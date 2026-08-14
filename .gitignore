@@ -1,0 +1,13 @@
+.env
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+archive/
+incoming/amazon/*.csv
+incoming/amazon/*.txt
+incoming/shopify/*.csv
+*.egg-info/
+dist/
+build/
+.pytest_cache/

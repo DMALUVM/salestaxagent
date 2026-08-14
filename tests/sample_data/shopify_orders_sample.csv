@@ -1,0 +1,16 @@
+Name,Email,Financial Status,Fulfillment Status,Currency,Subtotal,Shipping,Taxes,Total,Created at,Lineitem quantity,Lineitem name,Lineitem price,Lineitem sku,Shipping Name,Shipping Street,Shipping City,Shipping Province,Shipping Province Code,Shipping Zip,Shipping Country
+#1001,customer1@example.com,paid,fulfilled,USD,29.99,5.99,2.70,38.68,2026-01-03T10:15:00-06:00,1,Tallow Balm 4oz,29.99,TALLOW-BALM-4OZ,Jane Doe,123 Main St,Austin,Texas,TX,78701,US
+#1002,customer2@example.com,paid,fulfilled,USD,44.99,5.99,3.38,54.36,2026-01-05T14:30:00-06:00,1,Tallow Cream 8oz,44.99,TALLOW-CREAM-8OZ,John Smith,456 Oak Ave,Los Angeles,California,CA,90001,US
+#1003,customer3@example.com,paid,fulfilled,USD,59.98,0.00,4.50,64.48,2026-01-07T09:00:00-06:00,2,Tallow Balm 4oz,29.99,TALLOW-BALM-4OZ,Alice Johnson,789 Pine Rd,New York,New York,NY,10001,US
+#1004,customer4@example.com,paid,fulfilled,USD,12.99,3.99,0.97,17.95,2026-01-08T16:45:00-06:00,1,Tallow Lip Balm,12.99,TALLOW-LIP-BALM,Bob Wilson,321 Elm St,Chicago,Illinois,IL,60601,US
+#1005,customer5@example.com,paid,fulfilled,USD,29.99,5.99,2.25,38.23,2026-01-10T11:20:00-06:00,1,Tallow Balm 4oz,29.99,TALLOW-BALM-4OZ,Carol Davis,654 Maple Dr,Houston,Texas,TX,77001,US
+#1006,customer6@example.com,paid,fulfilled,USD,44.99,5.99,0.00,50.98,2026-01-12T08:30:00-06:00,1,Tallow Cream 8oz,44.99,TALLOW-CREAM-8OZ,Dave Brown,987 Cedar Ln,Portland,Oregon,OR,97201,US
+#1007,customer7@example.com,paid,fulfilled,USD,29.99,5.99,2.40,38.38,2026-01-14T13:00:00-06:00,1,Tallow Balm 4oz,29.99,TALLOW-BALM-4OZ,Eve Martinez,147 Birch Way,Miami,Florida,FL,33101,US
+#1008,customer8@example.com,paid,fulfilled,USD,87.97,0.00,6.60,94.57,2026-01-15T10:00:00-06:00,3,Tallow Balm 4oz,29.99,TALLOW-BALM-4OZ,Frank Lee,258 Walnut Ct,Dallas,Texas,TX,75201,US
+#1009,customer9@example.com,paid,fulfilled,USD,44.99,5.99,3.15,54.13,2026-01-18T15:30:00-06:00,1,Tallow Cream 8oz,44.99,TALLOW-CREAM-8OZ,Grace Kim,369 Spruce Ave,Seattle,Washington,WA,98101,US
+#1010,customer10@example.com,paid,fulfilled,USD,12.99,3.99,0.00,16.98,2026-01-20T09:45:00-06:00,1,Tallow Lip Balm,12.99,TALLOW-LIP-BALM,Henry Chen,741 Ash Blvd,Denver,Colorado,CO,80201,US
+#1011,customer11@example.com,paid,fulfilled,USD,29.99,5.99,2.10,38.08,2026-01-22T14:15:00-06:00,1,Tallow Balm 4oz,29.99,TALLOW-BALM-4OZ,Iris Patel,852 Oak St,Nashville,Tennessee,TN,37201,US
+#1012,customer12@example.com,paid,fulfilled,USD,74.98,0.00,5.62,80.60,2026-01-25T11:00:00-06:00,2,Tallow Cream 8oz,44.99,TALLOW-CREAM-8OZ,Jack Thompson,963 Pine Ave,Phoenix,Arizona,AZ,85001,US
+#1013,customer13@example.com,paid,fulfilled,USD,42.98,3.99,3.22,50.19,2026-01-28T16:00:00-06:00,1,Tallow Balm 4oz,29.99,TALLOW-BALM-4OZ,Kate Nelson,159 Elm Ct,San Antonio,Texas,TX,78201,US
+#1014,customer14@example.com,paid,fulfilled,USD,29.99,5.99,2.10,38.08,2026-02-01T10:30:00-06:00,1,Tallow Balm 4oz,29.99,TALLOW-BALM-4OZ,Leo Garcia,357 Maple St,Atlanta,Georgia,GA,30301,US
+#1015,customer15@example.com,paid,fulfilled,USD,44.99,5.99,3.60,54.58,2026-02-03T13:45:00-06:00,1,Tallow Cream 8oz,44.99,TALLOW-CREAM-8OZ,Mia Robinson,468 Cedar Dr,Philadelphia,Pennsylvania,PA,19101,US

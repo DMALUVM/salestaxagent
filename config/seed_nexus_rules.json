@@ -1,0 +1,188 @@
+{
+  "_metadata": {
+    "description": "Detailed, cited nexus rules per state for the intelligence layer. Covers physical (FBA) nexus, economic thresholds, and marketplace sales counting. Each rule carries primary sources, confidence, and notes on contested positions.",
+    "disclaimer": "Research aid only. Not legal or tax advice. Rules change. Consult a qualified CPA.",
+    "last_updated": "2026-01-15"
+  },
+  "rules": [
+    {
+      "state_code": "CA",
+      "rule_type": "physical_inventory_fba",
+      "position_summary": "FBA inventory stored in California creates physical nexus for sales tax and is considered 'doing business' for franchise tax purposes.",
+      "position_detail": "CDTFA takes the position that inventory stored in California — including through Amazon FBA — creates nexus requiring a seller's permit and sales tax collection. The FTB separately holds that such storage constitutes 'doing business' under R&TC § 23101, triggering the $800 minimum LLC franchise tax. Both agencies have actively pursued FBA sellers.",
+      "confidence": "high",
+      "conservative_position": "Register for both sales tax (CDTFA) and franchise tax (FTB) if any FBA inventory has been in CA. Pay the $800 LLC minimum.",
+      "aggressive_position": "Argue that FBA inventory alone, without seller control over placement, does not constitute purposeful direction into CA (citing PA Online Merchants Guild). This argument has NOT been tested or accepted in CA.",
+      "effective_date": "2012-09-15",
+      "primary_sources": [
+        {"type": "statute", "citation": "Cal. Rev. & Tax. Code § 6203(c)", "description": "Retailer engaged in business in this state — property in state"},
+        {"type": "statute", "citation": "Cal. Rev. & Tax. Code § 23101", "description": "Doing business definition for franchise tax"},
+        {"type": "agency_guidance", "citation": "CDTFA Publication 109", "description": "Registration requirements for remote sellers"},
+        {"type": "admin_ruling", "citation": "OTA Appeals re FBA/doing business, 2019-2024", "description": "OTA sustained FTB position on $800 franchise tax"}
+      ],
+      "secondary_sources": [
+        {"type": "analysis", "citation": "Avalara State-by-State FBA Nexus Guide, 2025 ed.", "description": "Third-party analysis confirming CA aggressive stance"}
+      ],
+      "notes": "CA is among the most aggressive states on FBA nexus. Both the CDTFA (sales tax) and FTB (franchise tax) actively enforce. The $800 franchise tax applies per year from the first day of 'doing business.' The 15-day safe harbor for temporary inventory does not typically apply to ongoing FBA storage.",
+      "open_questions": "Whether the PA Online Merchants Guild reasoning could gain traction in CA if a seller demonstrates truly no control over inventory placement. No CA court has adopted this reasoning as of the seed date.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "CA",
+      "rule_type": "economic_threshold",
+      "position_summary": "California economic nexus threshold is $500,000 in total sales into CA in the current or prior calendar year. Marketplace sales ARE included in the threshold calculation.",
+      "confidence": "high",
+      "effective_date": "2019-04-01",
+      "primary_sources": [
+        {"type": "statute", "citation": "Cal. Rev. & Tax. Code § 6203(c)(4)", "description": "$500,000 threshold for remote retailers"},
+        {"type": "agency_guidance", "citation": "CDTFA Special Notice L-628", "description": "Implementation of economic nexus"}
+      ],
+      "notes": "CA's $500,000 threshold is higher than the common $100,000. However, it includes marketplace sales, which means high-volume Amazon sellers may trigger it faster than expected. Transaction count test was eliminated.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "TX",
+      "rule_type": "physical_inventory_fba",
+      "position_summary": "FBA inventory stored in Texas creates physical nexus for both sales tax and franchise tax purposes.",
+      "position_detail": "The Texas Comptroller has publicly stated that inventory in Texas creates nexus. Texas has numerous FBA warehouses (DFW, HOU, SAT, ELP, etc.). The franchise tax obligation is particularly important: even below the ~$2.47M revenue exemption, the No Tax Due report and Public Information Report must be filed annually.",
+      "confidence": "high",
+      "conservative_position": "Register for sales tax and file franchise tax reports. File No Tax Due + PIR by May 15 annually.",
+      "aggressive_position": "No widely recognized aggressive position in TX. The Comptroller's stance is clear.",
+      "effective_date": "2012-01-01",
+      "primary_sources": [
+        {"type": "regulation", "citation": "34 Tex. Admin. Code § 3.286", "description": "Nexus provisions for sales tax"},
+        {"type": "statute", "citation": "Tex. Tax Code § 151.107", "description": "Seller/retailer nexus"},
+        {"type": "statute", "citation": "Tex. Tax Code Ch. 171", "description": "Franchise tax"},
+        {"type": "agency_guidance", "citation": "TX Comptroller Pub. 94-117", "description": "Nexus questionnaire guidance"}
+      ],
+      "notes": "Texas is a major FBA state. The franchise tax No Tax Due report is commonly overlooked by remote sellers. Failure to file can result in forfeiture of the right to transact business in Texas and personal liability for officers/managers.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "TX",
+      "rule_type": "economic_threshold",
+      "position_summary": "Texas economic nexus threshold is $500,000 in total revenue from sales into TX in the preceding 12 calendar months. Marketplace sales do NOT count toward the seller's threshold.",
+      "confidence": "high",
+      "effective_date": "2019-10-01",
+      "primary_sources": [
+        {"type": "regulation", "citation": "34 Tex. Admin. Code § 3.286", "description": "Remote seller nexus and threshold"},
+        {"type": "agency_guidance", "citation": "TX Comptroller guidance on HB 1525", "description": "Marketplace and remote seller rules"}
+      ],
+      "notes": "TX's $500,000 threshold is higher than most states. No transaction count test. Only the seller's own direct sales count, not marketplace facilitated sales.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "PA",
+      "rule_type": "physical_inventory_fba",
+      "position_summary": "CONTESTED: PA DOR historically asserted FBA inventory creates nexus, but the Online Merchants Guild v. Hassell decision found FBA inventory alone insufficient in the facts presented. The state's enforcement posture post-ruling is uncertain.",
+      "position_detail": "Pennsylvania presents the most nuanced FBA inventory nexus picture. The PA DOR took an aggressive early position that any inventory in PA warehouses created nexus. The Online Merchants Guild case pushed back on this, finding insufficient purposeful direction. However: the ruling is limited to its facts; the PA DOR may distinguish cases with additional contacts; and the ruling's interaction with marketplace facilitator collection is still being interpreted.",
+      "confidence": "contested",
+      "conservative_position": "Register for PA sales tax if FBA inventory has been in PA. The cost of compliance is typically less than the risk of a back-assessment if the DOR distinguishes your facts from Online Merchants Guild.",
+      "aggressive_position": "Rely on Online Merchants Guild to argue no nexus from FBA inventory alone. This position has legal support but carries audit risk if the DOR pushes back.",
+      "effective_date": "2023-08-01",
+      "primary_sources": [
+        {"type": "court_opinion", "citation": "Online Merchants Guild v. Hassell, No. 406 F.R. 2020 (Pa. Commw. Ct. 2023)", "description": "FBA inventory alone insufficient for nexus on the facts"},
+        {"type": "statute", "citation": "72 P.S. § 7201(b)", "description": "PA sales tax nexus definitions"}
+      ],
+      "secondary_sources": [
+        {"type": "analysis", "citation": "Tax Foundation analysis of Online Merchants Guild, 2023", "description": "Commentary on ruling's limited scope"}
+      ],
+      "notes": "This is THE key contested-position state for FBA inventory nexus. The ruling provides the strongest argument against FBA nexus but is limited to PA and to its specific facts. Most practitioners still recommend registration as the safer approach. Monitor PA DOR enforcement actions and any legislative response.",
+      "open_questions": "Will the PA DOR pursue cases that are factually distinguishable from Online Merchants Guild? Will other states' courts adopt similar reasoning? Is there any legislative effort to codify or override the ruling?",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "PA",
+      "rule_type": "economic_threshold",
+      "position_summary": "Pennsylvania economic nexus threshold is $100,000 in gross sales into PA in the current calendar year. No transaction count test.",
+      "confidence": "high",
+      "effective_date": "2019-07-01",
+      "primary_sources": [
+        {"type": "statute", "citation": "72 P.S. § 7213.2", "description": "Remote seller collection obligation"}
+      ],
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "WA",
+      "rule_type": "physical_inventory_fba",
+      "position_summary": "FBA inventory in Washington creates physical nexus for both sales tax and B&O (Business & Occupation) tax. B&O tax is a separate obligation not covered by marketplace facilitator collection.",
+      "confidence": "high",
+      "conservative_position": "Register for both sales tax and B&O tax if FBA inventory is in WA. File B&O returns even if Amazon handles sales tax collection.",
+      "effective_date": "2008-01-01",
+      "primary_sources": [
+        {"type": "statute", "citation": "RCW 82.04 (B&O tax)", "description": "Business and occupation tax statutes"},
+        {"type": "statute", "citation": "RCW 82.08 (retail sales tax)", "description": "Retail sales tax nexus"},
+        {"type": "admin_ruling", "citation": "WA DOR ETA 3195.2019", "description": "FBA sellers and B&O tax"}
+      ],
+      "notes": "Washington's B&O tax is frequently overlooked. The retailing B&O rate is 0.471% on gross receipts. Multiple B&O classifications may apply. FBA inventory clearly creates nexus for B&O. Washington also includes marketplace sales in the economic nexus threshold.",
+      "open_questions": "Interaction between B&O tax on marketplace-facilitated sales and direct sales. Small business B&O credit may reduce liability for smaller sellers.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "NY",
+      "rule_type": "physical_inventory_fba",
+      "position_summary": "FBA inventory in New York creates physical nexus for sales tax. New York has a relatively high economic nexus threshold ($500,000 AND 100+ transactions).",
+      "confidence": "high",
+      "effective_date": "2008-06-01",
+      "primary_sources": [
+        {"type": "statute", "citation": "N.Y. Tax Law § 1101(b)(8)", "description": "Vendor nexus definitions"},
+        {"type": "regulation", "citation": "N.Y. Comp. Codes R. & Regs. tit. 20, § 526.10", "description": "Nexus regulations"}
+      ],
+      "notes": "NY is a major FBA warehouse state (JFK8, SWF1, ALB1). Physical nexus from inventory is well-established. The economic nexus threshold is higher ($500K AND 100 transactions — both must be met). NY was an early adopter of click-through nexus (Amazon Affiliates case).",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "NJ",
+      "rule_type": "physical_inventory_fba",
+      "position_summary": "FBA inventory in New Jersey creates physical nexus. NJ has numerous FBA warehouses and treats stored inventory as nexus-creating property.",
+      "confidence": "high",
+      "effective_date": "2018-11-01",
+      "primary_sources": [
+        {"type": "statute", "citation": "N.J.S.A. 54:32B-2(i)", "description": "Sales tax nexus definitions"},
+        {"type": "agency_guidance", "citation": "NJ Division of Taxation TB-94", "description": "Remote seller nexus guidance"}
+      ],
+      "notes": "NJ has many FBA warehouses (EWR, ABE, ACY, TEB, etc.). Very high probability that FBA sellers have inventory in NJ. Standard $100,000 / 200 transaction economic nexus threshold, with transactions test being phased out in most states.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "OH",
+      "rule_type": "physical_inventory_fba",
+      "position_summary": "FBA inventory in Ohio creates physical nexus for sales tax. Ohio also has a Commercial Activity Tax (CAT) that may apply to businesses with nexus.",
+      "confidence": "high",
+      "effective_date": "2018-01-01",
+      "primary_sources": [
+        {"type": "statute", "citation": "Ohio Rev. Code § 5741.01(I)", "description": "Seller nexus definitions"},
+        {"type": "statute", "citation": "Ohio Rev. Code Ch. 5751", "description": "Commercial Activity Tax"}
+      ],
+      "notes": "OH is a major FBA state (CMH, CLE, AKC). The CAT applies to businesses with Ohio gross receipts over $150,000. CAT is separate from sales tax and is not covered by marketplace facilitator collection. CAT rate is 0.26% on gross receipts over $1M.",
+      "open_questions": "Interaction between CAT and FBA nexus for sellers whose only Ohio presence is inventory. CAT has its own nexus provisions.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "FL",
+      "rule_type": "physical_inventory_fba",
+      "position_summary": "FBA inventory in Florida creates physical nexus for sales tax.",
+      "confidence": "high",
+      "effective_date": "2021-07-01",
+      "primary_sources": [
+        {"type": "statute", "citation": "Fla. Stat. § 212.0596", "description": "Remote sales tax collection"},
+        {"type": "agency_guidance", "citation": "FL DOR TAA 22A-001", "description": "Remote seller and marketplace nexus"}
+      ],
+      "notes": "Florida was a relatively late adopter of economic nexus (July 2021). Standard $100,000 threshold, no transaction count. FBA warehouses in FL (JAX, MCO, MIA, TPA). Florida has no state income tax, reducing overall compliance burden.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "IL",
+      "rule_type": "physical_inventory_fba",
+      "position_summary": "FBA inventory in Illinois creates physical nexus. Illinois treats stored inventory as maintaining a place of business in the state.",
+      "confidence": "high",
+      "effective_date": "2015-01-01",
+      "primary_sources": [
+        {"type": "statute", "citation": "35 ILCS 105/2(1.1)", "description": "Use tax nexus — maintaining a place of business"},
+        {"type": "regulation", "citation": "86 Ill. Adm. Code 150.201", "description": "Nexus regulations"}
+      ],
+      "notes": "IL has been among the states that expressly treat inventory storage as nexus-creating. Multiple FBA warehouses (MDW, ORD). Illinois has a complex tax structure with separate Retailers' Occupation Tax and Use Tax.",
+      "last_reviewed": "2026-01-15"
+    }
+  ]
+}

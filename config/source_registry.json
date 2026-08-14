@@ -1,0 +1,30 @@
+{
+  "_metadata": {
+    "description": "Curated primary source URLs per state for the monitoring/change detection system. Focus on official .gov domains and authoritative sources.",
+    "last_updated": "2026-01-15"
+  },
+  "sources": [
+    {"state_code": "CA", "source_type": "dor_remote_seller", "title": "CDTFA — Internet Sales / Remote Sellers", "url": "https://www.cdtfa.ca.gov/taxes-and-fees/use-tax.htm", "check_frequency": "monthly"},
+    {"state_code": "CA", "source_type": "dor_marketplace", "title": "CDTFA — Marketplace Facilitators", "url": "https://www.cdtfa.ca.gov/taxes-and-fees/marketplace-facilitator.htm", "check_frequency": "monthly"},
+    {"state_code": "CA", "source_type": "franchise_tax", "title": "FTB — LLC Tax and Fee", "url": "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html", "check_frequency": "quarterly"},
+    {"state_code": "TX", "source_type": "dor_remote_seller", "title": "TX Comptroller — Remote Sellers", "url": "https://comptroller.texas.gov/taxes/sales/remote-sellers.php", "check_frequency": "monthly"},
+    {"state_code": "TX", "source_type": "franchise_tax", "title": "TX Comptroller — Franchise Tax", "url": "https://comptroller.texas.gov/taxes/franchise/", "check_frequency": "quarterly"},
+    {"state_code": "TX", "source_type": "dor_marketplace", "title": "TX Comptroller — Marketplace Providers", "url": "https://comptroller.texas.gov/taxes/sales/marketplace-providers.php", "check_frequency": "monthly"},
+    {"state_code": "PA", "source_type": "dor_remote_seller", "title": "PA DOR — Remote Seller Information", "url": "https://www.revenue.pa.gov/TaxTypes/SUT/RemoteSellers/Pages/default.aspx", "check_frequency": "monthly"},
+    {"state_code": "PA", "source_type": "court_opinions", "title": "PA Commonwealth Court Opinions", "url": "https://www.pacourts.us/courts/commonwealth-court/commonwealth-court-opinions", "check_frequency": "monthly"},
+    {"state_code": "NY", "source_type": "dor_remote_seller", "title": "NY DTF — Sales Tax for Remote Sellers", "url": "https://www.tax.ny.gov/bus/st/duty_to_collect.htm", "check_frequency": "monthly"},
+    {"state_code": "NJ", "source_type": "dor_remote_seller", "title": "NJ Division of Taxation — Remote Sellers", "url": "https://www.state.nj.us/treasury/taxation/remoteseller.shtml", "check_frequency": "monthly"},
+    {"state_code": "FL", "source_type": "dor_remote_seller", "title": "FL DOR — Remote Sales", "url": "https://floridarevenue.com/taxes/taxesfees/Pages/remote_sellers.aspx", "check_frequency": "monthly"},
+    {"state_code": "WA", "source_type": "dor_remote_seller", "title": "WA DOR — Remote Seller Nexus", "url": "https://dor.wa.gov/education/industry-guides/marketplace-fairness-leveling-playing-field/remote-seller-nexus", "check_frequency": "monthly"},
+    {"state_code": "WA", "source_type": "dor_marketplace", "title": "WA DOR — Marketplace Facilitators", "url": "https://dor.wa.gov/education/industry-guides/marketplace-fairness-leveling-playing-field/marketplace-facilitators", "check_frequency": "monthly"},
+    {"state_code": "OH", "source_type": "dor_remote_seller", "title": "OH DT — Remote Sellers", "url": "https://tax.ohio.gov/sales-and-use/sales-use-tax-resources/remote-seller-information", "check_frequency": "monthly"},
+    {"state_code": "IL", "source_type": "dor_remote_seller", "title": "IL DOR — Remote Retailers", "url": "https://tax.illinois.gov/research/taxinformation/sales/remote-retailer.html", "check_frequency": "monthly"},
+    {"state_code": "GA", "source_type": "dor_remote_seller", "title": "GA DOR — Remote Sellers & Marketplace Facilitators", "url": "https://dor.georgia.gov/taxes/sales-use-tax/marketplace-facilitators-and-remote-sellers", "check_frequency": "monthly"},
+    {"state_code": "IN", "source_type": "dor_remote_seller", "title": "IN DOR — Remote Sellers", "url": "https://www.in.gov/dor/business-tax/remote-sellers/", "check_frequency": "monthly"},
+    {"state_code": "TN", "source_type": "dor_remote_seller", "title": "TN DOR — Sales Tax", "url": "https://www.tn.gov/revenue/taxes/sales-and-use-tax.html", "check_frequency": "monthly"},
+    {"state_code": "KY", "source_type": "dor_remote_seller", "title": "KY DOR — Sales Tax", "url": "https://revenue.ky.gov/Business/Sales-Use-Tax/Pages/default.aspx", "check_frequency": "monthly"},
+    {"state_code": "MULTI", "source_type": "sst_matrix", "title": "Streamlined Sales Tax — Taxability Matrix", "url": "https://www.streamlinedsalestax.org/Shared-Pages/taxability-matrix", "check_frequency": "quarterly"},
+    {"state_code": "MULTI", "source_type": "other", "title": "Tax Foundation — State Sales Tax Rates", "url": "https://taxfoundation.org/data/all/state/2025-sales-tax-rates/", "check_frequency": "quarterly", "is_primary": false},
+    {"state_code": "MULTI", "source_type": "court_opinions", "title": "CourtListener — Tax Cases", "url": "https://www.courtlistener.com/?q=sales+tax+nexus+inventory&type=o", "check_frequency": "monthly", "is_primary": false}
+  ]
+}

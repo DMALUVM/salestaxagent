@@ -1,0 +1,130 @@
+{
+  "_metadata": {
+    "description": "Franchise, entity-level, and 'doing business' tax rules for states with significant implications for FBA sellers. Seeded with high-priority states.",
+    "disclaimer": "Research aid only. Not legal or tax advice.",
+    "last_updated": "2026-01-15"
+  },
+  "rules": [
+    {
+      "state_code": "CA",
+      "rule_type": "llc_annual_tax",
+      "trigger_description": "LLCs 'doing business' in California owe an $800 minimum annual franchise tax, regardless of income. FBA inventory storage is treated as 'doing business' by the FTB.",
+      "fba_inventory_triggers": true,
+      "economic_nexus_triggers": true,
+      "minimum_amount": 800,
+      "exemption_threshold": null,
+      "due_date_pattern": "Due by the 15th day of the 4th month after the beginning of the LLC's tax year (typically April 15 for calendar-year LLCs). First-year LLCs: due by the 15th day of the 4th month after filing. Annual return (Form 568) due by March 15 (calendar year) or 15th day of 3rd month after tax year end.",
+      "filing_required_even_if_exempt": true,
+      "penalty_for_nonfiling": "Penalty for late payment of the $800: 5% of unpaid tax plus 0.5%/month. Estimated fee penalty if LLC income exceeds $250,000. FTB may also assess a demand-to-file penalty ($2,000+).",
+      "position_summary": "California's $800 minimum LLC franchise tax is the highest-profile entity-level tax risk for FBA sellers. The FTB treats FBA inventory storage as 'doing business.' This applies even if: (1) Amazon handles sales tax collection, (2) the LLC has no employees or offices in CA, (3) the LLC is organized in another state. The OTA has sustained this position in multiple appeals.",
+      "confidence": "high",
+      "primary_sources": [
+        {"type": "statute", "citation": "Cal. Rev. & Tax. Code § 17941", "description": "$800 annual LLC tax"},
+        {"type": "statute", "citation": "Cal. Rev. & Tax. Code § 23101", "description": "'Doing business' definition"},
+        {"type": "admin_ruling", "citation": "Multiple OTA decisions, 2019-2024", "description": "FBA inventory = doing business"}
+      ],
+      "notes": "This is the single most commonly overlooked obligation for FBA sellers. Many sellers register for CA sales tax but miss the LLC franchise tax, which is administered by a different agency (FTB vs. CDTFA). The $800 applies per year. LLCs with CA income over $250,000 owe an additional annual fee ($900-$11,790). California suspended the $800 minimum for new LLCs in their first year for tax years 2021-2023 but this exemption has expired.",
+      "open_questions": "Whether the PA Online Merchants Guild reasoning (no purposeful direction of FBA inventory) could be successfully argued to the FTB/OTA. No CA authority has adopted this reasoning. Whether the first-year LLC exemption will be reinstated.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "TX",
+      "rule_type": "franchise_tax",
+      "trigger_description": "Entities 'doing business' in Texas must file franchise tax reports. FBA inventory creates nexus. Revenue exemption at ~$2.47M means most small sellers owe no tax, but filing is still required.",
+      "fba_inventory_triggers": true,
+      "economic_nexus_triggers": true,
+      "minimum_amount": 0,
+      "exemption_threshold": 2470000,
+      "due_date_pattern": "Annual. No Tax Due Report and Public Information Report due May 15 each year for the prior calendar year. Extensions available to November 15.",
+      "filing_required_even_if_exempt": true,
+      "penalty_for_nonfiling": "Failure to file: $50 penalty per report. Continued non-filing can lead to forfeiture of the right to transact business in Texas. The Texas Secretary of State can administratively terminate the entity's Texas registration.",
+      "position_summary": "Texas franchise tax applies to all entities doing business in Texas. FBA inventory creates 'doing business' nexus. The ~$2.47M total revenue exemption means most FBA sellers owe $0 in actual franchise tax. However, the No Tax Due report and Public Information Report must still be filed annually. Failure to file has real consequences including potential forfeiture of the right to do business.",
+      "confidence": "high",
+      "primary_sources": [
+        {"type": "statute", "citation": "Tex. Tax Code Ch. 171", "description": "Franchise tax statute"},
+        {"type": "statute", "citation": "Tex. Tax Code § 171.002", "description": "Taxable entities definition"},
+        {"type": "regulation", "citation": "34 TAC § 3.591", "description": "Franchise tax nexus"}
+      ],
+      "notes": "Common failure mode: FBA sellers register for TX sales tax but never file franchise tax reports. The Comptroller may not immediately enforce, but the obligation accrues. Cleaning up years of unfiled reports is more expensive than annual compliance. The PIR requires disclosure of officers/directors/managers, registered agent, and principal office. Consider this when evaluating TX franchise tax obligations.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "WA",
+      "rule_type": "business_occupation_tax",
+      "trigger_description": "Washington B&O tax applies to gross receipts from business conducted in WA. FBA inventory creates nexus for B&O purposes.",
+      "fba_inventory_triggers": true,
+      "economic_nexus_triggers": true,
+      "minimum_amount": 0,
+      "exemption_threshold": null,
+      "due_date_pattern": "Monthly, quarterly, or annual depending on estimated tax liability. Monthly if annual B&O > $4,800. Small business credit offsets first $125,000/month in taxable income (effectively $250/month in tax credit for retailing B&O).",
+      "filing_required_even_if_exempt": true,
+      "penalty_for_nonfiling": "Late filing penalty: 5% of tax due (minimum $5). Interest accrues on unpaid tax.",
+      "position_summary": "Washington's B&O tax is a gross receipts tax, not a sales tax. It applies to the seller directly and is NOT covered by marketplace facilitator collection. FBA sellers with WA inventory owe B&O tax on their WA-sourced income. The retailing B&O rate is 0.471%. The small business credit offsets some liability for smaller sellers.",
+      "confidence": "high",
+      "primary_sources": [
+        {"type": "statute", "citation": "RCW 82.04", "description": "B&O tax statute"},
+        {"type": "admin_ruling", "citation": "WA DOR ETA 3195.2019", "description": "B&O tax and FBA sellers"}
+      ],
+      "notes": "B&O tax is the most commonly overlooked WA obligation for FBA sellers. Most sellers focus only on sales tax (which Amazon handles as marketplace facilitator) and miss the B&O filing. The small business credit significantly reduces liability for sellers with modest WA revenue, but filing is still required.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "OH",
+      "rule_type": "commercial_activity_tax",
+      "trigger_description": "Ohio CAT applies to businesses with $150,000+ in Ohio gross receipts. FBA inventory may create sufficient nexus for CAT.",
+      "fba_inventory_triggers": true,
+      "economic_nexus_triggers": true,
+      "minimum_amount": 150,
+      "exemption_threshold": 150000,
+      "due_date_pattern": "Annual minimum tax ($150) due by May 10. Quarterly estimated payments if annual CAT exceeds $1,500 (i.e., gross receipts over ~$577,000).",
+      "filing_required_even_if_exempt": false,
+      "penalty_for_nonfiling": "10% penalty on unpaid tax. Interest at the federal short-term rate plus 5%.",
+      "position_summary": "Ohio CAT is a gross receipts tax at 0.26% on taxable gross receipts over $1 million. Minimum annual tax is $150 for businesses with $150,000-$1M in Ohio receipts. FBA inventory in Ohio likely creates CAT nexus, but the interaction with marketplace-facilitated sales is not fully settled.",
+      "confidence": "medium",
+      "primary_sources": [
+        {"type": "statute", "citation": "Ohio Rev. Code Ch. 5751", "description": "Commercial Activity Tax"},
+        {"type": "statute", "citation": "Ohio Rev. Code § 5751.01(I)", "description": "CAT nexus definitions"}
+      ],
+      "open_questions": "Does FBA inventory alone create CAT nexus, or does the CAT require a higher level of business activity? How are marketplace-facilitated sales sourced for CAT purposes? CAT nexus provisions were amended in 2022 — the 'bright-line' test based on $500k receipts or $50k payroll/property may interact with FBA presence.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "TN",
+      "rule_type": "franchise_tax",
+      "trigger_description": "Tennessee franchise and excise tax applies to entities doing business in TN. FBA inventory creates nexus. Franchise tax is on greater of net worth or book value of real/tangible property in TN.",
+      "fba_inventory_triggers": true,
+      "economic_nexus_triggers": true,
+      "minimum_amount": 100,
+      "exemption_threshold": null,
+      "due_date_pattern": "Annual. Due by the 15th day of the 4th month after close of tax year (April 15 for calendar year). Minimum franchise tax is $100.",
+      "filing_required_even_if_exempt": true,
+      "penalty_for_nonfiling": "Failure to file penalty. Secretary of State may revoke authority to do business in TN.",
+      "position_summary": "Tennessee imposes both a franchise tax (on net worth/tangible property) and an excise tax (on net earnings apportioned to TN). FBA inventory in TN likely creates nexus for both. The minimum franchise tax is $100. The excise tax rate is 6.5% of net earnings. Most small FBA sellers will owe little in actual tax but must still file.",
+      "confidence": "medium",
+      "primary_sources": [
+        {"type": "statute", "citation": "Tenn. Code Ann. § 67-4-2004", "description": "Franchise tax imposition"},
+        {"type": "statute", "citation": "Tenn. Code Ann. § 67-4-2007", "description": "Excise tax imposition"}
+      ],
+      "notes": "TN is a major FBA state (BNA, CHA, MEM). The franchise and excise tax is less commonly discussed than CA and TX but still applies. TN has no state income tax on wages, but the excise tax is effectively an income tax on business earnings.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "NV",
+      "rule_type": "gross_receipts_tax",
+      "trigger_description": "Nevada Commerce Tax applies to businesses with Nevada gross revenue exceeding $4 million. Unlikely for most small FBA sellers but should be monitored as revenue grows.",
+      "fba_inventory_triggers": true,
+      "economic_nexus_triggers": true,
+      "minimum_amount": 0,
+      "exemption_threshold": 4000000,
+      "due_date_pattern": "Annual. Due August 14 for the prior July 1 - June 30 fiscal year.",
+      "filing_required_even_if_exempt": false,
+      "position_summary": "The Nevada Commerce Tax is a gross receipts tax that applies at varying rates by industry to businesses with over $4M in Nevada-sourced gross revenue. Most FBA sellers are well below this threshold, but it should be monitored as a business scales.",
+      "confidence": "high",
+      "primary_sources": [
+        {"type": "statute", "citation": "NRS 363C", "description": "Commerce Tax statute"}
+      ],
+      "notes": "Low priority for most small sellers. The $4M threshold is very high. Include in monitoring for sellers approaching significant scale.",
+      "last_reviewed": "2026-01-15"
+    }
+  ]
+}

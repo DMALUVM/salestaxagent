@@ -1,0 +1,130 @@
+{
+  "_metadata": {
+    "description": "Filing-specific rules per state: frequencies, due dates, zero-return requirements, registration details.",
+    "last_updated": "2026-01-15"
+  },
+  "rules": [
+    {
+      "state_code": "CA",
+      "default_frequency": "quarterly",
+      "frequency_assignment_method": "CDTFA assigns based on estimated tax liability. Generally quarterly for new registrants, may move to monthly if >$50,000/yr tax or annually if very low volume.",
+      "typical_due_day": 30,
+      "due_date_notes": "Quarterly returns due last day of the month following the quarter end (April 30, July 31, October 31, January 31). Prepayment required for taxpayers averaging $17,000+/month.",
+      "zero_return_required": true,
+      "zero_return_notes": "Must file even if no tax is due in a period. Failure to file zero returns can result in estimated assessments.",
+      "prepayment_required": true,
+      "prepayment_notes": "Required if average monthly tax exceeds ~$17,000. Most small FBA sellers will not trigger prepayment.",
+      "discount_available": false,
+      "registration_url": "https://www.cdtfa.ca.gov/services/permits-licenses.htm",
+      "registration_notes": "Apply for a seller's permit through CDTFA. Separate FTB registration for franchise tax (Form 568). Two different agencies, two registrations.",
+      "primary_sources": [
+        {"type": "agency_guidance", "citation": "CDTFA Publication 73", "description": "Filing frequency and due dates"}
+      ],
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "TX",
+      "default_frequency": "quarterly",
+      "frequency_assignment_method": "Comptroller assigns based on estimated tax. Quarterly is typical for new filers. May be monthly if tax > ~$1,500/quarter or annually if < ~$1,000/year.",
+      "typical_due_day": 20,
+      "due_date_notes": "Returns due the 20th of the month following the reporting period. Quarterly: April 20, July 20, October 20, January 20.",
+      "zero_return_required": true,
+      "zero_return_notes": "Must file zero returns. Failure to file results in estimated assessments. Can file online via Webfile.",
+      "prepayment_required": true,
+      "prepayment_notes": "Required if tax collected in any quarter of the prior year exceeded $50,000. Very unlikely for most FBA sellers where Amazon handles collection.",
+      "discount_available": true,
+      "discount_notes": "0.5% timely filing discount (1.75% for prepayers). Maximum $2,500/reporting period.",
+      "registration_url": "https://comptroller.texas.gov/taxes/permit/",
+      "registration_notes": "Apply for a sales tax permit through the Comptroller. Separate franchise tax registration through the Comptroller's franchise tax division. WebFile system handles both.",
+      "primary_sources": [
+        {"type": "statute", "citation": "Tex. Tax Code § 151.401", "description": "Sales tax return filing"},
+        {"type": "agency_guidance", "citation": "TX Comptroller sales tax filing guide", "description": "Filing procedures"}
+      ],
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "PA",
+      "default_frequency": "monthly",
+      "frequency_assignment_method": "PA DOR typically assigns monthly for new registrants. Semi-annual and annual options exist for very low volume.",
+      "typical_due_day": 20,
+      "due_date_notes": "Returns due the 20th of the month following the reporting period.",
+      "zero_return_required": true,
+      "zero_return_notes": "Must file zero returns. PA uses e-TIDES online filing system.",
+      "prepayment_required": false,
+      "discount_available": true,
+      "discount_notes": "1% timely filing discount on first $300 of tax due (max $25/month).",
+      "registration_url": "https://www.revenue.pa.gov/OnlineServices/RegistrationServices/Pages/default.aspx",
+      "registration_notes": "Register online through PA DOR. Separate registration for corporate net income tax if applicable.",
+      "primary_sources": [
+        {"type": "statute", "citation": "72 P.S. § 7217", "description": "Filing requirements"}
+      ],
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "NY",
+      "default_frequency": "quarterly",
+      "frequency_assignment_method": "NYDTF typically assigns quarterly for most new registrants. Monthly filing for larger sellers. Annual filing available for vendors with less than $3,000 tax per quarter.",
+      "typical_due_day": 20,
+      "due_date_notes": "Quarterly returns due March 20, June 20, September 20, December 20 (note: not the 20th of the following month — NY quarters end Feb/May/Aug/Nov). Annual due March 20.",
+      "zero_return_required": true,
+      "zero_return_notes": "Must file zero returns quarterly. Use Online Tax Center.",
+      "prepayment_required": true,
+      "prepayment_notes": "PrompTax required for vendors with $300,000+ in annual taxable sales in certain areas.",
+      "discount_available": true,
+      "discount_notes": "5% vendor collection credit, max $200/quarter.",
+      "registration_url": "https://www.tax.ny.gov/bus/register/",
+      "registration_notes": "Register for a Certificate of Authority through NYDTF. Process is online through the Online Tax Center.",
+      "primary_sources": [
+        {"type": "statute", "citation": "N.Y. Tax Law § 1136", "description": "Filing requirements"}
+      ],
+      "notes": "NY has unusual quarterly periods (Mar 1 - May 31, Jun 1 - Aug 31, Sep 1 - Nov 30, Dec 1 - Feb 28/29). This catches many sellers off guard.",
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "FL",
+      "default_frequency": "monthly",
+      "frequency_assignment_method": "FL DOR assigns monthly for most. Quarterly for sellers with <$1,000/year tax. Semi-annual for very low volume.",
+      "typical_due_day": 20,
+      "due_date_notes": "Returns due the 20th of the month following the collection period. Returns filed and paid electronically by the 20th receive a collection allowance.",
+      "zero_return_required": true,
+      "zero_return_notes": "Must file even with no tax due. Failure to file results in $50 late filing penalty.",
+      "discount_available": true,
+      "discount_notes": "2.5% collection allowance on first $1,200 of tax due (max $30/period for monthly filers).",
+      "registration_url": "https://floridarevenue.com/taxes/registration/Pages/default.aspx",
+      "registration_notes": "Register through FL DOR online portal. No state income tax — sales tax only.",
+      "primary_sources": [
+        {"type": "statute", "citation": "Fla. Stat. § 212.11", "description": "Filing requirements"}
+      ],
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "NJ",
+      "default_frequency": "monthly",
+      "frequency_assignment_method": "Monthly if estimated annual tax > $500. Quarterly if < $500.",
+      "typical_due_day": 20,
+      "due_date_notes": "Monthly returns due the 20th of the following month. Quarterly returns due the 20th of the month following the quarter end.",
+      "zero_return_required": true,
+      "registration_url": "https://www.state.nj.us/treasury/revenue/revregistration.shtml",
+      "primary_sources": [
+        {"type": "statute", "citation": "N.J.S.A. 54:32B-17", "description": "Filing requirements"}
+      ],
+      "last_reviewed": "2026-01-15"
+    },
+    {
+      "state_code": "WA",
+      "default_frequency": "monthly",
+      "frequency_assignment_method": "DOR assigns based on estimated tax. Monthly if annual tax > $4,800. Quarterly if $1,200-$4,800. Annual if < $1,200.",
+      "typical_due_day": 25,
+      "due_date_notes": "Returns due the 25th of the month following the reporting period. Combined excise tax return covers both sales tax and B&O tax.",
+      "zero_return_required": true,
+      "zero_return_notes": "Must file zero returns. Combined filing covers sales tax + B&O tax on one return.",
+      "registration_url": "https://dor.wa.gov/open-business/apply-business-license",
+      "registration_notes": "Register through WA DOR Business Licensing Service. Single registration covers both sales tax and B&O tax.",
+      "primary_sources": [
+        {"type": "statute", "citation": "RCW 82.32.045", "description": "Filing requirements"}
+      ],
+      "notes": "WA combined excise return covers both sales tax and B&O. This simplifies filing but sellers must remember to include B&O tax calculation, not just sales tax.",
+      "last_reviewed": "2026-01-15"
+    }
+  ]
+}
