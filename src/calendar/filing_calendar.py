@@ -110,21 +110,27 @@ def _safe_date(year: int, month: int, day: int) -> date:
 
 
 def populate_calendar_for_registered_states(year: int | None = None) -> dict:
-    if year is None:
-        year = date.today().year
+    """Generate filing_calendar rows for all registered states.
+
+    Creates entries for the given year.  If year is None, generates for
+    both the current year and the next year so the calendar always has
+    upcoming periods visible.
+    """
+    current_year = date.today().year
+    years = [year] if year else [current_year, current_year + 1]
 
     nexus_records = fetch_all("nexus_status")
     registered = [r for r in nexus_records if r.get("is_registered")]
 
     if not registered:
-        return {"message": "No registered states found. Register in states with nexus, then update nexus_status."}
+        return {"message": "No registered states found.", "states_populated": [], "entries_created": 0}
 
     from src.config import load_state_rules
     rules_data = load_state_rules()
     state_rules = rules_data.get("states", {})
 
     total_created = 0
-    states_populated = []
+    states_populated = set()
 
     for record in registered:
         sc = record["state_code"]
@@ -134,27 +140,46 @@ def populate_calendar_for_registered_states(year: int | None = None) -> dict:
             frequency = rule.get("filing_frequency_default", "quarterly")
 
         due_day = state_rules.get(sc, {}).get("typical_due_day", 20)
-        entries = generate_filing_entries(sc, frequency, year, due_day)
 
-        if entries:
-            inserted = upsert_rows(
-                "filing_calendar", entries,
-                on_conflict="state_code,period_type,period_label",
-            )
-            total_created += inserted
-            states_populated.append(sc)
+        for yr in years:
+            entries = generate_filing_entries(sc, frequency, yr, due_day)
+            if entries:
+                inserted = upsert_rows(
+                    "filing_calendar", entries,
+                    on_conflict="state_code,period_type,period_label",
+                )
+                total_created += inserted
+                states_populated.add(sc)
 
     log_audit(
         action="populate_filing_calendar",
         category="calendar",
-        details={"year": year, "states": states_populated, "entries_created": total_created},
+        details={"years": years, "states": sorted(states_populated), "entries_created": total_created},
     )
 
     return {
-        "year": year,
-        "states_populated": states_populated,
+        "years": years,
+        "states_populated": sorted(states_populated),
         "entries_created": total_created,
     }
+
+
+def generate_filings_for_state(state_code: str, frequency: str, due_day: int = 20) -> int:
+    """Generate filing_calendar rows for a single state (current + next year).
+
+    Called when a state is newly registered via the dashboard.
+    Uses upsert so it's safe to call repeatedly.
+    """
+    current_year = date.today().year
+    total = 0
+    for yr in [current_year, current_year + 1]:
+        entries = generate_filing_entries(state_code, frequency, yr, due_day)
+        if entries:
+            total += upsert_rows(
+                "filing_calendar", entries,
+                on_conflict="state_code,period_type,period_label",
+            )
+    return total
 
 
 def get_upcoming_deadlines(days_ahead: int | None = None) -> list[dict]:

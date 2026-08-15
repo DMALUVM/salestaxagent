@@ -183,6 +183,19 @@ function EditDialog({
         return;
       }
 
+      // Generate filing calendar entries when a state is registered
+      if (form.is_registered && form.assigned_frequency) {
+        await fetch("/api/generate-filings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            state_code: reg.state_code,
+            frequency: form.assigned_frequency,
+            due_day: dueDay ?? 20,
+          }),
+        }).catch(() => {});  // best-effort; don't block save
+      }
+
       setSaving(false);
       onOpenChange(false);
       onSaved();

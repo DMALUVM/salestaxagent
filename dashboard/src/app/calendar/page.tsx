@@ -599,20 +599,68 @@ export default function CalendarPage() {
       </Tabs>
 
       {filings.length === 0 && (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            No filing calendar entries yet. Register states on the{" "}
-            <a href="/registrations" className="underline">
-              Registrations
-            </a>{" "}
-            page, then run{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-              python -m src.main populate-calendar
-            </code>{" "}
-            to generate filing periods.
-          </CardContent>
-        </Card>
+        <GenerateFilingsCard onDone={refetch} />
       )}
     </div>
+  );
+}
+
+function GenerateFilingsCard({ onDone }: { onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  async function generate() {
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await fetch("/api/generate-filings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const data = await res.json();
+      if (data.success) {
+        setResult(
+          `Generated ${data.entries_created} periods for ${data.states?.length ?? 0} states.`,
+        );
+        onDone();
+      } else {
+        setResult(data.error ?? "Failed to generate.");
+      }
+    } catch (e) {
+      setResult(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardContent className="py-8 text-center">
+        <Calendar className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
+        <p className="text-sm text-muted-foreground">
+          No filing calendar entries yet.
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Register states on the{" "}
+          <a href="/registrations" className="underline">
+            Registrations
+          </a>{" "}
+          page first, then generate filing periods.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-4"
+          onClick={generate}
+          disabled={busy}
+        >
+          {busy ? "Generating..." : "Generate Filing Schedule"}
+        </Button>
+        {result && (
+          <p className="mt-2 text-xs text-muted-foreground">{result}</p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -134,12 +134,29 @@ def test_alert():
 
 
 @cli.command("populate-calendar")
-@click.option("--year", type=int, default=None, help="Calendar year")
+@click.option("--year", type=int, default=None, help="Calendar year (default: current + next)")
 def populate_calendar(year):
     """Generate filing calendar entries for registered states."""
     from src.calendar.filing_calendar import populate_calendar_for_registered_states
     result = populate_calendar_for_registered_states(year)
-    click.echo(f"Calendar populated: {result}")
+    click.echo(f"States: {result.get('states_populated', [])}")
+    click.echo(f"Entries: {result.get('entries_created', 0)}")
+    if result.get("message"):
+        click.echo(result["message"])
+
+
+@cli.command("generate-filings")
+def generate_filings_cmd():
+    """Generate filing periods for all registered states (current + next year)."""
+    from src.calendar.filing_calendar import populate_calendar_for_registered_states
+    result = populate_calendar_for_registered_states()
+    states = result.get("states_populated", [])
+    entries = result.get("entries_created", 0)
+    if not states:
+        click.echo("No registered states found. Register states on the Registrations page first.")
+    else:
+        click.echo(f"Generated {entries} filing periods for {len(states)} states: {', '.join(states)}")
+        click.echo(f"Years: {result.get('years', [])}")
 
 
 @cli.command("health-report")
