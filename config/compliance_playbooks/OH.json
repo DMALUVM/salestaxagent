@@ -1,0 +1,29 @@
+{
+  "state_code": "OH",
+  "state_name": "Ohio",
+  "last_reviewed": "2026-08-15",
+  "confidence": "high",
+  "sources": ["ORC 5741.01", "Ohio Rev. Code Ch. 5751 (CAT)", "tax.ohio.gov"],
+  "scenarios": {
+    "register_sales_tax": {
+      "title": "Register for Ohio Sales Tax",
+      "summary": "FBA inventory or $100k/$200 txn (OR test, includes marketplace) creates nexus. Register as a vendor with OH DOR.",
+      "severity": "action",
+      "steps": [
+        {"order": 1, "title": "Register via Ohio Business Gateway", "detail": "Apply for a vendor's license through the Ohio Business Gateway online portal.", "url": "https://gateway.ohio.gov/", "url_label": "Ohio Business Gateway", "documents_needed": ["Federal EIN", "LLC details", "Responsible party SSN"], "verification_check": "Receive OH vendor's license number."},
+        {"order": 2, "title": "Note filing frequency and due dates", "detail": "Ohio assigns semi-monthly, monthly, or quarterly filing. Returns due the 23rd of the month following the period.", "deadline_rule": "23rd of following month"},
+        {"order": 3, "title": "Configure Shopify and update dashboard", "detail": "Enable OH tax in Shopify. Amazon handles marketplace orders. Update Registrations page."}
+      ],
+      "related_urls": {"registration_url": "https://gateway.ohio.gov/", "filing_url": "https://gateway.ohio.gov/"}
+    },
+    "franchise_or_entity": {
+      "title": "Ohio Commercial Activity Tax (CAT)",
+      "summary": "Ohio CAT is a gross receipts tax at 0.26% on receipts over $1M. Minimum $150 annual tax for businesses with $150k-$1M in OH gross receipts. FBA inventory may create CAT nexus.",
+      "severity": "warning",
+      "steps": [
+        {"order": 1, "title": "Determine if CAT applies", "detail": "If your Ohio gross receipts exceed $150,000, the CAT minimum tax ($150) applies. If over $1M, the 0.26% rate applies. CAT has its own nexus provisions (bright-line test: $500k receipts or $50k payroll/property in OH).", "common_pitfalls": ["CAT is separate from sales tax.", "Interaction between FBA inventory and CAT nexus is not fully settled — confirm with CPA."]},
+        {"order": 2, "title": "Register for CAT if applicable", "detail": "Register via Ohio Business Gateway. Annual minimum tax ($150) due May 10. Quarterly estimated payments if annual CAT exceeds $1,500.", "url": "https://gateway.ohio.gov/", "url_label": "Ohio Business Gateway", "deadline_rule": "Annual minimum due May 10; quarterly estimates if > $1,500"}
+      ]
+    }
+  }
+}

@@ -586,17 +586,55 @@ def _print_spapi_result(label: str, result: dict):
 
 
 @cli.command("playbook")
-@click.argument("state_code")
+@click.argument("state_code", required=False, default=None)
 @click.option("--export", "export_path", default=None,
               help="Write playbook to a file (e.g., ./exports/CA_playbook.md)")
-def playbook_cmd(state_code, export_path):
-    """Generate a compliance playbook for a state."""
-    state_code = state_code.upper()
+@click.option("--unregistered", is_flag=True,
+              help="Generate playbooks for ALL unregistered states")
+@click.option("--nexus-only", is_flag=True,
+              help="With --unregistered: only states with nexus/franchise flags")
+def playbook_cmd(state_code, export_path, unregistered, nexus_only):
+    """Generate compliance playbooks. Single state or batch unregistered."""
     from src.compliance.playbook import build_playbook
+    from pathlib import Path
+
+    if unregistered:
+        from src.db import fetch_all
+        nexus_rows = fetch_all("nexus_status")
+        flags = {f["state_code"] for f in fetch_all("franchise_tax_flags")
+                 if f.get("status") == "open"}
+
+        targets = []
+        for n in nexus_rows:
+            if n.get("is_registered"):
+                continue
+            sc = n["state_code"]
+            has_nexus = n.get("has_physical_nexus") or n.get("has_economic_nexus")
+            has_flag = sc in flags
+            if nexus_only and not (has_nexus or has_flag):
+                continue
+            targets.append(sc)
+
+        out_dir = Path(export_path) if export_path else Path("exports/playbooks")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        for sc in sorted(targets):
+            md = build_playbook(sc)
+            p = out_dir / f"{sc}_playbook.md"
+            p.write_text(md, encoding="utf-8")
+            click.echo(f"  {sc} → {p}")
+
+        click.echo(f"\nExported {len(targets)} playbooks to {out_dir}/")
+        return
+
+    if not state_code:
+        click.echo("Usage: playbook STATE or playbook --unregistered")
+        return
+
+    state_code = state_code.upper()
     md = build_playbook(state_code)
 
     if export_path:
-        from pathlib import Path
         p = Path(export_path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(md, encoding="utf-8")

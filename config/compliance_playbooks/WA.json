@@ -1,0 +1,31 @@
+{
+  "state_code": "WA",
+  "state_name": "Washington",
+  "last_reviewed": "2026-08-15",
+  "confidence": "high",
+  "sources": ["RCW 82.04 (B&O)", "RCW 82.08 (retail sales)", "WA DOR ETA 3195.2019"],
+  "scenarios": {
+    "register_sales_tax": {
+      "title": "Register for Washington Sales Tax",
+      "summary": "FBA inventory or $100k+ sales (includes marketplace) creates nexus. Register for a sales tax certificate with WA DOR.",
+      "severity": "action",
+      "steps": [
+        {"order": 1, "title": "Apply via WA DOR Business Licensing Service", "detail": "Register online through the WA DOR Business Licensing portal. You will need your Federal EIN, LLC details, and estimated WA sales.", "url": "https://dor.wa.gov/open-business/apply-business-license", "url_label": "WA DOR Business Licensing", "documents_needed": ["Federal EIN", "LLC formation certificate", "Responsible party SSN"],"verification_check": "Receive a WA UBI number and sales tax certificate."},
+        {"order": 2, "title": "Note filing frequency", "detail": "WA assigns monthly, quarterly, or annual filing. Returns due the 25th of the month following the period. Combined return covers both sales tax AND B&O tax on a single form.", "deadline_rule": "25th of following month", "verification_check": "Filing frequency visible in My DOR account."},
+        {"order": 3, "title": "Configure Shopify and update dashboard", "detail": "Enable WA tax in Shopify. Amazon handles marketplace orders. Update Registrations page."}
+      ],
+      "related_urls": {"registration_url": "https://dor.wa.gov/open-business/apply-business-license", "filing_url": "https://dor.wa.gov/file-pay-taxes"}
+    },
+    "franchise_or_entity": {
+      "title": "Washington B&O (Business & Occupation) Tax",
+      "summary": "IMPORTANT: WA B&O tax is a gross receipts tax SEPARATE from sales tax. It is NOT covered by Amazon marketplace facilitator collection. FBA inventory creates B&O nexus. Retailing B&O rate is 0.471% on gross receipts.",
+      "severity": "critical",
+      "steps": [
+        {"order": 1, "title": "Understand B&O is separate from sales tax", "detail": "B&O tax applies to your gross receipts from business in WA. Amazon handles sales tax collection, but B&O is your own obligation. The retailing B&O rate is 0.471%. Multiple classifications may apply.", "common_pitfalls": ["Most commonly overlooked WA obligation for FBA sellers.", "B&O applies even if Amazon collects sales tax."]},
+        {"order": 2, "title": "File B&O on combined return", "detail": "B&O and sales tax are filed on the same combined excise tax return in My DOR. Due the 25th of the month following the period.", "url": "https://dor.wa.gov/file-pay-taxes", "url_label": "WA DOR File & Pay"},
+        {"order": 3, "title": "Small business credit", "detail": "The small business B&O credit offsets the first ~$125k/month in taxable income (effectively ~$250/month credit for retailing B&O). Most small sellers owe very little after the credit, but filing is still required.", "verification_check": "B&O line shows on your combined return with credit applied."}
+      ],
+      "related_urls": {"help_url": "https://dor.wa.gov/taxes-rates/business-occupation-tax"}
+    }
+  }
+}
