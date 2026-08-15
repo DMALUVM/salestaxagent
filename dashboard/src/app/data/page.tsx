@@ -1,12 +1,14 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type { IngestionLog, ResearchTask } from "@/lib/types";
-import { SeverityBadge } from "@/components/status-badge";
 import { LoadingState } from "@/components/loading";
-import { EmptyState } from "@/components/empty-state";
+import { fileTypeLabel } from "@/lib/channels";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import {
   Table,
   TableBody,
@@ -23,6 +25,9 @@ import {
   XCircle,
   ClipboardList,
   FolderOpen,
+  FileUp,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react";
 
 function timeAgo(dateStr: string) {
@@ -42,11 +47,381 @@ const priorityStyles: Record<string, string> = {
   low: "bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-900 dark:text-slate-500",
 };
 
-export default function DataPage() {
-  const { data: logs, loading: l1 } = useSupabaseQuery<IngestionLog>(
-    "ingestion_log",
-    { orderBy: "created_at", limit: 20 }
+interface UploadResult {
+  success?: boolean;
+  error?: string;
+  report_type?: string;
+  filename?: string;
+  rows_total?: number;
+  rows_parsed?: number;
+  rows_skipped?: number;
+  rows_inserted?: number;
+  ship_from_rows_inserted?: number;
+  unique_orders?: number;
+  states_found?: string[];
+  ship_from_states?: string[];
+  unknown_fcs?: string[];
+  total_gross_sales?: number;
+  total_tax_collected?: number;
+  warnings?: string[];
+}
+
+function FileUploadCard({ onComplete }: { onComplete: () => void }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState<UploadResult | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (ext !== "csv" && ext !== "txt" && ext !== "tsv") {
+      setResult({
+        success: false,
+        error: "Unsupported file type. Please upload a CSV or TXT file.",
+      });
+      return;
+    }
+    setSelectedFile(file);
+    setResult(null);
+  }
+
+  async function handleUpload() {
+    if (!selectedFile) return;
+    setUploading(true);
+    setProgress(10);
+    setResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      formData.append("type", "amazon");
+
+      setProgress(30);
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      setProgress(80);
+
+      const data: UploadResult = await response.json();
+
+      setProgress(100);
+      setResult(data);
+      setSelectedFile(null);
+
+      if (data.success) {
+        onComplete();
+      }
+    } catch (e) {
+      setResult({
+        success: false,
+        error: `Upload failed: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    handleFiles(e.dataTransfer.files);
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm font-medium">
+          <FileUp className="h-4 w-4 text-muted-foreground" />
+          Upload Amazon Report
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div
+          className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors ${
+            dragging
+              ? "border-primary bg-primary/5"
+              : "border-muted-foreground/25 hover:border-muted-foreground/50"
+          }`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+        >
+          <Upload className="mb-3 h-8 w-8 text-muted-foreground/50" />
+          <p className="text-sm font-medium">
+            {selectedFile ? selectedFile.name : "Drop your Amazon report here"}
+          </p>
+          {selectedFile ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {(selectedFile.size / 1024).toFixed(0)} KB ready to upload
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Inventory Event Detail or Custom Combined Tax Report (CSV/TXT)
+            </p>
+          )}
+          <div className="mt-3 flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+            >
+              Browse Files
+            </Button>
+            {selectedFile && (
+              <Button
+                size="sm"
+                onClick={handleUpload}
+                disabled={uploading}
+              >
+                {uploading ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    Upload & Process
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.txt,.tsv"
+            className="hidden"
+            onChange={(e) => handleFiles(e.target.files)}
+          />
+        </div>
+
+        {uploading && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Processing...</span>
+              <span className="font-medium">{progress}%</span>
+            </div>
+            <Progress value={progress} />
+          </div>
+        )}
+
+        {result && (
+          <div
+            className={`rounded-lg border p-4 ${
+              result.success
+                ? "border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950"
+                : "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950"
+            }`}
+          >
+            <div className="flex items-start gap-2">
+              {result.success ? (
+                <CheckCircle className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              ) : (
+                <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+              )}
+              <div className="space-y-1.5">
+                <p
+                  className={`text-sm font-medium ${
+                    result.success
+                      ? "text-emerald-800 dark:text-emerald-300"
+                      : "text-red-800 dark:text-red-300"
+                  }`}
+                >
+                  {result.success
+                    ? `Successfully processed ${result.filename}`
+                    : result.error ?? "Upload failed"}
+                </p>
+                {result.success && (
+                  <div
+                    className={`grid gap-x-6 gap-y-0.5 text-xs ${
+                      result.success
+                        ? "text-emerald-700 dark:text-emerald-400"
+                        : "text-red-700 dark:text-red-400"
+                    }`}
+                    style={{ gridTemplateColumns: "auto 1fr" }}
+                  >
+                    <span>Rows total:</span>
+                    <span className="font-medium">
+                      {result.rows_total?.toLocaleString()}
+                    </span>
+                    <span>Rows parsed:</span>
+                    <span className="font-medium">
+                      {result.rows_parsed?.toLocaleString()}
+                    </span>
+                    <span>Rows inserted:</span>
+                    <span className="font-medium">
+                      {result.rows_inserted?.toLocaleString()}
+                    </span>
+                    {(result.rows_skipped ?? 0) > 0 && (
+                      <>
+                        <span>Rows skipped:</span>
+                        <span className="font-medium">
+                          {result.rows_skipped?.toLocaleString()}
+                        </span>
+                      </>
+                    )}
+                    <span>States found:</span>
+                    <span className="font-medium">
+                      {result.states_found?.join(", ") || "None"}
+                    </span>
+                    {result.report_type === "amazon_tax_report" && (
+                      <>
+                        <span>Unique orders:</span>
+                        <span className="font-medium">
+                          {result.unique_orders?.toLocaleString()}
+                        </span>
+                        <span>Gross sales:</span>
+                        <span className="font-medium">
+                          ${result.total_gross_sales?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </span>
+                        <span>Tax collected:</span>
+                        <span className="font-medium">
+                          ${result.total_tax_collected?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </span>
+                        {(result.ship_from_states?.length ?? 0) > 0 && (
+                          <>
+                            <span>Ship-from states:</span>
+                            <span className="font-medium">
+                              {result.ship_from_states?.join(", ")}
+                            </span>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+                {(result.unknown_fcs?.length ?? 0) > 0 && (
+                  <div className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                    <span>
+                      Unknown FC codes: {result.unknown_fcs?.join(", ")}. Add
+                      them to config/fc_codes.json.
+                    </span>
+                  </div>
+                )}
+                {(result.warnings?.length ?? 0) > 0 &&
+                  !result.success && (
+                    <ul className="text-xs text-red-700 dark:text-red-400 space-y-0.5">
+                      {result.warnings?.slice(0, 5).map((w, i) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          Supported: Amazon Inventory Event Detail, Custom Combined Tax Reports.
+          Report type is auto-detected from headers. Maximum file size: 200 MB.
+        </p>
+      </CardContent>
+    </Card>
   );
+}
+
+function SPAPIRefreshCard({ onComplete }: { onComplete: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleRefresh() {
+    setLoading(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/spapi-refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days: 30 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMessage(data.message);
+        onComplete();
+      } else {
+        setError(data.error ?? "Unknown error");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm font-medium">
+          <RefreshCw className="h-4 w-4 text-muted-foreground" />
+          Amazon SP-API Refresh
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Pull the latest orders and inventory data directly from Amazon&apos;s
+          Selling Partner API. Requires SP-API credentials in .env.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleRefresh}
+          disabled={loading}
+        >
+          {loading ? (
+            <>
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              Requesting...
+            </>
+          ) : (
+            <>
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+              Refresh Last 30 Days
+            </>
+          )}
+        </Button>
+        {message && (
+          <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950">
+            <CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+            <p className="text-xs text-emerald-800 dark:text-emerald-300">
+              {message}
+            </p>
+          </div>
+        )}
+        {error && (
+          <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950">
+            <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />
+            <p className="text-xs text-red-800 dark:text-red-300">{error}</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function DataPage() {
+  const {
+    data: logs,
+    loading: l1,
+    refetch: refetchLogs,
+  } = useSupabaseQuery<IngestionLog>("ingestion_log", {
+    orderBy: "ingested_at",
+    limit: 20,
+  });
   const { data: tasks, loading: l2 } = useSupabaseQuery<ResearchTask>(
     "research_tasks",
     { orderBy: "created_at" }
@@ -54,21 +429,29 @@ export default function DataPage() {
 
   if (l1 || l2) return <LoadingState />;
 
-  const openTasks = tasks.filter((t) => t.status === "open" || t.status === "in_progress");
+  const openTasks = tasks.filter(
+    (t) => t.status === "open" || t.status === "in_progress"
+  );
 
-  const amazonLogs = logs.filter((l) => l.source === "amazon");
-  const shopifyLogs = logs.filter((l) => l.source === "shopify");
+  const amazonLogs = logs.filter((l) => l.file_type.startsWith("amazon"));
+  const shopifyLogs = logs.filter((l) => l.file_type.startsWith("shopify"));
   const lastAmazon = amazonLogs[0];
   const lastShopify = shopifyLogs[0];
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Data & Ingestion</h1>
+        <h1 className="text-xl font-semibold tracking-tight">
+          Data & Ingestion
+        </h1>
         <p className="text-sm text-muted-foreground">
-          Data sources, ingestion history, and research tasks
+          Upload data, view ingestion history, and manage research tasks
         </p>
       </div>
+
+      <FileUploadCard onComplete={refetchLogs} />
+
+      <SPAPIRefreshCard onComplete={refetchLogs} />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
@@ -87,25 +470,28 @@ export default function DataPage() {
                   ) : (
                     <XCircle className="h-4 w-4 text-red-500" />
                   )}
-                  <span className="text-sm font-medium capitalize">{lastAmazon.status}</span>
+                  <span className="text-sm font-medium capitalize">
+                    {lastAmazon.status}
+                  </span>
                   <span className="text-xs text-muted-foreground">
-                    {timeAgo(lastAmazon.created_at)}
+                    {timeAgo(lastAmazon.ingested_at)}
                   </span>
                 </div>
-                {lastAmazon.filename && (
-                  <p className="text-xs text-muted-foreground">
-                    File: {lastAmazon.filename}
-                  </p>
-                )}
                 <p className="text-xs text-muted-foreground">
-                  {lastAmazon.rows_processed ?? 0} rows processed,{" "}
-                  {lastAmazon.rows_inserted ?? 0} inserted
+                  File: {lastAmazon.filename}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {lastAmazon.rows_total} rows processed,{" "}
+                  {lastAmazon.rows_inserted} inserted
                 </p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                No Amazon data ingested yet. Drop a CSV into{" "}
-                <code className="rounded bg-muted px-1 text-xs">incoming/amazon/</code>
+                No Amazon data ingested yet. Use the upload form above or drop a
+                CSV into{" "}
+                <code className="rounded bg-muted px-1 text-xs">
+                  incoming/amazon/
+                </code>
               </p>
             )}
           </CardContent>
@@ -127,20 +513,24 @@ export default function DataPage() {
                   ) : (
                     <XCircle className="h-4 w-4 text-red-500" />
                   )}
-                  <span className="text-sm font-medium capitalize">{lastShopify.status}</span>
+                  <span className="text-sm font-medium capitalize">
+                    {lastShopify.status}
+                  </span>
                   <span className="text-xs text-muted-foreground">
-                    {timeAgo(lastShopify.created_at)}
+                    {timeAgo(lastShopify.ingested_at)}
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {lastShopify.rows_processed ?? 0} orders,{" "}
-                  {lastShopify.rows_inserted ?? 0} aggregated
+                  {lastShopify.rows_total} orders,{" "}
+                  {lastShopify.rows_inserted} aggregated
                 </p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
                 No Shopify data yet. Configure API keys or drop a CSV into{" "}
-                <code className="rounded bg-muted px-1 text-xs">incoming/shopify/</code>
+                <code className="rounded bg-muted px-1 text-xs">
+                  incoming/shopify/
+                </code>
               </p>
             )}
           </CardContent>
@@ -151,7 +541,7 @@ export default function DataPage() {
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-sm font-medium">
             <FolderOpen className="h-4 w-4 text-muted-foreground" />
-            How to Add Data
+            Alternative: Drop Files (Power Users)
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -159,23 +549,25 @@ export default function DataPage() {
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="text-sm font-medium">Amazon Reports</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Download Inventory Event Detail from Seller Central and drop the
-                CSV/TXT into <code className="rounded bg-muted px-1">incoming/amazon/</code>
+                Drop CSV/TXT into{" "}
+                <code className="rounded bg-muted px-1">incoming/amazon/</code>{" "}
+                for automatic processing by the folder watcher.
               </p>
             </div>
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="text-sm font-medium">Shopify Orders</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Automatic via API polling (if configured), or export orders CSV
-                and drop into <code className="rounded bg-muted px-1">incoming/shopify/</code>
+                and drop into{" "}
+                <code className="rounded bg-muted px-1">incoming/shopify/</code>
               </p>
             </div>
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="text-sm font-medium">Rulings & Documents</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Drop JSON, PDF, or HTML files into{" "}
-                <code className="rounded bg-muted px-1">incoming/rulings/</code> for
-                processing
+                <code className="rounded bg-muted px-1">incoming/rulings/</code>{" "}
+                for processing
               </p>
             </div>
           </div>
@@ -213,7 +605,7 @@ export default function DataPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm font-medium">
-                        {t.state_code ?? "—"}
+                        {t.state_code ?? "\u2014"}
                       </TableCell>
                       <TableCell className="max-w-sm truncate text-sm">
                         {t.title}
@@ -255,14 +647,14 @@ export default function DataPage() {
                 <TableBody>
                   {logs.map((l) => (
                     <TableRow key={l.id}>
-                      <TableCell className="text-sm font-medium capitalize">
-                        {l.source}
+                      <TableCell className="text-sm font-medium">
+                        {fileTypeLabel(l.file_type)}
                       </TableCell>
                       <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
-                        {l.filename ?? "—"}
+                        {l.filename}
                       </TableCell>
                       <TableCell className="text-sm">
-                        {l.rows_inserted ?? l.rows_processed ?? "—"}
+                        {l.rows_inserted}
                       </TableCell>
                       <TableCell>
                         {l.status === "success" ? (
@@ -272,7 +664,7 @@ export default function DataPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {timeAgo(l.created_at)}
+                        {timeAgo(l.ingested_at)}
                       </TableCell>
                     </TableRow>
                   ))}

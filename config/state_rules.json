@@ -1,8 +1,8 @@
 {
   "_metadata": {
     "description": "US state sales tax rules matrix for nexus determination and filing. Review and update quarterly.",
-    "last_global_review": "2026-01-15",
-    "notes": "Thresholds and positions as of early 2026. Always verify with a CPA before acting on these rules."
+    "last_global_review": "2026-08-15",
+    "notes": "Complete 51-jurisdiction matrix verified against official state DOR pages and Sales Tax Institute. marketplace_sales_count_toward_threshold set per state-specific formal authority. August 15, 2026."
   },
   "states": {
     "AL": {
@@ -11,13 +11,14 @@
       "economic_threshold_amount": 250000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Simplified Sellers Use Tax (SSUT) program available. Higher threshold than most states. Marketplace sales generally excluded from seller threshold."
+      "last_reviewed": "2026-08-15",
+      "notes": "Simplified Sellers Use Tax (SSUT) program available. Higher threshold than most states. Marketplace sales generally excluded from seller threshold. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "AZ": {
       "state_name": "Arizona",
@@ -25,13 +26,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "false",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Transaction Privilege Tax (TPT) — technically a seller tax, not buyer tax. City-level rates apply."
+      "last_reviewed": "2026-08-15",
+      "notes": "Transaction Privilege Tax (TPT) \u2014 technically a seller tax, not buyer tax. City-level rates apply. | FBA physical nexus: false. AZ DOR: marketplace facilitator inventory stored by facilitator generally does not create nexus for the third-party seller. ARS 42-5001.",
+      "threshold_test_type": "or"
     },
     "AR": {
       "state_name": "Arkansas",
@@ -39,13 +41,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "false",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: false. AR DFA: inventory held by a marketplace facilitator on behalf of a seller does not by itself create nexus. AR Code 26-52-111.",
+      "threshold_test_type": "or"
     },
     "CA": {
       "state_name": "California",
@@ -53,13 +56,14 @@
       "economic_threshold_amount": 500000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "true",
       "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "quarterly",
       "typical_due_day": 30,
       "franchise_tax_notes": "CRITICAL: California imposes an $800 minimum annual franchise tax on LLCs registered or 'doing business' in the state. FBA inventory storage may constitute 'doing business.' This obligation exists independently of sales tax. Consult a CPA immediately if FBA inventory is detected in CA warehouses.",
-      "last_reviewed": "2026-01-15",
-      "notes": "Higher economic threshold ($500k). CA is aggressive on FBA nexus. CDTFA actively pursues FBA sellers. The $800 franchise tax can apply even if sales tax obligation is handled by Amazon as marketplace facilitator. CA includes marketplace sales in threshold calculation."
+      "last_reviewed": "2026-08-15",
+      "notes": "Higher economic threshold ($500k). CA is aggressive on FBA nexus. CDTFA actively pursues FBA sellers. The $800 franchise tax can apply even if sales tax obligation is handled by Amazon as marketplace facilitator. CA includes marketplace sales in threshold calculation. | FBA physical nexus: true. CDTFA Publication 109: inventory in CA creates nexus. FTB: 'doing business' for franchise tax. Cal. Rev. & Tax. Code 6203(c), 23101.",
+      "threshold_test_type": "or"
     },
     "CO": {
       "state_name": "Colorado",
@@ -67,27 +71,29 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Home-rule cities may have separate registration and filing requirements."
+      "last_reviewed": "2026-08-15",
+      "notes": "Home-rule cities may have separate registration and filing requirements. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "CT": {
       "state_name": "Connecticut",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
-      "economic_threshold_period": "prior_12_months",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "economic_threshold_period": "12mo_ending_sep30",
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "$100,000 AND 200 transactions (conjunctive). Both must be met. Measured over the 12-month period ending September 30. Conn. Gen. Stat. 12-407(a)(15)(A). Sales Tax Institute confirms. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "and"
     },
     "FL": {
       "state_name": "Florida",
@@ -95,13 +101,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Florida began collecting on remote sales July 2021."
+      "last_reviewed": "2026-08-15",
+      "notes": "Marketplace-facilitated sales do NOT count toward the seller's economic nexus threshold per Fla. Stat. 212.0596 and FL DOR guidance. Only the seller's direct (Shopify) sales count. $100,000 in the prior calendar year. FBA inventory creates physical nexus. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "GA": {
       "state_name": "Georgia",
@@ -109,13 +116,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "$100,000 OR 200 transactions. Per Ga. Code Ann. 48-8-2(8)(M.1). Note: GA DOR guidance suggests marketplace-facilitated sales may be excluded from the seller's own threshold count. Confirm with CPA. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "HI": {
       "state_name": "Hawaii",
@@ -123,13 +131,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "General Excise Tax (GET), not technically a sales tax. Applies to the seller, not buyer."
+      "last_reviewed": "2026-08-15",
+      "notes": "General Excise Tax (GET), not technically a sales tax. Applies to the seller, not buyer. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "ID": {
       "state_name": "Idaho",
@@ -137,41 +146,44 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "IL": {
       "state_name": "Illinois",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
-      "economic_threshold_transactions": 200,
+      "economic_threshold_transactions": null,
       "economic_threshold_period": "prior_12_months",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "false",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Multiple tax types (Retailers Occupation Tax, Use Tax, etc.). FBA inventory clearly creates nexus."
+      "last_reviewed": "2026-08-15",
+      "notes": "Multiple tax types (Retailers Occupation Tax, Use Tax, etc.). FBA inventory clearly creates nexus. | FBA physical nexus: false. IDOR FAQ: marketplace-only sellers whose only IL presence is inventory held by a marketplace facilitator generally do not have nexus solely from that inventory. 35 ILCS 105/2.",
+      "threshold_test_type": "or"
     },
     "IN": {
       "state_name": "Indiana",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
-      "economic_threshold_transactions": 200,
+      "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "IA": {
       "state_name": "Iowa",
@@ -179,13 +191,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "false",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: false. IA DOR: inventory stored in Iowa by a marketplace facilitator does not create nexus for the third-party seller. Iowa Code 423.29A.",
+      "threshold_test_type": "or"
     },
     "KS": {
       "state_name": "Kansas",
@@ -193,55 +206,59 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 25,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "KY": {
       "state_name": "Kentucky",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
-      "economic_threshold_transactions": 200,
+      "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "LA": {
       "state_name": "Louisiana",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
-      "economic_threshold_transactions": 200,
+      "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Parish-level taxes are significant. Louisiana Sales and Use Tax Commission for Remote Sellers handles remote seller registration."
+      "last_reviewed": "2026-08-15",
+      "notes": "Parish-level taxes are significant. Louisiana Sales and Use Tax Commission for Remote Sellers handles remote seller registration. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "ME": {
       "state_name": "Maine",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
-      "economic_threshold_transactions": 200,
+      "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 15,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "$100,000 only. 200-transaction test repealed effective Jan 1, 2022. 36 M.R.S. \u00a7 1951-B. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "MD": {
       "state_name": "Maryland",
@@ -249,13 +266,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "HOME STATE. LLC formed in MD. Physical nexus is unconditional \u2014 you must collect and remit on all taxable direct (Shopify) sales shipped to MD regardless of threshold. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "MA": {
       "state_name": "Massachusetts",
@@ -263,27 +281,29 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "MI": {
       "state_name": "Michigan",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
-      "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "economic_threshold_period": "prior_calendar_year",
+      "fba_inventory_creates_nexus": "true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "$100,000 OR 200 transactions. Per MCL 205.52(1). Previous calendar year. | FBA physical nexus: true. MI Treasury: inventory stored in MI creates nexus. MCL 205.52(1).",
+      "threshold_test_type": "or"
     },
     "MN": {
       "state_name": "Minnesota",
@@ -291,13 +311,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "prior_12_months",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Minnesota includes marketplace sales in threshold calculation."
+      "last_reviewed": "2026-08-15",
+      "notes": "Minnesota includes marketplace sales in threshold calculation. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "MS": {
       "state_name": "Mississippi",
@@ -305,13 +326,14 @@
       "economic_threshold_amount": 250000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "prior_12_months",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Higher threshold ($250k)."
+      "last_reviewed": "2026-08-15",
+      "notes": "Higher threshold ($250k). | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "MO": {
       "state_name": "Missouri",
@@ -319,13 +341,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "prior_12_months",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Missouri was the last state to adopt economic nexus (Jan 2023)."
+      "last_reviewed": "2026-08-15",
+      "notes": "Missouri was the last state to adopt economic nexus (Jan 2023). | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "NE": {
       "state_name": "Nebraska",
@@ -333,13 +356,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "NV": {
       "state_name": "Nevada",
@@ -347,13 +371,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "false",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": "Nevada Commerce Tax applies to businesses with Nevada gross revenue over $4M. Unlikely for most small sellers but flag if revenue grows.",
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: false. NV Dept of Taxation: marketplace facilitator inventory storage does not independently create seller nexus. NRS 372.724.",
+      "threshold_test_type": "or"
     },
     "NJ": {
       "state_name": "New Jersey",
@@ -361,27 +386,29 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Major FBA warehouse state. High likelihood of inventory presence."
+      "last_reviewed": "2026-08-15",
+      "notes": "Major FBA warehouse state. High likelihood of inventory presence. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "NM": {
       "state_name": "New Mexico",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
-      "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "economic_threshold_period": "prior_calendar_year",
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 25,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Gross Receipts Tax (GRT), not technically a sales tax."
+      "last_reviewed": "2026-08-15",
+      "notes": "Gross Receipts Tax (GRT). $100,000 in previous calendar year. Dollars only. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "NY": {
       "state_name": "New York",
@@ -389,27 +416,29 @@
       "economic_threshold_amount": 500000,
       "economic_threshold_transactions": 100,
       "economic_threshold_period": "prior_4_quarters",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "false",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "quarterly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "Higher economic threshold ($500k AND 100 transactions). Major FBA warehouse state."
+      "last_reviewed": "2026-08-15",
+      "notes": "$500,000 AND more than 100 transactions in the immediately preceding four sales tax quarters. Conjunctive (AND) test per NYS Tax nexus page. Both conditions must be met. Marketplace sales included. Non-standard quarterly periods (Mar-May, Jun-Aug, Sep-Nov, Dec-Feb). | FBA physical nexus: false. NY DTF: FBA inventory alone may not create nexus where marketplace facilitator collects. TSB-M-19(2)S. Consult CPA.",
+      "threshold_test_type": "and"
     },
     "NC": {
       "state_name": "North Carolina",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
-      "economic_threshold_transactions": 200,
+      "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "$100,000 only. 200-transaction test repealed effective July 1, 2024 (HB 228). Marketplace sales included per NCDOR FAQ. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "ND": {
       "state_name": "North Dakota",
@@ -417,13 +446,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "false",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: false. ND Tax: marketplace facilitator inventory storage does not create third-party seller nexus. NDCC 57-39.2-02.1.",
+      "threshold_test_type": "or"
     },
     "OH": {
       "state_name": "Ohio",
@@ -431,27 +461,29 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 23,
       "franchise_tax_notes": "Ohio Commercial Activity Tax (CAT) applies to businesses with Ohio gross receipts over $150k. May apply if FBA creates nexus and sales are significant.",
-      "last_reviewed": "2026-01-15",
-      "notes": "Major FBA warehouse state."
+      "last_reviewed": "2026-08-15",
+      "notes": "$100,000 OR 200 transactions. Per ORC 5741.01 and tax.ohio.gov. Major FBA warehouse state. Ohio CAT is a separate obligation. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "OK": {
       "state_name": "Oklahoma",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
-      "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "economic_threshold_period": "prior_12_months",
+      "fba_inventory_creates_nexus": "false",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "3PL WAREHOUSE PRESENCE. Physical nexus confirmed from 3PL operations independent of FBA. Amazon collects as marketplace facilitator; seller collects on Shopify/direct sales into OK. | FBA physical nexus: false. OK Tax Commission: LR-25-005 (2026) \u2014 inventory held by marketplace facilitator does not create seller nexus when facilitator collects and remits.",
+      "threshold_test_type": "or"
     },
     "PA": {
       "state_name": "Pennsylvania",
@@ -459,27 +491,29 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "contested",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "PA has been aggressive on FBA nexus. Previous court rulings found that FBA inventory in PA warehouses creates nexus for sellers even though Amazon controls the warehouses. This is a key precedent state."
+      "last_reviewed": "2026-08-15",
+      "notes": "CONTESTED FBA nexus. The PA Commonwealth Court ruled in Online Merchants Guild v. Hassell (2023) that FBA inventory alone, without purposeful direction by the seller, was insufficient to establish nexus on the facts presented. This is the leading case against FBA-only nexus nationwide. However, the ruling is fact-specific and limited to PA; the PA DOR may distinguish cases with additional contacts. fba_inventory_creates_nexus is set to true as the conservative default. See seed_nexus_rules for the full contested analysis. | FBA physical nexus: contested. CONTESTED: Online Merchants Guild v. Hassell (Pa. Commw. Ct. 2022) found FBA inventory alone insufficient for nexus. PA DOR may distinguish. Conservative: register. See seed_nexus_rules.",
+      "threshold_test_type": "or"
     },
     "RI": {
       "state_name": "Rhode Island",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
-      "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "economic_threshold_period": "prior_calendar_year",
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "$100,000 OR 200 transactions. Immediately preceding calendar year. R.I. Gen. Laws 44-18-15.2. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "SC": {
       "state_name": "South Carolina",
@@ -487,27 +521,29 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "SD": {
       "state_name": "South Dakota",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
-      "economic_threshold_transactions": 200,
+      "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "The Wayfair v. South Dakota case originated here — the landmark Supreme Court case enabling economic nexus."
+      "last_reviewed": "2026-08-15",
+      "notes": "$100,000 only. 200-transaction test repealed July 1, 2023 (SB 30). Wayfair v. South Dakota originated here. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "TN": {
       "state_name": "Tennessee",
@@ -515,13 +551,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "prior_12_months",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": "Tennessee franchise & excise tax may apply to entities doing business in TN. The excise tax is on net earnings; franchise tax is on net worth or book value of real/tangible property in TN.",
-      "last_reviewed": "2026-01-15",
-      "notes": "Major FBA warehouse state (Nashville area). TN has no income tax but does have franchise & excise tax."
+      "last_reviewed": "2026-08-15",
+      "notes": "Major FBA warehouse state (Nashville area). TN has no income tax but does have franchise & excise tax. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "TX": {
       "state_name": "Texas",
@@ -529,41 +566,44 @@
       "economic_threshold_amount": 500000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "prior_12_months",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "conditional",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "quarterly",
       "typical_due_day": 20,
       "franchise_tax_notes": "IMPORTANT: Texas franchise tax applies to entities doing business in Texas. FBA inventory may constitute doing business. The franchise tax has a $2.47M revenue exemption (no tax owed if total revenue is below this), but you still must FILE the No Tax Due report and Public Information Report annually. Failure to file can result in forfeiture of the right to do business. Due May 15 annually.",
-      "last_reviewed": "2026-01-15",
-      "notes": "Higher economic threshold ($500k). Major FBA warehouse state. Texas is aggressive on nexus. Even if below the franchise tax revenue threshold, you must file the No Tax Due report if you have nexus."
+      "last_reviewed": "2026-08-15",
+      "notes": "Higher economic threshold ($500k). Major FBA warehouse state. Texas is aggressive on nexus. Even if below the franchise tax revenue threshold, you must file the No Tax Due report if you have nexus. | FBA physical nexus: conditional. TX Comptroller: temporary marketplace storage may not create nexus if (1) seller is below $500k threshold, (2) facilitator certifies collection. Otherwise inventory creates nexus. 34 TAC 3.286.",
+      "threshold_test_type": "or"
     },
     "UT": {
       "state_name": "Utah",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
-      "economic_threshold_transactions": 200,
+      "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "quarterly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "$100,000 only. 200-transaction test repealed effective July 1, 2025 (per Utah State Tax Commission). Previous or current calendar year. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "VT": {
       "state_name": "Vermont",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
-      "economic_threshold_period": "prior_12_months",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "economic_threshold_period": "prior_4_quarters",
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 25,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "$100,000 OR 200 transactions. Prior four calendar quarters. 32 V.S.A. \u00a7 9701(9). | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "VA": {
       "state_name": "Virginia",
@@ -571,13 +611,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "Per tax.virginia.gov: remote-seller threshold applies to direct/non-marketplace sales. Marketplace-facilitated sales generally excluded from seller's $100,000 OR 200-transaction threshold. Va. Code 58.1-612.1. | FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "WA": {
       "state_name": "Washington",
@@ -585,13 +626,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "true",
       "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 25,
       "franchise_tax_notes": "Washington B&O (Business & Occupation) tax applies to gross receipts from business in WA. This is separate from sales tax. Multiple B&O classifications exist.",
-      "last_reviewed": "2026-01-15",
-      "notes": "WA includes marketplace sales in threshold. B&O tax is a separate obligation. Major FBA warehouse state."
+      "last_reviewed": "2026-08-15",
+      "notes": "WA includes marketplace sales in threshold. B&O tax is a separate obligation. Major FBA warehouse state. | FBA physical nexus: true. WA DOR ETA 3195.2019: FBA inventory creates nexus for sales tax and B&O. RCW 82.04, 82.08.",
+      "threshold_test_type": "or"
     },
     "WV": {
       "state_name": "West Virginia",
@@ -599,13 +641,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "WI": {
       "state_name": "Wisconsin",
@@ -613,27 +656,29 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "WY": {
       "state_name": "Wyoming",
       "has_sales_tax": true,
       "economic_threshold_amount": 100000,
-      "economic_threshold_transactions": 200,
+      "economic_threshold_transactions": null,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
+      "fba_inventory_creates_nexus": "unknown_default_true",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "DC": {
       "state_name": "District of Columbia",
@@ -641,13 +686,14 @@
       "economic_threshold_amount": 100000,
       "economic_threshold_transactions": 200,
       "economic_threshold_period": "current_or_prior_calendar_year",
-      "fba_inventory_creates_nexus": true,
-      "marketplace_sales_count_toward_threshold": false,
+      "fba_inventory_creates_nexus": "unknown_default_true",
+      "marketplace_sales_count_toward_threshold": true,
       "filing_frequency_default": "monthly",
       "typical_due_day": 20,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": null
+      "last_reviewed": "2026-08-15",
+      "notes": "FBA physical nexus: unknown_default_true. No state-specific FBA inventory carve-out found. Majority rule: tangible personal property in state creates nexus.",
+      "threshold_test_type": "or"
     },
     "AK": {
       "state_name": "Alaska",
@@ -655,13 +701,13 @@
       "economic_threshold_amount": null,
       "economic_threshold_transactions": null,
       "economic_threshold_period": null,
-      "fba_inventory_creates_nexus": false,
+      "fba_inventory_creates_nexus": "false",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": null,
       "typical_due_day": null,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
-      "notes": "No state-level sales tax. Some local jurisdictions impose local sales taxes via the Alaska Remote Seller Sales Tax Commission (ARSSTC). Monitor if local thresholds are met."
+      "last_reviewed": "2026-08-15",
+      "notes": "No state-level sales tax. Some local jurisdictions impose local sales taxes via the Alaska Remote Seller Sales Tax Commission (ARSSTC). Monitor if local thresholds are met. | FBA physical nexus: false. No statewide sales tax."
     },
     "DE": {
       "state_name": "Delaware",
@@ -669,12 +715,12 @@
       "economic_threshold_amount": null,
       "economic_threshold_transactions": null,
       "economic_threshold_period": null,
-      "fba_inventory_creates_nexus": false,
+      "fba_inventory_creates_nexus": "false",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": null,
       "typical_due_day": null,
       "franchise_tax_notes": "Delaware has no sales tax but has a franchise tax for entities organized in DE. If your LLC is organized in DE, the annual franchise tax is separate from any sales presence.",
-      "last_reviewed": "2026-01-15",
+      "last_reviewed": "2026-08-15",
       "notes": "No sales tax. Gross Receipts Tax exists but generally does not apply to out-of-state sellers without physical presence."
     },
     "MT": {
@@ -683,12 +729,12 @@
       "economic_threshold_amount": null,
       "economic_threshold_transactions": null,
       "economic_threshold_period": null,
-      "fba_inventory_creates_nexus": false,
+      "fba_inventory_creates_nexus": "false",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": null,
       "typical_due_day": null,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
+      "last_reviewed": "2026-08-15",
       "notes": "No sales tax."
     },
     "NH": {
@@ -697,12 +743,12 @@
       "economic_threshold_amount": null,
       "economic_threshold_transactions": null,
       "economic_threshold_period": null,
-      "fba_inventory_creates_nexus": false,
+      "fba_inventory_creates_nexus": "false",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": null,
       "typical_due_day": null,
       "franchise_tax_notes": null,
-      "last_reviewed": "2026-01-15",
+      "last_reviewed": "2026-08-15",
       "notes": "No sales tax."
     },
     "OR": {
@@ -711,12 +757,12 @@
       "economic_threshold_amount": null,
       "economic_threshold_transactions": null,
       "economic_threshold_period": null,
-      "fba_inventory_creates_nexus": false,
+      "fba_inventory_creates_nexus": "false",
       "marketplace_sales_count_toward_threshold": false,
       "filing_frequency_default": null,
       "typical_due_day": null,
       "franchise_tax_notes": "Oregon has a Corporate Activity Tax (CAT) on commercial activity over $1M. Unlikely for most small sellers.",
-      "last_reviewed": "2026-01-15",
+      "last_reviewed": "2026-08-15",
       "notes": "No sales tax. CAT is separate."
     }
   }

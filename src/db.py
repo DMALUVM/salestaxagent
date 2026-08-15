@@ -33,14 +33,25 @@ def _clean_row(row: dict) -> dict:
     return {k: _serialize(v) for k, v in row.items() if v is not None}
 
 
-def upsert_rows(table: str, rows: list[dict], on_conflict: str | None = None) -> int:
+def upsert_rows(
+    table: str,
+    rows: list[dict],
+    on_conflict: str | None = None,
+    batch_size: int = 500,
+) -> int:
     if not rows:
         return 0
     client = get_client()
-    cleaned = [_clean_row(r) for r in rows]
-    query = client.table(table).upsert(cleaned, on_conflict=on_conflict)
-    result = query.execute()
-    return len(result.data) if result.data else 0
+    total = 0
+    for i in range(0, len(rows), batch_size):
+        batch = [_clean_row(r) for r in rows[i : i + batch_size]]
+        result = (
+            client.table(table)
+            .upsert(batch, on_conflict=on_conflict)
+            .execute()
+        )
+        total += len(result.data) if result.data else 0
+    return total
 
 
 def insert_rows(table: str, rows: list[dict]) -> int:
@@ -52,16 +63,41 @@ def insert_rows(table: str, rows: list[dict]) -> int:
     return len(result.data) if result.data else 0
 
 
-def fetch_all(table: str, filters: dict | None = None, order: str | None = None) -> list[dict]:
+def delete_rows(table: str, filters: dict) -> int:
+    """Delete rows matching all equality filters. Returns count deleted."""
+    if not filters:
+        return 0
     client = get_client()
-    query = client.table(table).select("*")
-    if filters:
-        for key, value in filters.items():
-            query = query.eq(key, value)
-    if order:
-        query = query.order(order)
+    query = client.table(table).delete()
+    for key, value in filters.items():
+        query = query.eq(key, value)
     result = query.execute()
-    return result.data or []
+    return len(result.data) if result.data else 0
+
+
+def fetch_all(table: str, filters: dict | None = None, order: str | None = None) -> list[dict]:
+    """Fetch all matching rows, paginating past the PostgREST 1 000-row default."""
+    client = get_client()
+    all_rows: list[dict] = []
+    page_size = 1000
+    offset = 0
+
+    while True:
+        query = client.table(table).select("*")
+        if filters:
+            for key, value in filters.items():
+                query = query.eq(key, value)
+        if order:
+            query = query.order(order)
+        query = query.range(offset, offset + page_size - 1)
+        result = query.execute()
+        page = result.data or []
+        all_rows.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+
+    return all_rows
 
 
 def fetch_one(table: str, filters: dict) -> dict | None:

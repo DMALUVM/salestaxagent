@@ -3,13 +3,13 @@ from __future__ import annotations
 import csv
 import hashlib
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import httpx
 
 from src.config import settings
-from src.db import upsert_rows, log_ingestion, log_audit
+from src.db import delete_rows, upsert_rows, log_ingestion, log_audit
 from src.models.schema import SalesByState
 
 US_STATE_CODES = {
@@ -61,15 +61,19 @@ def _parse_date(value: str) -> date | None:
         return None
 
 
-def _month_bounds(d: date) -> tuple[date, date]:
-    start = d.replace(day=1)
+def _month_start(d: date) -> date:
+    return d.replace(day=1)
+
+
+def _month_end(d: date) -> date:
     if d.month == 12:
-        end = date(d.year + 1, 1, 1)
-    else:
-        end = date(d.year, d.month + 1, 1)
-    from datetime import timedelta
-    end = end - timedelta(days=1)
-    return start, end
+        return d.replace(month=12, day=31)
+    return date(d.year, d.month + 1, 1) - timedelta(days=1)
+
+
+# ---------------------------------------------------------------------------
+# CSV parser
+# ---------------------------------------------------------------------------
 
 
 def parse_shopify_csv(file_path: str | Path) -> dict:
@@ -77,9 +81,10 @@ def parse_shopify_csv(file_path: str | Path) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
 
-    state_agg: dict[str, dict] = defaultdict(lambda: {
+    # Key: (state_code, month_start_date)
+    monthly_agg: dict[tuple[str, date], dict] = defaultdict(lambda: {
         "order_count": 0, "gross_sales": 0.0, "tax_collected": 0.0,
-        "min_date": None, "max_date": None, "orders_seen": set(),
+        "orders_seen": set(),
     })
 
     warnings = []
@@ -128,7 +133,8 @@ def parse_shopify_csv(file_path: str | Path) -> dict:
             if not order_date:
                 order_date = date.today()
 
-            agg = state_agg[state_code]
+            month_key = _month_start(order_date)
+            agg = monthly_agg[(state_code, month_key)]
 
             if order_name not in agg["orders_seen"]:
                 agg["orders_seen"].add(order_name)
@@ -150,20 +156,13 @@ def parse_shopify_csv(file_path: str | Path) -> dict:
                     tax = 0.0
                 agg["tax_collected"] += tax
 
-            if agg["min_date"] is None or order_date < agg["min_date"]:
-                agg["min_date"] = order_date
-            if agg["max_date"] is None or order_date > agg["max_date"]:
-                agg["max_date"] = order_date
-
     sales = []
-    for state_code, agg in state_agg.items():
-        period_start, period_end = agg["min_date"], agg["max_date"]
-        if not period_start or not period_end:
-            continue
+    for (state_code, month_start_date), agg in monthly_agg.items():
+        period_end = _month_end(month_start_date)
         sales.append(SalesByState(
             state_code=state_code,
             channel="shopify",
-            period_start=period_start,
+            period_start=month_start_date,
             period_end=period_end,
             order_count=agg["order_count"],
             gross_sales=round(agg["gross_sales"], 2),
@@ -223,6 +222,11 @@ def ingest_shopify_csv(file_path: str | Path, dry_run: bool = False) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# API fetcher
+# ---------------------------------------------------------------------------
+
+
 def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
     if not settings.shopify_enabled:
         return {"error": "Shopify API not configured. Set SHOPIFY_SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN in .env"}
@@ -262,9 +266,9 @@ def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
                     url = part.split("<")[1].split(">")[0]
                     break
 
-    state_agg = defaultdict(lambda: {
+    # Aggregate by (state, month) — same granularity as amazon_spapi
+    monthly_agg: dict[tuple[str, date], dict] = defaultdict(lambda: {
         "order_count": 0, "gross_sales": 0.0, "tax_collected": 0.0,
-        "min_date": None, "max_date": None,
     })
 
     for order in all_orders:
@@ -283,31 +287,34 @@ def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
         if not order_date:
             continue
 
-        agg = state_agg[state_code]
+        month_key = _month_start(order_date)
+        agg = monthly_agg[(state_code, month_key)]
         agg["order_count"] += 1
         agg["gross_sales"] += float(order.get("subtotal_price", 0) or 0)
         agg["tax_collected"] += float(order.get("total_tax", 0) or 0)
 
-        if agg["min_date"] is None or order_date < agg["min_date"]:
-            agg["min_date"] = order_date
-        if agg["max_date"] is None or order_date > agg["max_date"]:
-            agg["max_date"] = order_date
-
     sales = []
-    for state_code, agg in state_agg.items():
-        if not agg["min_date"]:
-            continue
+    all_states: set[str] = set()
+    for (state_code, month_start_date), agg in monthly_agg.items():
+        period_end = _month_end(month_start_date)
+        all_states.add(state_code)
         sales.append(SalesByState(
             state_code=state_code,
             channel="shopify",
-            period_start=agg["min_date"],
-            period_end=agg["max_date"],
+            period_start=month_start_date,
+            period_end=period_end,
             order_count=agg["order_count"],
             gross_sales=round(agg["gross_sales"], 2),
             net_sales=round(agg["gross_sales"], 2),
             tax_collected=round(agg["tax_collected"], 2),
             source="shopify_api",
         ))
+
+    # Delete old shopify rows for states we're about to replace.
+    # This cleans up legacy all-time aggregate rows that predate
+    # the monthly-granularity change.
+    for sc in all_states:
+        delete_rows("sales_by_state", {"state_code": sc, "channel": "shopify"})
 
     rows = [s.model_dump() for s in sales]
     inserted = upsert_rows(
@@ -327,7 +334,8 @@ def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
         category="ingestion",
         details={
             "orders_fetched": len(all_orders),
-            "states": sorted(state_agg.keys()),
+            "states": sorted(all_states),
+            "monthly_periods": len(sales),
             "since_date": since_date.isoformat() if since_date else None,
         },
         rows_affected=inserted,
@@ -335,8 +343,9 @@ def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
 
     return {
         "orders_fetched": len(all_orders),
-        "states_found": sorted(state_agg.keys()),
-        "total_orders": sum(a["order_count"] for a in state_agg.values()),
-        "total_sales": round(sum(a["gross_sales"] for a in state_agg.values()), 2),
+        "states_found": sorted(all_states),
+        "total_orders": sum(a["order_count"] for a in monthly_agg.values()),
+        "total_sales": round(sum(a["gross_sales"] for a in monthly_agg.values()), 2),
+        "monthly_periods": len(sales),
         "rows_inserted": inserted,
     }

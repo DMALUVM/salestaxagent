@@ -1,0 +1,12 @@
+Starting Sales Tax Compliance Agent...
+Press Ctrl+C to stop.
+
+[Watcher] Watching /Users/maloney_assistant/sales-tax-agent/incoming for new files...
+[Scheduler] Shopify polling every 4h
+[Scheduler] Daily analysis at 08:00
+[Scheduler] Deadline check at 09:00
+[Scheduler] SP-API refresh daily at 06:00
+[Scheduler] Source monitoring every Monday at 07:00
+
+Agent is running. Watching for files and running scheduled tasks.
+

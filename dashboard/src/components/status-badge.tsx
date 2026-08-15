@@ -29,8 +29,8 @@ const filingStyles: Record<string, string> = {
   completed: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800",
 };
 
-export function FilingStatusBadge({ status }: { status: string }) {
-  const s = status.toLowerCase();
+export function FilingStatusBadge({ status }: { status: string | null | undefined }) {
+  const s = (status ?? "pending").toLowerCase();
   return (
     <Badge variant="outline" className={`text-xs font-medium ${filingStyles[s] ?? filingStyles.pending}`}>
       {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -44,8 +44,8 @@ const severityStyles: Record<string, string> = {
   info: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800",
 };
 
-export function SeverityBadge({ severity }: { severity: string }) {
-  const s = severity.toLowerCase();
+export function SeverityBadge({ severity }: { severity: string | null | undefined }) {
+  const s = (severity ?? "info").toLowerCase();
   return (
     <Badge variant="outline" className={`text-xs font-medium ${severityStyles[s] ?? severityStyles.info}`}>
       {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -59,11 +59,20 @@ const frequencyStyles: Record<string, string> = {
   annual: "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700",
 };
 
-export function FrequencyBadge({ frequency }: { frequency: string }) {
-  const f = frequency.toLowerCase();
+export function FrequencyBadge({ frequency }: { frequency: string | null | undefined }) {
+  if (!frequency) {
+    return (
+      <Badge variant="outline" className="text-xs font-medium text-muted-foreground">
+        —
+      </Badge>
+    );
+  }
+  const f = frequency.toLowerCase().replace("_", "-");
+  const label =
+    f === "semi-annual" ? "Semi-Annual" : f.charAt(0).toUpperCase() + f.slice(1);
   return (
-    <Badge variant="outline" className={`text-xs font-medium ${frequencyStyles[f] ?? frequencyStyles.monthly}`}>
-      {f.charAt(0).toUpperCase() + f.slice(1)}
+    <Badge variant="outline" className={`text-xs font-medium ${frequencyStyles[frequency.toLowerCase()] ?? frequencyStyles.monthly}`}>
+      {label}
     </Badge>
   );
 }

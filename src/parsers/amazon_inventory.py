@@ -31,6 +31,12 @@ def _normalize_header(header: str) -> str:
     return HEADER_ALIASES.get(h, h)
 
 
+def is_inventory_event_detail(headers: list[str]) -> bool:
+    """Return True if *headers* match an Inventory Event Detail report."""
+    normalized = {_normalize_header(h) for h in headers}
+    return "fulfillment-center-id" in normalized and "date-time" in normalized
+
+
 def _detect_delimiter(first_line: str) -> str:
     if "\t" in first_line:
         return "\t"

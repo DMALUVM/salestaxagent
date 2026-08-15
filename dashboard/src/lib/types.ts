@@ -12,6 +12,7 @@ export interface NexusStatus {
   is_registered: boolean;
   registration_date: string | null;
   assigned_frequency: string | null;
+  last_filed_through: string | null;
   requires_action: boolean;
   action_notes: string | null;
   confidence: string | null;
@@ -24,9 +25,11 @@ export interface StateRule {
   has_sales_tax: boolean;
   economic_threshold_amount: number | null;
   economic_threshold_transactions: number | null;
-  fba_inventory_creates_nexus: boolean;
+  threshold_test_type: string | null;
+  fba_inventory_creates_nexus: string;
   marketplace_sales_count_toward_threshold: boolean;
   filing_frequency_default: string | null;
+  typical_due_day: number | null;
   franchise_tax_notes: string | null;
   notes: string | null;
   last_reviewed: string | null;
@@ -35,13 +38,18 @@ export interface StateRule {
 export interface FilingEntry {
   id: string;
   state_code: string;
+  period_type: string;
   period_label: string;
+  period_start: string;
+  period_end: string;
   due_date: string;
-  frequency: string;
   status: string;
   filed_amount: number | null;
   filed_at: string | null;
+  filed_date: string | null;
+  filed_notes: string | null;
   notes: string | null;
+  is_zero_return: boolean;
   reminder_sent: boolean;
   updated_at: string;
 }
@@ -131,13 +139,16 @@ export interface AdminRuling {
 
 export interface IngestionLog {
   id: string;
-  source: string;
-  filename: string | null;
-  rows_processed: number | null;
-  rows_inserted: number | null;
+  filename: string;
+  file_type: string;
+  file_hash: string | null;
+  rows_total: number;
+  rows_inserted: number;
+  rows_skipped: number;
+  warnings: string[] | null;
   status: string;
   error_message: string | null;
-  created_at: string;
+  ingested_at: string;
 }
 
 export interface ResearchTask {
@@ -149,4 +160,30 @@ export interface ResearchTask {
   task_type: string | null;
   status: string;
   created_at: string;
+}
+
+export interface SalesByState {
+  id: string;
+  state_code: string;
+  channel: string;
+  period_start: string;
+  period_end: string;
+  order_count: number;
+  gross_sales: number;
+  net_sales: number;
+  tax_collected: number;
+  source: string | null;
+  ingested_at: string;
+}
+
+export interface RegistrationRow {
+  state_code: string;
+  state_name: string;
+  has_sales_tax: boolean;
+  is_registered: boolean;
+  registration_date: string | null;
+  assigned_frequency: string | null;
+  typical_due_day: number | null;
+  notes: string | null;
+  filing_frequency_default: string | null;
 }

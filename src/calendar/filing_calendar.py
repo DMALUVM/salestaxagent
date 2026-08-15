@@ -63,6 +63,32 @@ def generate_filing_entries(state_code: str, frequency: str, year: int,
                 "status": "pending",
             })
 
+    elif frequency == "semi_annual":
+        halves = [
+            ("H1", 1, 6, 7),   # Jan-Jun, due July
+            ("H2", 7, 12, 1),  # Jul-Dec, due January next year
+        ]
+        for label_suffix, start_month, end_month, due_month in halves:
+            period_start = date(year, start_month, 1)
+            if end_month == 12:
+                period_end = date(year, 12, 31)
+            else:
+                period_end = date(year, end_month + 1, 1) - timedelta(days=1)
+
+            due_year = year + 1 if due_month < start_month else year
+            due_date = _safe_date(due_year, due_month, due_day)
+            label = f"{year}-{label_suffix}"
+
+            entries.append({
+                "state_code": state_code,
+                "period_type": "semi_annual",
+                "period_label": label,
+                "period_start": period_start,
+                "period_end": period_end,
+                "due_date": due_date,
+                "status": "pending",
+            })
+
     elif frequency == "annual":
         entries.append({
             "state_code": state_code,

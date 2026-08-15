@@ -29,14 +29,12 @@
 ```
 Mac Mini (always-on)
 ├── Python agent (scheduler, parsers, engines, alerts)
-├── Folder watcher: ~/sales-tax-agent/incoming/
-│   ├── amazon/   ← drop Amazon CSV/TXT reports here
-│   ├── shopify/  ← optional manual CSV fallback
-│   └── rulings/  ← drop ruling JSON, PDF, HTML, or TXT here
+├── Amazon SP-API integration (automatic orders + inventory refresh)
+├── Shopify API polling (every 4h)
+├── Folder watcher: ~/sales-tax-agent/incoming/ (CSV fallback)
 ├── Intelligence layer (knowledge base, citations, source monitoring)
-├── Shopify API polling (daily)
 ├── Source monitoring (weekly, checks .gov URLs for changes)
-└── Telegram bot + email alerts
+└── Telegram bot alerts
 
 Supabase (cloud Postgres)
 ├── Core: inventory_events, sales_by_state, nexus_status, state_rules
@@ -377,7 +375,7 @@ This seeds nexus rules (12 rules across CA, TX, PA, WA, NY, NJ, OH, FL, IL), fra
 
 ## Dashboard
 
-A polished Next.js dashboard for viewing compliance data, reviewing nexus flags, tracking filing deadlines, and exploring the intelligence layer's rules and rulings. Read-only with light write actions (mark filings complete, add notes). Every screen includes the standard disclaimer: *"This is a monitoring and research aid, not legal or tax advice."*
+A Next.js dashboard for managing compliance data, registrations, file uploads, nexus flags, filing deadlines, and the intelligence layer's rules and rulings. Every screen includes the standard disclaimer: *"This is a monitoring and research aid, not legal or tax advice."*
 
 ### Screens
 
@@ -385,9 +383,10 @@ A polished Next.js dashboard for viewing compliance data, reviewing nexus flags,
 |--------|--------------|
 | **Overview** | Stat cards (physical nexus count, economic nexus status, upcoming deadlines, open flags), upcoming filings, recent alerts, franchise tax flags |
 | **Nexus Status** | Per-state table with physical/economic nexus badges, economic progress bars, registration status, confidence levels. Filterable with Active/Approaching/Below Threshold tabs |
+| **Registrations** | Manage sales tax registrations for all 45 sales-tax states. Toggle registered on/off, set filing frequency (monthly/quarterly/annual), set due day, add free-text notes. Saves directly to Supabase — no CSV upload required. Highlights states with nexus that are not yet registered |
 | **Filing Calendar** | Overdue/upcoming/completed counts, tabbed filing table with "Mark Complete" action (records amount and notes) |
 | **Rules & Rulings** | Searchable knowledge explorer — nexus rules with citations and contested position blocks, court rulings with status and FBA relevance, admin rulings with issuing bodies |
-| **Data & Ingestion** | Data source status (Amazon FBA, Shopify), ingestion history, open research tasks, instructions for adding data |
+| **Data & Ingestion** | Upload Amazon reports (CSV/TXT) directly from the browser with drag-and-drop. Files are parsed in TypeScript and written to Supabase. Shows upload progress, success/error details, states found, and unknown FC codes. Also shows data source status (Amazon FBA, Shopify), ingestion history, open research tasks, and the legacy drop-into-incoming/ method for power users |
 
 ### Running Locally
 
@@ -405,46 +404,68 @@ Open http://localhost:3001. The dashboard shows a setup prompt until Supabase cr
 
 1. Push the `dashboard/` directory to a Git repository (or use the monorepo root)
 2. Import the project in Vercel — set the root directory to `dashboard/`
-3. Add environment variables: `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+3. Add environment variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and optionally `SUPABASE_SERVICE_KEY` (for server-side upload route writes)
 4. Deploy
 
 ### Features
 
+- **Registrations management** — toggle registration status, set filing frequency and due day, add notes per state. Writes directly to `nexus_status` and `state_rules` tables in Supabase
+- **File upload** — drag-and-drop Amazon Inventory Event Detail or Custom Combined Tax reports (CSV/TXT) from the Data & Ingestion page. Parsed in TypeScript, batched and upserted into `inventory_events`, with ingestion and audit logging
 - **Dark mode** — toggle in the sidebar footer, persists via localStorage
 - **Responsive** — desktop sidebar collapses to a mobile drawer on small screens
 - **Status colors** — green/amber/red/blue for nexus status, deadlines, confidence, and contested positions
 - **Supabase-connected** — all data fetched live from the same Supabase instance the agent writes to
-- **Human-in-the-loop** — the dashboard is a monitoring interface, not an autonomous actor. Filing completions are recorded as user-confirmed actions
+- **Human-in-the-loop** — the dashboard is a monitoring interface, not an autonomous actor. Filing completions and registrations are recorded as user-confirmed actions
 
 ---
 
-## Maintenance Rhythm
+## Daily Use (With SP-API Connected)
 
-### Weekly (5 minutes)
+### What runs automatically
 
-1. **Monday**: Download Amazon Inventory Event Detail for the last 30–60 days from Seller Central
-2. Drop the file into `~/sales-tax-agent/incoming/amazon/`
-3. Check Telegram for any new alerts from the past week
-4. Review any new nexus flags — decide if action is needed with your CPA
-5. Check for source monitoring alerts (automatic if agent is running; manual: `python -m src.main monitor-sources`)
+When the agent is running (`python -m src.main run`):
 
-### Monthly (15 minutes)
+| Time | Task | What it does |
+|------|------|-------------|
+| Daily 06:00 | SP-API refresh | Pulls last 7 days of Amazon orders + inventory |
+| Every 4h | Shopify poll | Pulls recent Shopify orders |
+| Daily 08:00 | Nexus analysis | Physical + economic nexus evaluation; Telegram alerts |
+| Daily 09:00 | Deadline check | Alerts on filings due within 3 days or overdue |
+| Monday 07:00 | Source monitor | Checks .gov sources for rule changes |
 
-1. Download Amazon sales/order reports for the prior month
-2. Drop into `~/sales-tax-agent/incoming/amazon/`
-3. Run `python -m src.main analyze` for a full summary
-4. Review upcoming filing deadlines (`python -m src.main deadlines`)
-5. After filing returns, mark them complete (`python -m src.main complete --state XX --period YYYY-QN`)
-6. Export a report for your CPA if needed (`python -m src.main export`)
-7. Run `python -m src.main health-report` — review stale rules, open research tasks, and coverage gaps
-8. Address any open research tasks (`python -m src.main research-tasks`)
+**No manual CSV downloads are needed** when SP-API is connected. The agent keeps Amazon + Shopify data current automatically.
 
-### Quarterly
+### What to check in the dashboard
 
-1. Review the state rules matrix for any threshold or rule changes
-2. Discuss flags and recommendations with your CPA
-3. Update registrations if you've registered in new states
-4. Review contested positions with CPA (`python -m src.main contested`)
+1. **Overview** — look for red cards (overdue filings, exceeded thresholds, critical flags)
+2. **Tax Liability** — estimated seller-owed tax per state, filing frequency, next due date
+3. **Filing Calendar** — mark filings complete after submitting returns to each state
+4. **Registrations** — update when you register or deregister in a state
+
+### When to talk to your CPA
+
+- **CA franchise tax**: $800/year LLC tax applies if FBA inventory has been in CA. Separate from sales tax, separate agency (FTB). Most commonly overlooked obligation.
+- **TX franchise tax**: Must file No Tax Due report + PIR by May 15 annually, even if $0 owed. Failure = forfeiture of right to do business.
+- **Any state exceeding economic nexus**: Registration required. CPA advises on effective date and back-filing.
+- **PA nexus**: Contested — Online Merchants Guild v. Hassell (2023). Most practitioners still recommend registration.
+- **WA B&O tax**: Separate from sales tax, NOT covered by Amazon marketplace collection. 0.471% on gross receipts.
+
+### Maintenance Rhythm
+
+**Weekly (~2 min):** Check Telegram alerts. Review any new nexus flags in dashboard.
+
+**Monthly (~10 min):** After filing returns, mark them complete in Filing Calendar. Run `python -m src.main health-report` to check rule currency.
+
+**Quarterly:** Discuss flags with CPA. Update registrations. Review contested positions (`python -m src.main contested`).
+
+### Data Source Priority
+
+| Source | Type | Status |
+|--------|------|--------|
+| `amazon_spapi` | SP-API (live) | **Primary** Amazon source |
+| `shopify_api` | Shopify API (live) | **Primary** Shopify source |
+| `amazon_custom_combined_tax` | CSV upload | Historical / backfill. Superseded by SP-API. |
+| `amazon_inventory` | CSV upload | Legacy. Superseded by SP-API Inventory Ledger. |
 
 ---
 
@@ -484,12 +505,19 @@ Maps Amazon fulfillment center codes (e.g., "DFW7") to US states. This is extens
 
 ---
 
+## Known Limitations & Confidence Notes
+
+- **Tax rates are base state-level only.** Local/county/city surcharges (1-4% additional) are not included. Liability figures are planning estimates, not filing-ready numbers.
+- **PA FBA nexus is contested.** Flagged conservatively (true) with full Online Merchants Guild v. Hassell analysis.
+- **Once nexus is established, it persists** even if sales drop. Most states lack clear "un-nexus" provisions.
+- **Marketplace sales** (Amazon) do NOT count toward the seller's economic nexus threshold in most states. Only CA, MN, WA include them. This is correct per state guidance.
+- **Economic nexus uses state-specific lookback periods** (current/prior calendar year, trailing 12 months, etc.) Transaction thresholds in some states may have changed since the last rule review.
+- **The system does not file returns.** It monitors and estimates. All filing decisions should involve a qualified CPA.
+
 ## Future Phases
 
-1. **Amazon SP-API Integration** — Automate inventory and sales data retrieval (eliminates manual downloads)
-2. **Browser Automation** — Selenium/Playwright fallback for Seller Central report downloads
-3. **Commercial Tax Engine** — Integrate TaxJar or Avalara for rate calculation and assisted filing
-4. **Deeper Franchise Tax Rules** — Expand beyond CA/TX to all states with entity-level implications
-5. **Multi-Entity Support** — Handle multiple LLCs or business structures
-6. ~~**Vercel Dashboard**~~ — Done. See [Dashboard](#dashboard) section
-7. **Historical Nexus Analysis** — Determine retroactive obligations and voluntary disclosure program options
+1. **Commercial Tax Engine** — Integrate TaxJar or Avalara for rate calculation and assisted filing
+2. **Multi-Entity Support** — Handle multiple LLCs or business structures
+3. **Historical Nexus Analysis** — Determine retroactive obligations and voluntary disclosure program options
+4. ~~**Amazon SP-API Integration**~~ — Done. Orders + Inventory Ledger with auto-chunking.
+5. ~~**Vercel Dashboard**~~ — Done. See [Dashboard](#dashboard) section

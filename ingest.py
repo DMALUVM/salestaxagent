@@ -3,11 +3,15 @@
 Convenience script for one-time data ingestion.
 
 Usage:
-    python ingest.py --amazon path/to/inventory-report.csv
+    python ingest.py --amazon path/to/report.csv          # auto-detects type
+    python ingest.py --amazon path/to/report.csv --dry-run
     python ingest.py --shopify
     python ingest.py --shopify-csv path/to/orders.csv
     python ingest.py --registrations path/to/registrations.csv
-    python ingest.py --amazon path/to/report.csv --dry-run
+
+The --amazon flag auto-detects the report type:
+  - Inventory Event Detail  (has fulfillment-center-id, date-time)
+  - Custom Combined Tax     (has ship_from_state, ship_to_state)
 """
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ import click
 
 @click.command()
 @click.option("--amazon", "amazon_path", type=click.Path(exists=True),
-              help="Path to Amazon Inventory Event Detail CSV/TXT file")
+              help="Path to Amazon report CSV (auto-detects Inventory or Tax)")
 @click.option("--shopify", "shopify_api", is_flag=True,
               help="Pull orders from Shopify Admin API")
 @click.option("--shopify-csv", "shopify_csv_path", type=click.Path(exists=True),
@@ -45,10 +49,24 @@ def ingest(amazon_path, shopify_api, shopify_csv_path, reg_path, dry_run):
         click.echo("DRY RUN — no data will be written to the database.\n")
 
     if amazon_path:
-        click.echo(f"Ingesting Amazon inventory report: {amazon_path}")
-        from src.parsers.amazon_inventory import ingest_amazon_inventory
-        result = ingest_amazon_inventory(amazon_path, dry_run=dry_run)
-        _print_result("Amazon Inventory", result)
+        click.echo(f"Ingesting Amazon report: {amazon_path}")
+        # Auto-detect report type from headers
+        with open(amazon_path, "r", encoding="utf-8-sig") as _f:
+            first_line = _f.readline()
+        _delim = "\t" if "\t" in first_line else ","
+        _headers = [h.strip().strip('"') for h in first_line.split(_delim)]
+
+        from src.parsers.amazon_tax_report import is_custom_combined_tax
+        if is_custom_combined_tax(_headers):
+            click.echo("  Detected: Custom Combined Tax report")
+            from src.parsers.amazon_tax_report import ingest_amazon_tax_report
+            result = ingest_amazon_tax_report(amazon_path, dry_run=dry_run)
+            _print_tax_result(result)
+        else:
+            click.echo("  Detected: Inventory Event Detail report")
+            from src.parsers.amazon_inventory import ingest_amazon_inventory
+            result = ingest_amazon_inventory(amazon_path, dry_run=dry_run)
+            _print_result("Amazon Inventory", result)
 
     if shopify_api:
         click.echo("Fetching orders from Shopify API...")
@@ -91,6 +109,24 @@ def _print_result(source: str, result: dict):
 
     for w in result.get("warnings", []):
         click.echo(f"  ⚠️  {w}")
+
+
+def _print_tax_result(result: dict):
+    click.echo(f"\n  Amazon Custom Combined Tax Results:")
+    click.echo(f"  Rows total:        {result.get('rows_total', 0):,}")
+    click.echo(f"  Rows parsed:       {result.get('rows_parsed', 0):,}")
+    click.echo(f"  Rows skipped:      {result.get('rows_skipped', 0):,}")
+    click.echo(f"  Unique orders:     {result.get('unique_orders', 0):,}")
+    click.echo(f"  Sales periods:     {result.get('sales_periods', 0)}")
+    click.echo(f"  Rows inserted:     {result.get('rows_inserted', 0)} (sales_by_state)")
+    click.echo(f"  Ship-from rows:    {result.get('ship_from_rows_inserted', 0)} (inventory_events)")
+    click.echo(f"  Total gross sales: ${result.get('total_gross_sales', 0):,.2f}")
+    click.echo(f"  Total tax:         ${result.get('total_tax_collected', 0):,.2f}")
+    click.echo(f"  Ship-to states:    {result.get('ship_to_states', [])}")
+    click.echo(f"  Ship-from states:  {result.get('ship_from_states', [])}")
+
+    for w in result.get("warnings", []):
+        click.echo(f"  Warning: {w}")
 
 
 def _import_registrations(path: str, dry_run: bool):

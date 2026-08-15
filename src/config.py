@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     shopify_shop_domain: str = ""
     shopify_access_token: str = ""
 
+    amazon_sp_client_id: str = ""
+    amazon_sp_client_secret: str = ""
+    amazon_sp_refresh_token: str = ""
+    amazon_sp_marketplace_id: str = "ATVPDKIKX0DER"
+
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
@@ -55,6 +60,14 @@ class Settings(BaseSettings):
     @property
     def shopify_enabled(self) -> bool:
         return bool(self.shopify_shop_domain and self.shopify_access_token)
+
+    @property
+    def amazon_sp_enabled(self) -> bool:
+        return bool(
+            self.amazon_sp_client_id
+            and self.amazon_sp_client_secret
+            and self.amazon_sp_refresh_token
+        )
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

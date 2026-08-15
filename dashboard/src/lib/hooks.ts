@@ -10,6 +10,10 @@ interface UseQueryResult<T> {
   refetch: () => void;
 }
 
+/**
+ * Fetches all matching rows from a Supabase table, paginating past
+ * the PostgREST 1 000-row default when necessary.
+ */
 export function useSupabaseQuery<T>(
   table: string,
   options?: {
@@ -32,33 +36,67 @@ export function useSupabaseQuery<T>(
     }
 
     let cancelled = false;
-    async function fetch() {
+
+    async function fetchPage(from: number, to: number) {
+      let query = getSupabase().from(table).select("*");
+
+      if (options?.filters) {
+        for (const [key, value] of Object.entries(options.filters)) {
+          query = query.eq(key, value);
+        }
+      }
+      if (options?.orderBy) {
+        query = query.order(options.orderBy, {
+          ascending: options.ascending ?? false,
+        });
+      }
+
+      query = query.range(from, to);
+      return query;
+    }
+
+    async function fetchAll() {
       setLoading(true);
       try {
-        let query = getSupabase().from(table).select("*");
+        const PAGE = 1000;
 
-        if (options?.filters) {
-          for (const [key, value] of Object.entries(options.filters)) {
-            query = query.eq(key, value);
+        // If a small explicit limit is set, single fetch is fine
+        if (options?.limit && options.limit <= PAGE) {
+          const { data: rows, error: err } = await fetchPage(
+            0,
+            options.limit - 1,
+          );
+          if (cancelled) return;
+          if (err) {
+            setError(err.message);
+          } else {
+            setData((rows ?? []) as T[]);
+            setError(null);
           }
+          return;
         }
 
-        if (options?.orderBy) {
-          query = query.order(options.orderBy, {
-            ascending: options.ascending ?? false,
-          });
+        // Paginate to get all rows
+        const all: T[] = [];
+        let offset = 0;
+        while (true) {
+          const { data: rows, error: err } = await fetchPage(
+            offset,
+            offset + PAGE - 1,
+          );
+          if (cancelled) return;
+          if (err) {
+            setError(err.message);
+            return;
+          }
+          const page = (rows ?? []) as T[];
+          all.push(...page);
+          if (page.length < PAGE) break;
+          offset += PAGE;
         }
 
-        if (options?.limit) {
-          query = query.limit(options.limit);
-        }
-
-        const { data: rows, error: err } = await query;
-        if (cancelled) return;
-        if (err) {
-          setError(err.message);
-        } else {
-          setData((rows ?? []) as T[]);
+        if (!cancelled) {
+          setData(all);
           setError(null);
         }
       } catch (e) {
@@ -68,7 +106,7 @@ export function useSupabaseQuery<T>(
       }
     }
 
-    fetch();
+    fetchAll();
     return () => {
       cancelled = true;
     };

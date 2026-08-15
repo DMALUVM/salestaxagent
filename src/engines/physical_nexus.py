@@ -25,9 +25,23 @@ def _get_intelligence_citations(state_code: str) -> dict:
         return {}
 
 
+CONFIRMED_PHYSICAL_NEXUS: dict[str, dict] = {
+    "MD": {
+        "source": "Home state / LLC formation state",
+        "since": "2024-01-01",
+        "confidence": "high",
+    },
+    "OK": {
+        "source": "3PL warehouse presence (independent of FBA)",
+        "since": "2024-01-01",
+        "confidence": "high",
+    },
+}
+
+
 def evaluate_physical_nexus() -> dict:
     inventory_events = fetch_all("inventory_events", order="event_date")
-    if not inventory_events:
+    if not inventory_events and not CONFIRMED_PHYSICAL_NEXUS:
         return {"states": [], "flags": [], "message": "No inventory events found. Ingest Amazon data first."}
 
     rules_data = load_state_rules()
@@ -79,8 +93,28 @@ def evaluate_physical_nexus() -> dict:
         if not rule.get("has_sales_tax", True):
             continue
 
-        creates_nexus = rule.get("fba_inventory_creates_nexus", True)
-        confidence = "high" if creates_nexus else "medium"
+        fba_position = str(rule.get("fba_inventory_creates_nexus", "unknown_default_true"))
+
+        # Map the string enum to nexus determination
+        # true / unknown_default_true → nexus, high/medium confidence
+        # false → no nexus from FBA
+        # contested → nexus (conservative) but contested confidence
+        # conditional → nexus (conservative) but medium confidence with note
+        if fba_position == "false":
+            creates_nexus = False
+            confidence = "low"
+        elif fba_position == "contested":
+            creates_nexus = True  # conservative
+            confidence = "contested"
+        elif fba_position == "conditional":
+            creates_nexus = True  # conservative
+            confidence = "medium"
+        elif fba_position == "true":
+            creates_nexus = True
+            confidence = "high"
+        else:  # unknown_default_true or legacy boolean True
+            creates_nexus = fba_position not in ("False", "false")
+            confidence = "medium"
 
         intel = _get_intelligence_citations(state_code)
         if intel.get("confidence"):
@@ -91,29 +125,48 @@ def evaluate_physical_nexus() -> dict:
 
         if creates_nexus and presence["total_units_in"] > 0:
             requires_action = True
+            fc_list = sorted(presence["fc_codes"])
             action_notes = (
                 f"FBA inventory detected in {state_code} since {presence['first_seen']}. "
-                f"{presence['total_events']} events across FCs: {sorted(presence['fc_codes'])}. "
-                f"This state treats FBA inventory as creating physical nexus."
+                f"FCs: {fc_list}. "
             )
-            if confidence == "contested":
+            if fba_position == "contested":
                 action_notes += (
-                    f"\n  NOTE: This state's position is CONTESTED. "
+                    "FBA nexus position is CONTESTED in this state. "
                 )
                 if intel.get("conservative_position"):
-                    action_notes += f"\n  Conservative: {intel['conservative_position']}"
-                if intel.get("aggressive_position"):
-                    action_notes += f"\n  Aggressive: {intel['aggressive_position']}"
-                if intel.get("open_questions"):
-                    action_notes += f"\n  Open questions: {intel['open_questions'][:200]}"
+                    action_notes += f"Conservative: {intel['conservative_position'][:120]} "
+            elif fba_position == "conditional":
+                action_notes += (
+                    "FBA nexus is CONDITIONAL — may not apply if marketplace "
+                    "facilitator certifies collection. Confirm with CPA."
+                )
+            elif fba_position == "false":
+                # Inventory detected but state has carve-out
+                creates_nexus = False
+                requires_action = False
+                action_notes = (
+                    f"FBA inventory present in {state_code} (FCs: {fc_list}), "
+                    f"but state has marketplace-facilitator FBA carve-out. "
+                    f"Physical nexus not asserted. Amazon remits as facilitator."
+                )
+            else:
+                action_notes += "Physical nexus from FBA inventory."
 
             existing = None
             existing_records = fetch_all("nexus_status", {"state_code": state_code})
             if existing_records:
                 existing = existing_records[0]
 
-            if not existing or not existing.get("has_physical_nexus"):
+            if creates_nexus and (not existing or not existing.get("has_physical_nexus")):
                 new_nexus_states.append(state_code)
+        elif not creates_nexus and presence["total_units_in"] > 0 and fba_position == "false":
+            # Note the carve-out even though no nexus asserted
+            action_notes = (
+                f"FBA inventory present in {state_code} "
+                f"(FCs: {sorted(presence['fc_codes'])}), "
+                f"but state has FBA/marketplace carve-out. No physical nexus asserted."
+            )
 
         nexus_row = {
             "state_code": state_code,
@@ -140,6 +193,61 @@ def evaluate_physical_nexus() -> dict:
                 "status": "open",
             }
             franchise_flags.append(flag)
+
+    # Inject confirmed physical nexus (home state, 3PL, etc.)
+    # These have nexus independent of FBA inventory data.
+    already_covered = {u["state_code"] for u in nexus_updates}
+    for sc, info in CONFIRMED_PHYSICAL_NEXUS.items():
+        rule = state_rules.get(sc, {})
+        if not rule.get("has_sales_tax", True):
+            continue
+
+        since = info.get("since", date.today().isoformat())
+        source = info.get("source", "Confirmed physical presence")
+        conf = info.get("confidence", "high")
+
+        if sc in already_covered:
+            # Merge: keep FBA data but ensure has_physical_nexus=True
+            for u in nexus_updates:
+                if u["state_code"] == sc:
+                    u["has_physical_nexus"] = True
+                    u["confidence"] = conf
+                    existing_src = u.get("physical_nexus_source", "")
+                    u["physical_nexus_source"] = f"{source}; {existing_src}" if existing_src else source
+                    if not u.get("action_notes"):
+                        u["action_notes"] = f"Physical nexus: {source}"
+                        u["requires_action"] = True
+                    break
+        else:
+            existing_records = fetch_all("nexus_status", {"state_code": sc})
+            existing = existing_records[0] if existing_records else None
+            if not existing or not existing.get("has_physical_nexus"):
+                new_nexus_states.append(sc)
+
+            nexus_updates.append({
+                "state_code": sc,
+                "has_physical_nexus": True,
+                "physical_nexus_since": since,
+                "physical_nexus_source": source,
+                "requires_action": True,
+                "action_notes": f"Physical nexus: {source}",
+                "confidence": conf,
+            })
+
+        # Check for franchise flags
+        franchise_notes = rule.get("franchise_tax_notes")
+        if franchise_notes and sc not in {f["state_code"] for f in franchise_flags}:
+            severity = "critical" if sc in ("CA", "TX") else "warning"
+            franchise_flags.append({
+                "state_code": sc,
+                "flag_type": "franchise_tax",
+                "description": franchise_notes,
+                "severity": severity,
+                "trigger_reason": source,
+                "recommended_action": _franchise_recommendation(sc, rule),
+                "confidence": conf,
+                "status": "open",
+            })
 
     if nexus_updates:
         upsert_rows("nexus_status", nexus_updates, on_conflict="state_code")
@@ -175,7 +283,8 @@ def evaluate_physical_nexus() -> dict:
         "new_nexus_states": new_nexus_states,
         "nexus_states": sorted(
             sc for sc, p in state_presence.items()
-            if state_rules.get(sc, {}).get("fba_inventory_creates_nexus", True)
+            if str(state_rules.get(sc, {}).get("fba_inventory_creates_nexus", "unknown_default_true"))
+               not in ("false", "False")
             and p["total_units_in"] > 0
         ),
         "franchise_flags": franchise_flags,
