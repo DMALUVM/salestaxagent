@@ -531,12 +531,29 @@ Maps Amazon fulfillment center codes (e.g., "DFW7") to US states. This is extens
 
 ## Known Limitations & Confidence Notes
 
-- **Tax rates are base state-level only.** Local/county/city surcharges (1-4% additional) are not included. Liability figures are planning estimates, not filing-ready numbers.
-- **PA FBA nexus is contested.** Flagged conservatively (true) with full Online Merchants Guild v. Hassell analysis.
-- **Once nexus is established, it persists** even if sales drop. Most states lack clear "un-nexus" provisions.
-- **Marketplace sales** (Amazon) do NOT count toward the seller's economic nexus threshold in most states. Only CA, MN, WA include them. This is correct per state guidance.
-- **Economic nexus uses state-specific lookback periods** (current/prior calendar year, trailing 12 months, etc.) Transaction thresholds in some states may have changed since the last rule review.
+### Tax liability estimates
+- **Base state-level rates only.** Local/county/city surcharges (1-4% additional) are not included. Liability figures are planning estimates, not filing-ready numbers.
+- **Seller liability = Shopify/direct sales only.** Amazon collects and remits as marketplace facilitator in all states. The "What Do I Owe?" page shows Shopify sales × base rate. Amazon volume is shown for reference and nexus threshold tracking, not as seller liability.
+
+### Economic nexus
+- **Marketplace sales inclusion is state-specific.** Some states (CA, TX, NY, OH, etc.) include marketplace sales toward the seller's threshold. Others (FL, VA, GA, IL, etc.) exclude them. Each state's rule is cited in `config/state_rules.json`.
+- **AND vs OR thresholds.** NY requires BOTH $500k AND 100+ transactions. CT requires BOTH $100k AND 200 transactions. All others use OR. The engine honors this per state.
+- **Lookback periods vary.** Most states use current/prior calendar year. CT uses 12 months ending Sep 30. VT and NY use trailing 4 quarters. The engine computes per-state windows.
+
+### Physical nexus (FBA)
+- **PA FBA nexus is contested.** Online Merchants Guild v. Hassell (2022) found FBA inventory alone insufficient. Flagged conservatively.
+- **8 states have FBA carve-outs** (AZ, AR, IA, IL, ND, NV, NY, OK) — marketplace-facilitator inventory storage does not create seller nexus. TX is conditional.
+- **FBA nexus ≠ must collect on Amazon orders.** Amazon already remits as marketplace facilitator. Physical nexus matters for registration decisions, not for duplicate collection.
+
+### SKU-level data
+- **Amazon refunds may be incomplete.** The SP-API orders report does not reliably include return data. Amazon refunds show as "—" or 0 with a note, not false accuracy. Connect Amazon returns/settlement reports for complete refund visibility.
+- **Shopify refunds** are from order refund line items in the API backfill. Refund accuracy depends on the order data scope.
+- **SKU totals ≠ state totals.** SKU data is aggregated from line items (price × quantity per line), while state data uses order subtotals. Discounts, multi-item orders, and rounding can cause differences. The integrity-check command reports the gap.
+
+### System behavior
 - **The system does not file returns.** It monitors and estimates. All filing decisions should involve a qualified CPA.
+- **Sticky nexus is cleared** when current data no longer meets the threshold under current rules. Prior exceedances are noted for CPA review.
+- **Data freshness depends on polling schedule.** The background agent refreshes Shopify and Amazon daily. The Pulse page shows last sync times. Stale data (>36h) is flagged.
 
 ## Future Phases
 

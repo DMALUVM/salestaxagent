@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
 import {
   DollarSign,
   AlertTriangle,
@@ -32,6 +33,7 @@ import {
   Store,
   Info,
   CalendarClock,
+  Download,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -208,14 +210,27 @@ export default function LiabilityPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">
-          What Do I Owe?
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Shopify sales since last filing &times; state rate &middot; Amazon
-          shown for reference only
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">
+            What Do I Owe?
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Shopify sales since last filing &times; state rate &middot; Amazon
+            shown for reference only
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={() => {
+            window.open("/api/export-csv?table=sales_by_state", "_blank");
+          }}
+        >
+          <Download className="mr-1.5 h-3.5 w-3.5" />
+          Export CSV
+        </Button>
       </div>
 
       {/* Disclaimer */}

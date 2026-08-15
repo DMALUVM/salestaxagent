@@ -335,6 +335,46 @@ export default function PulsePage() {
         ))}
       </div>
 
+      {/* ── Sync health ── */}
+      {logs && logs.length > 0 && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-4 p-3 text-xs text-muted-foreground">
+            {(() => {
+              const shopifySync = logs.find(
+                (l) => l.status === "success" && l.file_type?.startsWith("shopify"),
+              );
+              const amazonSync = logs.find(
+                (l) => l.status === "success" && l.file_type?.startsWith("amazon"),
+              );
+              const stale = (l: typeof shopifySync) =>
+                l ? (Date.now() - new Date(l.ingested_at).getTime()) / 3600000 > 36 : true;
+
+              return (
+                <>
+                  <span>
+                    Shopify:{" "}
+                    <span className={stale(shopifySync) ? "text-amber-500 font-medium" : ""}>
+                      {shopifySync ? timeAgo(shopifySync.ingested_at) + " ago" : "never"}
+                    </span>
+                  </span>
+                  <span>
+                    Amazon:{" "}
+                    <span className={stale(amazonSync) ? "text-amber-500 font-medium" : ""}>
+                      {amazonSync ? timeAgo(amazonSync.ingested_at) + " ago" : "never"}
+                    </span>
+                  </span>
+                  {(stale(shopifySync) || stale(amazonSync)) && (
+                    <span className="text-amber-500">
+                      Data may be stale (&gt;36h)
+                    </span>
+                  )}
+                </>
+              );
+            })()}
+          </CardContent>
+        </Card>
+      )}
+
       <p className="text-center text-[11px] text-muted-foreground/60">
         Monitoring aid — not legal or tax advice.
       </p>

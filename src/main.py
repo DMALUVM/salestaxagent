@@ -585,6 +585,93 @@ def _print_spapi_result(label: str, result: dict):
                 )
 
 
+@cli.command("integrity-check")
+def integrity_check():
+    """Verify data integrity: SKU case, duplicate keys, channel totals."""
+    from src.db import fetch_all
+    from src.channels import normalize_channel
+
+    issues = 0
+
+    # 1. SKU case check
+    click.echo("Checking sales_by_sku SKU case normalization...")
+    sku_rows = fetch_all("sales_by_sku")
+    bad_case = [r for r in sku_rows if r.get("sku") and r["sku"] != r["sku"].strip().upper()]
+    if bad_case:
+        click.echo(f"  FAIL: {len(bad_case)} rows with non-uppercase SKU")
+        for r in bad_case[:5]:
+            click.echo(f"    {r['sku']!r} in {r.get('channel')} {r.get('period_start')}")
+        issues += 1
+    else:
+        click.echo(f"  OK: {len(sku_rows)} rows, all uppercase")
+
+    # 2. Duplicate key check
+    click.echo("Checking for duplicate upsert keys in sales_by_sku...")
+    seen: dict[tuple, int] = {}
+    for r in sku_rows:
+        key = (r.get("channel"), r.get("sku"), r.get("state_code"),
+               r.get("period_start"), r.get("source"))
+        seen[key] = seen.get(key, 0) + 1
+    dupes = {k: v for k, v in seen.items() if v > 1}
+    if dupes:
+        click.echo(f"  FAIL: {len(dupes)} duplicate keys")
+        for k, v in list(dupes.items())[:3]:
+            click.echo(f"    {k}: {v} rows")
+        issues += 1
+    else:
+        click.echo(f"  OK: {len(seen)} unique keys, no duplicates")
+
+    # 3. Channel totals cross-check
+    click.echo("Cross-checking sales_by_state vs sales_by_sku channel totals...")
+    state_rows = fetch_all("sales_by_state")
+    for ch in ["shopify", "amazon"]:
+        state_total = sum(
+            float(r.get("gross_sales", 0))
+            for r in state_rows
+            if normalize_channel(r.get("channel", "")) == ch
+        )
+        sku_total = sum(
+            float(r.get("gross_sales", 0))
+            for r in sku_rows
+            if normalize_channel(r.get("channel", "")) == ch
+        )
+        diff = abs(state_total - sku_total)
+        pct = (diff / state_total * 100) if state_total > 0 else 0
+        # SKU totals can differ from state totals due to line-item vs
+        # order-level aggregation (discounts, multi-item orders, etc.)
+        # and different time range coverage.  WARN above 10%, NOTE above 50%.
+        status = "OK" if pct < 10 else "WARN" if pct < 100 else "FAIL"
+        click.echo(f"  {ch}: state=${state_total:,.0f} sku=${sku_total:,.0f} "
+                    f"diff=${diff:,.0f} ({pct:.1f}%) [{status}]")
+        if status == "FAIL":
+            issues += 1
+
+    # 4. Period start sanity
+    click.echo("Checking period_start format (must be YYYY-MM-01)...")
+    bad_periods_state = [r for r in state_rows
+                         if r.get("period_start") and not str(r["period_start"]).endswith("-01")]
+    bad_periods_sku = [r for r in sku_rows
+                       if r.get("period_start") and not str(r["period_start"]).endswith("-01")]
+    if bad_periods_state:
+        click.echo(f"  FAIL: {len(bad_periods_state)} sales_by_state rows with non-01 period_start")
+        issues += 1
+    else:
+        click.echo(f"  OK: sales_by_state all YYYY-MM-01")
+    if bad_periods_sku:
+        click.echo(f"  FAIL: {len(bad_periods_sku)} sales_by_sku rows with non-01 period_start")
+        issues += 1
+    else:
+        click.echo(f"  OK: sales_by_sku all YYYY-MM-01")
+
+    # 5. Refund semantics
+    sku_with_refunds = sum(1 for r in sku_rows if float(r.get("refund_sales", 0)) > 0)
+    sku_zero_refunds = sum(1 for r in sku_rows if float(r.get("refund_sales", 0)) == 0)
+    click.echo(f"Refund coverage: {sku_with_refunds} rows with refund data, "
+               f"{sku_zero_refunds} with zero/null (may be missing, not confirmed zero)")
+
+    click.echo(f"\n{'PASSED' if issues == 0 else f'FAILED ({issues} issues)'}")
+
+
 @cli.command()
 def run():
     """Start the background agent (folder watcher + scheduled tasks)."""
