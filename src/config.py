@@ -18,6 +18,8 @@ class Settings(BaseSettings):
 
     shopify_shop_domain: str = ""
     shopify_access_token: str = ""
+    shopify_client_id: str = ""
+    shopify_client_secret: str = ""
 
     amazon_sp_client_id: str = ""
     amazon_sp_client_secret: str = ""
@@ -59,7 +61,11 @@ class Settings(BaseSettings):
 
     @property
     def shopify_enabled(self) -> bool:
-        return bool(self.shopify_shop_domain and self.shopify_access_token)
+        return bool(
+            self.shopify_shop_domain
+            and (self.shopify_access_token
+                 or (self.shopify_client_id and self.shopify_client_secret))
+        )
 
     @property
     def amazon_sp_enabled(self) -> bool:

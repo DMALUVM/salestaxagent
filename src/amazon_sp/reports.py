@@ -12,9 +12,10 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 
 from src.channels import AMAZON
-from src.db import log_audit, log_ingestion, upsert_rows
+from src.db import delete_rows, log_audit, log_ingestion, upsert_rows
 from src.mappers.fc_to_state import fc_to_state
 from src.models.schema import InventoryEvent, SalesByState
+from src.sku_normalize import normalize_sku
 
 from src.amazon_sp.client import request_and_download
 
@@ -349,6 +350,231 @@ def parse_orders_report(content: str) -> dict:
     return result
 
 
+# ── Orders → SKU-level parser ─────────────────────────────────
+
+
+def parse_orders_by_sku(content: str) -> dict:
+    """Parse the same orders report but aggregate by (sku, state, month)
+    into rows suitable for sales_by_sku.
+    """
+    result: dict = {
+        "rows_total": 0,
+        "rows_parsed": 0,
+        "rows_skipped": 0,
+        "warnings": [],
+        "sku_rows": [],
+        "unique_skus": 0,
+    }
+
+    first_line = content.split("\n", 1)[0]
+    delimiter = _detect_delimiter(first_line)
+    reader = csv.DictReader(
+        io.StringIO(content), delimiter=delimiter, quotechar='"',
+    )
+    if not reader.fieldnames:
+        result["warnings"].append("Empty report or no headers")
+        return result
+
+    H = _build_header_lookup(reader.fieldnames)
+
+    # Key: (sku, state, month_start)
+    agg: dict[tuple, dict] = defaultdict(lambda: {
+        "units": 0, "gross_sales": 0.0, "order_ids": set(),
+        "asin": None, "title": None,
+    })
+
+    for row in reader:
+        result["rows_total"] += 1
+
+        order_id = _get(row, H, "amazon-order-id")
+        status = _get(row, H, "order-status").lower()
+        country = _get(row, H, "ship-country").upper()
+        raw_state = _get(row, H, "ship-state")
+
+        if not order_id:
+            result["rows_skipped"] += 1
+            continue
+        if status in ("cancelled", "pending"):
+            result["rows_skipped"] += 1
+            continue
+        if country and country not in ("US", ""):
+            result["rows_skipped"] += 1
+            continue
+
+        state = _normalize_state(raw_state) if raw_state else "XX"
+        if not state:
+            state = "XX"
+
+        raw_sku = _get(row, H, "sku")
+        sku = normalize_sku(raw_sku)
+        if sku == "UNKNOWN":
+            result["rows_skipped"] += 1
+            continue
+
+        price_str = _get(row, H, "item-price")
+        if not price_str:
+            result["rows_skipped"] += 1
+            continue
+
+        purchase_date = _parse_date(_get(row, H, "purchase-date"))
+        if not purchase_date:
+            result["rows_skipped"] += 1
+            continue
+
+        result["rows_parsed"] += 1
+        month_key = _month_start(purchase_date)
+        price = _parse_money(price_str)
+        try:
+            qty = int(float(_get(row, H, "quantity") or "0"))
+        except (ValueError, TypeError):
+            qty = 0
+
+        key = (sku, state, month_key)
+        b = agg[key]
+        b["units"] += max(qty, 1)
+        b["gross_sales"] += price
+        b["order_ids"].add(order_id)
+
+        asin = _get(row, H, "asin")
+        if asin and not b["asin"]:
+            b["asin"] = asin
+        title = _get(row, H, "product-name")
+        if title and (not b["title"] or len(title) > len(b["title"])):
+            b["title"] = title
+
+    # Build output rows
+    rows = []
+    for (sku, state, month_start), b in agg.items():
+        rows.append({
+            "channel": "amazon",
+            "sku": sku,
+            "asin": b["asin"],
+            "product_title": b["title"],
+            "state_code": state,
+            "period_start": month_start.isoformat(),
+            "period_end": _month_end(month_start).isoformat(),
+            "units": b["units"],
+            "gross_sales": round(b["gross_sales"], 2),
+            "net_sales": round(b["gross_sales"], 2),
+            "refund_units": 0,
+            "refund_sales": 0,
+            "order_count": len(b["order_ids"]),
+            "source": SOURCE_LABEL,
+        })
+
+    result["sku_rows"] = rows
+    result["unique_skus"] = len(set(r["sku"] for r in rows)) if rows else 0
+    return result
+
+
+def fetch_amazon_skus(
+    start: date,
+    end: date,
+    dry_run: bool = False,
+    on_poll: callable | None = None,
+) -> dict:
+    """Fetch SP-API orders report, parse SKU-level, upsert to sales_by_sku."""
+    chunks = _date_chunks(start, end)
+
+    all_rows: list[dict] = []
+    total_parsed = 0
+    total_skipped = 0
+    total_raw = 0
+    warnings: list[str] = []
+
+    for i, (c_start, c_end) in enumerate(chunks, 1):
+        label = c_start.strftime("%Y-%m")
+        if on_poll:
+            on_poll(f"chunk {i}/{len(chunks)} ({label}): requesting", 0)
+
+        content = request_and_download(
+            ORDERS_REPORT, c_start, c_end, on_poll=on_poll,
+        )
+        parsed = parse_orders_by_sku(content)
+        total_raw += parsed["rows_total"]
+        total_parsed += parsed["rows_parsed"]
+        total_skipped += parsed["rows_skipped"]
+        warnings.extend(parsed["warnings"])
+        all_rows.extend(parsed["sku_rows"])
+
+        if on_poll:
+            on_poll(
+                f"chunk {i}/{len(chunks)} ({label}): "
+                f"{parsed['rows_parsed']:,} rows, "
+                f"{parsed['unique_skus']} SKUs",
+                0,
+            )
+
+    unique_skus = len(set(r["sku"] for r in all_rows)) if all_rows else 0
+
+    summary = {
+        "report_type": "amazon_skus",
+        "source": SOURCE_LABEL,
+        "period": f"{start} to {end}",
+        "chunks": len(chunks),
+        "rows_total": total_raw,
+        "rows_parsed": total_parsed,
+        "rows_skipped": total_skipped,
+        "sku_rows": len(all_rows),
+        "unique_skus": unique_skus,
+        "warnings": warnings,
+        "dry_run": dry_run,
+        "rows_inserted": 0,
+    }
+
+    if dry_run or not all_rows:
+        return summary
+
+    # Deduplicate on upsert key before writing
+    seen: dict[tuple, dict] = {}
+    for row in all_rows:
+        key = (row["channel"], row["sku"], row["state_code"],
+               row["period_start"], row["source"])
+        existing = seen.get(key)
+        if existing:
+            existing["units"] += row["units"]
+            existing["gross_sales"] = round(existing["gross_sales"] + row["gross_sales"], 2)
+            existing["net_sales"] = round((existing["net_sales"] or 0) + (row["net_sales"] or 0), 2)
+            existing["order_count"] = (existing["order_count"] or 0) + (row["order_count"] or 0)
+            # Keep longest title
+            if row.get("product_title") and (
+                not existing.get("product_title")
+                or len(row["product_title"]) > len(existing["product_title"])
+            ):
+                existing["product_title"] = row["product_title"]
+        else:
+            seen[key] = dict(row)
+
+    deduped = list(seen.values())
+
+    inserted = upsert_rows(
+        "sales_by_sku", deduped,
+        on_conflict="channel,sku,state_code,period_start,source",
+    )
+    summary["rows_inserted"] = inserted
+
+    log_ingestion(
+        filename=f"spapi_skus_{start}_{end}",
+        file_type="amazon_sales",
+        rows_total=total_raw,
+        rows_inserted=inserted,
+        rows_skipped=total_skipped,
+        warnings=warnings or None,
+    )
+    log_audit(
+        action="fetch_amazon_skus",
+        category="ingestion",
+        details={
+            "period": f"{start} to {end}",
+            "unique_skus": unique_skus,
+            "sku_rows": len(deduped),
+        },
+        rows_affected=inserted,
+    )
+
+    return summary
+
+
 # ── Inventory Ledger parser ──────────────────────────────────
 
 
@@ -431,8 +657,8 @@ def parse_inventory_ledger(content: str) -> dict:
             fc_code=fc_code,
             state_code=state_code,
             asin=_get(row, H, "asin") or None,
-            sku=_get(row, H, "msku") or None,
-            fnsku=_get(row, H, "fnsku") or None,
+            sku=_get(row, H, "msku").upper() or None,
+            fnsku=_get(row, H, "fnsku").upper() or None,
             quantity=qty,
             event_type=_get(row, H, "event-type", "event_type") or None,
             disposition=_get(row, H, "disposition") or None,

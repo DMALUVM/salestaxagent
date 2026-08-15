@@ -176,6 +176,25 @@ export interface SalesByState {
   ingested_at: string;
 }
 
+export interface SalesBySku {
+  id: string;
+  channel: string;
+  sku: string;
+  asin: string | null;
+  product_title: string | null;
+  state_code: string;
+  period_start: string;
+  period_end: string;
+  units: number;
+  gross_sales: number;
+  net_sales: number | null;
+  refund_units: number;
+  refund_sales: number;
+  order_count: number | null;
+  source: string | null;
+  ingested_at: string;
+}
+
 export interface RegistrationRow {
   state_code: string;
   state_name: string;

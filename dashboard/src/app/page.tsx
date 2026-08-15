@@ -1,31 +1,46 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type {
   NexusStatus,
   FilingEntry,
   FranchiseTaxFlag,
-  IngestionLog,
-  StateRule,
   SalesByState,
+  IngestionLog,
 } from "@/lib/types";
+import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
 import { LoadingState } from "@/components/loading";
 import { SeverityBadge } from "@/components/status-badge";
-import { USNexusMap } from "@/components/us-map";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { isConfigured } from "@/lib/supabase";
 import {
   AlertTriangle,
   Calendar,
-  CheckCircle,
   ChevronRight,
   DollarSign,
   MapPin,
+  Package,
   Shield,
+  ShoppingBag,
   TrendingUp,
+  FileDown,
+  Map,
+  ClipboardCheck,
 } from "lucide-react";
+
+// ---------------------------------------------------------------------------
+
+function fmt(n: number) {
+  return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+function fmtD(n: number) {
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+type ChFilter = "all" | "shopify" | "amazon";
 
 function SetupPrompt() {
   return (
@@ -33,373 +48,295 @@ function SetupPrompt() {
       <Shield className="mb-4 h-12 w-12 text-muted-foreground/30" />
       <h2 className="text-lg font-semibold">Connect to Supabase</h2>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">
-        Set{" "}
-        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-          NEXT_PUBLIC_SUPABASE_URL
-        </code>{" "}
-        and{" "}
-        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-          NEXT_PUBLIC_SUPABASE_ANON_KEY
-        </code>{" "}
-        in your{" "}
-        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-          .env.local
-        </code>{" "}
-        file.
+        Set <code className="rounded bg-muted px-1.5 py-0.5 text-xs">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in{" "}
+        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">.env.local</code>.
       </p>
     </div>
   );
 }
 
-function timeAgo(dateStr: string) {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+function timeAgo(s: string) {
+  const d = Date.now() - new Date(s).getTime();
+  const m = Math.floor(d / 60000);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
 }
 
-export default function OverviewPage() {
+// ---------------------------------------------------------------------------
+
+export default function PulsePage() {
   if (!isConfigured()) return <SetupPrompt />;
 
-  const { data: nexus, loading: l1 } = useSupabaseQuery<NexusStatus>(
-    "nexus_status",
-  );
-  const { data: filings, loading: l2 } = useSupabaseQuery<FilingEntry>(
-    "filing_calendar",
-    { orderBy: "due_date", ascending: true },
-  );
-  const { data: flags, loading: l3 } = useSupabaseQuery<FranchiseTaxFlag>(
-    "franchise_tax_flags",
-    { filters: { status: "open" } },
-  );
-  const { data: logs } = useSupabaseQuery<IngestionLog>("ingestion_log", {
-    orderBy: "ingested_at",
-    limit: 5,
+  const [ch, setCh] = useState<ChFilter>("all");
+
+  const { data: sales, loading: l1 } = useSupabaseQuery<SalesByState>("sales_by_state");
+  const { data: nexus, loading: l2 } = useSupabaseQuery<NexusStatus>("nexus_status");
+  const { data: filings, loading: l3 } = useSupabaseQuery<FilingEntry>("filing_calendar", {
+    orderBy: "due_date", ascending: true,
   });
-  const { data: stateRules } = useSupabaseQuery<StateRule>("state_rules");
-  const { data: sales } = useSupabaseQuery<SalesByState>("sales_by_state");
+  const { data: flags } = useSupabaseQuery<FranchiseTaxFlag>("franchise_tax_flags", {
+    filters: { status: "open" },
+  });
+  const { data: logs } = useSupabaseQuery<IngestionLog>("ingestion_log", {
+    orderBy: "ingested_at", limit: 5,
+  });
+
+  // ── Compute period boundaries ──
+  const now = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const lastMonth = now.getMonth() === 0
+    ? `${now.getFullYear() - 1}-12`
+    : `${now.getFullYear()}-${String(now.getMonth()).padStart(2, "0")}`;
+
+  const mtd = useMemo(() => {
+    let gross = 0, orders = 0;
+    for (const s of sales) {
+      if (!s.period_start?.startsWith(thisMonth)) continue;
+      const c = normalizeChannel(s.channel);
+      if (ch !== "all" && c !== ch) continue;
+      gross += s.gross_sales;
+      orders += s.order_count;
+    }
+    return { gross, orders };
+  }, [sales, thisMonth, ch]);
+
+  const lastMo = useMemo(() => {
+    let gross = 0, orders = 0;
+    for (const s of sales) {
+      if (!s.period_start?.startsWith(lastMonth)) continue;
+      const c = normalizeChannel(s.channel);
+      if (ch !== "all" && c !== ch) continue;
+      gross += s.gross_sales;
+      orders += s.order_count;
+    }
+    return { gross, orders };
+  }, [sales, lastMonth, ch]);
 
   if (l1 || l2 || l3) return <LoadingState />;
 
-  const today = new Date().toISOString().slice(0, 10);
-  const nowMs = Date.now();
+  const today = now.toISOString().slice(0, 10);
 
-  // ── Compute overview metrics ──
-
+  // ── Tax actions ──
   const overdue = filings.filter(
     (f) => (f.status === "pending" || f.status === "late") && f.due_date < today,
   );
-  const dueSoon = filings.filter((f) => {
-    if (f.status !== "pending") return false;
-    if (f.due_date < today) return false;
-    const days = (new Date(f.due_date).getTime() - nowMs) / 86400000;
-    return days <= 30;
-  });
-
-  const criticalFlags = flags.filter((f) => f.severity === "critical");
-
-  const registered = nexus.filter((n) => n.is_registered);
-  const nexusNotRegistered = nexus.filter(
-    (n) =>
-      !n.is_registered && (n.has_physical_nexus || n.has_economic_nexus),
+  const upcoming = filings
+    .filter((f) => f.status === "pending" && f.due_date >= today)
+    .slice(0, 3);
+  const criticalFlags = (flags ?? []).filter((f) => f.severity === "critical");
+  const unregNexus = nexus.filter(
+    (n) => !n.is_registered && (n.has_physical_nexus || n.has_economic_nexus),
   );
+  const econExceeded = nexus.filter((n) => n.has_economic_nexus && !n.is_registered);
 
-  const physCount = nexus.filter((n) => n.has_physical_nexus).length;
-  const econExceeded = nexus.filter((n) => n.has_economic_nexus).length;
+  // Top 3 critical items
+  const criticalItems: { label: string; href: string }[] = [];
+  for (const f of criticalFlags.slice(0, 2))
+    criticalItems.push({ label: `${f.state_code} — ${f.flag_type.replace(/_/g, " ")}`, href: "/nexus" });
+  for (const sc of econExceeded.slice(0, 2))
+    criticalItems.push({ label: `${sc.state_code} — economic threshold exceeded`, href: "/nexus" });
+  if (overdue.length > 0)
+    criticalItems.push({ label: `${overdue.length} overdue filing${overdue.length > 1 ? "s" : ""}`, href: "/calendar" });
 
-  const lastSync = logs.find(
-    (l) =>
-      l.status === "success" &&
-      (l.file_type.startsWith("amazon") || l.file_type.startsWith("shopify")),
-  );
+  const actionCount = overdue.length + criticalFlags.length + unregNexus.length;
+  const lastSync = logs?.find((l) => l.status === "success");
 
-  const hasUrgent =
-    overdue.length > 0 || criticalFlags.length > 0 || nexusNotRegistered.length > 0;
+  const chLabel = ch === "all" ? "All Channels" : ch === "amazon" ? "Amazon" : "Shopify";
 
   return (
     <div className="space-y-6">
-      {/* ── Header ── */}
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Overview</h1>
-        <p className="text-sm text-muted-foreground">
-          {hasUrgent
-            ? "Items need your attention"
-            : "All clear — no urgent actions"}
-          {lastSync && (
-            <span className="ml-2 text-xs">
-              &middot; Last sync {timeAgo(lastSync.ingested_at)}
-            </span>
-          )}
-        </p>
-      </div>
-
-      {/* ── Urgent items (red zone) ── */}
-      {hasUrgent && (
-        <div className="space-y-3">
-          {overdue.map((f) => (
-            <Link key={f.id} href="/calendar">
-              <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 transition-colors hover:bg-red-100 dark:border-red-900 dark:bg-red-950 dark:hover:bg-red-900/50">
-                <Calendar className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                <div className="flex-1">
-                  <span className="text-sm font-medium text-red-800 dark:text-red-300">
-                    OVERDUE — {f.state_code} {f.period_label}
-                  </span>
-                  <span className="ml-2 text-xs text-red-600 dark:text-red-400">
-                    Due {f.due_date}
-                  </span>
-                </div>
-                <ChevronRight className="h-4 w-4 text-red-400" />
-              </div>
-            </Link>
-          ))}
-
-          {criticalFlags.map((f) => (
-            <div
-              key={f.id}
-              className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900 dark:bg-red-950"
-            >
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
-                <span className="text-sm font-medium text-red-800 dark:text-red-300">
-                  {f.state_code} — {f.flag_type === "franchise_tax" ? "Franchise / Entity Tax" : f.flag_type}
-                </span>
-                <SeverityBadge severity={f.severity} />
-              </div>
-              <p className="mt-1 text-xs text-red-700 dark:text-red-400">
-                {f.description.slice(0, 200)}
-              </p>
-              {f.recommended_action && (
-                <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">
-                  <span className="font-medium">Action:</span>{" "}
-                  {f.recommended_action.slice(0, 160)}
-                </p>
-              )}
-            </div>
-          ))}
-
-          {nexusNotRegistered.length > 0 && (
-            <Link href="/registrations">
-              <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 transition-colors hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950 dark:hover:bg-amber-900/50">
-                <MapPin className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <div className="flex-1">
-                  <span className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                    {nexusNotRegistered.length} state
-                    {nexusNotRegistered.length !== 1 && "s"} with nexus but not
-                    registered
-                  </span>
-                  <span className="ml-2 text-xs text-amber-600 dark:text-amber-400">
-                    {nexusNotRegistered.map((n) => n.state_code).join(", ")}
-                  </span>
-                </div>
-                <ChevronRight className="h-4 w-4 text-amber-400" />
-              </div>
-            </Link>
-          )}
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Pulse</h1>
+          <p className="text-sm text-muted-foreground">
+            Daily command center
+            {lastSync && (
+              <span className="ml-1">
+                &middot; Synced {timeAgo(lastSync.ingested_at)} ago
+              </span>
+            )}
+          </p>
         </div>
-      )}
-
-      {/* ── Summary row ── */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Link href="/liability">
-          <Card className="transition-colors hover:border-primary/30">
-            <CardContent className="flex items-center gap-3 p-4">
-              <DollarSign className="h-5 w-5 text-primary" />
-              <div>
-                <p className="text-2xl font-semibold">
-                  {registered.length}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Registered state{registered.length !== 1 && "s"}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/calendar">
-          <Card
-            className={`transition-colors hover:border-primary/30 ${
-              overdue.length > 0 ? "border-red-200 dark:border-red-900" : ""
-            }`}
-          >
-            <CardContent className="flex items-center gap-3 p-4">
-              <Calendar
-                className={`h-5 w-5 ${
-                  overdue.length > 0
-                    ? "text-red-500"
-                    : dueSoon.length > 0
-                    ? "text-amber-500"
-                    : "text-emerald-500"
-                }`}
-              />
-              <div>
-                <p className="text-2xl font-semibold">
-                  {overdue.length > 0
-                    ? overdue.length
-                    : dueSoon.length}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {overdue.length > 0
-                    ? "Overdue filing" + (overdue.length !== 1 ? "s" : "")
-                    : "Due next 30d"}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/nexus">
-          <Card className="transition-colors hover:border-primary/30">
-            <CardContent className="flex items-center gap-3 p-4">
-              <MapPin className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <p className="text-2xl font-semibold">{physCount}</p>
-                <p className="text-xs text-muted-foreground">
-                  Physical nexus states
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/nexus">
-          <Card className="transition-colors hover:border-primary/30">
-            <CardContent className="flex items-center gap-3 p-4">
-              <TrendingUp
-                className={`h-5 w-5 ${
-                  econExceeded > 0 ? "text-red-500" : "text-muted-foreground"
-                }`}
-              />
-              <div>
-                <p className="text-2xl font-semibold">
-                  {econExceeded > 0 ? `${econExceeded}` : "0"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Economic nexus exceeded
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
+        <div className="inline-flex rounded-lg border bg-muted p-0.5">
+          {(["all", "amazon", "shopify"] as ChFilter[]).map((v) => (
+            <button
+              key={v}
+              onClick={() => setCh(v)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                ch === v
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {v === "all" ? "All" : v === "amazon" ? "Amazon" : "Shopify"}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* ── Nexus map ── */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm font-medium">
-            <MapPin className="h-4 w-4 text-muted-foreground" />
-            Nexus Map
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pb-3">
-          <USNexusMap
-            nexus={nexus}
-            rules={stateRules}
-            filings={filings}
-            flags={flags}
-            sales={sales}
-          />
-        </CardContent>
-      </Card>
-
-      {/* ── Upcoming filings ── */}
-      {dueSoon.length > 0 && (
+      {/* ── Sales cards ── */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
-          <CardHeader className="pb-3">
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              MTD Gross ({chLabel})
+            </p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">
+              ${fmt(Math.round(mtd.gross))}
+            </p>
+            <p className="text-xs text-muted-foreground">{fmt(mtd.orders)} orders</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Last Month ({chLabel})
+            </p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">
+              ${fmt(Math.round(lastMo.gross))}
+            </p>
+            <p className="text-xs text-muted-foreground">{fmt(lastMo.orders)} orders</p>
+          </CardContent>
+        </Card>
+        <Card className={actionCount > 0 ? "border-amber-500/30" : ""}>
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Open Tax Actions
+            </p>
+            <p className={`mt-1 text-2xl font-semibold tabular-nums ${actionCount > 0 ? "text-amber-500" : ""}`}>
+              {actionCount}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {overdue.length > 0 ? `${overdue.length} overdue` : "No overdue"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Registered States
+            </p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">
+              {nexus.filter((n) => n.is_registered).length}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {nexus.filter((n) => n.has_physical_nexus).length} physical nexus
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ── Critical items + Deadlines ── */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Critical items */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              Top Actions
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {criticalItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No critical items. You&apos;re in good shape.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {criticalItems.slice(0, 4).map((item, i) => (
+                  <Link key={i} href={item.href}>
+                    <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted">
+                      <span>{item.label}</span>
+                      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Next deadlines */}
+        <Card>
+          <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium">
               <Calendar className="h-4 w-4 text-muted-foreground" />
-              Coming Up
+              Next Deadlines
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
-              {dueSoon.slice(0, 8).map((f) => {
-                const days = Math.ceil(
-                  (new Date(f.due_date).getTime() - nowMs) / 86400000,
-                );
-                return (
-                  <div
-                    key={f.id}
-                    className="flex items-center justify-between rounded-md border px-3 py-2"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="w-8 text-sm font-medium">
-                        {f.state_code}
+            {upcoming.length === 0 && overdue.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No upcoming deadlines.</p>
+            ) : (
+              <div className="space-y-2">
+                {overdue.slice(0, 2).map((f) => (
+                  <Link key={f.id} href="/calendar">
+                    <div className="flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm dark:border-red-900 dark:bg-red-950">
+                      <span className="font-medium text-red-700 dark:text-red-300">
+                        OVERDUE — {f.state_code} {f.period_label}
                       </span>
-                      <span className="text-xs text-muted-foreground">
-                        {f.period_label}
+                      <span className="text-xs text-red-600 dark:text-red-400">
+                        {f.due_date}
                       </span>
                     </div>
-                    <span
-                      className={`text-xs font-medium ${
-                        days <= 7
-                          ? "text-red-600 dark:text-red-400"
-                          : days <= 14
-                          ? "text-amber-600 dark:text-amber-400"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      {days}d &middot; {f.due_date.slice(5)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ── Non-critical franchise flags ── */}
-      {flags.filter((f) => f.severity !== "critical").length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium">
-              <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-              Entity / Franchise Tax Flags
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {flags
-                .filter((f) => f.severity !== "critical")
-                .map((f) => (
-                  <div
-                    key={f.id}
-                    className="flex items-start gap-3 rounded-md border px-3 py-2"
-                  >
-                    <SeverityBadge severity={f.severity} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">
-                        {f.state_code}
-                        <span className="ml-2 font-normal text-muted-foreground">
-                          {f.description.slice(0, 100)}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
+                  </Link>
                 ))}
-            </div>
+                {upcoming.map((f) => {
+                  const days = Math.ceil(
+                    (new Date(f.due_date).getTime() - Date.now()) / 86400000,
+                  );
+                  return (
+                    <div
+                      key={f.id}
+                      className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+                    >
+                      <span>
+                        {f.state_code}{" "}
+                        <span className="text-muted-foreground">{f.period_label}</span>
+                      </span>
+                      <span
+                        className={`text-xs font-medium ${
+                          days <= 7 ? "text-red-500" : days <= 14 ? "text-amber-500" : "text-muted-foreground"
+                        }`}
+                      >
+                        {days}d &middot; {f.due_date.slice(5)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
-      )}
+      </div>
 
-      {/* ── All clear ── */}
-      {!hasUrgent && dueSoon.length === 0 && flags.length === 0 && (
-        <Card>
-          <CardContent className="flex items-center gap-3 py-8 justify-center text-sm text-muted-foreground">
-            <CheckCircle className="h-5 w-5 text-emerald-500" />
-            No urgent items. Check back after your next filing period.
-          </CardContent>
-        </Card>
-      )}
+      {/* ── Quick links ── */}
+      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {[
+          { href: "/sales-map", icon: Map, label: "Sales Map" },
+          { href: "/liability", icon: DollarSign, label: "What Do I Owe?" },
+          { href: "/registrations", icon: ClipboardCheck, label: "Registrations" },
+          { href: "/skus", icon: Package, label: "SKU Performance" },
+          { href: "/nexus", icon: MapPin, label: "Nexus Monitor" },
+          { href: "/data", icon: FileDown, label: "Data & Export" },
+        ].map(({ href, icon: Icon, label }) => (
+          <Link key={href} href={href}>
+            <Card className="transition-colors hover:border-primary/30">
+              <CardContent className="flex flex-col items-center gap-2 p-4 text-center">
+                <Icon className="h-5 w-5 text-muted-foreground" />
+                <span className="text-xs font-medium">{label}</span>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
+      </div>
 
-      {/* ── Disclaimer ── */}
       <p className="text-center text-[11px] text-muted-foreground/60">
-        This is a monitoring aid, not legal or tax advice. Consult a qualified
-        CPA before acting on any position.
+        Monitoring aid — not legal or tax advice.
       </p>
     </div>
   );

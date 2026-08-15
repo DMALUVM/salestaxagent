@@ -229,13 +229,11 @@ def ingest_shopify_csv(file_path: str | Path, dry_run: bool = False) -> dict:
 
 def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
     if not settings.shopify_enabled:
-        return {"error": "Shopify API not configured. Set SHOPIFY_SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN in .env"}
+        return {"error": "Shopify API not configured. Set SHOPIFY_SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN (or CLIENT_ID + SECRET) in .env"}
 
+    from src.shopify_auth import auth_headers
     base_url = f"https://{settings.shopify_shop_domain}/admin/api/2024-01/orders.json"
-    headers = {
-        "X-Shopify-Access-Token": settings.shopify_access_token,
-        "Content-Type": "application/json",
-    }
+    headers = auth_headers()
 
     params = {
         "status": "any",

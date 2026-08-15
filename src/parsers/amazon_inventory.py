@@ -9,6 +9,7 @@ from typing import TextIO
 from src.db import insert_rows, log_ingestion, log_audit, upsert_rows
 from src.mappers.fc_to_state import fc_to_state
 from src.models.schema import InventoryEvent
+from src.sku_normalize import normalize_sku
 
 EXPECTED_HEADERS = {
     "date-time", "fulfillment-center-id", "asin", "sku", "quantity",
@@ -129,8 +130,8 @@ def parse_amazon_inventory_file(file_path: str | Path) -> dict:
                 fc_code=fc_code,
                 state_code=state_code,
                 asin=(row.get("asin") or "").strip() or None,
-                sku=(row.get("sku") or "").strip() or None,
-                fnsku=(row.get("fnsku") or "").strip() or None,
+                sku=normalize_sku(row.get("sku")) if row.get("sku") else None,
+                fnsku=(row.get("fnsku") or "").strip().upper() or None,
                 quantity=qty,
                 event_type=(row.get("event-type") or "").strip() or None,
                 disposition=(row.get("disposition") or "").strip() or None,

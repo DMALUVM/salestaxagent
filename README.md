@@ -264,8 +264,18 @@ python -m src.main deadlines
 # Mark a filing as complete
 python -m src.main complete --state TX --period 2026-Q2
 
-# Export report for CPA review
-python -m src.main export --format csv --output report.csv
+# Generate filing calendar for all registered states
+python -m src.main generate-filings
+
+# Backfill Shopify SKU data (product-level sales)
+python -m src.main backfill-shopify-skus
+
+# Export sales data as CSV for CPA
+python -m src.main export-csv --table sales_by_state --start 2026-01-01
+python -m src.main export-csv --table sales_by_sku --start 2026-01-01
+
+# SP-API: pull Amazon orders + inventory
+python -m src.main spapi-refresh --days 30
 
 # Start the background agent (folder watcher + scheduler + API polling)
 python -m src.main run
@@ -273,6 +283,20 @@ python -m src.main run
 # Test Telegram notifications
 python -m src.main test-alert
 ```
+
+### Dashboard Pages
+
+| Page | Route | Purpose |
+|------|-------|---------|
+| **Pulse** | `/` | Daily command center: MTD/last month sales, open actions, deadlines, quick links |
+| **What Do I Owe?** | `/liability` | Shopify-focused tax liability estimates per registered state |
+| **Filing Calendar** | `/calendar` | Track + mark filings complete; bulk-mark overdue |
+| **Registrations** | `/registrations` | Manage state registrations, frequency, last filed through |
+| **Nexus Monitor** | `/nexus` | Unregistered exposure: physical + economic nexus by state |
+| **Sales Map** | `/sales-map` | US choropleth by sales volume; year + month + channel filters |
+| **SKU Performance** | `/skus` | Product-level sales, units, refunds by SKU |
+| **Rules & Rulings** | `/rules` | Cited nexus rules, court opinions, admin guidance |
+| **Data & Export** | `/data` | Upload CSV, trigger SP-API refresh, download CPA exports |
 
 ### Folder Watcher
 

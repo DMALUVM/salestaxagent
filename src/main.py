@@ -133,6 +133,92 @@ def test_alert():
         click.echo(f"Failed to send alert: {result.get('error')}")
 
 
+@cli.command("backfill-shopify-skus")
+def backfill_shopify_skus():
+    """Pull Shopify line items and populate sales_by_sku (monthly grain)."""
+    click.echo("Fetching Shopify orders with line items...")
+    from src.parsers.shopify_skus import fetch_shopify_skus
+    result = fetch_shopify_skus()
+    if result.get("error"):
+        click.echo(f"Error: {result['error']}")
+    else:
+        click.echo(f"Orders: {result['orders_fetched']:,}")
+        click.echo(f"SKU rows: {result['sku_rows']:,}")
+        click.echo(f"Unique SKUs: {result['unique_skus']}")
+        click.echo(f"Inserted: {result['rows_inserted']}")
+
+
+@cli.command("backfill-amazon-skus")
+@click.option("--start", "start_str", default=None,
+              help="Start date (YYYY-MM-DD, default: 2025-01-01)")
+@click.option("--end", "end_str", default=None,
+              help="End date (YYYY-MM-DD, default: yesterday)")
+@click.option("--dry-run", is_flag=True)
+def backfill_amazon_skus(start_str, end_str, dry_run):
+    """Pull Amazon SP-API orders and populate sales_by_sku (monthly grain)."""
+    from datetime import date as d, timedelta
+    start = d.fromisoformat(start_str) if start_str else d(2025, 1, 1)
+    end = d.fromisoformat(end_str) if end_str else d.today() - timedelta(days=1)
+    yesterday = d.today() - timedelta(days=1)
+    if end > yesterday:
+        end = yesterday
+
+    if dry_run:
+        click.echo("DRY RUN — no data will be written.\n")
+
+    click.echo(f"Fetching Amazon SKU data: {start} to {end}")
+
+    def _on_poll(status, elapsed):
+        click.echo(f"  [{elapsed}s] {status}")
+
+    from src.amazon_sp.reports import fetch_amazon_skus
+    result = fetch_amazon_skus(start, end, dry_run=dry_run, on_poll=_on_poll)
+
+    click.echo(f"\n  Amazon SKU Results:")
+    click.echo(f"  Chunks:      {result.get('chunks', 0)}")
+    click.echo(f"  Rows total:  {result.get('rows_total', 0):,}")
+    click.echo(f"  Rows parsed: {result.get('rows_parsed', 0):,}")
+    click.echo(f"  SKU rows:    {result.get('sku_rows', 0):,}")
+    click.echo(f"  Unique SKUs: {result.get('unique_skus', 0)}")
+    click.echo(f"  Inserted:    {result.get('rows_inserted', 0):,}")
+    for w in result.get("warnings", []):
+        click.echo(f"  Warning: {w}")
+
+
+@cli.command("export-csv")
+@click.option("--table", type=click.Choice(["sales_by_state", "sales_by_sku"]),
+              default="sales_by_state", help="Table to export")
+@click.option("--start", "start_str", default=None, help="Start date (YYYY-MM-DD)")
+@click.option("--end", "end_str", default=None, help="End date (YYYY-MM-DD)")
+@click.option("--output", default=None, help="Output file path")
+def export_csv_cmd(table, start_str, end_str, output):
+    """Export sales data as CSV for CPA review."""
+    import csv as csvmod
+    from datetime import date as d
+    from src.db import fetch_all
+
+    rows = fetch_all(table)
+    if start_str:
+        rows = [r for r in rows if (r.get("period_start") or "") >= start_str]
+    if end_str:
+        rows = [r for r in rows if (r.get("period_start") or "") <= end_str]
+
+    if not rows:
+        click.echo("No rows match the filter.")
+        return
+
+    if output is None:
+        output = f"{table}_{d.today().isoformat()}.csv"
+
+    keys = sorted(rows[0].keys())
+    with open(output, "w", newline="") as f:
+        writer = csvmod.DictWriter(f, fieldnames=keys)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    click.echo(f"Exported {len(rows)} rows to {output}")
+
+
 @cli.command("populate-calendar")
 @click.option("--year", type=int, default=None, help="Calendar year (default: current + next)")
 def populate_calendar(year):

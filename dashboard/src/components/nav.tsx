@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   MapPin,
   MapPinned,
+  Package,
   BookOpen,
   Database,
   Shield,
@@ -37,8 +38,9 @@ const primaryLinks: NavItem[] = [
 const monitorLinks: NavItem[] = [
   { href: "/nexus", label: "Nexus Monitor", icon: MapPin },
   { href: "/sales-map", label: "Sales Map", icon: MapPinned },
+  { href: "/skus", label: "SKU Performance", icon: Package },
   { href: "/rules", label: "Rules & Rulings", icon: BookOpen },
-  { href: "/data", label: "Data & Sync", icon: Database },
+  { href: "/data", label: "Data & Export", icon: Database },
 ];
 
 function NavLinks({ onClick }: { onClick?: () => void }) {
