@@ -584,11 +584,12 @@ def run():
 
 
 def _run_shopify_poll():
-    from datetime import date, timedelta
     from src.parsers.shopify_orders import fetch_shopify_orders_api
-    since = date.today() - timedelta(days=7)
     try:
-        result = fetch_shopify_orders_api(since_date=since)
+        # Always pull ALL orders (no since_date) to ensure complete
+        # monthly totals.  The delete-then-upsert pattern in the
+        # parser replaces all shopify rows atomically.
+        result = fetch_shopify_orders_api()
         print(f"[Shopify Poll] {result.get('orders_fetched', 0)} orders, "
               f"{result.get('rows_inserted', 0)} rows inserted")
     except Exception as e:
@@ -596,69 +597,106 @@ def _run_shopify_poll():
 
 
 def _run_daily_analysis():
+    """Run physical + economic nexus analysis, gather deadlines, and send
+    a SINGLE Telegram summary.  Dedicated threshold-crossed alerts are
+    sent only for states that newly exceed their threshold on THIS run.
+    """
+    from src.db import fetch_all
     from src.engines.physical_nexus import evaluate_physical_nexus
     from src.engines.economic_nexus import evaluate_economic_nexus
-    from src.alerts.telegram import send_nexus_alert, send_threshold_alert, send_telegram
+    from src.calendar.filing_calendar import get_upcoming_deadlines
+    from src.alerts.telegram import (
+        send_daily_summary,
+        send_threshold_crossed,
+        send_telegram,
+    )
+    from datetime import date
 
     try:
+        # Snapshot which states had economic nexus BEFORE this run
+        prior_econ = {
+            r["state_code"]
+            for r in fetch_all("nexus_status")
+            if r.get("has_economic_nexus")
+        }
+
+        # ── Run engines ──
         phys = evaluate_physical_nexus()
-        for state in phys.get("new_nexus_states", []):
-            details = phys.get("details", {}).get(state, {})
-            send_nexus_alert(
-                state, "physical",
-                f"FBA inventory detected since {details.get('first_seen', '?')}. "
-                f"FCs: {details.get('fc_codes', [])}"
-            )
-
-        # Alert on new franchise tax flags
-        for flag in phys.get("franchise_flags", []):
-            if flag.get("severity") == "critical":
-                send_nexus_alert(
-                    flag["state_code"], "franchise",
-                    f"{flag['description'][:200]}"
-                )
-
         econ = evaluate_economic_nexus()
-        for alert in econ.get("alerts", []):
-            detail = econ.get("details", {}).get(alert["state"], {})
-            send_threshold_alert(
-                alert["state"],
-                detail.get("progress_percent", 0),
-                detail.get("total_amount", 0),
+
+        # ── Detect newly crossed thresholds ──
+        current_econ = set(econ.get("exceeded_threshold", []))
+        newly_crossed = sorted(current_econ - prior_econ)
+
+        # Send dedicated alert per newly crossed state
+        for sc in newly_crossed:
+            detail = econ.get("details", {}).get(sc, {})
+            notes = detail.get("action_notes", "")
+            send_threshold_crossed(
+                sc,
+                detail.get("threshold_amount", 0),
                 detail.get("threshold_amount_cfg", 100000),
+                notes[:200] if notes else f"${detail.get('threshold_amount',0):,.0f}",
             )
+
+        # ── Gather deadlines ──
+        deadlines = get_upcoming_deadlines()
+        today = date.today().isoformat()
+        overdue = [d for d in deadlines if d.get("days_overdue")]
+        upcoming = [d for d in deadlines if d.get("days_until_due") is not None
+                    and not d.get("days_overdue")]
+
+        # ── Gather franchise flags ──
+        flags = fetch_all("franchise_tax_flags", {"status": "open"})
+        critical_flags = [f for f in flags if f.get("severity") == "critical"]
+        warning_flags = [f for f in flags if f.get("severity") == "warning"]
+
+        # ── Count action needed (unregistered nexus states) ──
+        nexus_all = fetch_all("nexus_status")
+        action_needed = sum(
+            1 for n in nexus_all
+            if not n.get("is_registered")
+            and (n.get("has_physical_nexus") or n.get("has_economic_nexus"))
+        )
+
+        # ── Send single summary ──
+        send_daily_summary(
+            phys_nexus_count=len(phys.get("nexus_states", [])),
+            new_phys_states=phys.get("new_nexus_states", []),
+            econ_exceeded=sorted(current_econ),
+            econ_approaching=econ.get("approaching_threshold", []),
+            newly_crossed=newly_crossed,
+            critical_flags=critical_flags,
+            warning_flags=warning_flags,
+            overdue_count=len(overdue),
+            upcoming_deadlines=upcoming,
+            action_needed=action_needed,
+        )
 
         print(f"[Daily Analysis] Physical: {len(phys.get('nexus_states', []))} states, "
-              f"Economic alerts: {len(econ.get('alerts', []))}")
+              f"Economic exceeded: {len(current_econ)}, "
+              f"Newly crossed: {newly_crossed}, "
+              f"Overdue: {len(overdue)}")
+
     except Exception as e:
         print(f"[Daily Analysis] Error: {e}")
         try:
-            from src.alerts.telegram import send_telegram
             send_telegram(f"🚨 <b>Daily Analysis Failed</b>\n\n{str(e)[:300]}")
         except Exception:
             pass
 
 
 def _run_deadline_check():
+    """Deadline check is now part of the daily summary.
+    This function is kept for backward compatibility with the scheduler
+    but no longer sends individual alerts.
+    """
     from src.calendar.filing_calendar import get_upcoming_deadlines
-    from src.alerts.telegram import send_deadline_alert
 
     try:
         deadlines = get_upcoming_deadlines()
-        sent = 0
-        for d in deadlines:
-            days = d.get("days_until_due", d.get("days_overdue", 0))
-            if d.get("days_overdue"):
-                days = -d["days_overdue"]
-
-            if not d.get("reminder_sent") or days <= 3:
-                send_deadline_alert(
-                    d["state_code"], d["period_label"],
-                    str(d["due_date"]), days,
-                )
-                sent += 1
-
-        print(f"[Deadline Check] {len(deadlines)} upcoming, {sent} alerts sent")
+        overdue = [d for d in deadlines if d.get("days_overdue")]
+        print(f"[Deadline Check] {len(overdue)} overdue, {len(deadlines)} total (included in daily summary)")
     except Exception as e:
         print(f"[Deadline Check] Error: {e}")
 

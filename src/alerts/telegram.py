@@ -1,3 +1,9 @@
+"""Telegram alert module.
+
+Default behavior: ONE summary message per analysis run.
+Exception: dedicated single-state message when a state NEWLY crosses
+its economic nexus threshold (was under, now over on this run).
+"""
 from __future__ import annotations
 
 import httpx
@@ -5,6 +11,8 @@ import httpx
 from src.config import settings
 from src.db import insert_rows
 
+
+# ── Low-level sender ────────────────────────────────────────
 
 def send_telegram(message: str, parse_mode: str = "HTML") -> dict:
     if not settings.telegram_enabled:
@@ -38,22 +46,37 @@ def send_telegram(message: str, parse_mode: str = "HTML") -> dict:
     return {"sent": success, "error": error}
 
 
-def send_nexus_alert(state_code: str, nexus_type: str, details: str) -> dict:
-    emoji = {"physical": "📦", "economic": "💰", "franchise": "🏛️"}.get(nexus_type, "⚠️")
+# ── Threshold-cross dedicated alert (exception) ────────────
+
+def send_threshold_crossed(
+    state_code: str,
+    amount: float,
+    threshold: float,
+    trigger: str,
+) -> dict:
+    """Dedicated single-state alert when a state NEWLY crosses its
+    economic nexus threshold on this analysis run.
+
+    Args:
+        trigger: human description e.g. "sales $215,446 >= $100,000"
+    """
+    pct = (amount / threshold * 100) if threshold else 0
     message = (
-        f"{emoji} <b>New {nexus_type.title()} Nexus Alert — {state_code}</b>\n\n"
-        f"{details}\n\n"
-        f"<i>Action required: Review with your CPA. This system does not file returns.</i>"
+        f"🚨 <b>THRESHOLD CROSSED — {state_code}</b>\n\n"
+        f"{trigger}\n"
+        f"Progress: ${amount:,.0f} / ${threshold:,.0f} ({pct:.0f}%)\n\n"
+        f"<b>Action:</b> Register for sales tax in {state_code}. "
+        f"Consult CPA for effective date and filing obligations."
     )
     result = send_telegram(message)
 
     insert_rows("alerts", [{
-        "alert_type": f"nexus_{nexus_type}",
+        "alert_type": "threshold_crossed",
         "channel": "telegram",
-        "subject": f"New {nexus_type} nexus: {state_code}",
+        "subject": f"Threshold crossed: {state_code}",
         "body": message,
         "state_code": state_code,
-        "severity": "critical" if nexus_type == "franchise" else "warning",
+        "severity": "critical",
         "delivered": result.get("sent", False),
         "error_message": result.get("error"),
     }])
@@ -61,55 +84,124 @@ def send_nexus_alert(state_code: str, nexus_type: str, details: str) -> dict:
     return result
 
 
-def send_deadline_alert(state_code: str, period_label: str, due_date: str,
-                        days_until: int) -> dict:
-    if days_until <= 0:
-        emoji = "🚨"
-        urgency = "OVERDUE" if days_until < 0 else "DUE TODAY"
-    elif days_until <= 3:
-        emoji = "⏰"
-        urgency = f"Due in {days_until} days"
-    else:
-        emoji = "📅"
-        urgency = f"Due in {days_until} days"
+# ── Daily summary (single message) ─────────────────────────
 
+def send_daily_summary(
+    phys_nexus_count: int,
+    new_phys_states: list[str],
+    econ_exceeded: list[str],
+    econ_approaching: list[str],
+    newly_crossed: list[str],
+    critical_flags: list[dict],
+    warning_flags: list[dict],
+    overdue_count: int,
+    upcoming_deadlines: list[dict],
+    action_needed: int,
+) -> dict:
+    """Send a single consolidated Telegram summary after analysis.
+
+    Sections are included only when they have content.
+    """
+    parts: list[str] = []
+    parts.append("<b>📊 Sales Tax Agent — Daily Summary</b>")
+
+    # ── Physical nexus
+    phys_line = f"📦 Physical nexus: {phys_nexus_count} states"
+    if new_phys_states:
+        phys_line += f" (<b>NEW:</b> {', '.join(new_phys_states)})"
+    parts.append(phys_line)
+
+    # ── Economic nexus
+    if econ_exceeded:
+        exc_list = ", ".join(econ_exceeded[:10])
+        parts.append(f"💰 Economic exceeded: {len(econ_exceeded)} ({exc_list})")
+    if econ_approaching:
+        app_list = ", ".join(econ_approaching[:8])
+        parts.append(f"📈 Approaching: {len(econ_approaching)} ({app_list})")
+    if newly_crossed:
+        parts.append(
+            f"🚨 <b>Newly crossed threshold:</b> {', '.join(newly_crossed)} "
+            f"— see dedicated alert(s)"
+        )
+
+    # ── Franchise flags
+    if critical_flags:
+        flag_items = [f"{f.get('state_code', '?')}" for f in critical_flags[:5]]
+        parts.append(f"🏛️ Critical flags: {', '.join(flag_items)}")
+    if warning_flags:
+        parts.append(f"⚠️ Warning flags: {len(warning_flags)}")
+
+    # ── Filing calendar
+    if overdue_count > 0:
+        parts.append(f"🚨 Overdue filings: {overdue_count}")
+    if upcoming_deadlines:
+        next_items = []
+        for d in upcoming_deadlines[:3]:
+            sc = d.get("state_code", "?")
+            period = d.get("period_label", "?")
+            due = str(d.get("due_date", "?"))
+            days = d.get("days_until_due", "?")
+            next_items.append(f"{sc} {period} ({days}d)")
+        parts.append(f"📅 Next due: {' · '.join(next_items)}")
+
+    # ── Action needed
+    if action_needed > 0:
+        parts.append(f"\n⚡ <b>Action needed: {action_needed} state{'s' if action_needed != 1 else ''}</b>")
+
+    # ── Footer
+    parts.append("\n<i>Monitoring aid — not tax advice.</i>")
+
+    message = "\n".join(parts)
+    result = send_telegram(message)
+
+    insert_rows("alerts", [{
+        "alert_type": "daily_summary",
+        "channel": "telegram",
+        "subject": f"Daily summary: {phys_nexus_count} phys, {len(econ_exceeded)} econ exceeded",
+        "body": message,
+        "severity": "info",
+        "delivered": result.get("sent", False),
+        "error_message": result.get("error"),
+    }])
+
+    return result
+
+
+# ── Test alert ──────────────────────────────────────────────
+
+def send_test_alert() -> dict:
     message = (
-        f"{emoji} <b>Filing Deadline — {state_code} ({period_label})</b>\n\n"
-        f"<b>{urgency}</b>\n"
-        f"Due date: {due_date}\n\n"
-        f"<i>Mark complete after filing: python -m src.main complete --state {state_code} --period {period_label}</i>"
+        "✅ <b>Sales Tax Agent — Test Alert</b>\n\n"
+        "Telegram notifications are working correctly.\n"
+        "You will receive:\n"
+        "• Daily summary (one message per analysis run)\n"
+        "• Dedicated alert when a state newly crosses its threshold\n"
+        "• Error alerts if data sync fails"
+    )
+    return send_telegram(message)
+
+
+# ── Legacy wrappers (kept for backward compat) ──────────────
+
+def send_nexus_alert(state_code: str, nexus_type: str, details: str) -> dict:
+    """Legacy: only used for error paths now."""
+    emoji = {"physical": "📦", "economic": "💰", "franchise": "🏛️"}.get(nexus_type, "⚠️")
+    message = (
+        f"{emoji} <b>New {nexus_type.title()} Nexus — {state_code}</b>\n\n"
+        f"{details}\n\n"
+        f"<i>Review with your CPA.</i>"
     )
     return send_telegram(message)
 
 
 def send_threshold_alert(state_code: str, progress_pct: float, amount: float,
                          threshold: float) -> dict:
-    if progress_pct >= 100:
-        emoji = "🚨"
-        status = "EXCEEDED"
-    elif progress_pct >= 80:
-        emoji = "⚠️"
-        status = "APPROACHING"
-    else:
-        emoji = "📊"
-        status = "MONITORING"
-
-    message = (
-        f"{emoji} <b>Economic Nexus {status} — {state_code}</b>\n\n"
-        f"Progress: ${amount:,.2f} / ${threshold:,.0f} ({progress_pct:.0f}%)\n\n"
-        f"<i>Review with CPA if approaching or exceeded.</i>"
-    )
-    return send_telegram(message)
+    """Legacy: replaced by send_threshold_crossed for new crossings."""
+    return send_threshold_crossed(state_code, amount, threshold,
+                                  f"${amount:,.0f} >= ${threshold:,.0f} ({progress_pct:.0f}%)")
 
 
-def send_test_alert() -> dict:
-    message = (
-        "✅ <b>Sales Tax Agent — Test Alert</b>\n\n"
-        "Telegram notifications are working correctly.\n"
-        "You will receive alerts for:\n"
-        "• New physical nexus (FBA inventory in new states)\n"
-        "• Economic nexus threshold crossings\n"
-        "• Franchise tax flags (CA, TX, etc.)\n"
-        "• Upcoming filing deadlines"
-    )
-    return send_telegram(message)
+def send_deadline_alert(state_code: str, period_label: str, due_date: str,
+                        days_until: int) -> dict:
+    """Legacy: deadlines are now included in the daily summary."""
+    return {"sent": False, "error": "Deadlines are now in daily summary"}
