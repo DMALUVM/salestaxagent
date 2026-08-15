@@ -26,7 +26,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MapPin, Search } from "lucide-react";
+import { MapPin, Search, ShieldCheck } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,7 +61,7 @@ function ProgressBar({ pct }: { pct: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// Total volume computation (Shopify + Amazon per state, all data in DB)
+// Volume computation
 // ---------------------------------------------------------------------------
 
 interface StateVolume {
@@ -115,14 +115,15 @@ function EconomicCell({
   const amtExceeded = amtPct >= 100;
   const txnExceeded = threshTxn ? txnPct >= 100 : false;
 
-  // AND: both must be met; OR: either triggers
   const currentlyExceeded = isAnd
     ? amtExceeded && (threshTxn ? txnExceeded : true)
     : amtExceeded || txnExceeded;
 
   let statusLabel = "";
   if (n.has_economic_nexus) {
-    if (currentlyExceeded) {
+    if (n.is_registered) {
+      statusLabel = "Registered \u2014 see Filings";
+    } else if (currentlyExceeded) {
       if (isAnd)
         statusLabel = "Exceeded (both sales AND transactions met)";
       else if (amtExceeded && txnExceeded)
@@ -133,15 +134,13 @@ function EconomicCell({
         statusLabel = `Exceeded on sales ($${fmt(amt)} / $${fmt(threshAmt)})`;
     } else {
       statusLabel =
-        "Threshold was exceeded in a prior period; obligation may continue \u2014 confirm with CPA";
+        "Previously exceeded \u2014 confirm with CPA";
     }
   }
 
-  const totalVol = volume?.total ?? 0;
-
   return (
     <div className="space-y-2">
-      {/* Dollar threshold progress */}
+      {/* Dollar progress */}
       <div className="space-y-0.5">
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground">
@@ -154,14 +153,14 @@ function EconomicCell({
         <ProgressBar pct={amtPct} />
       </div>
 
-      {/* AND/OR label between the two metrics */}
+      {/* AND/OR label */}
       {threshTxn != null && (
         <p className="text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
           {isAnd ? "and" : "or"}
         </p>
       )}
 
-      {/* Transaction threshold progress */}
+      {/* Transaction progress */}
       {threshTxn != null && (
         <div className="space-y-0.5">
           <div className="flex items-center justify-between text-xs">
@@ -178,14 +177,20 @@ function EconomicCell({
         </div>
       )}
 
-      {/* Exceeded label */}
+      {/* Status label */}
       {statusLabel && (
-        <p className="text-xs font-medium text-red-600 dark:text-red-400">
+        <p
+          className={`text-xs font-medium ${
+            n.is_registered
+              ? "text-emerald-600 dark:text-emerald-400"
+              : "text-red-600 dark:text-red-400"
+          }`}
+        >
           {statusLabel}
         </p>
       )}
 
-      {/* Channel breakdown + marketplace flag */}
+      {/* Channel breakdown */}
       {volume && (volume.shopify > 0 || volume.amazon > 0) && (
         <p className="text-[10px] text-muted-foreground">
           Shopify ${fmt(Math.round(volume.shopify))} + Amazon $
@@ -209,17 +214,21 @@ function NexusTable({
   rows,
   stateRules,
   volumes,
+  emptyTitle,
+  emptyDescription,
 }: {
   rows: NexusStatus[];
   stateRules: Map<string, StateRule>;
   volumes: Record<string, StateVolume>;
+  emptyTitle?: string;
+  emptyDescription?: string;
 }) {
   if (rows.length === 0) {
     return (
       <EmptyState
         icon={<MapPin className="h-8 w-8" />}
-        title="No states in this category"
-        description="Run an analysis or ingest data to populate nexus status."
+        title={emptyTitle ?? "No states in this category"}
+        description={emptyDescription ?? ""}
       />
     );
   }
@@ -232,9 +241,9 @@ function NexusTable({
             <TableHead className="w-16">State</TableHead>
             <TableHead className="w-28">Physical</TableHead>
             <TableHead className="min-w-[240px]">
-              Economic Threshold Progress
+              Economic Threshold
             </TableHead>
-            <TableHead className="w-24">Registered</TableHead>
+            <TableHead className="w-24">Status</TableHead>
             <TableHead className="w-20">Confidence</TableHead>
           </TableRow>
         </TableHeader>
@@ -276,17 +285,20 @@ function NexusTable({
                       variant="outline"
                       className="text-xs border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                     >
-                      Yes
+                      <ShieldCheck className="mr-1 h-3 w-3" />
+                      Registered
+                    </Badge>
+                  ) : (n.has_physical_nexus || n.has_economic_nexus) ? (
+                    <Badge
+                      variant="outline"
+                      className="text-xs border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+                    >
+                      Unregistered
                     </Badge>
                   ) : (
                     <span className="text-xs text-muted-foreground">
-                      No
+                      &mdash;
                     </span>
-                  )}
-                  {n.is_registered && n.assigned_frequency && (
-                    <p className="mt-0.5 text-xs text-muted-foreground capitalize">
-                      {n.assigned_frequency.replace("_", "-")}
-                    </p>
                   )}
                 </TableCell>
                 <TableCell>
@@ -307,6 +319,7 @@ function NexusTable({
 
 export default function NexusPage() {
   const [search, setSearch] = useState("");
+  const [showRegistered, setShowRegistered] = useState(false);
   const { data: nexus, loading: l1 } =
     useSupabaseQuery<NexusStatus>("nexus_status");
   const { data: rules, loading: l2 } =
@@ -320,7 +333,8 @@ export default function NexusPage() {
 
   const stateRules = new Map(rules.map((r) => [r.state_code, r]));
 
-  const filtered = nexus.filter(
+  // Search filter
+  const searched = nexus.filter(
     (n) =>
       n.state_code.toLowerCase().includes(search.toLowerCase()) ||
       stateRules
@@ -329,26 +343,45 @@ export default function NexusPage() {
         .includes(search.toLowerCase()),
   );
 
-  // Active: has physical or economic nexus
-  const withNexus = filtered.filter(
-    (n) => n.has_physical_nexus || n.has_economic_nexus,
+  // Base: exclude registered unless toggle is on
+  const filtered = showRegistered
+    ? searched
+    : searched.filter((n) => !n.is_registered);
+
+  const registeredCount = searched.filter((n) => n.is_registered).length;
+
+  // Unregistered exposure: nexus exists but not registered
+  const unregExposure = filtered.filter(
+    (n) =>
+      !n.is_registered && (n.has_physical_nexus || n.has_economic_nexus),
   );
 
-  // Approaching: no nexus yet, but economic progress >= 50% on either metric,
-  // AND not already registered (registered states don't need a "watch" alert)
+  // Approaching: no nexus yet, progress >= 50%, not registered
   const approaching = filtered.filter((n) => {
     if (n.has_physical_nexus || n.has_economic_nexus) return false;
     if (n.is_registered) return false;
     return (n.economic_progress_percent ?? 0) >= 50;
   });
 
-  // Below threshold: everything else
+  // Below threshold (unregistered)
   const safe = filtered.filter(
     (n) =>
       !n.has_physical_nexus &&
       !n.has_economic_nexus &&
-      ((n.economic_progress_percent ?? 0) < 50 || n.is_registered),
+      (n.economic_progress_percent ?? 0) < 50 &&
+      !n.is_registered,
   );
+
+  // Registered (only shown when toggle is on)
+  const registeredStates = showRegistered
+    ? searched.filter((n) => n.is_registered)
+    : [];
+
+  const defaultTab = unregExposure.length > 0
+    ? "exposure"
+    : approaching.length > 0
+    ? "approaching"
+    : "safe";
 
   return (
     <div className="space-y-6">
@@ -358,24 +391,37 @@ export default function NexusPage() {
             Nexus Monitor
           </h1>
           <p className="text-sm text-muted-foreground">
-            Physical and economic nexus by state
+            Unregistered exposure &middot; Physical and economic nexus
           </p>
         </div>
-        <div className="relative w-full sm:w-64">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Filter states..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-8"
-          />
+        <div className="flex items-center gap-3">
+          <div className="relative w-full sm:w-56">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Filter states..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8"
+            />
+          </div>
+          {registeredCount > 0 && (
+            <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={showRegistered}
+                onChange={(e) => setShowRegistered(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-muted-foreground/30"
+              />
+              Show registered ({registeredCount})
+            </label>
+          )}
         </div>
       </div>
 
-      <Tabs defaultValue="nexus">
+      <Tabs defaultValue={defaultTab}>
         <TabsList>
-          <TabsTrigger value="nexus">
-            Active Nexus ({withNexus.length})
+          <TabsTrigger value="exposure">
+            Unregistered Exposure ({unregExposure.length})
           </TabsTrigger>
           <TabsTrigger value="approaching">
             Approaching ({approaching.length})
@@ -383,15 +429,22 @@ export default function NexusPage() {
           <TabsTrigger value="safe">
             Below Threshold ({safe.length})
           </TabsTrigger>
+          {showRegistered && registeredStates.length > 0 && (
+            <TabsTrigger value="registered">
+              Registered ({registeredStates.length})
+            </TabsTrigger>
+          )}
         </TabsList>
 
-        <TabsContent value="nexus" className="mt-4">
+        <TabsContent value="exposure" className="mt-4">
           <Card>
             <CardContent className="p-0">
               <NexusTable
-                rows={withNexus}
+                rows={unregExposure}
                 stateRules={stateRules}
                 volumes={volumes}
+                emptyTitle="No unregistered exposure"
+                emptyDescription="All states with nexus are registered. Check the Registrations page for details."
               />
             </CardContent>
           </Card>
@@ -404,6 +457,8 @@ export default function NexusPage() {
                 rows={approaching}
                 stateRules={stateRules}
                 volumes={volumes}
+                emptyTitle="No states approaching"
+                emptyDescription="No unregistered states are near the economic nexus threshold."
               />
             </CardContent>
           </Card>
@@ -416,10 +471,28 @@ export default function NexusPage() {
                 rows={safe}
                 stateRules={stateRules}
                 volumes={volumes}
+                emptyTitle="No states below threshold"
+                emptyDescription=""
               />
             </CardContent>
           </Card>
         </TabsContent>
+
+        {showRegistered && (
+          <TabsContent value="registered" className="mt-4">
+            <Card>
+              <CardContent className="p-0">
+                <NexusTable
+                  rows={registeredStates}
+                  stateRules={stateRules}
+                  volumes={volumes}
+                  emptyTitle="No registered states"
+                  emptyDescription=""
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
 
       <Disclaimer />
