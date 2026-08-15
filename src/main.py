@@ -585,6 +585,26 @@ def _print_spapi_result(label: str, result: dict):
                 )
 
 
+@cli.command("playbook")
+@click.argument("state_code")
+@click.option("--export", "export_path", default=None,
+              help="Write playbook to a file (e.g., ./exports/CA_playbook.md)")
+def playbook_cmd(state_code, export_path):
+    """Generate a compliance playbook for a state."""
+    state_code = state_code.upper()
+    from src.compliance.playbook import build_playbook
+    md = build_playbook(state_code)
+
+    if export_path:
+        from pathlib import Path
+        p = Path(export_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(md, encoding="utf-8")
+        click.echo(f"Playbook exported to {p}")
+    else:
+        click.echo(md)
+
+
 @cli.command("integrity-check")
 def integrity_check():
     """Verify data integrity: SKU case, duplicate keys, channel totals."""

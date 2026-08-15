@@ -1,0 +1,98 @@
+{
+  "state_code": "TX",
+  "state_name": "Texas",
+  "last_reviewed": "2026-08-15",
+  "confidence": "high",
+  "sources": [
+    "Tex. Tax Code § 151.107",
+    "34 TAC § 3.286",
+    "Tex. Tax Code Ch. 171",
+    "TX Comptroller remote seller guidance"
+  ],
+  "scenarios": {
+    "register_sales_tax": {
+      "title": "Register for Texas Sales Tax (Comptroller)",
+      "summary": "If you have physical nexus (FBA inventory) or economic nexus ($500k in preceding 12 months, includes marketplace sales) in Texas, register for a sales tax permit.",
+      "severity": "action",
+      "steps": [
+        {
+          "order": 1,
+          "title": "Determine if registration is needed",
+          "detail": "TX nexus triggers: (1) FBA inventory in TX warehouses (major FBA state: DFW, HOU, SAT, ELP), (2) $500,000+ in TX sales in the preceding 12 months (includes marketplace sales). TX has no transaction threshold."
+        },
+        {
+          "order": 2,
+          "title": "Apply for a Texas Sales Tax Permit online",
+          "detail": "Use the Comptroller's eSystems portal. You will need: Federal EIN, LLC formation documents, responsible party SSN, TX Registered Agent if required, estimated sales volume.",
+          "url": "https://comptroller.texas.gov/taxes/sales/",
+          "url_label": "TX Comptroller Sales Tax",
+          "account_to_create": "eSystems / Webfile account",
+          "documents_needed": ["Federal EIN", "LLC certificate", "Responsible party SSN", "TX Secretary of State filing number (if registered in TX)"],
+          "verification_check": "Sales tax permit number issued."
+        },
+        {
+          "order": 3,
+          "title": "Note filing frequency and due dates",
+          "detail": "TX Comptroller assigns filing frequency based on liability (typically quarterly for moderate-volume sellers). Returns due the 20th of the month following the reporting period. TX offers a 0.5% timely filing discount (max $2,500/period).",
+          "frequency": "Quarterly (typical)",
+          "deadline_rule": "20th of month following period end"
+        },
+        {
+          "order": 4,
+          "title": "Configure Shopify tax collection for TX",
+          "detail": "Enable TX tax collection in Shopify. Amazon handles collection on marketplace orders."
+        },
+        {
+          "order": 5,
+          "title": "Update dashboard registrations",
+          "detail": "Mark TX as registered with correct frequency and due day."
+        }
+      ],
+      "related_urls": {
+        "registration_url": "https://comptroller.texas.gov/taxes/sales/",
+        "filing_url": "https://comptroller.texas.gov/taxes/file-pay/"
+      }
+    },
+    "franchise_or_entity": {
+      "title": "Texas Franchise Tax (No Tax Due Report + PIR)",
+      "summary": "CRITICAL: All entities doing business in Texas must file franchise tax reports annually. FBA inventory creates 'doing business' nexus. Even if your revenue is below the ~$2.47M exemption (no tax owed), you MUST file the No Tax Due report and Public Information Report. Failure to file can result in forfeiture of the right to do business in Texas.",
+      "severity": "critical",
+      "steps": [
+        {
+          "order": 1,
+          "title": "Understand the obligation",
+          "detail": "Texas franchise tax applies to all entities doing business in TX. FBA inventory creates nexus. The ~$2.47M total revenue exemption means most small sellers owe $0 in actual franchise tax. However, the filing obligation exists regardless of whether tax is owed.",
+          "common_pitfalls": ["Most common failure: FBA sellers register for TX sales tax but never file franchise tax reports. The obligation accrues silently.", "Failure to file: $50 penalty per report + potential forfeiture of right to do business in TX + personal liability for officers/managers."]
+        },
+        {
+          "order": 2,
+          "title": "Register for franchise tax (if not already)",
+          "detail": "If your LLC is already registered with the TX Secretary of State (or has filed a TX sales tax permit application), you may already be in the franchise tax system. Check via the TX Comptroller's franchise tax search.",
+          "url": "https://comptroller.texas.gov/taxes/franchise/",
+          "url_label": "TX Comptroller Franchise Tax"
+        },
+        {
+          "order": 3,
+          "title": "File the No Tax Due Report annually",
+          "detail": "If your total revenue is below ~$2.47M, file the No Tax Due Report. This is a simple declaration that no franchise tax is owed. Filed via Webfile.",
+          "deadline_rule": "May 15 annually (for prior calendar year)",
+          "form_name": "No Tax Due Report (Form 05-163)",
+          "verification_check": "Filing confirmation in Webfile.",
+          "common_pitfalls": ["Extension available to November 15 but must be requested.", "The report covers the prior calendar year's activity."]
+        },
+        {
+          "order": 4,
+          "title": "File the Public Information Report (PIR) annually",
+          "detail": "Filed alongside the No Tax Due Report. Requires: entity name, SOS file number, principal office, registered agent, officer/director/manager names. Filed via Webfile.",
+          "deadline_rule": "May 15 annually",
+          "form_name": "Public Information Report (Form 05-102)",
+          "verification_check": "PIR accepted in Webfile."
+        }
+      ],
+      "related_urls": {
+        "franchise_url": "https://comptroller.texas.gov/taxes/franchise/",
+        "filing_url": "https://comptroller.texas.gov/taxes/file-pay/"
+      }
+    }
+  }
+}

@@ -39,7 +39,7 @@ const monitorLinks: NavItem[] = [
   { href: "/nexus", label: "Nexus Monitor", icon: MapPin },
   { href: "/sales-map", label: "Sales Map", icon: MapPinned },
   { href: "/skus", label: "SKU Performance", icon: Package },
-  { href: "/rules", label: "Rules & Rulings", icon: BookOpen },
+  { href: "/compliance", label: "Compliance Guides", icon: BookOpen },
   { href: "/data", label: "Data & Export", icon: Database },
 ];
 

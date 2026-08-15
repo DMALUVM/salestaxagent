@@ -1,0 +1,73 @@
+{
+  "state_code": "_GENERIC",
+  "state_name": "Generic Template",
+  "last_reviewed": "2026-08-15",
+  "confidence": "medium",
+  "sources": ["General DOR remote seller guidance patterns"],
+  "scenarios": {
+    "register_sales_tax": {
+      "title": "Register for Sales Tax — {state_name}",
+      "summary": "If you have physical nexus (FBA inventory) or economic nexus in {state_name}, you may need to register for a sales tax permit with the state's Department of Revenue (DOR).",
+      "severity": "action",
+      "steps": [
+        {
+          "order": 1,
+          "title": "Find the official registration page",
+          "detail": "Search for '{state_name} Department of Revenue remote seller registration' or '{state_name} sales tax permit application'. Most states offer online registration.",
+          "common_pitfalls": ["Some states call it a 'Certificate of Authority', others a 'Sales Tax Permit' or 'Seller's Permit'. They are functionally equivalent."]
+        },
+        {
+          "order": 2,
+          "title": "Gather required information",
+          "detail": "Typically needed: Federal EIN, LLC formation documents, responsible party SSN, business address, estimated sales volume, NAICS code.",
+          "documents_needed": ["Federal EIN", "LLC formation certificate", "Responsible party SSN"]
+        },
+        {
+          "order": 3,
+          "title": "Complete the application",
+          "detail": "Apply as a remote seller or out-of-state dealer. Indicate that you sell via marketplace (Amazon) and direct website (Shopify).",
+          "verification_check": "Receive a sales tax permit/certificate number."
+        },
+        {
+          "order": 4,
+          "title": "Note assigned filing frequency and due dates",
+          "detail": "Most states assign monthly, quarterly, or annual filing. Returns are typically due the 20th of the month following the reporting period. Some states require zero-filing even in months with no sales.",
+          "frequency": "Varies by state and liability",
+          "deadline_rule": "Typically 20th of following month"
+        },
+        {
+          "order": 5,
+          "title": "Configure Shopify tax collection",
+          "detail": "Enable tax collection for this state in Shopify Admin > Settings > Taxes. Amazon handles marketplace orders."
+        },
+        {
+          "order": 6,
+          "title": "Update dashboard registrations",
+          "detail": "Mark the state as registered with correct frequency and due day. Generate filing calendar entries."
+        }
+      ]
+    },
+    "marketplace_facilitator_notes": {
+      "title": "Amazon Marketplace Facilitator — {state_name}",
+      "summary": "Amazon collects and remits sales tax on marketplace orders in all states with sales tax. This does not eliminate your registration or filing obligations if you have nexus.",
+      "severity": "info",
+      "steps": [
+        {
+          "order": 1,
+          "title": "Amazon handles sales tax on Amazon orders",
+          "detail": "You do not owe additional sales tax on Amazon-facilitated orders."
+        },
+        {
+          "order": 2,
+          "title": "You may still need to register and file",
+          "detail": "If you have physical or economic nexus, registration may be required. Returns typically show Amazon-collected amounts as a deduction or marketplace facilitator line."
+        },
+        {
+          "order": 3,
+          "title": "Collect on Shopify/direct",
+          "detail": "You are responsible for collecting and remitting on direct (Shopify) orders."
+        }
+      ]
+    }
+  }
+}
