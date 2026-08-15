@@ -1,0 +1,138 @@
+{
+  "state_code": "CA",
+  "state_name": "California",
+  "last_reviewed": "2026-08-15",
+  "confidence": "high",
+  "sources": [
+    "CDTFA Publication 109",
+    "Cal. Rev. & Tax. Code § 6203(c)",
+    "Cal. Rev. & Tax. Code § 17941, § 23101",
+    "FTB LLC Tax webpage"
+  ],
+  "scenarios": {
+    "register_sales_tax": {
+      "title": "Register for California Sales Tax (CDTFA)",
+      "summary": "If you have physical nexus (FBA inventory) or economic nexus ($500k threshold, includes marketplace sales) in California, you must register for a seller's permit with CDTFA.",
+      "severity": "action",
+      "steps": [
+        {
+          "order": 1,
+          "title": "Determine if registration is needed",
+          "detail": "CA nexus triggers: (1) FBA inventory stored in CA warehouses, (2) $500,000+ in total CA sales including marketplace sales in the current or prior calendar year. If either applies, registration is required.",
+          "verification_check": "Review your Nexus Monitor page — CA should show physical and/or economic nexus.",
+          "common_pitfalls": ["CA includes Amazon marketplace sales in the $500k threshold — this is unusual among states."]
+        },
+        {
+          "order": 2,
+          "title": "Create a CDTFA online account",
+          "detail": "Go to the CDTFA online registration page. You will need: your Federal EIN, LLC formation documents (state of formation, date), responsible party SSN, estimated monthly CA sales, business type (LLC, sole prop, etc.), and your physical business address.",
+          "url": "https://onlineservices.cdtfa.ca.gov/_/",
+          "url_label": "CDTFA Online Services",
+          "account_to_create": "CDTFA Online Services account",
+          "documents_needed": ["Federal EIN", "LLC formation certificate or articles", "Responsible party SSN", "Bank account for ACH (optional)"],
+          "verification_check": "You receive a Seller's Permit number (starts with SR or similar)."
+        },
+        {
+          "order": 3,
+          "title": "Apply for a Seller's Permit",
+          "detail": "Within the CDTFA portal, complete the online registration application. Select 'out-of-state seller' or 'remote seller' as appropriate. You may be asked about inventory locations — include CA FBA warehouses if applicable. CDTFA may assign a filing frequency (monthly, quarterly, or annual) based on estimated liability.",
+          "form_name": "CDTFA-400-SPA (online equivalent)",
+          "verification_check": "Seller's Permit number issued and visible in CDTFA account.",
+          "common_pitfalls": ["If you only sell through Amazon marketplace, you still need the permit if you have CA nexus — Amazon's collection does not eliminate your registration obligation."]
+        },
+        {
+          "order": 4,
+          "title": "Note your assigned filing frequency",
+          "detail": "CDTFA will assign monthly, quarterly, or annual filing. Quarterly is most common for moderate-volume sellers. Returns are typically due the last day of the month following the reporting period (e.g., Q1 return due April 30).",
+          "frequency": "Quarterly (typical); monthly if liability >$17k/month",
+          "deadline_rule": "Last day of month following period end",
+          "verification_check": "Filing frequency visible in your CDTFA account under 'Account Information'."
+        },
+        {
+          "order": 5,
+          "title": "Configure Shopify tax collection for CA",
+          "detail": "In Shopify Admin > Settings > Taxes, ensure California sales tax is enabled for collection on direct orders. Amazon already collects as marketplace facilitator. This step is for your Shopify/direct channel only.",
+          "verification_check": "Test checkout shows CA tax being calculated on a Shopify order.",
+          "common_pitfalls": ["Do not double-collect on Amazon orders — Amazon handles this.", "CA has city/county/district rates; Shopify typically handles rate lookup if configured."]
+        },
+        {
+          "order": 6,
+          "title": "Update your Sales Tax Agent registration",
+          "detail": "On the Registrations page, mark CA as registered, set filing frequency to match CDTFA assignment, and set the due day. Generate filing calendar entries.",
+          "verification_check": "CA appears as 'Registered' in the dashboard with correct frequency."
+        }
+      ],
+      "related_urls": {
+        "registration_url": "https://onlineservices.cdtfa.ca.gov/_/",
+        "filing_url": "https://onlineservices.cdtfa.ca.gov/_/",
+        "help_url": "https://www.cdtfa.ca.gov/taxes-and-fees/use-tax.htm"
+      }
+    },
+    "franchise_or_entity": {
+      "title": "California $800 LLC Franchise Tax (FTB)",
+      "summary": "CRITICAL: California imposes a minimum $800 annual franchise tax on LLCs 'doing business' in the state. FBA inventory storage is treated as 'doing business' by the FTB. This is separate from CDTFA sales tax and administered by a different agency.",
+      "severity": "critical",
+      "steps": [
+        {
+          "order": 1,
+          "title": "Understand the obligation",
+          "detail": "The $800 minimum franchise tax applies to every LLC doing business in California, regardless of whether the LLC is formed in CA or another state (e.g., Maryland). FBA inventory storage constitutes 'doing business' per FTB and OTA rulings. This tax is owed even if: (1) Amazon handles sales tax collection, (2) you have no employees in CA, (3) your LLC is formed elsewhere.",
+          "common_pitfalls": ["This is the most commonly overlooked obligation for FBA sellers.", "The $800 is per YEAR, not per filing period.", "Additional LLC fee ($900-$11,790) if CA-sourced income exceeds $250k."]
+        },
+        {
+          "order": 2,
+          "title": "Register with the FTB (if out-of-state LLC)",
+          "detail": "If your LLC is formed outside CA (e.g., Maryland), you must register as a foreign LLC doing business in CA with the Secretary of State, then register with FTB. Search for 'FTB foreign LLC registration' or use the FTB website.",
+          "url": "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html",
+          "url_label": "FTB LLC Tax Information",
+          "account_to_create": "FTB business account (MyFTB)",
+          "documents_needed": ["Federal EIN", "LLC formation certificate from home state", "CA Secretary of State filing (Statement of Information)", "Responsible party information"],
+          "verification_check": "FTB account shows LLC registered with a CA entity number."
+        },
+        {
+          "order": 3,
+          "title": "Pay the $800 annual franchise tax",
+          "detail": "The $800 minimum is due by the 15th day of the 4th month after the beginning of the LLC's tax year (April 15 for calendar-year LLCs). For a new registration, the first $800 is due within the first year. Pay via MyFTB or voucher.",
+          "deadline_rule": "April 15 annually (calendar year LLCs)",
+          "form_name": "Form 568 (LLC Return of Income) + LLC Tax Voucher (FTB 3522)",
+          "verification_check": "Payment confirmation in MyFTB; Form 568 filed.",
+          "common_pitfalls": ["Late payment penalty: 5% of unpaid tax + 0.5%/month.", "This is NOT the same as CDTFA sales tax — different agency, different login, different deadline."]
+        },
+        {
+          "order": 4,
+          "title": "File annual LLC return (Form 568)",
+          "detail": "File Form 568 (LLC Return of Income) annually. Due by March 15 for calendar-year LLCs (or 15th day of 3rd month after tax year end). Extension available to September 15.",
+          "deadline_rule": "March 15 annually (calendar year); extension to September 15",
+          "form_name": "Form 568",
+          "verification_check": "Form 568 accepted by FTB."
+        }
+      ],
+      "related_urls": {
+        "franchise_url": "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html",
+        "help_url": "https://www.ftb.ca.gov/help/contact/index.html"
+      }
+    },
+    "marketplace_facilitator_notes": {
+      "title": "Amazon Marketplace Facilitator — California",
+      "summary": "Amazon collects and remits CA sales tax on marketplace orders. However, this does NOT eliminate your registration, filing, or franchise tax obligations.",
+      "severity": "info",
+      "steps": [
+        {
+          "order": 1,
+          "title": "Amazon handles sales tax collection on Amazon orders",
+          "detail": "Amazon is a registered marketplace facilitator in CA. It collects and remits sales tax on all orders fulfilled through its platform. You do not owe additional sales tax on Amazon-facilitated orders."
+        },
+        {
+          "order": 2,
+          "title": "You still need to register and file",
+          "detail": "Even though Amazon collects, you must still: (1) register for a seller's permit with CDTFA, (2) file returns (reporting Amazon-collected amounts as marketplace facilitator deductions), (3) pay the $800 FTB franchise tax if you have CA nexus."
+        },
+        {
+          "order": 3,
+          "title": "Collect tax on Shopify/direct orders",
+          "detail": "For orders through your own website (Shopify), you are responsible for collecting and remitting CA sales tax at the appropriate combined rate."
+        }
+      ]
+    }
+  }
+}

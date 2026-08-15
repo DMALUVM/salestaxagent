@@ -165,6 +165,7 @@ export default function CompliancePage() {
   const [inputVal, setInputVal] = useState(stateParam || "CA");
   const [data, setData] = useState<{
     config: PlaybookConfig;
+    playbook_found: boolean;
     context: Context;
   } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -307,6 +308,29 @@ export default function CompliancePage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Playbook not found warning */}
+          {data && !data.playbook_found && (
+            <Card className="border-amber-200 dark:border-amber-900">
+              <CardContent className="py-6 text-center text-sm text-muted-foreground">
+                <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-amber-500" />
+                <p className="font-medium">
+                  Playbook content not found for {config?.state_code ?? state}
+                </p>
+                <p className="mt-1 text-xs">
+                  Run{" "}
+                  <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+                    python scripts/seed_compliance_playbooks.py
+                  </code>{" "}
+                  then{" "}
+                  <code className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+                    python scripts/sync_playbooks_to_dashboard.py
+                  </code>{" "}
+                  and redeploy.
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Scenarios */}
           {config?.scenarios &&

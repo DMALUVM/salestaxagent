@@ -1,0 +1,30 @@
+{
+  "state_code": "PA",
+  "state_name": "Pennsylvania",
+  "last_reviewed": "2026-08-15",
+  "confidence": "contested",
+  "sources": ["Online Merchants Guild v. Hassell (Pa. Commw. Ct. 2022)", "72 P.S. § 7201(b)", "72 P.S. § 7213.2"],
+  "scenarios": {
+    "register_sales_tax": {
+      "title": "Register for Pennsylvania Sales Tax — CONTESTED FBA Nexus",
+      "summary": "PA nexus from FBA inventory is CONTESTED. The Online Merchants Guild v. Hassell ruling found FBA inventory alone insufficient for nexus. However, economic nexus ($100k direct sales) is clear. Most practitioners recommend registration as the conservative approach.",
+      "severity": "action",
+      "steps": [
+        {"order": 1, "title": "⚠ Evaluate with CPA before registering", "detail": "PA FBA nexus is the most actively contested position nationwide. The 2022 Commonwealth Court ruling found that FBA inventory alone, without purposeful direction by the seller, was insufficient to establish nexus. However: (1) the ruling is fact-specific, (2) PA DOR may distinguish your case, (3) economic nexus ($100k) is separate and clear. Consult a CPA before deciding.", "common_pitfalls": ["Registering may create obligations retroactively if DOR interprets your facts differently.", "NOT registering carries risk if DOR asserts nexus despite the OMG ruling."]},
+        {"order": 2, "title": "If registering: apply via PA e-TIDES", "detail": "Register as a remote seller through PA's e-TIDES online system. Apply for a Sales Tax License.", "url": "https://www.etides.state.pa.us/", "url_label": "PA e-TIDES", "documents_needed": ["Federal EIN", "LLC details"], "verification_check": "Receive PA Sales Tax License number."},
+        {"order": 3, "title": "Filing details", "detail": "PA assigns monthly filing by default. Returns due the 20th of the following month. 1% timely filing discount (max $25/month).", "deadline_rule": "20th of following month", "frequency": "Monthly (default)"}
+      ],
+      "related_urls": {"registration_url": "https://www.etides.state.pa.us/"}
+    },
+    "marketplace_facilitator_notes": {
+      "title": "Amazon Marketplace & PA",
+      "summary": "Amazon collects PA sales tax as marketplace facilitator. Registration and filing may still be required if you have nexus.",
+      "severity": "info",
+      "steps": [
+        {"order": 1, "title": "Amazon handles PA sales tax on marketplace orders", "detail": "Amazon remits; you do not owe additional sales tax on Amazon PA orders."},
+        {"order": 2, "title": "If registered, file returns showing marketplace deduction", "detail": "PA returns typically have a line for marketplace facilitator deductions."},
+        {"order": 3, "title": "Shopify direct orders require collection if registered", "detail": "If you register, enable PA tax collection in Shopify for direct orders."}
+      ]
+    }
+  }
+}

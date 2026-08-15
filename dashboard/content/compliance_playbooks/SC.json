@@ -1,0 +1,68 @@
+{
+  "state_code": "SC",
+  "state_name": "South Carolina",
+  "last_reviewed": "2026-08-15",
+  "confidence": "medium",
+  "sources": [
+    "South Carolina DOR remote seller guidance"
+  ],
+  "scenarios": {
+    "register_sales_tax": {
+      "title": "Register for South Carolina Sales Tax",
+      "summary": "If you have physical nexus (FBA inventory) or economic nexus ($100,000 (includes marketplace sales)) in South Carolina, registration is required.",
+      "severity": "action",
+      "steps": [
+        {
+          "order": 1,
+          "title": "Register with South Carolina DOR",
+          "detail": "Apply as a remote seller. Threshold: $100,000 (includes marketplace sales). FBA inventory likely creates nexus (majority rule; no specific carve-out found).",
+          "url": "https://dor.sc.gov/",
+          "url_label": "SC DOR",
+          "documents_needed": [
+            "Federal EIN",
+            "LLC formation certificate",
+            "Responsible party SSN"
+          ],
+          "verification_check": "Receive a South Carolina sales tax permit/license number."
+        },
+        {
+          "order": 2,
+          "title": "Note filing frequency and due dates",
+          "detail": "Typical: monthly filing. Returns typically due the 20th of the month following the period. Verify assigned frequency after registration.",
+          "frequency": "Monthly",
+          "deadline_rule": "20th of following month (verify with DOR)"
+        },
+        {
+          "order": 3,
+          "title": "Configure Shopify and update dashboard",
+          "detail": "Enable SC tax collection in Shopify for direct orders. Amazon handles marketplace orders. Mark SC as registered in the dashboard."
+        }
+      ],
+      "related_urls": {
+        "registration_url": "https://dor.sc.gov/"
+      }
+    },
+    "marketplace_facilitator_notes": {
+      "title": "Amazon Marketplace \u2014 South Carolina",
+      "summary": "Amazon collects and remits SC sales tax on marketplace orders. This does not eliminate registration or filing obligations.",
+      "severity": "info",
+      "steps": [
+        {
+          "order": 1,
+          "title": "Amazon handles sales tax on Amazon orders",
+          "detail": "You do not owe additional sales tax on Amazon-facilitated orders."
+        },
+        {
+          "order": 2,
+          "title": "Register and file if nexus exists",
+          "detail": "If you have physical or economic nexus, registration may be required. Returns show Amazon-collected amounts as marketplace deductions."
+        },
+        {
+          "order": 3,
+          "title": "Collect on Shopify/direct",
+          "detail": "You are responsible for collecting and remitting on direct (Shopify) orders shipped to SC."
+        }
+      ]
+    }
+  }
+}
