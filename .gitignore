@@ -11,3 +11,5 @@ incoming/shopify/*.csv
 dist/
 build/
 .pytest_cache/
+.vercel
+.env*
