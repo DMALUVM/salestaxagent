@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     incoming_dir: str = str(PROJECT_ROOT / "incoming")
     archive_dir: str = str(PROJECT_ROOT / "archive")
-    shopify_poll_interval_hours: int = 4
+    shopify_poll_interval_hours: int = 2
     folder_watch_interval_seconds: int = 60
     alert_days_before_deadline: int = 14
     economic_nexus_warn_percent: int = 80

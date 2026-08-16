@@ -935,6 +935,12 @@ def run():
         )
         click.echo("[Scheduler] Job worker every 45s")
 
+        # Print full schedule table
+        click.echo("\n── Schedule ─────────────────────────────────────")
+        for job in scheduler.get_jobs():
+            click.echo(f"  {job.id:<20s}  trigger: {job.trigger}")
+        click.echo("─────────────────────────────────────────────────")
+
         click.echo("\nAgent is running. Watching for files and running scheduled tasks.\n")
 
         def _shutdown(signum, frame):
@@ -957,15 +963,47 @@ def run():
 
 def _run_shopify_poll():
     from src.parsers.shopify_orders import fetch_shopify_orders_api
-    try:
-        # Always pull ALL orders (no since_date) to ensure complete
-        # monthly totals.  The delete-then-upsert pattern in the
-        # parser replaces all shopify rows atomically.
-        result = fetch_shopify_orders_api()
-        print(f"[Shopify Poll] {result.get('orders_fetched', 0)} orders, "
-              f"{result.get('rows_inserted', 0)} rows inserted")
-    except Exception as e:
-        print(f"[Shopify Poll] Error: {e}")
+    from src.db import log_ingestion
+    from datetime import datetime, timezone
+    import time
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    attempts = 0
+    last_err = None
+
+    for attempt in range(2):  # try twice
+        attempts = attempt + 1
+        try:
+            result = fetch_shopify_orders_api()
+            orders = result.get("orders_fetched", 0)
+            inserted = result.get("rows_inserted", 0)
+            print(f"[Shopify Poll] {ts} OK — {orders} orders, {inserted} rows"
+                  + (f" (retry {attempt})" if attempt else ""))
+            log_ingestion(
+                filename=f"shopify_api_poll_{ts}",
+                file_type="shopify_api",
+                rows_total=orders,
+                rows_inserted=inserted,
+                status="success",
+            )
+            return  # success — done
+        except Exception as e:
+            last_err = e
+            print(f"[Shopify Poll] {ts} attempt {attempts} failed: {e}")
+            if attempt == 0:
+                time.sleep(30)  # wait 30s before retry
+
+    # Both attempts failed
+    err_text = str(last_err)[:500]
+    print(f"[Shopify Poll] {ts} FAILED after {attempts} attempts: {err_text}")
+    log_ingestion(
+        filename=f"shopify_api_poll_{ts}",
+        file_type="shopify_api",
+        rows_total=0,
+        rows_inserted=0,
+        status="failed",
+        error_message=err_text,
+    )
 
 
 def _run_daily_analysis():
@@ -1074,25 +1112,58 @@ def _run_deadline_check():
 
 
 def _run_spapi_refresh():
-    from datetime import date, timedelta
+    from datetime import date, timedelta, datetime, timezone
     from src.amazon_sp.reports import fetch_orders, fetch_inventory
+    from src.db import log_ingestion
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=7)
     errors = []
     try:
         orders = fetch_orders(start, end)
-        print(f"[SP-API] Orders: {orders.get('rows_inserted', 0)} rows, "
+        inserted = orders.get("rows_inserted", 0)
+        print(f"[SP-API] {ts} Orders: {inserted} rows, "
               f"${orders.get('total_gross_sales', 0):,.0f} sales")
+        log_ingestion(
+            filename=f"spapi_orders_{ts}",
+            file_type="amazon_spapi",
+            rows_total=orders.get("rows_total", inserted),
+            rows_inserted=inserted,
+            status="success",
+        )
     except Exception as e:
         errors.append(f"Orders: {e}")
-        print(f"[SP-API] Orders error: {e}")
+        print(f"[SP-API] {ts} Orders error: {e}")
+        log_ingestion(
+            filename=f"spapi_orders_{ts}",
+            file_type="amazon_spapi",
+            rows_total=0, rows_inserted=0,
+            status="failed",
+            error_message=str(e)[:500],
+        )
     try:
         inv = fetch_inventory(start, end)
-        print(f"[SP-API] Inventory: {inv.get('rows_inserted', 0)} rows, "
+        inserted = inv.get("rows_inserted", 0)
+        print(f"[SP-API] {ts} Inventory: {inserted} rows, "
               f"states: {inv.get('states_found', [])}")
+        log_ingestion(
+            filename=f"spapi_inventory_{ts}",
+            file_type="amazon_inventory",
+            rows_total=inv.get("rows_total", inserted),
+            rows_inserted=inserted,
+            status="success",
+        )
     except Exception as e:
         errors.append(f"Inventory: {e}")
-        print(f"[SP-API] Inventory error: {e}")
+        print(f"[SP-API] {ts} Inventory error: {e}")
+        log_ingestion(
+            filename=f"spapi_inventory_{ts}",
+            file_type="amazon_inventory",
+            rows_total=0, rows_inserted=0,
+            status="failed",
+            error_message=str(e)[:500],
+        )
     if errors:
         try:
             from src.alerts.telegram import send_telegram

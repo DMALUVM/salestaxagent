@@ -1,16 +1,16 @@
 import { Suspense } from "react";
-import ComplianceClient from "./ComplianceClient";
+import ComplianceHub from "./ComplianceHub";
 
 export default function CompliancePage() {
   return (
     <Suspense
       fallback={
         <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-          Loading compliance guide…
+          Loading compliance hub...
         </div>
       }
     >
-      <ComplianceClient />
+      <ComplianceHub />
     </Suspense>
   );
 }

@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import { useEffect, useState } from "react";
+import { getSupabase, isConfigured } from "@/lib/supabase";
 
 interface NavItem {
   href: string;
@@ -45,8 +46,44 @@ const monitorLinks: NavItem[] = [
   { href: "/data", label: "Data & Export", icon: Database },
 ];
 
+function useComplianceCount() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (!isConfigured()) return;
+    async function load() {
+      try {
+        const sb = getSupabase();
+        // Try with compliance columns first
+        const { count: c, error } = await sb
+          .from("nexus_status")
+          .select("state_code", { count: "exact", head: true })
+          .or("has_physical_nexus.eq.true,has_economic_nexus.eq.true")
+          .eq("is_registered", false)
+          .or("compliance_resolved.is.null,compliance_resolved.eq.false");
+
+        if (!error && typeof c === "number") {
+          setCount(c);
+          return;
+        }
+        // Fallback: columns may not exist yet
+        const { count: c2 } = await sb
+          .from("nexus_status")
+          .select("state_code", { count: "exact", head: true })
+          .or("has_physical_nexus.eq.true,has_economic_nexus.eq.true")
+          .eq("is_registered", false);
+        if (typeof c2 === "number") setCount(c2);
+      } catch {
+        // ignore
+      }
+    }
+    load();
+  }, []);
+  return count;
+}
+
 function NavLinks({ onClick }: { onClick?: () => void }) {
   const pathname = usePathname();
+  const complianceCount = useComplianceCount();
 
   function renderLink(item: NavItem) {
     const active =
@@ -54,6 +91,7 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
         ? pathname === "/"
         : pathname.startsWith(item.href);
     const Icon = item.icon;
+    const showBadge = item.href === "/compliance" && complianceCount > 0;
     return (
       <Link
         key={item.href}
@@ -67,6 +105,11 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
       >
         <Icon className="h-4 w-4" />
         {item.label}
+        {showBadge && (
+          <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-semibold text-white">
+            {complianceCount}
+          </span>
+        )}
       </Link>
     );
   }

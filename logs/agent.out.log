@@ -10,3 +10,48 @@ Press Ctrl+C to stop.
 
 Agent is running. Watching for files and running scheduled tasks.
 
+Starting Sales Tax Compliance Agent...
+Press Ctrl+C to stop.
+
+[Watcher] Watching /Users/maloney_assistant/sales-tax-agent/incoming for new files...
+[Scheduler] Shopify polling every 4h
+[Scheduler] Daily analysis at 08:00
+[Scheduler] Deadline check at 09:00
+[Scheduler] SP-API refresh daily at 06:00
+[Scheduler] Source monitoring every Monday at 07:00
+[Scheduler] CPA exports daily at 06:30
+[Scheduler] Job worker every 45s
+
+Agent is running. Watching for files and running scheduled tasks.
+
+[Job Worker] Running job 22010694-2a84-4041-a46b-3d3650a89f1c: export_cpa
+[CPA Export] Inventory presence: 4/4 files uploaded
+[CPA Export] Registration triage: 3 files uploaded
+[Job Worker] Job 22010694-2a84-4041-a46b-3d3650a89f1c completed
+
+Shutting down...
+Agent stopped.
+Starting Sales Tax Compliance Agent...
+Press Ctrl+C to stop.
+
+[Watcher] Watching /Users/maloney_assistant/sales-tax-agent/incoming for new files...
+[Scheduler] Shopify polling every 2h
+[Scheduler] Daily analysis at 08:00
+[Scheduler] Deadline check at 09:00
+[Scheduler] SP-API refresh daily at 06:00
+[Scheduler] Source monitoring every Monday at 07:00
+[Scheduler] CPA exports daily at 06:30
+[Scheduler] Job worker every 45s
+
+── Schedule ─────────────────────────────────────
+  shopify_poll          trigger: interval[2:00:00]
+  daily_analysis        trigger: cron[hour='8', minute='0']
+  deadline_check        trigger: cron[hour='9', minute='0']
+  spapi_refresh         trigger: cron[hour='6', minute='0']
+  source_monitoring     trigger: cron[day_of_week='mon', hour='7', minute='0']
+  cpa_exports           trigger: cron[hour='6', minute='30']
+  job_worker            trigger: interval[0:00:45]
+─────────────────────────────────────────────────
+
+Agent is running. Watching for files and running scheduled tasks.
+
