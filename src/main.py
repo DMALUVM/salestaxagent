@@ -785,6 +785,89 @@ def economic_nexus_audit(fmt, out_dir, no_upload):
             click.echo(f"  Storage upload failed (non-fatal): {e}", err=True)
 
 
+@cli.command("kintsugi-compare")
+@click.option("--file", "filepath", default=None,
+              help="Path to Kintsugi XLSX (auto-detects newest in incoming/kintsugi/)")
+@click.option("--window", "window", default="2024-01-01:",
+              help="Date window as START:END (e.g. 2024-01-01:2026-08-16)")
+@click.option("--out", "out_dir", default="exports/cpa",
+              help="Output directory for CSV")
+@click.option("--dry-run", is_flag=True, help="Parse Kintsugi only, no agent query")
+@click.option("--no-upload", is_flag=True, help="Skip Storage upload")
+def kintsugi_compare(filepath, window, out_dir, dry_run, no_upload):
+    """Reconcile Kintsugi transaction report against agent sales data."""
+    from pathlib import Path
+    from src.exports.kintsugi_compare import (
+        parse_jurisdiction_summary, build_comparison, build_csv, print_report,
+    )
+    from src.db import upload_to_storage
+
+    # Auto-detect file
+    if not filepath:
+        kdir = Path("incoming/kintsugi")
+        xlsx_files = sorted(kdir.glob("*.xlsx"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not xlsx_files:
+            click.echo("No .xlsx files found in incoming/kintsugi/", err=True)
+            return
+        filepath = str(xlsx_files[0])
+        click.echo(f"Auto-detected: {filepath}")
+
+    # Parse window
+    parts = window.split(":")
+    w_start = parts[0] if parts[0] else "2024-01-01"
+    w_end = parts[1] if len(parts) > 1 and parts[1] else None
+
+    if dry_run:
+        rows = parse_jurisdiction_summary(filepath)
+        click.echo(f"Kintsugi: {len(rows)} US states")
+        total = sum(r["txn_amount"] for r in rows)
+        click.echo(f"Grand total txn amount: ${total:,.2f}")
+        for r in sorted(rows, key=lambda x: x["txn_amount"], reverse=True)[:10]:
+            click.echo(f"  {r['state_code']}: ${r['txn_amount']:>12,.0f}  txns: {r['txn_count']:>6,}")
+        return
+
+    comparison = build_comparison(filepath, w_start, w_end)
+    report = print_report(comparison)
+    click.echo(report)
+
+    # Write CSV
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    csv_content = build_csv(comparison)
+    csv_path = out / f"Kintsugi_Reconciliation_{ts}.csv"
+    csv_path.write_text(csv_content, encoding="utf-8")
+    click.echo(f"\nCSV: {csv_path}")
+
+    # JSON
+    import json
+    json_path = out / f"Kintsugi_Reconciliation_{ts}.json"
+    json_path.write_text(json.dumps(comparison, indent=2, default=str), encoding="utf-8")
+    click.echo(f"JSON: {json_path}")
+
+    # Upload
+    if not no_upload:
+        click.echo("Uploading to Supabase Storage...")
+        try:
+            upload_to_storage("cpa-exports", "kintsugi-compare/latest.csv",
+                              csv_content.encode("utf-8"), "text/csv")
+            upload_to_storage("cpa-exports", "kintsugi-compare/latest.json",
+                              json.dumps(comparison, indent=2, default=str).encode("utf-8"),
+                              "application/json")
+            meta = {
+                "generated_at": comparison["generated_at"],
+                "window": comparison["window"],
+                "totals": comparison["totals"],
+                "flags_count": len(comparison["flags"]),
+            }
+            upload_to_storage("cpa-exports", "kintsugi-compare/meta.json",
+                              json.dumps(meta, indent=2).encode("utf-8"), "application/json")
+            click.echo("  Uploaded 3 files to cpa-exports/kintsugi-compare/")
+        except Exception as e:
+            click.echo(f"  Upload failed (non-fatal): {e}", err=True)
+
+
 @cli.command("registration-triage")
 @click.option("--format", "fmt", type=click.Choice(["md", "csv", "all"]),
               default="all", help="Output format")

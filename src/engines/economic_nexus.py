@@ -286,7 +286,8 @@ def evaluate_economic_nexus(reference_date: date | None = None) -> dict:
         if has_economic:
             nexus_row["economic_nexus_since"] = reference_date.isoformat()
 
-        # Preserve physical nexus + registration from existing record
+        # Preserve physical nexus, registration, and compliance from existing.
+        # Engine must NEVER overwrite user-set registration or compliance state.
         if existing:
             if existing.get("has_physical_nexus"):
                 nexus_row["has_physical_nexus"] = True
@@ -297,6 +298,13 @@ def evaluate_economic_nexus(reference_date: date | None = None) -> dict:
                 nexus_row["registration_date"] = existing.get("registration_date")
                 nexus_row["assigned_frequency"] = existing.get("assigned_frequency")
                 nexus_row["last_filed_through"] = existing.get("last_filed_through")
+            for keep_field in (
+                "compliance_resolved", "compliance_resolved_at",
+                "compliance_hidden", "compliance_notes",
+            ):
+                val = existing.get(keep_field)
+                if val is not None:
+                    nexus_row[keep_field] = val
 
             # If previously exceeded but not currently: CLEAR the flag.
             # Do not carry forward stale exceedances under rules that

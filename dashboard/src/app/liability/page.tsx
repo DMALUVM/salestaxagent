@@ -64,16 +64,84 @@ function resolveFiledThrough(
   n: NexusStatus,
   filedEntries: FilingEntry[],
 ): string | null {
-  // User-set value takes priority
   if (n.last_filed_through) return n.last_filed_through;
 
-  // Fall back to latest filed period_end from the calendar
   let latest: string | null = null;
   for (const f of filedEntries) {
     if (f.state_code !== n.state_code || f.status !== "filed") continue;
     if (!latest || f.period_end > latest) latest = f.period_end;
   }
   return latest;
+}
+
+/**
+ * Compute the next unfiled period's due date from filed_through + frequency.
+ *
+ * Rules:
+ *   1. Next period starts the day after filed_through.
+ *   2. Period end = end of the calendar month/quarter/half/year containing that start.
+ *   3. Due date = dueDay of the month after period end.
+ *   4. NEVER returns a due date whose period_end <= filed_through.
+ *   5. If filed_through is null, returns null (no mass OVERDUE).
+ *
+ * Examples:
+ *   MD quarterly, filed_through=2026-06-30, due_day=20
+ *     → next period = Q3 2026 (07-01 to 09-30), due = 2026-10-20
+ *   WV monthly, filed_through=2026-06-30, due_day=20
+ *     → next period = July 2026 (07-01 to 07-31), due = 2026-08-20
+ *   OH semi_annual, filed_through=2026-06-30, due_day=20
+ *     → next period = H2 2026 (07-01 to 12-31), due = 2027-01-20
+ */
+function computeNextDue(
+  filedThrough: string | null,
+  frequency: string | null,
+  dueDay: number,
+): { due: string; days: number; periodEnd: string } | null {
+  if (!filedThrough || !frequency) return null;
+
+  const ft = new Date(filedThrough + "T00:00:00");
+  // Next period starts the day after filed_through
+  const start = new Date(ft);
+  start.setDate(start.getDate() + 1);
+
+  const y = start.getFullYear();
+  const m = start.getMonth(); // 0-based
+
+  let periodEndDate: Date;
+  const freq = frequency.toLowerCase().replace("-", "_");
+
+  if (freq === "monthly") {
+    // Period = the calendar month containing `start`
+    periodEndDate = new Date(y, m + 1, 0); // last day of month
+  } else if (freq === "quarterly") {
+    // Quarter containing `start`
+    const qEnd = Math.floor(m / 3) * 3 + 2; // 0-based month of quarter end
+    periodEndDate = new Date(y, qEnd + 1, 0);
+  } else if (freq === "semi_annual" || freq === "semi-annual") {
+    // H1 = Jan-Jun, H2 = Jul-Dec
+    periodEndDate = m < 6 ? new Date(y, 6, 0) : new Date(y, 12, 0);
+  } else if (freq === "annual") {
+    periodEndDate = new Date(y, 12, 0); // Dec 31
+  } else {
+    // Unknown frequency — fall back to monthly
+    periodEndDate = new Date(y, m + 1, 0);
+  }
+
+  // Due date = dueDay of month after period end
+  const dueMonth = periodEndDate.getMonth() + 1;
+  const dueYear =
+    dueMonth > 11
+      ? periodEndDate.getFullYear() + 1
+      : periodEndDate.getFullYear();
+  const dueDate = new Date(dueYear, dueMonth % 12, Math.min(dueDay, 28));
+
+  const periodEnd = periodEndDate.toISOString().slice(0, 10);
+  const due = dueDate.toISOString().slice(0, 10);
+  const days = Math.ceil(
+    (dueDate.getTime() - Date.now()) / 86400000,
+  );
+
+  return { due, days, periodEnd };
 }
 
 interface StateLiability {
@@ -117,25 +185,6 @@ export default function LiabilityPage() {
     return m;
   }, [rules]);
 
-  // Per-state filing context: next unfiled due date
-  const nextDueMap = useMemo(() => {
-    const m: Record<string, { due: string; days: number }> = {};
-    const nowMs = Date.now();
-    for (const f of filings) {
-      if (f.status !== "pending" && f.status !== "late") continue;
-      const sc = f.state_code;
-      if (!m[sc] || f.due_date < m[sc].due) {
-        m[sc] = {
-          due: f.due_date,
-          days: Math.ceil(
-            (new Date(f.due_date).getTime() - nowMs) / 86400000,
-          ),
-        };
-      }
-    }
-    return m;
-  }, [filings]);
-
   const liabilities = useMemo(() => {
     const registered = nexus.filter((n) => n.is_registered);
     if (registered.length === 0) return [];
@@ -149,10 +198,13 @@ export default function LiabilityPage() {
 
       const filedThrough = resolveFiledThrough(n, filings);
       const rate = STATE_TAX_RATES[sc] ?? 0;
-      const nd = nextDueMap[sc];
+      const freq = n.assigned_frequency ?? rule.filing_frequency_default;
+      const dueDay = rule.typical_due_day ?? 20;
 
-      // Sum sales for this state, partitioned by channel and
-      // by whether the period falls after the last-filed-through date.
+      // Compute next due from filed_through + frequency.
+      // If filed_through is null → no next_due (amber "Set date" prompt).
+      const nd = computeNextDue(filedThrough, freq, dueDay);
+
       let shopAll = 0;
       let shopSince = 0;
       let amzAll = 0;
@@ -162,8 +214,9 @@ export default function LiabilityPage() {
         if (s.state_code !== sc) continue;
         const ch = normalizeChannel(s.channel);
         const amt = s.gross_sales;
-        const afterFiling =
-          !filedThrough || s.period_end > filedThrough;
+        // Only count sales AFTER filed_through.
+        // If filed_through is null → show $0 (NOT all-time).
+        const afterFiling = filedThrough ? s.period_end > filedThrough : false;
 
         if (ch === SHOPIFY) {
           shopAll += amt;
@@ -178,7 +231,7 @@ export default function LiabilityPage() {
         state_code: sc,
         state_name: rule.state_name ?? sc,
         rate,
-        frequency: n.assigned_frequency ?? rule.filing_frequency_default,
+        frequency: freq,
         next_due: nd?.due ?? null,
         next_due_days: nd?.days ?? null,
         filed_through: filedThrough,
@@ -193,7 +246,7 @@ export default function LiabilityPage() {
 
     rows.sort((a, b) => b.seller_est_tax - a.seller_est_tax);
     return rows;
-  }, [nexus, sales, ruleMap, filings, nextDueMap]);
+  }, [nexus, sales, ruleMap, filings]);
 
   if (l1 || l2 || l3 || l4) return <LoadingState />;
 
@@ -259,8 +312,8 @@ export default function LiabilityPage() {
               {missingDates.length === 1
                 ? `${missingDates[0].state_code} is`
                 : `${missingDates.map((d) => d.state_code).join(", ")} are`}{" "}
-              missing a last-filed date. Without it, all-time sales are shown
-              instead of just the unfiled period. Set it on the{" "}
+              missing a last-filed date. Until set, no sales or due dates
+              are shown for {missingDates.length === 1 ? "this state" : "these states"}. Set it on the{" "}
               <a href="/registrations" className="underline font-medium">
                 Registrations
               </a>{" "}
@@ -396,25 +449,34 @@ export default function LiabilityPage() {
                           )}
                         </TableCell>
                         <TableCell>
-                          {row.next_due ? (
+                          {row.next_due && row.has_filed_through ? (
                             <div>
                               <span
                                 className={`text-xs font-medium ${
-                                  (row.next_due_days ?? 99) <= 0
+                                  (row.next_due_days ?? 99) < 0
                                     ? "text-red-600 dark:text-red-400"
                                     : (row.next_due_days ?? 99) <= 14
                                     ? "text-amber-600 dark:text-amber-400"
                                     : "text-muted-foreground"
                                 }`}
                               >
-                                {(row.next_due_days ?? 0) <= 0
+                                {(row.next_due_days ?? 0) < 0
                                   ? "OVERDUE"
+                                  : (row.next_due_days ?? 0) === 0
+                                  ? "TODAY"
                                   : `${row.next_due_days}d`}
                               </span>
                               <span className="ml-1 text-xs text-muted-foreground">
                                 {row.next_due.slice(5)}
                               </span>
                             </div>
+                          ) : !row.has_filed_through ? (
+                            <a
+                              href="/registrations"
+                              className="text-xs text-amber-600 underline dark:text-amber-400"
+                            >
+                              Set filed-through
+                            </a>
                           ) : (
                             <span className="text-xs text-muted-foreground">
                               &mdash;

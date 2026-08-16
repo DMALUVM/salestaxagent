@@ -418,38 +418,62 @@ def build_pdf(audit: dict) -> bytes:
         pdf.set_text_color(0, 0, 0)
     pdf.ln(4)
 
-    # Executive table — exceeded + approaching
+    # Section A: Needs Registration (exceeded/approaching + NOT registered)
+    unreg_action = [s for s in audit["states"]
+                    if s["status"] in ("exceeded", "approaching") and not s["is_registered"]]
+    reg_action = [s for s in audit["states"]
+                  if s["status"] in ("exceeded", "approaching") and s["is_registered"]]
+
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Exceeded + Approaching States", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, f"Section A: Needs Registration ({len(unreg_action)} states)", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 7)
+    pdf.cell(0, 4, "States exceeding or approaching economic threshold AND not yet registered.", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
 
     cols = [12, 18, 18, 20, 20, 20, 12, 14, 10, 16]
     hdrs = ["State", "Window", "Status", "Shopify $", "Amazon $", "Counted $", "Thr $", "% Dol", "MP?", "Conf"]
-    pdf.set_font("Helvetica", "B", 6)
-    for i, h in enumerate(hdrs):
-        pdf.cell(cols[i], 5, h, border=1)
-    pdf.ln()
 
-    pdf.set_font("Helvetica", "", 6)
-    key_states = [s for s in audit["states"] if s["status"] in ("exceeded", "approaching")]
-    for s in key_states:
-        win = f"{s['window_start'][5:]} to {s['window_end'][5:]}"
-        row = [
-            s["state_code"], win, s["status"].upper(),
-            f"${s['shopify_sales']:,.0f}", f"${s['amazon_sales']:,.0f}",
-            f"${s['counted_sales']:,.0f}", f"${s['threshold_amount']:,.0f}",
-            f"{s['pct_of_dollar_threshold']:.0f}%",
-            "Y" if s["marketplace_sales_included"] else "N",
-            s["marketplace_rule_confidence"][:3],
-        ]
-        for i, val in enumerate(row):
-            pdf.cell(cols[i], 4, val, border=1)
+    def _write_table(states_list):
+        pdf.set_font("Helvetica", "B", 6)
+        for i, h in enumerate(hdrs):
+            pdf.cell(cols[i], 5, h, border=1)
         pdf.ln()
+        pdf.set_font("Helvetica", "", 6)
+        for s in states_list:
+            win = f"{s['window_start'][5:]} to {s['window_end'][5:]}"
+            row = [
+                s["state_code"], win, s["status"].upper(),
+                f"${s['shopify_sales']:,.0f}", f"${s['amazon_sales']:,.0f}",
+                f"${s['counted_sales']:,.0f}", f"${s['threshold_amount']:,.0f}",
+                f"{s['pct_of_dollar_threshold']:.0f}%",
+                "Y" if s["marketplace_sales_included"] else "N",
+                s["marketplace_rule_confidence"][:3],
+            ]
+            for i, val in enumerate(row):
+                pdf.cell(cols[i], 4, val, border=1)
+            pdf.ln()
+
+    if unreg_action:
+        _write_table(unreg_action)
+    else:
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.cell(0, 5, "No unregistered states at or above threshold.", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
+
+    # Section B: Registered states (appendix — CPA transparency)
+    if reg_action:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, f"Section B: Registered States ({len(reg_action)} states) -- Monitoring Only", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 7)
+        pdf.cell(0, 4, "Already registered. Threshold math shown for audit transparency only.", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(2)
+        _write_table(reg_action)
+        pdf.ln(4)
 
     # Full appendix
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Full State Appendix", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, "Appendix: All States", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 6)
 
     for s in audit["states"]:
@@ -536,6 +560,8 @@ def build_csv(audit: dict) -> str:
 def build_meta(audit: dict) -> dict:
     exceeded = [s["state_code"] for s in audit["states"] if s["status"] == "exceeded"]
     approaching = [s["state_code"] for s in audit["states"] if s["status"] == "approaching"]
+    needs_reg = [s["state_code"] for s in audit["states"]
+                 if s["status"] in ("exceeded", "approaching") and not s["is_registered"]]
     return {
         "generated_at": audit["generated_at"],
         "reference_date": audit["reference_date"],
@@ -543,6 +569,7 @@ def build_meta(audit: dict) -> dict:
         "states_analyzed": len(audit["states"]),
         "exceeded": exceeded,
         "approaching": approaching,
+        "needs_registration": needs_reg,
         "data_coverage": audit["data_coverage"],
         "data_gaps": audit["data_gaps"],
         "validation": audit["validation"],

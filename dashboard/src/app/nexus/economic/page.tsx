@@ -227,7 +227,7 @@ export default function EconomicNexusAuditPage() {
 
   const [meta, setMeta] = useState<AuditMeta | null>(null);
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState("exceeded");
+  const [tab, setTab] = useState("needs_reg");
   const [selectedState, setSelectedState] = useState<StateAudit | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
 
@@ -321,8 +321,10 @@ export default function EconomicNexusAuditPage() {
   }, [auditStates, nexusRows, salesRows, l1, l2]);
 
   const states = liveAudit;
-  const exceeded = states.filter((s) => s.status === "exceeded");
-  const approaching = states.filter((s) => s.status === "approaching");
+  // Registration-aware buckets: default view = unregistered action items
+  const needsReg = states.filter((s) => (s.status === "exceeded" || s.status === "approaching") && !s.is_registered);
+  const approachingUnreg = states.filter((s) => s.status === "approaching" && !s.is_registered);
+  const registeredStates = states.filter((s) => s.is_registered);
   const all = states;
 
   function applySearch(list: StateAudit[]) {
@@ -473,29 +475,38 @@ export default function EconomicNexusAuditPage() {
       )}
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card className="border-red-200 dark:border-red-900">
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-red-500" />
-              <span className="text-2xl font-bold">{exceeded.length}</span>
+              <span className="text-2xl font-bold">{needsReg.length}</span>
             </div>
-            <p className="text-xs text-muted-foreground">Exceeded</p>
+            <p className="text-xs text-muted-foreground">Needs Registration</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-amber-500" />
-              <span className="text-2xl font-bold">{approaching.length}</span>
+              <span className="text-2xl font-bold">{approachingUnreg.length}</span>
             </div>
-            <p className="text-xs text-muted-foreground">Approaching</p>
+            <p className="text-xs text-muted-foreground">Approaching (unreg)</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="h-4 w-4 text-blue-500" />
+              <span className="text-2xl font-bold">{registeredStates.length}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">Registered</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <span className="text-2xl font-bold">{all.length}</span>
-            <p className="text-xs text-muted-foreground">States analyzed</p>
+            <p className="text-xs text-muted-foreground">All analyzed</p>
           </CardContent>
         </Card>
       </div>
@@ -506,18 +517,23 @@ export default function EconomicNexusAuditPage() {
         <Input placeholder="Filter states..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8" />
       </div>
 
-      {/* Tabs */}
+      {/* Tabs — default is Needs Registration, not all exceeded */}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
-          <TabsTrigger value="exceeded">Exceeded ({exceeded.length})</TabsTrigger>
-          <TabsTrigger value="approaching">Approaching ({approaching.length})</TabsTrigger>
+          <TabsTrigger value="needs_reg">Needs Registration ({needsReg.length})</TabsTrigger>
+          <TabsTrigger value="registered">Registered ({registeredStates.length})</TabsTrigger>
           <TabsTrigger value="all">All ({all.length})</TabsTrigger>
         </TabsList>
-        <TabsContent value="exceeded" className="mt-4">
-          <Card><CardContent className="p-0"><AuditTable rows={exceeded} /></CardContent></Card>
+        <TabsContent value="needs_reg" className="mt-4">
+          <Card><CardContent className="p-0"><AuditTable rows={needsReg} /></CardContent></Card>
         </TabsContent>
-        <TabsContent value="approaching" className="mt-4">
-          <Card><CardContent className="p-0"><AuditTable rows={approaching} /></CardContent></Card>
+        <TabsContent value="registered" className="mt-4">
+          {registeredStates.length > 0 && (
+            <p className="mb-2 text-xs text-muted-foreground">
+              Registered states shown for CPA audit transparency — no registration action needed.
+            </p>
+          )}
+          <Card><CardContent className="p-0"><AuditTable rows={registeredStates} /></CardContent></Card>
         </TabsContent>
         <TabsContent value="all" className="mt-4">
           <Card><CardContent className="p-0"><AuditTable rows={all} /></CardContent></Card>

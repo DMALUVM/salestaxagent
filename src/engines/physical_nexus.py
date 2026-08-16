@@ -177,6 +177,24 @@ def evaluate_physical_nexus() -> dict:
             "action_notes": action_notes,
             "confidence": confidence,
         }
+
+        # Preserve registration + compliance + economic fields from existing row.
+        # Engine must NEVER overwrite user-set registration or compliance state.
+        if not existing:
+            existing_records = fetch_all("nexus_status", {"state_code": state_code})
+            existing = existing_records[0] if existing_records else None
+        if existing:
+            for keep_field in (
+                "is_registered", "registration_date", "assigned_frequency",
+                "last_filed_through", "has_economic_nexus", "economic_nexus_since",
+                "economic_progress_amount", "economic_progress_transactions",
+                "economic_progress_percent", "compliance_resolved",
+                "compliance_resolved_at", "compliance_hidden", "compliance_notes",
+            ):
+                val = existing.get(keep_field)
+                if val is not None:
+                    nexus_row[keep_field] = val
+
         nexus_updates.append(nexus_row)
 
         franchise_notes = rule.get("franchise_tax_notes")
@@ -224,7 +242,7 @@ def evaluate_physical_nexus() -> dict:
             if not existing or not existing.get("has_physical_nexus"):
                 new_nexus_states.append(sc)
 
-            nexus_updates.append({
+            confirmed_row = {
                 "state_code": sc,
                 "has_physical_nexus": True,
                 "physical_nexus_since": since,
@@ -232,7 +250,20 @@ def evaluate_physical_nexus() -> dict:
                 "requires_action": True,
                 "action_notes": f"Physical nexus: {source}",
                 "confidence": conf,
-            })
+            }
+            # Preserve registration + compliance + economic fields
+            if existing:
+                for keep_field in (
+                    "is_registered", "registration_date", "assigned_frequency",
+                    "last_filed_through", "has_economic_nexus", "economic_nexus_since",
+                    "economic_progress_amount", "economic_progress_transactions",
+                    "economic_progress_percent", "compliance_resolved",
+                    "compliance_resolved_at", "compliance_hidden", "compliance_notes",
+                ):
+                    val = existing.get(keep_field)
+                    if val is not None:
+                        confirmed_row[keep_field] = val
+            nexus_updates.append(confirmed_row)
 
         # Check for franchise flags
         franchise_notes = rule.get("franchise_tax_notes")
