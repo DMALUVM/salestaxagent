@@ -44,6 +44,7 @@ interface StateAudit {
   pct_of_dollar_threshold: number;
   pct_of_txn_threshold: number;
   status: string;
+  exceeded_reason?: string;
   is_registered: boolean;
   formula: string;
   data_coverage: {
@@ -80,9 +81,16 @@ function fmt(n: number) {
 
 function statusColor(s: string) {
   if (s === "exceeded") return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300";
+  if (s === "exceeded_txn") return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
   if (s === "approaching") return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
   if (s === "caution") return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300";
   return "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400";
+}
+
+function statusLabel(s: StateAudit): string {
+  if (s.status === "exceeded_txn") return "exceeded (txn)";
+  if (s.status === "exceeded" && s.exceeded_reason === "dollar") return "exceeded ($)";
+  return s.status;
 }
 
 function barWidth(pct: number) {
@@ -140,7 +148,12 @@ function StateDrawer({
             </div>
             <div>
               <p className="text-[10px] text-muted-foreground">Status</p>
-              <Badge className={`${statusColor(s.status)} text-xs`}>{s.status.toUpperCase()}</Badge>
+              <Badge className={`${statusColor(s.status)} text-xs`}>{statusLabel(s).toUpperCase()}</Badge>
+              {s.exceeded_reason === "txn_only" && (
+                <span className="ml-1 text-[10px] text-muted-foreground">
+                  ({s.counted_orders.toLocaleString()} txns vs {s.threshold_transactions?.toLocaleString()} threshold)
+                </span>
+              )}
               {s.is_registered && <Badge variant="outline" className="ml-1 text-[10px]">Registered</Badge>}
             </div>
           </div>
@@ -321,11 +334,11 @@ export default function EconomicNexusAuditPage() {
   }, [auditStates, nexusRows, salesRows, l1, l2]);
 
   const states = liveAudit;
-  // Registration-aware buckets: default view = unregistered action items.
-  // Coerce is_registered to handle any truthy variant from Supabase/JSON.
+  // Registration-aware buckets.
   const isReg = (s: StateAudit) => s.is_registered === true;
-  const needsReg = states.filter((s) => (s.status === "exceeded" || s.status === "approaching") && !isReg(s));
-  const approachingUnreg = states.filter((s) => s.status === "approaching" && !isReg(s));
+  const isExceededOrApproaching = (s: StateAudit) =>
+    s.status === "exceeded" || s.status === "exceeded_txn" || s.status === "approaching";
+  const needsReg = states.filter((s) => isExceededOrApproaching(s) && !isReg(s));
   const registeredStates = states.filter((s) => isReg(s));
   const all = states;
 
@@ -388,8 +401,8 @@ export default function EconomicNexusAuditPage() {
                   {s.state_code}
                   {s.is_registered && <Badge variant="outline" className="ml-1 text-[10px] px-1 py-0">Reg</Badge>}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {s.window_start.slice(5)} – {s.window_end.slice(5)}
+                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                  {s.window_start} – {s.window_end.slice(5)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums text-xs">${fmt(s.shopify_sales)}</TableCell>
                 <TableCell className="text-right tabular-nums text-xs">${fmt(s.amazon_sales)}</TableCell>
@@ -406,7 +419,7 @@ export default function EconomicNexusAuditPage() {
                 <TableCell className="text-right tabular-nums text-xs">{s.counted_orders > 0 ? fmt(s.counted_orders) : "—"}</TableCell>
                 <TableCell>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${statusColor(s.status)}`}>
-                    {s.status}
+                    {statusLabel(s)}
                   </span>
                 </TableCell>
                 <TableCell className="text-xs">{s.marketplace_sales_included ? "Yes" : "No"}</TableCell>
@@ -477,8 +490,8 @@ export default function EconomicNexusAuditPage() {
       )}
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Card className="border-red-200 dark:border-red-900">
+      <div className="grid grid-cols-3 gap-3">
+        <Card className={needsReg.length > 0 ? "border-red-200 dark:border-red-900" : ""}>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-red-500" />
@@ -490,19 +503,10 @@ export default function EconomicNexusAuditPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-amber-500" />
-              <span className="text-2xl font-bold">{approachingUnreg.length}</span>
-            </div>
-            <p className="text-xs text-muted-foreground">Approaching (unreg)</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2">
               <CheckCircle className="h-4 w-4 text-blue-500" />
               <span className="text-2xl font-bold">{registeredStates.length}</span>
             </div>
-            <p className="text-xs text-muted-foreground">Registered</p>
+            <p className="text-xs text-muted-foreground">Registered (monitoring)</p>
           </CardContent>
         </Card>
         <Card>

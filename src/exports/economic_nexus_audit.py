@@ -208,14 +208,27 @@ def build_audit(reference_date: date | None = None) -> dict:
         warn_pct = settings.economic_nexus_warn_percent
         approaching = not exceeded and (dollar_pct >= warn_pct or txn_pct >= warn_pct)
 
+        # Determine status with reason clarity
         if exceeded:
-            status = "exceeded"
+            if amount_met and txn_met:
+                status = "exceeded"
+                exceeded_reason = "dollar + txn"
+            elif amount_met:
+                status = "exceeded"
+                exceeded_reason = "dollar"
+            else:
+                # txn only — label distinctly so CPA understands
+                status = "exceeded_txn"
+                exceeded_reason = "txn_only"
         elif approaching:
             status = "approaching"
+            exceeded_reason = ""
         elif dollar_pct >= settings.economic_nexus_caution_percent:
             status = "caution"
+            exceeded_reason = ""
         else:
             status = "under"
+            exceeded_reason = ""
 
         # State-level coverage warnings
         state_gaps = []
@@ -231,9 +244,16 @@ def build_audit(reference_date: date | None = None) -> dict:
 
         # Formula in English
         if mp_counts:
-            formula = f"counted_sales = shopify(${shopify_sales:,.2f}) + amazon(${amazon_sales:,.2f}) = ${counted_sales:,.2f}"
+            formula = (
+                f"counted_sales = shopify(${shopify_sales:,.2f}) + amazon(${amazon_sales:,.2f}) = ${counted_sales:,.2f}. "
+                f"Note: Amazon marketplace sales are INCLUDED per {sc} state rule (marketplace_sales_count_toward_threshold=true). "
+                f"Kintsugi 'taxable sales' may show a lower figure because it excludes exempt or marketplace-facilitated amounts."
+            )
         else:
-            formula = f"counted_sales = shopify(${shopify_sales:,.2f}) only; amazon(${amazon_sales:,.2f}) excluded per state rule"
+            formula = (
+                f"counted_sales = shopify(${shopify_sales:,.2f}) only; amazon(${amazon_sales:,.2f}) excluded per {sc} state rule "
+                f"(marketplace_sales_count_toward_threshold=false)."
+            )
 
         audit_states.append({
             "state_code": sc,
@@ -255,6 +275,7 @@ def build_audit(reference_date: date | None = None) -> dict:
             "pct_of_dollar_threshold": dollar_pct,
             "pct_of_txn_threshold": txn_pct,
             "status": status,
+            "exceeded_reason": exceeded_reason,
             "is_registered": bool(nx.get("is_registered")),
             "formula": formula,
             "data_coverage": {
@@ -380,9 +401,11 @@ def build_pdf(audit: dict) -> bytes:
     pdf.cell(0, 6, f"Report ID: {audit['report_id']}", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, f"Generated: {audit['generated_at'][:19]}Z", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, f"Reference date: {audit['reference_date']}", new_x="LMARGIN", new_y="NEXT")
-    exceeded = [s for s in audit["states"] if s["status"] == "exceeded"]
+    exceeded = [s for s in audit["states"] if s["status"] in ("exceeded", "exceeded_txn")]
+    exceeded_dollar = [s for s in exceeded if s.get("exceeded_reason") != "txn_only"]
+    exceeded_txn_only = [s for s in exceeded if s.get("exceeded_reason") == "txn_only"]
     approaching = [s for s in audit["states"] if s["status"] == "approaching"]
-    pdf.cell(0, 6, f"States: {len(audit['states'])} analyzed, {len(exceeded)} exceeded, {len(approaching)} approaching", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"States: {len(audit['states'])} analyzed, {len(exceeded_dollar)} exceeded (dollar), {len(exceeded_txn_only)} exceeded (txn only), {len(approaching)} approaching", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
 
     pdf.set_font("Helvetica", "I", 7)
@@ -420,9 +443,9 @@ def build_pdf(audit: dict) -> bytes:
 
     # Section A: Needs Registration (exceeded/approaching + NOT registered)
     unreg_action = [s for s in audit["states"]
-                    if s["status"] in ("exceeded", "approaching") and not s["is_registered"]]
+                    if s["status"] in ("exceeded", "exceeded_txn", "approaching") and not s["is_registered"]]
     reg_action = [s for s in audit["states"]
-                  if s["status"] in ("exceeded", "approaching") and s["is_registered"]]
+                  if s["status"] in ("exceeded", "exceeded_txn", "approaching") and s["is_registered"]]
 
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, f"Section A: Needs Registration ({len(unreg_action)} states)", new_x="LMARGIN", new_y="NEXT")
@@ -534,7 +557,7 @@ def build_csv(audit: dict) -> str:
         "marketplace_rule_confidence", "counted_sales", "counted_orders",
         "threshold_amount", "threshold_transactions", "threshold_test_type",
         "pct_of_dollar_threshold", "pct_of_txn_threshold", "status",
-        "is_registered", "formula", "coverage_gaps",
+        "exceeded_reason", "is_registered", "formula", "coverage_gaps",
     ])
     for s in audit["states"]:
         writer.writerow([
@@ -548,7 +571,8 @@ def build_csv(audit: dict) -> str:
             s["threshold_amount"], s["threshold_transactions"] or "",
             s["threshold_test_type"],
             s["pct_of_dollar_threshold"], s["pct_of_txn_threshold"],
-            s["status"], "yes" if s["is_registered"] else "no",
+            s["status"], s.get("exceeded_reason", ""),
+            "yes" if s["is_registered"] else "no",
             s["formula"],
             "; ".join(s["data_coverage"]["gaps"]) if s["data_coverage"]["gaps"] else "",
         ])
@@ -558,16 +582,23 @@ def build_csv(audit: dict) -> str:
 # ── Upload ─────────────────────────────────────────────────
 
 def build_meta(audit: dict) -> dict:
-    exceeded = [s["state_code"] for s in audit["states"] if s["status"] == "exceeded"]
+    exceeded = [s["state_code"] for s in audit["states"]
+                if s["status"] in ("exceeded", "exceeded_txn")]
+    exceeded_dollar = [s["state_code"] for s in audit["states"]
+                       if s["status"] == "exceeded" and s.get("exceeded_reason") != "txn_only"]
+    exceeded_txn_only = [s["state_code"] for s in audit["states"]
+                         if s["status"] == "exceeded_txn"]
     approaching = [s["state_code"] for s in audit["states"] if s["status"] == "approaching"]
     needs_reg = [s["state_code"] for s in audit["states"]
-                 if s["status"] in ("exceeded", "approaching") and not s["is_registered"]]
+                 if s["status"] in ("exceeded", "exceeded_txn", "approaching") and not s["is_registered"]]
     return {
         "generated_at": audit["generated_at"],
         "reference_date": audit["reference_date"],
         "report_id": audit["report_id"],
         "states_analyzed": len(audit["states"]),
         "exceeded": exceeded,
+        "exceeded_dollar": exceeded_dollar,
+        "exceeded_txn_only": exceeded_txn_only,
         "approaching": approaching,
         "needs_registration": needs_reg,
         "data_coverage": audit["data_coverage"],
