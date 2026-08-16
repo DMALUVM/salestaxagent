@@ -321,10 +321,12 @@ export default function EconomicNexusAuditPage() {
   }, [auditStates, nexusRows, salesRows, l1, l2]);
 
   const states = liveAudit;
-  // Registration-aware buckets: default view = unregistered action items
-  const needsReg = states.filter((s) => (s.status === "exceeded" || s.status === "approaching") && !s.is_registered);
-  const approachingUnreg = states.filter((s) => s.status === "approaching" && !s.is_registered);
-  const registeredStates = states.filter((s) => s.is_registered);
+  // Registration-aware buckets: default view = unregistered action items.
+  // Coerce is_registered to handle any truthy variant from Supabase/JSON.
+  const isReg = (s: StateAudit) => s.is_registered === true;
+  const needsReg = states.filter((s) => (s.status === "exceeded" || s.status === "approaching") && !isReg(s));
+  const approachingUnreg = states.filter((s) => s.status === "approaching" && !isReg(s));
+  const registeredStates = states.filter((s) => isReg(s));
   const all = states;
 
   function applySearch(list: StateAudit[]) {

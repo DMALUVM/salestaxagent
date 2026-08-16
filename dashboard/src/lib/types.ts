@@ -1,5 +1,5 @@
 export interface NexusStatus {
-  id: string;
+  id?: string;
   state_code: string;
   has_physical_nexus: boolean;
   physical_nexus_since: string | null;

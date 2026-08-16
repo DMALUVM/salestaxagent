@@ -82,19 +82,23 @@ function buildRegistrationViews(
     .sort((a, b) => a.state_code.localeCompare(b.state_code))
     .map((r) => {
       const n = nexusMap.get(r.state_code);
+      // Coerce is_registered: treat true, "true", 1 as truthy.
+      // Supabase may return boolean, string, or null depending on schema.
+      const rawReg: unknown = n?.is_registered;
+      const isReg = rawReg === true || rawReg === "true" || rawReg === 1;
       return {
         state_code: r.state_code,
         state_name: r.state_name,
         has_sales_tax: r.has_sales_tax,
-        is_registered: n?.is_registered ?? false,
+        is_registered: isReg,
         registration_date: n?.registration_date ?? null,
         assigned_frequency: n?.assigned_frequency ?? null,
         typical_due_day: r.typical_due_day ?? null,
-        last_filed_through: lastFiled[r.state_code] ?? null,
+        last_filed_through: n?.last_filed_through ?? lastFiled[r.state_code] ?? null,
         notes: r.notes ?? null,
         filing_frequency_default: r.filing_frequency_default ?? null,
-        has_physical_nexus: n?.has_physical_nexus ?? false,
-        has_economic_nexus: n?.has_economic_nexus ?? false,
+        has_physical_nexus: !!n?.has_physical_nexus,
+        has_economic_nexus: !!n?.has_economic_nexus,
       };
     });
 }
@@ -518,6 +522,14 @@ export default function RegistrationsPage() {
   }, [nexus, filingEntries]);
 
   if (l1 || l2 || l3) return <LoadingState />;
+
+  // DEBUG: log registered state count from raw nexus query
+  const _dbRegCount = nexus.filter((n) => n.is_registered === true || (n.is_registered as unknown) === "true").length;
+  if (typeof window !== "undefined") {
+    console.log(`[Registrations] nexus rows: ${nexus.length}, is_registered=true: ${_dbRegCount}, sample:`,
+      nexus.filter((n) => n.is_registered).slice(0, 3).map((n) => ({ sc: n.state_code, reg: n.is_registered, type: typeof n.is_registered }))
+    );
+  }
 
   const allRegs = buildRegistrationViews(rules, nexus, lastFiledMap);
 
