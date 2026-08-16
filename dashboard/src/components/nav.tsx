@@ -17,6 +17,7 @@ import {
   Moon,
   Sun,
   ListChecks,
+  TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -39,6 +40,7 @@ const primaryLinks: NavItem[] = [
 
 const monitorLinks: NavItem[] = [
   { href: "/nexus", label: "Nexus Monitor", icon: MapPin },
+  { href: "/nexus/economic", label: "Economic Audit", icon: TrendingUp },
   { href: "/triage", label: "Registration Triage", icon: ListChecks },
   { href: "/sales-map", label: "Sales Map", icon: MapPinned },
   { href: "/skus", label: "SKU Performance", icon: Package },

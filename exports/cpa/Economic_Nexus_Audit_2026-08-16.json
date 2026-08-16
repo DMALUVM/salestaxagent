@@ -1,0 +1,7554 @@
+{
+  "reference_date": "2026-08-16",
+  "generated_at": "2026-08-16T17:18:44.111464+00:00",
+  "report_id": "9aa3739b",
+  "states": [
+    {
+      "state_code": "AL",
+      "state_name": "Alabama",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_calendar_year",
+      "shopify_sales": 1282.33,
+      "shopify_orders": 40,
+      "amazon_sales": 27086.77,
+      "amazon_orders": 1747,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 1282.33,
+      "counted_orders": 40,
+      "threshold_amount": 250000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 0.5,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,282.33) only; amazon($27,086.77) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 44.49,
+          "amazon": 1248.19,
+          "shopify_txn": 2,
+          "amazon_txn": 76
+        },
+        {
+          "month": "2025-02",
+          "shopify": 11.99,
+          "amazon": 1162.2,
+          "shopify_txn": 2,
+          "amazon_txn": 77
+        },
+        {
+          "month": "2025-03",
+          "shopify": 23.79,
+          "amazon": 1436.52,
+          "shopify_txn": 2,
+          "amazon_txn": 88
+        },
+        {
+          "month": "2025-04",
+          "shopify": 38.0,
+          "amazon": 902.39,
+          "shopify_txn": 1,
+          "amazon_txn": 57
+        },
+        {
+          "month": "2025-05",
+          "shopify": 173.5,
+          "amazon": 1409.29,
+          "shopify_txn": 3,
+          "amazon_txn": 95
+        },
+        {
+          "month": "2025-06",
+          "shopify": 118.25,
+          "amazon": 841.43,
+          "shopify_txn": 1,
+          "amazon_txn": 53
+        },
+        {
+          "month": "2025-07",
+          "shopify": 87.32,
+          "amazon": 1045.94,
+          "shopify_txn": 3,
+          "amazon_txn": 69
+        },
+        {
+          "month": "2025-08",
+          "shopify": 58.99,
+          "amazon": 1283.43,
+          "shopify_txn": 3,
+          "amazon_txn": 79
+        },
+        {
+          "month": "2025-09",
+          "shopify": 0.0,
+          "amazon": 1064.87,
+          "shopify_txn": 0,
+          "amazon_txn": 71
+        },
+        {
+          "month": "2025-10",
+          "shopify": 38.77,
+          "amazon": 1273.68,
+          "shopify_txn": 2,
+          "amazon_txn": 86
+        },
+        {
+          "month": "2025-11",
+          "shopify": 70.15,
+          "amazon": 1838.69,
+          "shopify_txn": 2,
+          "amazon_txn": 116
+        },
+        {
+          "month": "2025-12",
+          "shopify": 74.47,
+          "amazon": 3500.08,
+          "shopify_txn": 4,
+          "amazon_txn": 224
+        },
+        {
+          "month": "2026-01",
+          "shopify": 69.76,
+          "amazon": 1681.12,
+          "shopify_txn": 2,
+          "amazon_txn": 110
+        },
+        {
+          "month": "2026-02",
+          "shopify": 58.48,
+          "amazon": 1803.78,
+          "shopify_txn": 1,
+          "amazon_txn": 117
+        },
+        {
+          "month": "2026-03",
+          "shopify": 21.0,
+          "amazon": 1414.5,
+          "shopify_txn": 1,
+          "amazon_txn": 86
+        },
+        {
+          "month": "2026-04",
+          "shopify": 159.21,
+          "amazon": 1600.34,
+          "shopify_txn": 3,
+          "amazon_txn": 105
+        },
+        {
+          "month": "2026-05",
+          "shopify": 75.43,
+          "amazon": 1188.03,
+          "shopify_txn": 2,
+          "amazon_txn": 79
+        },
+        {
+          "month": "2026-06",
+          "shopify": 73.3,
+          "amazon": 1086.19,
+          "shopify_txn": 2,
+          "amazon_txn": 77
+        },
+        {
+          "month": "2026-07",
+          "shopify": 30.2,
+          "amazon": 1152.21,
+          "shopify_txn": 3,
+          "amazon_txn": 71
+        },
+        {
+          "month": "2026-08",
+          "shopify": 55.23,
+          "amazon": 153.89,
+          "shopify_txn": 1,
+          "amazon_txn": 11
+        }
+      ]
+    },
+    {
+      "state_code": "AR",
+      "state_name": "Arkansas",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 1655.03,
+      "shopify_orders": 49,
+      "amazon_sales": 13075.45,
+      "amazon_orders": 839,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 1655.03,
+      "counted_orders": 49,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 1.7,
+      "pct_of_txn_threshold": 24.5,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,655.03) only; amazon($13,075.45) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 62.5,
+          "amazon": 563.63,
+          "shopify_txn": 2,
+          "amazon_txn": 37
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 603.59,
+          "shopify_txn": 0,
+          "amazon_txn": 41
+        },
+        {
+          "month": "2025-03",
+          "shopify": 44.79,
+          "amazon": 614.09,
+          "shopify_txn": 2,
+          "amazon_txn": 38
+        },
+        {
+          "month": "2025-04",
+          "shopify": 75.0,
+          "amazon": 645.55,
+          "shopify_txn": 1,
+          "amazon_txn": 40
+        },
+        {
+          "month": "2025-05",
+          "shopify": 57.49,
+          "amazon": 490.84,
+          "shopify_txn": 3,
+          "amazon_txn": 36
+        },
+        {
+          "month": "2025-06",
+          "shopify": 75.99,
+          "amazon": 538.65,
+          "shopify_txn": 1,
+          "amazon_txn": 29
+        },
+        {
+          "month": "2025-07",
+          "shopify": 191.99,
+          "amazon": 473.65,
+          "shopify_txn": 6,
+          "amazon_txn": 32
+        },
+        {
+          "month": "2025-08",
+          "shopify": 158.95,
+          "amazon": 429.7,
+          "shopify_txn": 3,
+          "amazon_txn": 27
+        },
+        {
+          "month": "2025-09",
+          "shopify": 101.94,
+          "amazon": 665.54,
+          "shopify_txn": 5,
+          "amazon_txn": 41
+        },
+        {
+          "month": "2025-10",
+          "shopify": 69.97,
+          "amazon": 728.49,
+          "shopify_txn": 2,
+          "amazon_txn": 45
+        },
+        {
+          "month": "2025-11",
+          "shopify": 20.0,
+          "amazon": 886.43,
+          "shopify_txn": 1,
+          "amazon_txn": 58
+        },
+        {
+          "month": "2025-12",
+          "shopify": 111.26,
+          "amazon": 1465.97,
+          "shopify_txn": 3,
+          "amazon_txn": 86
+        },
+        {
+          "month": "2026-01",
+          "shopify": 34.98,
+          "amazon": 991.32,
+          "shopify_txn": 1,
+          "amazon_txn": 69
+        },
+        {
+          "month": "2026-02",
+          "shopify": 38.03,
+          "amazon": 830.44,
+          "shopify_txn": 3,
+          "amazon_txn": 56
+        },
+        {
+          "month": "2026-03",
+          "shopify": 83.64,
+          "amazon": 626.41,
+          "shopify_txn": 2,
+          "amazon_txn": 41
+        },
+        {
+          "month": "2026-04",
+          "shopify": 111.96,
+          "amazon": 772.97,
+          "shopify_txn": 3,
+          "amazon_txn": 46
+        },
+        {
+          "month": "2026-05",
+          "shopify": 196.08,
+          "amazon": 521.63,
+          "shopify_txn": 4,
+          "amazon_txn": 37
+        },
+        {
+          "month": "2026-06",
+          "shopify": 40.97,
+          "amazon": 575.98,
+          "shopify_txn": 2,
+          "amazon_txn": 39
+        },
+        {
+          "month": "2026-07",
+          "shopify": 103.34,
+          "amazon": 522.66,
+          "shopify_txn": 3,
+          "amazon_txn": 34
+        },
+        {
+          "month": "2026-08",
+          "shopify": 76.15,
+          "amazon": 127.91,
+          "shopify_txn": 2,
+          "amazon_txn": 7
+        }
+      ]
+    },
+    {
+      "state_code": "AZ",
+      "state_name": "Arizona",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 3749.86,
+      "shopify_orders": 121,
+      "amazon_sales": 80972.72,
+      "amazon_orders": 5117,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 3749.86,
+      "counted_orders": 121,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 3.7,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($3,749.86) only; amazon($80,972.72) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 137.72,
+          "amazon": 4560.0,
+          "shopify_txn": 4,
+          "amazon_txn": 267
+        },
+        {
+          "month": "2025-02",
+          "shopify": 150.98,
+          "amazon": 3747.51,
+          "shopify_txn": 3,
+          "amazon_txn": 223
+        },
+        {
+          "month": "2025-03",
+          "shopify": 175.38,
+          "amazon": 3971.96,
+          "shopify_txn": 8,
+          "amazon_txn": 239
+        },
+        {
+          "month": "2025-04",
+          "shopify": 209.53,
+          "amazon": 3639.59,
+          "shopify_txn": 10,
+          "amazon_txn": 223
+        },
+        {
+          "month": "2025-05",
+          "shopify": 153.69,
+          "amazon": 3903.46,
+          "shopify_txn": 6,
+          "amazon_txn": 250
+        },
+        {
+          "month": "2025-06",
+          "shopify": 154.13,
+          "amazon": 3476.67,
+          "shopify_txn": 6,
+          "amazon_txn": 216
+        },
+        {
+          "month": "2025-07",
+          "shopify": 269.54,
+          "amazon": 3677.0,
+          "shopify_txn": 10,
+          "amazon_txn": 235
+        },
+        {
+          "month": "2025-08",
+          "shopify": 121.93,
+          "amazon": 3185.64,
+          "shopify_txn": 3,
+          "amazon_txn": 191
+        },
+        {
+          "month": "2025-09",
+          "shopify": 169.45,
+          "amazon": 2733.02,
+          "shopify_txn": 7,
+          "amazon_txn": 177
+        },
+        {
+          "month": "2025-10",
+          "shopify": 27.98,
+          "amazon": 3487.27,
+          "shopify_txn": 1,
+          "amazon_txn": 219
+        },
+        {
+          "month": "2025-11",
+          "shopify": 105.31,
+          "amazon": 4471.12,
+          "shopify_txn": 6,
+          "amazon_txn": 287
+        },
+        {
+          "month": "2025-12",
+          "shopify": 503.14,
+          "amazon": 7277.77,
+          "shopify_txn": 9,
+          "amazon_txn": 449
+        },
+        {
+          "month": "2026-01",
+          "shopify": 194.73,
+          "amazon": 4770.45,
+          "shopify_txn": 7,
+          "amazon_txn": 308
+        },
+        {
+          "month": "2026-02",
+          "shopify": 12.99,
+          "amazon": 5233.02,
+          "shopify_txn": 1,
+          "amazon_txn": 321
+        },
+        {
+          "month": "2026-03",
+          "shopify": 344.17,
+          "amazon": 5635.61,
+          "shopify_txn": 7,
+          "amazon_txn": 372
+        },
+        {
+          "month": "2026-04",
+          "shopify": 76.86,
+          "amazon": 4735.05,
+          "shopify_txn": 6,
+          "amazon_txn": 311
+        },
+        {
+          "month": "2026-05",
+          "shopify": 376.4,
+          "amazon": 4584.83,
+          "shopify_txn": 9,
+          "amazon_txn": 299
+        },
+        {
+          "month": "2026-06",
+          "shopify": 334.14,
+          "amazon": 4137.81,
+          "shopify_txn": 9,
+          "amazon_txn": 282
+        },
+        {
+          "month": "2026-07",
+          "shopify": 159.42,
+          "amazon": 3158.75,
+          "shopify_txn": 5,
+          "amazon_txn": 207
+        },
+        {
+          "month": "2026-08",
+          "shopify": 72.37,
+          "amazon": 586.19,
+          "shopify_txn": 4,
+          "amazon_txn": 41
+        }
+      ]
+    },
+    {
+      "state_code": "CA",
+      "state_name": "California",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 16939.36,
+      "shopify_orders": 520,
+      "amazon_sales": 273149.17,
+      "amazon_orders": 17520,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 290088.53,
+      "counted_orders": 18040,
+      "threshold_amount": 500000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 58.0,
+      "pct_of_txn_threshold": 0,
+      "status": "caution",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($16,939.36) + amazon($273,149.17) = $290,088.53",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 582.95,
+          "amazon": 14208.57,
+          "shopify_txn": 15,
+          "amazon_txn": 883
+        },
+        {
+          "month": "2025-02",
+          "shopify": 956.66,
+          "amazon": 12689.48,
+          "shopify_txn": 21,
+          "amazon_txn": 791
+        },
+        {
+          "month": "2025-03",
+          "shopify": 699.99,
+          "amazon": 13742.09,
+          "shopify_txn": 17,
+          "amazon_txn": 867
+        },
+        {
+          "month": "2025-04",
+          "shopify": 1108.25,
+          "amazon": 13758.79,
+          "shopify_txn": 25,
+          "amazon_txn": 861
+        },
+        {
+          "month": "2025-05",
+          "shopify": 1123.87,
+          "amazon": 12386.51,
+          "shopify_txn": 34,
+          "amazon_txn": 798
+        },
+        {
+          "month": "2025-06",
+          "shopify": 771.22,
+          "amazon": 10663.39,
+          "shopify_txn": 24,
+          "amazon_txn": 678
+        },
+        {
+          "month": "2025-07",
+          "shopify": 754.07,
+          "amazon": 12037.4,
+          "shopify_txn": 28,
+          "amazon_txn": 804
+        },
+        {
+          "month": "2025-08",
+          "shopify": 1131.63,
+          "amazon": 11177.74,
+          "shopify_txn": 29,
+          "amazon_txn": 711
+        },
+        {
+          "month": "2025-09",
+          "shopify": 602.11,
+          "amazon": 10829.58,
+          "shopify_txn": 21,
+          "amazon_txn": 690
+        },
+        {
+          "month": "2025-10",
+          "shopify": 681.39,
+          "amazon": 12510.24,
+          "shopify_txn": 23,
+          "amazon_txn": 811
+        },
+        {
+          "month": "2025-11",
+          "shopify": 1090.93,
+          "amazon": 12840.37,
+          "shopify_txn": 29,
+          "amazon_txn": 812
+        },
+        {
+          "month": "2025-12",
+          "shopify": 704.52,
+          "amazon": 24136.3,
+          "shopify_txn": 23,
+          "amazon_txn": 1491
+        },
+        {
+          "month": "2026-01",
+          "shopify": 627.4,
+          "amazon": 17778.05,
+          "shopify_txn": 20,
+          "amazon_txn": 1188
+        },
+        {
+          "month": "2026-02",
+          "shopify": 574.13,
+          "amazon": 17257.77,
+          "shopify_txn": 19,
+          "amazon_txn": 1078
+        },
+        {
+          "month": "2026-03",
+          "shopify": 1178.41,
+          "amazon": 17291.41,
+          "shopify_txn": 38,
+          "amazon_txn": 1107
+        },
+        {
+          "month": "2026-04",
+          "shopify": 899.78,
+          "amazon": 16294.58,
+          "shopify_txn": 34,
+          "amazon_txn": 1087
+        },
+        {
+          "month": "2026-05",
+          "shopify": 998.11,
+          "amazon": 14548.51,
+          "shopify_txn": 31,
+          "amazon_txn": 958
+        },
+        {
+          "month": "2026-06",
+          "shopify": 948.73,
+          "amazon": 14276.08,
+          "shopify_txn": 43,
+          "amazon_txn": 953
+        },
+        {
+          "month": "2026-07",
+          "shopify": 986.3,
+          "amazon": 12413.59,
+          "shopify_txn": 28,
+          "amazon_txn": 809
+        },
+        {
+          "month": "2026-08",
+          "shopify": 518.91,
+          "amazon": 2308.72,
+          "shopify_txn": 18,
+          "amazon_txn": 143
+        }
+      ]
+    },
+    {
+      "state_code": "CO",
+      "state_name": "Colorado",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 5214.19,
+      "shopify_orders": 149,
+      "amazon_sales": 71565.0,
+      "amazon_orders": 4608,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 5214.19,
+      "counted_orders": 149,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 5.2,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($5,214.19) only; amazon($71,565.00) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 121.37,
+          "amazon": 3241.89,
+          "shopify_txn": 4,
+          "amazon_txn": 202
+        },
+        {
+          "month": "2025-02",
+          "shopify": 86.77,
+          "amazon": 3346.81,
+          "shopify_txn": 2,
+          "amazon_txn": 210
+        },
+        {
+          "month": "2025-03",
+          "shopify": 151.49,
+          "amazon": 3153.69,
+          "shopify_txn": 3,
+          "amazon_txn": 199
+        },
+        {
+          "month": "2025-04",
+          "shopify": 335.14,
+          "amazon": 3655.53,
+          "shopify_txn": 4,
+          "amazon_txn": 226
+        },
+        {
+          "month": "2025-05",
+          "shopify": 62.99,
+          "amazon": 3129.19,
+          "shopify_txn": 3,
+          "amazon_txn": 211
+        },
+        {
+          "month": "2025-06",
+          "shopify": 459.01,
+          "amazon": 2400.66,
+          "shopify_txn": 12,
+          "amazon_txn": 155
+        },
+        {
+          "month": "2025-07",
+          "shopify": 412.49,
+          "amazon": 2734.76,
+          "shopify_txn": 8,
+          "amazon_txn": 186
+        },
+        {
+          "month": "2025-08",
+          "shopify": 136.61,
+          "amazon": 2131.54,
+          "shopify_txn": 4,
+          "amazon_txn": 130
+        },
+        {
+          "month": "2025-09",
+          "shopify": 569.07,
+          "amazon": 2625.18,
+          "shopify_txn": 11,
+          "amazon_txn": 171
+        },
+        {
+          "month": "2025-10",
+          "shopify": 293.92,
+          "amazon": 3453.36,
+          "shopify_txn": 7,
+          "amazon_txn": 231
+        },
+        {
+          "month": "2025-11",
+          "shopify": 346.34,
+          "amazon": 4494.83,
+          "shopify_txn": 9,
+          "amazon_txn": 269
+        },
+        {
+          "month": "2025-12",
+          "shopify": 473.58,
+          "amazon": 7755.36,
+          "shopify_txn": 11,
+          "amazon_txn": 461
+        },
+        {
+          "month": "2026-01",
+          "shopify": 373.48,
+          "amazon": 4698.88,
+          "shopify_txn": 6,
+          "amazon_txn": 319
+        },
+        {
+          "month": "2026-02",
+          "shopify": 144.72,
+          "amazon": 4982.59,
+          "shopify_txn": 10,
+          "amazon_txn": 318
+        },
+        {
+          "month": "2026-03",
+          "shopify": 232.52,
+          "amazon": 3986.66,
+          "shopify_txn": 9,
+          "amazon_txn": 259
+        },
+        {
+          "month": "2026-04",
+          "shopify": 300.01,
+          "amazon": 4155.75,
+          "shopify_txn": 13,
+          "amazon_txn": 286
+        },
+        {
+          "month": "2026-05",
+          "shopify": 332.45,
+          "amazon": 3836.18,
+          "shopify_txn": 15,
+          "amazon_txn": 253
+        },
+        {
+          "month": "2026-06",
+          "shopify": 200.07,
+          "amazon": 3842.94,
+          "shopify_txn": 9,
+          "amazon_txn": 265
+        },
+        {
+          "month": "2026-07",
+          "shopify": 157.46,
+          "amazon": 3278.66,
+          "shopify_txn": 8,
+          "amazon_txn": 215
+        },
+        {
+          "month": "2026-08",
+          "shopify": 24.7,
+          "amazon": 660.54,
+          "shopify_txn": 1,
+          "amazon_txn": 42
+        }
+      ]
+    },
+    {
+      "state_code": "CT",
+      "state_name": "Connecticut",
+      "window_start": "2024-10-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "12mo_ending_sep30",
+      "shopify_sales": 1796.06,
+      "shopify_orders": 60,
+      "amazon_sales": 31354.87,
+      "amazon_orders": 2066,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 33150.93,
+      "counted_orders": 2126,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "and",
+      "pct_of_dollar_threshold": 33.2,
+      "pct_of_txn_threshold": 1063.0,
+      "status": "approaching",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,796.06) + amazon($31,354.87) = $33,150.93",
+      "data_coverage": {
+        "shopify_min_date": "2024-10-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2024-10-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2024-10",
+          "shopify": 139.91,
+          "amazon": 623.71,
+          "shopify_txn": 9,
+          "amazon_txn": 48
+        },
+        {
+          "month": "2024-11",
+          "shopify": 21.98,
+          "amazon": 845.5,
+          "shopify_txn": 2,
+          "amazon_txn": 58
+        },
+        {
+          "month": "2024-12",
+          "shopify": 0.0,
+          "amazon": 1395.33,
+          "shopify_txn": 0,
+          "amazon_txn": 95
+        },
+        {
+          "month": "2025-01",
+          "shopify": 61.5,
+          "amazon": 1327.09,
+          "shopify_txn": 1,
+          "amazon_txn": 87
+        },
+        {
+          "month": "2025-02",
+          "shopify": 32.5,
+          "amazon": 1367.1,
+          "shopify_txn": 1,
+          "amazon_txn": 82
+        },
+        {
+          "month": "2025-03",
+          "shopify": 99.83,
+          "amazon": 1250.84,
+          "shopify_txn": 3,
+          "amazon_txn": 80
+        },
+        {
+          "month": "2025-04",
+          "shopify": 32.5,
+          "amazon": 1292.02,
+          "shopify_txn": 1,
+          "amazon_txn": 83
+        },
+        {
+          "month": "2025-05",
+          "shopify": 85.68,
+          "amazon": 1035.18,
+          "shopify_txn": 3,
+          "amazon_txn": 72
+        },
+        {
+          "month": "2025-06",
+          "shopify": 120.49,
+          "amazon": 980.33,
+          "shopify_txn": 5,
+          "amazon_txn": 62
+        },
+        {
+          "month": "2025-07",
+          "shopify": 119.28,
+          "amazon": 1037.87,
+          "shopify_txn": 3,
+          "amazon_txn": 70
+        },
+        {
+          "month": "2025-08",
+          "shopify": 100.49,
+          "amazon": 850.72,
+          "shopify_txn": 2,
+          "amazon_txn": 58
+        },
+        {
+          "month": "2025-09",
+          "shopify": 68.96,
+          "amazon": 1113.3,
+          "shopify_txn": 4,
+          "amazon_txn": 74
+        },
+        {
+          "month": "2025-10",
+          "shopify": 120.91,
+          "amazon": 1250.5,
+          "shopify_txn": 3,
+          "amazon_txn": 88
+        },
+        {
+          "month": "2025-11",
+          "shopify": 147.9,
+          "amazon": 1800.65,
+          "shopify_txn": 2,
+          "amazon_txn": 119
+        },
+        {
+          "month": "2025-12",
+          "shopify": 103.74,
+          "amazon": 3655.4,
+          "shopify_txn": 3,
+          "amazon_txn": 229
+        },
+        {
+          "month": "2026-01",
+          "shopify": 0.0,
+          "amazon": 2159.5,
+          "shopify_txn": 0,
+          "amazon_txn": 144
+        },
+        {
+          "month": "2026-02",
+          "shopify": 71.82,
+          "amazon": 2274.25,
+          "shopify_txn": 3,
+          "amazon_txn": 140
+        },
+        {
+          "month": "2026-03",
+          "shopify": 73.32,
+          "amazon": 1724.44,
+          "shopify_txn": 1,
+          "amazon_txn": 117
+        },
+        {
+          "month": "2026-04",
+          "shopify": 63.97,
+          "amazon": 1389.32,
+          "shopify_txn": 1,
+          "amazon_txn": 93
+        },
+        {
+          "month": "2026-05",
+          "shopify": 156.93,
+          "amazon": 1194.96,
+          "shopify_txn": 5,
+          "amazon_txn": 79
+        },
+        {
+          "month": "2026-06",
+          "shopify": 120.37,
+          "amazon": 1327.57,
+          "shopify_txn": 5,
+          "amazon_txn": 89
+        },
+        {
+          "month": "2026-07",
+          "shopify": 39.99,
+          "amazon": 1138.22,
+          "shopify_txn": 1,
+          "amazon_txn": 77
+        },
+        {
+          "month": "2026-08",
+          "shopify": 13.99,
+          "amazon": 321.07,
+          "shopify_txn": 2,
+          "amazon_txn": 22
+        }
+      ]
+    },
+    {
+      "state_code": "DC",
+      "state_name": "District of Columbia",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 487.39,
+      "shopify_orders": 8,
+      "amazon_sales": 1629.15,
+      "amazon_orders": 109,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 2116.54,
+      "counted_orders": 117,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 2.1,
+      "pct_of_txn_threshold": 58.5,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($487.39) + amazon($1,629.15) = $2,116.54",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 99.0,
+          "amazon": 97.93,
+          "shopify_txn": 1,
+          "amazon_txn": 6
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 69.95,
+          "shopify_txn": 0,
+          "amazon_txn": 5
+        },
+        {
+          "month": "2025-03",
+          "shopify": 0.0,
+          "amazon": 173.88,
+          "shopify_txn": 0,
+          "amazon_txn": 10
+        },
+        {
+          "month": "2025-04",
+          "shopify": 75.99,
+          "amazon": 85.94,
+          "shopify_txn": 1,
+          "amazon_txn": 6
+        },
+        {
+          "month": "2025-05",
+          "shopify": 0.0,
+          "amazon": 95.83,
+          "shopify_txn": 0,
+          "amazon_txn": 6
+        },
+        {
+          "month": "2025-06",
+          "shopify": 85.5,
+          "amazon": 83.94,
+          "shopify_txn": 1,
+          "amazon_txn": 5
+        },
+        {
+          "month": "2025-07",
+          "shopify": 0.0,
+          "amazon": 41.97,
+          "shopify_txn": 0,
+          "amazon_txn": 3
+        },
+        {
+          "month": "2025-08",
+          "shopify": 66.48,
+          "amazon": 41.97,
+          "shopify_txn": 1,
+          "amazon_txn": 3
+        },
+        {
+          "month": "2025-09",
+          "shopify": 0.0,
+          "amazon": 41.97,
+          "shopify_txn": 0,
+          "amazon_txn": 2
+        },
+        {
+          "month": "2025-10",
+          "shopify": 0.0,
+          "amazon": 69.95,
+          "shopify_txn": 0,
+          "amazon_txn": 5
+        },
+        {
+          "month": "2025-11",
+          "shopify": 34.98,
+          "amazon": 29.98,
+          "shopify_txn": 1,
+          "amazon_txn": 2
+        },
+        {
+          "month": "2025-12",
+          "shopify": 0.0,
+          "amazon": 99.93,
+          "shopify_txn": 0,
+          "amazon_txn": 7
+        },
+        {
+          "month": "2026-01",
+          "shopify": 0.0,
+          "amazon": 225.84,
+          "shopify_txn": 0,
+          "amazon_txn": 16
+        },
+        {
+          "month": "2026-02",
+          "shopify": 79.94,
+          "amazon": 42.27,
+          "shopify_txn": 1,
+          "amazon_txn": 3
+        },
+        {
+          "month": "2026-03",
+          "shopify": 0.0,
+          "amazon": 81.44,
+          "shopify_txn": 0,
+          "amazon_txn": 6
+        },
+        {
+          "month": "2026-04",
+          "shopify": 0.0,
+          "amazon": 99.93,
+          "shopify_txn": 0,
+          "amazon_txn": 7
+        },
+        {
+          "month": "2026-05",
+          "shopify": 25.5,
+          "amazon": 71.95,
+          "shopify_txn": 1,
+          "amazon_txn": 5
+        },
+        {
+          "month": "2026-06",
+          "shopify": 0.0,
+          "amazon": 61.55,
+          "shopify_txn": 0,
+          "amazon_txn": 5
+        },
+        {
+          "month": "2026-07",
+          "shopify": 0.0,
+          "amazon": 98.94,
+          "shopify_txn": 0,
+          "amazon_txn": 6
+        },
+        {
+          "month": "2026-08",
+          "shopify": 20.0,
+          "amazon": 13.99,
+          "shopify_txn": 1,
+          "amazon_txn": 1
+        }
+      ]
+    },
+    {
+      "state_code": "FL",
+      "state_name": "Florida",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_calendar_year",
+      "shopify_sales": 11005.93,
+      "shopify_orders": 346,
+      "amazon_sales": 203341.24,
+      "amazon_orders": 13056,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 11005.93,
+      "counted_orders": 346,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 11.0,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($11,005.93) only; amazon($203,341.24) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 292.07,
+          "amazon": 10616.06,
+          "shopify_txn": 9,
+          "amazon_txn": 645
+        },
+        {
+          "month": "2025-02",
+          "shopify": 169.32,
+          "amazon": 8178.52,
+          "shopify_txn": 11,
+          "amazon_txn": 522
+        },
+        {
+          "month": "2025-03",
+          "shopify": 233.87,
+          "amazon": 10060.34,
+          "shopify_txn": 10,
+          "amazon_txn": 630
+        },
+        {
+          "month": "2025-04",
+          "shopify": 484.87,
+          "amazon": 9648.38,
+          "shopify_txn": 14,
+          "amazon_txn": 621
+        },
+        {
+          "month": "2025-05",
+          "shopify": 560.82,
+          "amazon": 9669.25,
+          "shopify_txn": 18,
+          "amazon_txn": 633
+        },
+        {
+          "month": "2025-06",
+          "shopify": 332.06,
+          "amazon": 8213.57,
+          "shopify_txn": 12,
+          "amazon_txn": 518
+        },
+        {
+          "month": "2025-07",
+          "shopify": 907.77,
+          "amazon": 9243.75,
+          "shopify_txn": 27,
+          "amazon_txn": 613
+        },
+        {
+          "month": "2025-08",
+          "shopify": 730.15,
+          "amazon": 8352.81,
+          "shopify_txn": 24,
+          "amazon_txn": 530
+        },
+        {
+          "month": "2025-09",
+          "shopify": 1160.35,
+          "amazon": 7944.85,
+          "shopify_txn": 19,
+          "amazon_txn": 502
+        },
+        {
+          "month": "2025-10",
+          "shopify": 581.04,
+          "amazon": 8404.77,
+          "shopify_txn": 18,
+          "amazon_txn": 517
+        },
+        {
+          "month": "2025-11",
+          "shopify": 541.91,
+          "amazon": 12120.04,
+          "shopify_txn": 17,
+          "amazon_txn": 768
+        },
+        {
+          "month": "2025-12",
+          "shopify": 818.43,
+          "amazon": 16015.04,
+          "shopify_txn": 26,
+          "amazon_txn": 1012
+        },
+        {
+          "month": "2026-01",
+          "shopify": 342.3,
+          "amazon": 14065.44,
+          "shopify_txn": 11,
+          "amazon_txn": 928
+        },
+        {
+          "month": "2026-02",
+          "shopify": 504.87,
+          "amazon": 15246.64,
+          "shopify_txn": 16,
+          "amazon_txn": 962
+        },
+        {
+          "month": "2026-03",
+          "shopify": 865.78,
+          "amazon": 12064.85,
+          "shopify_txn": 22,
+          "amazon_txn": 785
+        },
+        {
+          "month": "2026-04",
+          "shopify": 496.19,
+          "amazon": 11539.59,
+          "shopify_txn": 27,
+          "amazon_txn": 758
+        },
+        {
+          "month": "2026-05",
+          "shopify": 841.91,
+          "amazon": 10311.28,
+          "shopify_txn": 20,
+          "amazon_txn": 674
+        },
+        {
+          "month": "2026-06",
+          "shopify": 227.63,
+          "amazon": 9665.19,
+          "shopify_txn": 10,
+          "amazon_txn": 650
+        },
+        {
+          "month": "2026-07",
+          "shopify": 669.0,
+          "amazon": 9906.7,
+          "shopify_txn": 21,
+          "amazon_txn": 653
+        },
+        {
+          "month": "2026-08",
+          "shopify": 245.59,
+          "amazon": 2074.17,
+          "shopify_txn": 14,
+          "amazon_txn": 135
+        }
+      ]
+    },
+    {
+      "state_code": "GA",
+      "state_name": "Georgia",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 3578.51,
+      "shopify_orders": 104,
+      "amazon_sales": 69940.12,
+      "amazon_orders": 4478,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 3578.51,
+      "counted_orders": 104,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 3.6,
+      "pct_of_txn_threshold": 52.0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($3,578.51) only; amazon($69,940.12) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 64.5,
+          "amazon": 3284.77,
+          "shopify_txn": 2,
+          "amazon_txn": 209
+        },
+        {
+          "month": "2025-02",
+          "shopify": 27.0,
+          "amazon": 2969.98,
+          "shopify_txn": 2,
+          "amazon_txn": 183
+        },
+        {
+          "month": "2025-03",
+          "shopify": 255.05,
+          "amazon": 3184.32,
+          "shopify_txn": 8,
+          "amazon_txn": 195
+        },
+        {
+          "month": "2025-04",
+          "shopify": 95.98,
+          "amazon": 3267.08,
+          "shopify_txn": 3,
+          "amazon_txn": 199
+        },
+        {
+          "month": "2025-05",
+          "shopify": 172.21,
+          "amazon": 3086.71,
+          "shopify_txn": 6,
+          "amazon_txn": 201
+        },
+        {
+          "month": "2025-06",
+          "shopify": 74.49,
+          "amazon": 2143.04,
+          "shopify_txn": 3,
+          "amazon_txn": 128
+        },
+        {
+          "month": "2025-07",
+          "shopify": 101.03,
+          "amazon": 3066.63,
+          "shopify_txn": 5,
+          "amazon_txn": 201
+        },
+        {
+          "month": "2025-08",
+          "shopify": 195.79,
+          "amazon": 2818.4,
+          "shopify_txn": 6,
+          "amazon_txn": 180
+        },
+        {
+          "month": "2025-09",
+          "shopify": 173.23,
+          "amazon": 2398.72,
+          "shopify_txn": 7,
+          "amazon_txn": 141
+        },
+        {
+          "month": "2025-10",
+          "shopify": 92.2,
+          "amazon": 3227.08,
+          "shopify_txn": 3,
+          "amazon_txn": 211
+        },
+        {
+          "month": "2025-11",
+          "shopify": 149.39,
+          "amazon": 3991.19,
+          "shopify_txn": 5,
+          "amazon_txn": 255
+        },
+        {
+          "month": "2025-12",
+          "shopify": 472.11,
+          "amazon": 8904.93,
+          "shopify_txn": 7,
+          "amazon_txn": 546
+        },
+        {
+          "month": "2026-01",
+          "shopify": 191.01,
+          "amazon": 5334.47,
+          "shopify_txn": 4,
+          "amazon_txn": 359
+        },
+        {
+          "month": "2026-02",
+          "shopify": 96.58,
+          "amazon": 5234.98,
+          "shopify_txn": 3,
+          "amazon_txn": 332
+        },
+        {
+          "month": "2026-03",
+          "shopify": 217.91,
+          "amazon": 3764.85,
+          "shopify_txn": 6,
+          "amazon_txn": 247
+        },
+        {
+          "month": "2026-04",
+          "shopify": 289.52,
+          "amazon": 3255.5,
+          "shopify_txn": 8,
+          "amazon_txn": 216
+        },
+        {
+          "month": "2026-05",
+          "shopify": 395.25,
+          "amazon": 3143.04,
+          "shopify_txn": 9,
+          "amazon_txn": 211
+        },
+        {
+          "month": "2026-06",
+          "shopify": 246.01,
+          "amazon": 3178.66,
+          "shopify_txn": 9,
+          "amazon_txn": 223
+        },
+        {
+          "month": "2026-07",
+          "shopify": 95.35,
+          "amazon": 3158.14,
+          "shopify_txn": 2,
+          "amazon_txn": 205
+        },
+        {
+          "month": "2026-08",
+          "shopify": 173.9,
+          "amazon": 527.63,
+          "shopify_txn": 6,
+          "amazon_txn": 36
+        }
+      ]
+    },
+    {
+      "state_code": "HI",
+      "state_name": "Hawaii",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 493.51,
+      "shopify_orders": 14,
+      "amazon_sales": 6220.81,
+      "amazon_orders": 399,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 6714.32,
+      "counted_orders": 413,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 6.7,
+      "pct_of_txn_threshold": 206.5,
+      "status": "exceeded",
+      "is_registered": true,
+      "formula": "counted_sales = shopify($493.51) + amazon($6,220.81) = $6,714.32",
+      "data_coverage": {
+        "shopify_min_date": "2025-02-01",
+        "shopify_max_date": "2026-06-30",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": [
+          "Shopify data starts 2025-02-01, window starts 2025-01-01"
+        ]
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 0.0,
+          "amazon": 329.8,
+          "shopify_txn": 0,
+          "amazon_txn": 17
+        },
+        {
+          "month": "2025-02",
+          "shopify": 13.0,
+          "amazon": 339.77,
+          "shopify_txn": 1,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2025-03",
+          "shopify": 17.0,
+          "amazon": 255.82,
+          "shopify_txn": 1,
+          "amazon_txn": 16
+        },
+        {
+          "month": "2025-04",
+          "shopify": 0.0,
+          "amazon": 254.83,
+          "shopify_txn": 0,
+          "amazon_txn": 17
+        },
+        {
+          "month": "2025-05",
+          "shopify": 0.0,
+          "amazon": 326.27,
+          "shopify_txn": 0,
+          "amazon_txn": 23
+        },
+        {
+          "month": "2025-06",
+          "shopify": 0.0,
+          "amazon": 307.8,
+          "shopify_txn": 0,
+          "amazon_txn": 18
+        },
+        {
+          "month": "2025-07",
+          "shopify": 25.0,
+          "amazon": 399.1,
+          "shopify_txn": 1,
+          "amazon_txn": 28
+        },
+        {
+          "month": "2025-08",
+          "shopify": 23.79,
+          "amazon": 317.78,
+          "shopify_txn": 2,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2025-09",
+          "shopify": 23.8,
+          "amazon": 301.79,
+          "shopify_txn": 1,
+          "amazon_txn": 21
+        },
+        {
+          "month": "2025-10",
+          "shopify": 47.58,
+          "amazon": 358.54,
+          "shopify_txn": 1,
+          "amazon_txn": 21
+        },
+        {
+          "month": "2025-11",
+          "shopify": 51.0,
+          "amazon": 330.84,
+          "shopify_txn": 1,
+          "amazon_txn": 18
+        },
+        {
+          "month": "2025-12",
+          "shopify": 136.6,
+          "amazon": 345.78,
+          "shopify_txn": 2,
+          "amazon_txn": 19
+        },
+        {
+          "month": "2026-01",
+          "shopify": 0.0,
+          "amazon": 408.73,
+          "shopify_txn": 0,
+          "amazon_txn": 27
+        },
+        {
+          "month": "2026-02",
+          "shopify": 27.98,
+          "amazon": 328.15,
+          "shopify_txn": 1,
+          "amazon_txn": 21
+        },
+        {
+          "month": "2026-03",
+          "shopify": 0.0,
+          "amazon": 213.45,
+          "shopify_txn": 0,
+          "amazon_txn": 15
+        },
+        {
+          "month": "2026-04",
+          "shopify": 31.43,
+          "amazon": 362.62,
+          "shopify_txn": 1,
+          "amazon_txn": 24
+        },
+        {
+          "month": "2026-05",
+          "shopify": 84.44,
+          "amazon": 425.96,
+          "shopify_txn": 1,
+          "amazon_txn": 28
+        },
+        {
+          "month": "2026-06",
+          "shopify": 11.89,
+          "amazon": 239.03,
+          "shopify_txn": 1,
+          "amazon_txn": 18
+        },
+        {
+          "month": "2026-07",
+          "shopify": 0.0,
+          "amazon": 346.77,
+          "shopify_txn": 0,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2026-08",
+          "shopify": 0.0,
+          "amazon": 27.98,
+          "shopify_txn": 0,
+          "amazon_txn": 2
+        }
+      ]
+    },
+    {
+      "state_code": "IA",
+      "state_name": "Iowa",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 1412.48,
+      "shopify_orders": 46,
+      "amazon_sales": 23739.42,
+      "amazon_orders": 1524,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 25151.9,
+      "counted_orders": 1570,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 25.2,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,412.48) + amazon($23,739.42) = $25,151.90",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 64.0,
+          "amazon": 853.42,
+          "shopify_txn": 2,
+          "amazon_txn": 54
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 932.35,
+          "shopify_txn": 0,
+          "amazon_txn": 64
+        },
+        {
+          "month": "2025-03",
+          "shopify": 82.22,
+          "amazon": 1092.25,
+          "shopify_txn": 2,
+          "amazon_txn": 65
+        },
+        {
+          "month": "2025-04",
+          "shopify": 57.49,
+          "amazon": 1171.44,
+          "shopify_txn": 3,
+          "amazon_txn": 71
+        },
+        {
+          "month": "2025-05",
+          "shopify": 29.75,
+          "amazon": 867.15,
+          "shopify_txn": 1,
+          "amazon_txn": 58
+        },
+        {
+          "month": "2025-06",
+          "shopify": 63.75,
+          "amazon": 524.64,
+          "shopify_txn": 1,
+          "amazon_txn": 34
+        },
+        {
+          "month": "2025-07",
+          "shopify": 67.5,
+          "amazon": 977.8,
+          "shopify_txn": 3,
+          "amazon_txn": 67
+        },
+        {
+          "month": "2025-08",
+          "shopify": 181.48,
+          "amazon": 891.39,
+          "shopify_txn": 4,
+          "amazon_txn": 58
+        },
+        {
+          "month": "2025-09",
+          "shopify": 90.97,
+          "amazon": 900.38,
+          "shopify_txn": 2,
+          "amazon_txn": 58
+        },
+        {
+          "month": "2025-10",
+          "shopify": 33.99,
+          "amazon": 1099.32,
+          "shopify_txn": 3,
+          "amazon_txn": 72
+        },
+        {
+          "month": "2025-11",
+          "shopify": 17.1,
+          "amazon": 1423.0,
+          "shopify_txn": 1,
+          "amazon_txn": 88
+        },
+        {
+          "month": "2025-12",
+          "shopify": 277.56,
+          "amazon": 3079.67,
+          "shopify_txn": 9,
+          "amazon_txn": 195
+        },
+        {
+          "month": "2026-01",
+          "shopify": 20.0,
+          "amazon": 1975.92,
+          "shopify_txn": 1,
+          "amazon_txn": 125
+        },
+        {
+          "month": "2026-02",
+          "shopify": 0.0,
+          "amazon": 1704.4,
+          "shopify_txn": 0,
+          "amazon_txn": 110
+        },
+        {
+          "month": "2026-03",
+          "shopify": 93.96,
+          "amazon": 1460.57,
+          "shopify_txn": 3,
+          "amazon_txn": 92
+        },
+        {
+          "month": "2026-04",
+          "shopify": 76.5,
+          "amazon": 1229.38,
+          "shopify_txn": 3,
+          "amazon_txn": 84
+        },
+        {
+          "month": "2026-05",
+          "shopify": 99.5,
+          "amazon": 1263.23,
+          "shopify_txn": 3,
+          "amazon_txn": 79
+        },
+        {
+          "month": "2026-06",
+          "shopify": 58.95,
+          "amazon": 1061.66,
+          "shopify_txn": 2,
+          "amazon_txn": 71
+        },
+        {
+          "month": "2026-07",
+          "shopify": 23.79,
+          "amazon": 1071.56,
+          "shopify_txn": 1,
+          "amazon_txn": 71
+        },
+        {
+          "month": "2026-08",
+          "shopify": 73.97,
+          "amazon": 159.89,
+          "shopify_txn": 2,
+          "amazon_txn": 8
+        }
+      ]
+    },
+    {
+      "state_code": "ID",
+      "state_name": "Idaho",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 829.35,
+      "shopify_orders": 34,
+      "amazon_sales": 29866.35,
+      "amazon_orders": 1948,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 30695.7,
+      "counted_orders": 1982,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 30.7,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($829.35) + amazon($29,866.35) = $30,695.70",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 11.99,
+          "amazon": 992.34,
+          "shopify_txn": 1,
+          "amazon_txn": 63
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 1169.21,
+          "shopify_txn": 0,
+          "amazon_txn": 72
+        },
+        {
+          "month": "2025-03",
+          "shopify": 62.0,
+          "amazon": 1420.61,
+          "shopify_txn": 2,
+          "amazon_txn": 92
+        },
+        {
+          "month": "2025-04",
+          "shopify": 42.0,
+          "amazon": 1465.87,
+          "shopify_txn": 2,
+          "amazon_txn": 100
+        },
+        {
+          "month": "2025-05",
+          "shopify": 0.0,
+          "amazon": 1267.27,
+          "shopify_txn": 0,
+          "amazon_txn": 81
+        },
+        {
+          "month": "2025-06",
+          "shopify": 0.0,
+          "amazon": 1044.29,
+          "shopify_txn": 0,
+          "amazon_txn": 61
+        },
+        {
+          "month": "2025-07",
+          "shopify": 30.0,
+          "amazon": 1063.62,
+          "shopify_txn": 1,
+          "amazon_txn": 73
+        },
+        {
+          "month": "2025-08",
+          "shopify": 36.0,
+          "amazon": 1380.04,
+          "shopify_txn": 1,
+          "amazon_txn": 90
+        },
+        {
+          "month": "2025-09",
+          "shopify": 43.99,
+          "amazon": 1244.35,
+          "shopify_txn": 2,
+          "amazon_txn": 75
+        },
+        {
+          "month": "2025-10",
+          "shopify": 0.0,
+          "amazon": 1382.51,
+          "shopify_txn": 0,
+          "amazon_txn": 97
+        },
+        {
+          "month": "2025-11",
+          "shopify": 10.19,
+          "amazon": 1502.86,
+          "shopify_txn": 1,
+          "amazon_txn": 102
+        },
+        {
+          "month": "2025-12",
+          "shopify": 0.0,
+          "amazon": 3150.8,
+          "shopify_txn": 0,
+          "amazon_txn": 197
+        },
+        {
+          "month": "2026-01",
+          "shopify": 105.94,
+          "amazon": 1991.74,
+          "shopify_txn": 4,
+          "amazon_txn": 134
+        },
+        {
+          "month": "2026-02",
+          "shopify": 95.95,
+          "amazon": 2038.02,
+          "shopify_txn": 2,
+          "amazon_txn": 124
+        },
+        {
+          "month": "2026-03",
+          "shopify": 64.04,
+          "amazon": 2033.15,
+          "shopify_txn": 2,
+          "amazon_txn": 136
+        },
+        {
+          "month": "2026-04",
+          "shopify": 0.0,
+          "amazon": 1513.22,
+          "shopify_txn": 2,
+          "amazon_txn": 102
+        },
+        {
+          "month": "2026-05",
+          "shopify": 64.97,
+          "amazon": 1707.64,
+          "shopify_txn": 3,
+          "amazon_txn": 117
+        },
+        {
+          "month": "2026-06",
+          "shopify": 62.25,
+          "amazon": 1848.14,
+          "shopify_txn": 4,
+          "amazon_txn": 125
+        },
+        {
+          "month": "2026-07",
+          "shopify": 92.96,
+          "amazon": 1343.59,
+          "shopify_txn": 3,
+          "amazon_txn": 86
+        },
+        {
+          "month": "2026-08",
+          "shopify": 107.07,
+          "amazon": 307.08,
+          "shopify_txn": 4,
+          "amazon_txn": 21
+        }
+      ]
+    },
+    {
+      "state_code": "IL",
+      "state_name": "Illinois",
+      "window_start": "2025-08-16",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_12_months",
+      "shopify_sales": 3714.83,
+      "shopify_orders": 108,
+      "amazon_sales": 55249.65,
+      "amazon_orders": 3604,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 3714.83,
+      "counted_orders": 108,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 3.7,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($3,714.83) only; amazon($55,249.65) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-08-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-08-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-08",
+          "shopify": 506.25,
+          "amazon": 2631.79,
+          "shopify_txn": 10,
+          "amazon_txn": 167
+        },
+        {
+          "month": "2025-09",
+          "shopify": 212.4,
+          "amazon": 2974.24,
+          "shopify_txn": 8,
+          "amazon_txn": 191
+        },
+        {
+          "month": "2025-10",
+          "shopify": 205.52,
+          "amazon": 3618.04,
+          "shopify_txn": 5,
+          "amazon_txn": 238
+        },
+        {
+          "month": "2025-11",
+          "shopify": 255.64,
+          "amazon": 4705.69,
+          "shopify_txn": 6,
+          "amazon_txn": 289
+        },
+        {
+          "month": "2025-12",
+          "shopify": 413.07,
+          "amazon": 10250.42,
+          "shopify_txn": 13,
+          "amazon_txn": 639
+        },
+        {
+          "month": "2026-01",
+          "shopify": 215.68,
+          "amazon": 6394.78,
+          "shopify_txn": 4,
+          "amazon_txn": 431
+        },
+        {
+          "month": "2026-02",
+          "shopify": 375.78,
+          "amazon": 5343.39,
+          "shopify_txn": 12,
+          "amazon_txn": 349
+        },
+        {
+          "month": "2026-03",
+          "shopify": 137.35,
+          "amazon": 4778.22,
+          "shopify_txn": 6,
+          "amazon_txn": 322
+        },
+        {
+          "month": "2026-04",
+          "shopify": 107.67,
+          "amazon": 3844.42,
+          "shopify_txn": 7,
+          "amazon_txn": 260
+        },
+        {
+          "month": "2026-05",
+          "shopify": 407.66,
+          "amazon": 3900.12,
+          "shopify_txn": 10,
+          "amazon_txn": 259
+        },
+        {
+          "month": "2026-06",
+          "shopify": 296.59,
+          "amazon": 3443.9,
+          "shopify_txn": 7,
+          "amazon_txn": 231
+        },
+        {
+          "month": "2026-07",
+          "shopify": 441.02,
+          "amazon": 2670.12,
+          "shopify_txn": 13,
+          "amazon_txn": 182
+        },
+        {
+          "month": "2026-08",
+          "shopify": 140.2,
+          "amazon": 694.52,
+          "shopify_txn": 7,
+          "amazon_txn": 46
+        }
+      ]
+    },
+    {
+      "state_code": "IN",
+      "state_name": "Indiana",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 2887.06,
+      "shopify_orders": 96,
+      "amazon_sales": 46581.71,
+      "amazon_orders": 3006,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 2887.06,
+      "counted_orders": 96,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 2.9,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($2,887.06) only; amazon($46,581.71) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 156.24,
+          "amazon": 2035.63,
+          "shopify_txn": 4,
+          "amazon_txn": 133
+        },
+        {
+          "month": "2025-02",
+          "shopify": 42.0,
+          "amazon": 2214.5,
+          "shopify_txn": 1,
+          "amazon_txn": 140
+        },
+        {
+          "month": "2025-03",
+          "shopify": 99.48,
+          "amazon": 2087.86,
+          "shopify_txn": 4,
+          "amazon_txn": 139
+        },
+        {
+          "month": "2025-04",
+          "shopify": 141.39,
+          "amazon": 1836.65,
+          "shopify_txn": 4,
+          "amazon_txn": 117
+        },
+        {
+          "month": "2025-05",
+          "shopify": 203.93,
+          "amazon": 1905.97,
+          "shopify_txn": 6,
+          "amazon_txn": 125
+        },
+        {
+          "month": "2025-06",
+          "shopify": 109.01,
+          "amazon": 1184.81,
+          "shopify_txn": 5,
+          "amazon_txn": 75
+        },
+        {
+          "month": "2025-07",
+          "shopify": 244.32,
+          "amazon": 1832.09,
+          "shopify_txn": 8,
+          "amazon_txn": 122
+        },
+        {
+          "month": "2025-08",
+          "shopify": 113.67,
+          "amazon": 1518.57,
+          "shopify_txn": 6,
+          "amazon_txn": 100
+        },
+        {
+          "month": "2025-09",
+          "shopify": 142.34,
+          "amazon": 1380.94,
+          "shopify_txn": 3,
+          "amazon_txn": 90
+        },
+        {
+          "month": "2025-10",
+          "shopify": 27.2,
+          "amazon": 2003.56,
+          "shopify_txn": 1,
+          "amazon_txn": 140
+        },
+        {
+          "month": "2025-11",
+          "shopify": 80.78,
+          "amazon": 3153.03,
+          "shopify_txn": 6,
+          "amazon_txn": 194
+        },
+        {
+          "month": "2025-12",
+          "shopify": 244.29,
+          "amazon": 6557.16,
+          "shopify_txn": 7,
+          "amazon_txn": 394
+        },
+        {
+          "month": "2026-01",
+          "shopify": 212.99,
+          "amazon": 4096.44,
+          "shopify_txn": 7,
+          "amazon_txn": 267
+        },
+        {
+          "month": "2026-02",
+          "shopify": 119.61,
+          "amazon": 3033.34,
+          "shopify_txn": 3,
+          "amazon_txn": 189
+        },
+        {
+          "month": "2026-03",
+          "shopify": 161.57,
+          "amazon": 2627.47,
+          "shopify_txn": 6,
+          "amazon_txn": 173
+        },
+        {
+          "month": "2026-04",
+          "shopify": 172.45,
+          "amazon": 2504.69,
+          "shopify_txn": 4,
+          "amazon_txn": 166
+        },
+        {
+          "month": "2026-05",
+          "shopify": 284.64,
+          "amazon": 2290.88,
+          "shopify_txn": 5,
+          "amazon_txn": 154
+        },
+        {
+          "month": "2026-06",
+          "shopify": 136.27,
+          "amazon": 2014.13,
+          "shopify_txn": 5,
+          "amazon_txn": 133
+        },
+        {
+          "month": "2026-07",
+          "shopify": 96.34,
+          "amazon": 1868.3,
+          "shopify_txn": 5,
+          "amazon_txn": 124
+        },
+        {
+          "month": "2026-08",
+          "shopify": 98.54,
+          "amazon": 435.69,
+          "shopify_txn": 6,
+          "amazon_txn": 31
+        }
+      ]
+    },
+    {
+      "state_code": "KS",
+      "state_name": "Kansas",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 1105.42,
+      "shopify_orders": 43,
+      "amazon_sales": 18844.48,
+      "amazon_orders": 1185,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 19949.9,
+      "counted_orders": 1228,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 19.9,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,105.42) + amazon($18,844.48) = $19,949.90",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 42.5,
+          "amazon": 738.52,
+          "shopify_txn": 2,
+          "amazon_txn": 43
+        },
+        {
+          "month": "2025-02",
+          "shopify": 120.17,
+          "amazon": 953.35,
+          "shopify_txn": 4,
+          "amazon_txn": 58
+        },
+        {
+          "month": "2025-03",
+          "shopify": 0.0,
+          "amazon": 739.76,
+          "shopify_txn": 0,
+          "amazon_txn": 44
+        },
+        {
+          "month": "2025-04",
+          "shopify": 120.9,
+          "amazon": 668.54,
+          "shopify_txn": 3,
+          "amazon_txn": 42
+        },
+        {
+          "month": "2025-05",
+          "shopify": 91.19,
+          "amazon": 684.81,
+          "shopify_txn": 4,
+          "amazon_txn": 45
+        },
+        {
+          "month": "2025-06",
+          "shopify": 105.0,
+          "amazon": 614.61,
+          "shopify_txn": 2,
+          "amazon_txn": 35
+        },
+        {
+          "month": "2025-07",
+          "shopify": 0.0,
+          "amazon": 748.96,
+          "shopify_txn": 0,
+          "amazon_txn": 50
+        },
+        {
+          "month": "2025-08",
+          "shopify": 13.0,
+          "amazon": 470.97,
+          "shopify_txn": 1,
+          "amazon_txn": 33
+        },
+        {
+          "month": "2025-09",
+          "shopify": 108.75,
+          "amazon": 889.68,
+          "shopify_txn": 2,
+          "amazon_txn": 54
+        },
+        {
+          "month": "2025-10",
+          "shopify": 41.99,
+          "amazon": 587.67,
+          "shopify_txn": 1,
+          "amazon_txn": 42
+        },
+        {
+          "month": "2025-11",
+          "shopify": 41.8,
+          "amazon": 1547.91,
+          "shopify_txn": 2,
+          "amazon_txn": 96
+        },
+        {
+          "month": "2025-12",
+          "shopify": 0.0,
+          "amazon": 3034.46,
+          "shopify_txn": 1,
+          "amazon_txn": 169
+        },
+        {
+          "month": "2026-01",
+          "shopify": 27.0,
+          "amazon": 1341.05,
+          "shopify_txn": 1,
+          "amazon_txn": 89
+        },
+        {
+          "month": "2026-02",
+          "shopify": 0.0,
+          "amazon": 1297.26,
+          "shopify_txn": 1,
+          "amazon_txn": 86
+        },
+        {
+          "month": "2026-03",
+          "shopify": 22.94,
+          "amazon": 1230.35,
+          "shopify_txn": 2,
+          "amazon_txn": 82
+        },
+        {
+          "month": "2026-04",
+          "shopify": 104.76,
+          "amazon": 810.35,
+          "shopify_txn": 7,
+          "amazon_txn": 53
+        },
+        {
+          "month": "2026-05",
+          "shopify": 63.71,
+          "amazon": 931.34,
+          "shopify_txn": 2,
+          "amazon_txn": 64
+        },
+        {
+          "month": "2026-06",
+          "shopify": 27.98,
+          "amazon": 904.34,
+          "shopify_txn": 2,
+          "amazon_txn": 57
+        },
+        {
+          "month": "2026-07",
+          "shopify": 118.75,
+          "amazon": 524.64,
+          "shopify_txn": 4,
+          "amazon_txn": 34
+        },
+        {
+          "month": "2026-08",
+          "shopify": 54.98,
+          "amazon": 125.91,
+          "shopify_txn": 2,
+          "amazon_txn": 9
+        }
+      ]
+    },
+    {
+      "state_code": "KY",
+      "state_name": "Kentucky",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 1112.9,
+      "shopify_orders": 51,
+      "amazon_sales": 23413.37,
+      "amazon_orders": 1505,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 24526.27,
+      "counted_orders": 1556,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 24.5,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,112.90) + amazon($23,413.37) = $24,526.27",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 11.99,
+          "amazon": 953.35,
+          "shopify_txn": 2,
+          "amazon_txn": 60
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 1246.16,
+          "shopify_txn": 1,
+          "amazon_txn": 80
+        },
+        {
+          "month": "2025-03",
+          "shopify": 64.98,
+          "amazon": 1234.68,
+          "shopify_txn": 2,
+          "amazon_txn": 75
+        },
+        {
+          "month": "2025-04",
+          "shopify": 0.0,
+          "amazon": 1112.25,
+          "shopify_txn": 0,
+          "amazon_txn": 68
+        },
+        {
+          "month": "2025-05",
+          "shopify": 0.0,
+          "amazon": 1042.47,
+          "shopify_txn": 0,
+          "amazon_txn": 68
+        },
+        {
+          "month": "2025-06",
+          "shopify": 144.52,
+          "amazon": 678.53,
+          "shopify_txn": 5,
+          "amazon_txn": 45
+        },
+        {
+          "month": "2025-07",
+          "shopify": 51.99,
+          "amazon": 968.3,
+          "shopify_txn": 2,
+          "amazon_txn": 69
+        },
+        {
+          "month": "2025-08",
+          "shopify": 31.19,
+          "amazon": 796.46,
+          "shopify_txn": 2,
+          "amazon_txn": 52
+        },
+        {
+          "month": "2025-09",
+          "shopify": 0.0,
+          "amazon": 933.37,
+          "shopify_txn": 0,
+          "amazon_txn": 57
+        },
+        {
+          "month": "2025-10",
+          "shopify": 45.49,
+          "amazon": 1174.38,
+          "shopify_txn": 5,
+          "amazon_txn": 76
+        },
+        {
+          "month": "2025-11",
+          "shopify": 92.46,
+          "amazon": 1450.72,
+          "shopify_txn": 5,
+          "amazon_txn": 93
+        },
+        {
+          "month": "2025-12",
+          "shopify": 123.59,
+          "amazon": 3163.05,
+          "shopify_txn": 5,
+          "amazon_txn": 199
+        },
+        {
+          "month": "2026-01",
+          "shopify": 92.25,
+          "amazon": 1796.75,
+          "shopify_txn": 3,
+          "amazon_txn": 120
+        },
+        {
+          "month": "2026-02",
+          "shopify": 35.88,
+          "amazon": 1614.19,
+          "shopify_txn": 3,
+          "amazon_txn": 100
+        },
+        {
+          "month": "2026-03",
+          "shopify": 43.99,
+          "amazon": 1382.9,
+          "shopify_txn": 2,
+          "amazon_txn": 91
+        },
+        {
+          "month": "2026-04",
+          "shopify": 59.68,
+          "amazon": 976.12,
+          "shopify_txn": 3,
+          "amazon_txn": 67
+        },
+        {
+          "month": "2026-05",
+          "shopify": 50.41,
+          "amazon": 963.84,
+          "shopify_txn": 2,
+          "amazon_txn": 57
+        },
+        {
+          "month": "2026-06",
+          "shopify": 111.68,
+          "amazon": 886.55,
+          "shopify_txn": 4,
+          "amazon_txn": 64
+        },
+        {
+          "month": "2026-07",
+          "shopify": 68.49,
+          "amazon": 883.41,
+          "shopify_txn": 3,
+          "amazon_txn": 55
+        },
+        {
+          "month": "2026-08",
+          "shopify": 84.31,
+          "amazon": 155.89,
+          "shopify_txn": 2,
+          "amazon_txn": 9
+        }
+      ]
+    },
+    {
+      "state_code": "LA",
+      "state_name": "Louisiana",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 1292.84,
+      "shopify_orders": 50,
+      "amazon_sales": 18302.21,
+      "amazon_orders": 1195,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 19595.05,
+      "counted_orders": 1245,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 19.6,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,292.84) + amazon($18,302.21) = $19,595.05",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 108.95,
+          "amazon": 810.47,
+          "shopify_txn": 3,
+          "amazon_txn": 52
+        },
+        {
+          "month": "2025-02",
+          "shopify": 63.49,
+          "amazon": 820.46,
+          "shopify_txn": 3,
+          "amazon_txn": 52
+        },
+        {
+          "month": "2025-03",
+          "shopify": 0.0,
+          "amazon": 918.06,
+          "shopify_txn": 0,
+          "amazon_txn": 61
+        },
+        {
+          "month": "2025-04",
+          "shopify": 50.99,
+          "amazon": 979.34,
+          "shopify_txn": 3,
+          "amazon_txn": 61
+        },
+        {
+          "month": "2025-05",
+          "shopify": 109.0,
+          "amazon": 763.37,
+          "shopify_txn": 2,
+          "amazon_txn": 50
+        },
+        {
+          "month": "2025-06",
+          "shopify": 27.0,
+          "amazon": 695.53,
+          "shopify_txn": 1,
+          "amazon_txn": 42
+        },
+        {
+          "month": "2025-07",
+          "shopify": 94.49,
+          "amazon": 851.19,
+          "shopify_txn": 2,
+          "amazon_txn": 59
+        },
+        {
+          "month": "2025-08",
+          "shopify": 64.26,
+          "amazon": 908.69,
+          "shopify_txn": 2,
+          "amazon_txn": 54
+        },
+        {
+          "month": "2025-09",
+          "shopify": 45.98,
+          "amazon": 620.57,
+          "shopify_txn": 3,
+          "amazon_txn": 42
+        },
+        {
+          "month": "2025-10",
+          "shopify": 25.89,
+          "amazon": 856.4,
+          "shopify_txn": 2,
+          "amazon_txn": 58
+        },
+        {
+          "month": "2025-11",
+          "shopify": 57.99,
+          "amazon": 810.74,
+          "shopify_txn": 4,
+          "amazon_txn": 56
+        },
+        {
+          "month": "2025-12",
+          "shopify": 17.85,
+          "amazon": 1934.64,
+          "shopify_txn": 1,
+          "amazon_txn": 126
+        },
+        {
+          "month": "2026-01",
+          "shopify": 13.99,
+          "amazon": 1403.33,
+          "shopify_txn": 1,
+          "amazon_txn": 92
+        },
+        {
+          "month": "2026-02",
+          "shopify": 98.49,
+          "amazon": 954.73,
+          "shopify_txn": 3,
+          "amazon_txn": 61
+        },
+        {
+          "month": "2026-03",
+          "shopify": 124.32,
+          "amazon": 1148.7,
+          "shopify_txn": 4,
+          "amazon_txn": 76
+        },
+        {
+          "month": "2026-04",
+          "shopify": 78.99,
+          "amazon": 956.2,
+          "shopify_txn": 4,
+          "amazon_txn": 65
+        },
+        {
+          "month": "2026-05",
+          "shopify": 29.99,
+          "amazon": 917.36,
+          "shopify_txn": 2,
+          "amazon_txn": 59
+        },
+        {
+          "month": "2026-06",
+          "shopify": 147.28,
+          "amazon": 761.25,
+          "shopify_txn": 4,
+          "amazon_txn": 49
+        },
+        {
+          "month": "2026-07",
+          "shopify": 87.19,
+          "amazon": 1049.28,
+          "shopify_txn": 4,
+          "amazon_txn": 72
+        },
+        {
+          "month": "2026-08",
+          "shopify": 46.7,
+          "amazon": 141.9,
+          "shopify_txn": 2,
+          "amazon_txn": 8
+        }
+      ]
+    },
+    {
+      "state_code": "MA",
+      "state_name": "Massachusetts",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 4755.93,
+      "shopify_orders": 136,
+      "amazon_sales": 51384.79,
+      "amazon_orders": 3256,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 4755.93,
+      "counted_orders": 136,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 4.8,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($4,755.93) only; amazon($51,384.79) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 78.99,
+          "amazon": 2482.36,
+          "shopify_txn": 3,
+          "amazon_txn": 155
+        },
+        {
+          "month": "2025-02",
+          "shopify": 158.98,
+          "amazon": 2330.44,
+          "shopify_txn": 5,
+          "amazon_txn": 146
+        },
+        {
+          "month": "2025-03",
+          "shopify": 190.86,
+          "amazon": 2186.5,
+          "shopify_txn": 3,
+          "amazon_txn": 139
+        },
+        {
+          "month": "2025-04",
+          "shopify": 131.63,
+          "amazon": 2167.55,
+          "shopify_txn": 6,
+          "amazon_txn": 140
+        },
+        {
+          "month": "2025-05",
+          "shopify": 409.58,
+          "amazon": 2097.57,
+          "shopify_txn": 10,
+          "amazon_txn": 138
+        },
+        {
+          "month": "2025-06",
+          "shopify": 112.44,
+          "amazon": 1890.77,
+          "shopify_txn": 4,
+          "amazon_txn": 111
+        },
+        {
+          "month": "2025-07",
+          "shopify": 258.47,
+          "amazon": 1919.07,
+          "shopify_txn": 8,
+          "amazon_txn": 123
+        },
+        {
+          "month": "2025-08",
+          "shopify": 164.95,
+          "amazon": 2089.63,
+          "shopify_txn": 7,
+          "amazon_txn": 123
+        },
+        {
+          "month": "2025-09",
+          "shopify": 322.58,
+          "amazon": 1800.08,
+          "shopify_txn": 10,
+          "amazon_txn": 111
+        },
+        {
+          "month": "2025-10",
+          "shopify": 257.74,
+          "amazon": 2143.62,
+          "shopify_txn": 8,
+          "amazon_txn": 144
+        },
+        {
+          "month": "2025-11",
+          "shopify": 356.62,
+          "amazon": 3353.73,
+          "shopify_txn": 10,
+          "amazon_txn": 215
+        },
+        {
+          "month": "2025-12",
+          "shopify": 206.67,
+          "amazon": 7373.47,
+          "shopify_txn": 6,
+          "amazon_txn": 441
+        },
+        {
+          "month": "2026-01",
+          "shopify": 125.17,
+          "amazon": 3850.8,
+          "shopify_txn": 4,
+          "amazon_txn": 254
+        },
+        {
+          "month": "2026-02",
+          "shopify": 395.64,
+          "amazon": 3651.26,
+          "shopify_txn": 13,
+          "amazon_txn": 231
+        },
+        {
+          "month": "2026-03",
+          "shopify": 246.16,
+          "amazon": 3128.83,
+          "shopify_txn": 9,
+          "amazon_txn": 200
+        },
+        {
+          "month": "2026-04",
+          "shopify": 245.08,
+          "amazon": 2184.39,
+          "shopify_txn": 6,
+          "amazon_txn": 142
+        },
+        {
+          "month": "2026-05",
+          "shopify": 403.75,
+          "amazon": 2278.18,
+          "shopify_txn": 7,
+          "amazon_txn": 143
+        },
+        {
+          "month": "2026-06",
+          "shopify": 262.93,
+          "amazon": 2097.17,
+          "shopify_txn": 6,
+          "amazon_txn": 146
+        },
+        {
+          "month": "2026-07",
+          "shopify": 349.35,
+          "amazon": 2029.6,
+          "shopify_txn": 8,
+          "amazon_txn": 133
+        },
+        {
+          "month": "2026-08",
+          "shopify": 78.34,
+          "amazon": 329.77,
+          "shopify_txn": 3,
+          "amazon_txn": 21
+        }
+      ]
+    },
+    {
+      "state_code": "MD",
+      "state_name": "Maryland",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 5666.28,
+      "shopify_orders": 136,
+      "amazon_sales": 39669.89,
+      "amazon_orders": 2489,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 45336.17,
+      "counted_orders": 2625,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 45.3,
+      "pct_of_txn_threshold": 1312.5,
+      "status": "exceeded",
+      "is_registered": true,
+      "formula": "counted_sales = shopify($5,666.28) + amazon($39,669.89) = $45,336.17",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 518.84,
+          "amazon": 2133.56,
+          "shopify_txn": 9,
+          "amazon_txn": 136
+        },
+        {
+          "month": "2025-02",
+          "shopify": 84.75,
+          "amazon": 1629.89,
+          "shopify_txn": 1,
+          "amazon_txn": 107
+        },
+        {
+          "month": "2025-03",
+          "shopify": 421.64,
+          "amazon": 1592.97,
+          "shopify_txn": 9,
+          "amazon_txn": 99
+        },
+        {
+          "month": "2025-04",
+          "shopify": 88.49,
+          "amazon": 1442.06,
+          "shopify_txn": 3,
+          "amazon_txn": 86
+        },
+        {
+          "month": "2025-05",
+          "shopify": 170.88,
+          "amazon": 1403.76,
+          "shopify_txn": 3,
+          "amazon_txn": 91
+        },
+        {
+          "month": "2025-06",
+          "shopify": 249.13,
+          "amazon": 1380.09,
+          "shopify_txn": 5,
+          "amazon_txn": 82
+        },
+        {
+          "month": "2025-07",
+          "shopify": 88.2,
+          "amazon": 1636.88,
+          "shopify_txn": 3,
+          "amazon_txn": 105
+        },
+        {
+          "month": "2025-08",
+          "shopify": 166.3,
+          "amazon": 1375.38,
+          "shopify_txn": 7,
+          "amazon_txn": 85
+        },
+        {
+          "month": "2025-09",
+          "shopify": 336.82,
+          "amazon": 1563.95,
+          "shopify_txn": 5,
+          "amazon_txn": 101
+        },
+        {
+          "month": "2025-10",
+          "shopify": 256.09,
+          "amazon": 1762.39,
+          "shopify_txn": 7,
+          "amazon_txn": 117
+        },
+        {
+          "month": "2025-11",
+          "shopify": 307.33,
+          "amazon": 2303.53,
+          "shopify_txn": 8,
+          "amazon_txn": 139
+        },
+        {
+          "month": "2025-12",
+          "shopify": 353.37,
+          "amazon": 5394.49,
+          "shopify_txn": 7,
+          "amazon_txn": 323
+        },
+        {
+          "month": "2026-01",
+          "shopify": 218.56,
+          "amazon": 3265.3,
+          "shopify_txn": 5,
+          "amazon_txn": 208
+        },
+        {
+          "month": "2026-02",
+          "shopify": 324.61,
+          "amazon": 2769.0,
+          "shopify_txn": 10,
+          "amazon_txn": 173
+        },
+        {
+          "month": "2026-03",
+          "shopify": 366.57,
+          "amazon": 2283.4,
+          "shopify_txn": 9,
+          "amazon_txn": 148
+        },
+        {
+          "month": "2026-04",
+          "shopify": 196.49,
+          "amazon": 1817.14,
+          "shopify_txn": 11,
+          "amazon_txn": 116
+        },
+        {
+          "month": "2026-05",
+          "shopify": 395.76,
+          "amazon": 2078.4,
+          "shopify_txn": 8,
+          "amazon_txn": 129
+        },
+        {
+          "month": "2026-06",
+          "shopify": 578.53,
+          "amazon": 1676.5,
+          "shopify_txn": 14,
+          "amazon_txn": 113
+        },
+        {
+          "month": "2026-07",
+          "shopify": 406.89,
+          "amazon": 1867.41,
+          "shopify_txn": 9,
+          "amazon_txn": 110
+        },
+        {
+          "month": "2026-08",
+          "shopify": 137.03,
+          "amazon": 293.79,
+          "shopify_txn": 3,
+          "amazon_txn": 21
+        }
+      ]
+    },
+    {
+      "state_code": "ME",
+      "state_name": "Maine",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 427.1,
+      "shopify_orders": 19,
+      "amazon_sales": 7398.24,
+      "amazon_orders": 466,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 427.1,
+      "counted_orders": 19,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 0.4,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($427.10) only; amazon($7,398.24) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-02-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": [
+          "Shopify data starts 2025-02-01, window starts 2025-01-01"
+        ]
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 0.0,
+          "amazon": 424.73,
+          "shopify_txn": 0,
+          "amazon_txn": 24
+        },
+        {
+          "month": "2025-02",
+          "shopify": 11.99,
+          "amazon": 309.8,
+          "shopify_txn": 1,
+          "amazon_txn": 17
+        },
+        {
+          "month": "2025-03",
+          "shopify": 0.0,
+          "amazon": 249.84,
+          "shopify_txn": 0,
+          "amazon_txn": 16
+        },
+        {
+          "month": "2025-04",
+          "shopify": 0.0,
+          "amazon": 367.01,
+          "shopify_txn": 0,
+          "amazon_txn": 24
+        },
+        {
+          "month": "2025-05",
+          "shopify": 30.0,
+          "amazon": 327.28,
+          "shopify_txn": 2,
+          "amazon_txn": 15
+        },
+        {
+          "month": "2025-06",
+          "shopify": 11.99,
+          "amazon": 222.85,
+          "shopify_txn": 1,
+          "amazon_txn": 14
+        },
+        {
+          "month": "2025-07",
+          "shopify": 37.0,
+          "amazon": 365.97,
+          "shopify_txn": 1,
+          "amazon_txn": 21
+        },
+        {
+          "month": "2025-08",
+          "shopify": 40.0,
+          "amazon": 235.85,
+          "shopify_txn": 1,
+          "amazon_txn": 14
+        },
+        {
+          "month": "2025-09",
+          "shopify": 34.98,
+          "amazon": 211.85,
+          "shopify_txn": 1,
+          "amazon_txn": 14
+        },
+        {
+          "month": "2025-10",
+          "shopify": 0.0,
+          "amazon": 344.75,
+          "shopify_txn": 0,
+          "amazon_txn": 23
+        },
+        {
+          "month": "2025-11",
+          "shopify": 21.4,
+          "amazon": 487.48,
+          "shopify_txn": 2,
+          "amazon_txn": 29
+        },
+        {
+          "month": "2025-12",
+          "shopify": 81.0,
+          "amazon": 1055.63,
+          "shopify_txn": 1,
+          "amazon_txn": 68
+        },
+        {
+          "month": "2026-01",
+          "shopify": 28.99,
+          "amazon": 472.39,
+          "shopify_txn": 1,
+          "amazon_txn": 32
+        },
+        {
+          "month": "2026-02",
+          "shopify": 17.0,
+          "amazon": 403.85,
+          "shopify_txn": 1,
+          "amazon_txn": 28
+        },
+        {
+          "month": "2026-03",
+          "shopify": 0.0,
+          "amazon": 457.23,
+          "shopify_txn": 0,
+          "amazon_txn": 29
+        },
+        {
+          "month": "2026-04",
+          "shopify": 0.0,
+          "amazon": 340.63,
+          "shopify_txn": 0,
+          "amazon_txn": 23
+        },
+        {
+          "month": "2026-05",
+          "shopify": 0.0,
+          "amazon": 468.97,
+          "shopify_txn": 0,
+          "amazon_txn": 30
+        },
+        {
+          "month": "2026-06",
+          "shopify": 47.99,
+          "amazon": 299.37,
+          "shopify_txn": 3,
+          "amazon_txn": 23
+        },
+        {
+          "month": "2026-07",
+          "shopify": 54.87,
+          "amazon": 310.79,
+          "shopify_txn": 3,
+          "amazon_txn": 19
+        },
+        {
+          "month": "2026-08",
+          "shopify": 9.89,
+          "amazon": 41.97,
+          "shopify_txn": 1,
+          "amazon_txn": 3
+        }
+      ]
+    },
+    {
+      "state_code": "MI",
+      "state_name": "Michigan",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_calendar_year",
+      "shopify_sales": 4337.94,
+      "shopify_orders": 141,
+      "amazon_sales": 81473.22,
+      "amazon_orders": 5299,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 85811.16,
+      "counted_orders": 5440,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 85.8,
+      "pct_of_txn_threshold": 2720.0,
+      "status": "exceeded",
+      "is_registered": true,
+      "formula": "counted_sales = shopify($4,337.94) + amazon($81,473.22) = $85,811.16",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 144.47,
+          "amazon": 3955.34,
+          "shopify_txn": 6,
+          "amazon_txn": 249
+        },
+        {
+          "month": "2025-02",
+          "shopify": 164.23,
+          "amazon": 3930.34,
+          "shopify_txn": 5,
+          "amazon_txn": 257
+        },
+        {
+          "month": "2025-03",
+          "shopify": 251.05,
+          "amazon": 3663.68,
+          "shopify_txn": 9,
+          "amazon_txn": 223
+        },
+        {
+          "month": "2025-04",
+          "shopify": 231.95,
+          "amazon": 3188.81,
+          "shopify_txn": 3,
+          "amazon_txn": 203
+        },
+        {
+          "month": "2025-05",
+          "shopify": 339.38,
+          "amazon": 3558.92,
+          "shopify_txn": 12,
+          "amazon_txn": 232
+        },
+        {
+          "month": "2025-06",
+          "shopify": 143.75,
+          "amazon": 2188.9,
+          "shopify_txn": 7,
+          "amazon_txn": 141
+        },
+        {
+          "month": "2025-07",
+          "shopify": 388.51,
+          "amazon": 3574.76,
+          "shopify_txn": 10,
+          "amazon_txn": 233
+        },
+        {
+          "month": "2025-08",
+          "shopify": 302.07,
+          "amazon": 2566.56,
+          "shopify_txn": 11,
+          "amazon_txn": 163
+        },
+        {
+          "month": "2025-09",
+          "shopify": 290.39,
+          "amazon": 2769.08,
+          "shopify_txn": 7,
+          "amazon_txn": 184
+        },
+        {
+          "month": "2025-10",
+          "shopify": 241.55,
+          "amazon": 3588.65,
+          "shopify_txn": 10,
+          "amazon_txn": 240
+        },
+        {
+          "month": "2025-11",
+          "shopify": 64.99,
+          "amazon": 5669.66,
+          "shopify_txn": 3,
+          "amazon_txn": 365
+        },
+        {
+          "month": "2025-12",
+          "shopify": 148.75,
+          "amazon": 11240.49,
+          "shopify_txn": 9,
+          "amazon_txn": 697
+        },
+        {
+          "month": "2026-01",
+          "shopify": 175.46,
+          "amazon": 6073.94,
+          "shopify_txn": 4,
+          "amazon_txn": 408
+        },
+        {
+          "month": "2026-02",
+          "shopify": 246.23,
+          "amazon": 5416.28,
+          "shopify_txn": 7,
+          "amazon_txn": 348
+        },
+        {
+          "month": "2026-03",
+          "shopify": 231.4,
+          "amazon": 4343.97,
+          "shopify_txn": 7,
+          "amazon_txn": 292
+        },
+        {
+          "month": "2026-04",
+          "shopify": 279.9,
+          "amazon": 3736.03,
+          "shopify_txn": 9,
+          "amazon_txn": 257
+        },
+        {
+          "month": "2026-05",
+          "shopify": 326.01,
+          "amazon": 4157.85,
+          "shopify_txn": 11,
+          "amazon_txn": 276
+        },
+        {
+          "month": "2026-06",
+          "shopify": 170.29,
+          "amazon": 4327.43,
+          "shopify_txn": 5,
+          "amazon_txn": 295
+        },
+        {
+          "month": "2026-07",
+          "shopify": 149.58,
+          "amazon": 2970.92,
+          "shopify_txn": 4,
+          "amazon_txn": 200
+        },
+        {
+          "month": "2026-08",
+          "shopify": 47.98,
+          "amazon": 551.61,
+          "shopify_txn": 2,
+          "amazon_txn": 36
+        }
+      ]
+    },
+    {
+      "state_code": "MN",
+      "state_name": "Minnesota",
+      "window_start": "2025-08-16",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_12_months",
+      "shopify_sales": 1503.97,
+      "shopify_orders": 51,
+      "amazon_sales": 32835.05,
+      "amazon_orders": 2120,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 34339.02,
+      "counted_orders": 2171,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 34.3,
+      "pct_of_txn_threshold": 1085.5,
+      "status": "exceeded",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,503.97) + amazon($32,835.05) = $34,339.02",
+      "data_coverage": {
+        "shopify_min_date": "2025-08-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-08-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-08",
+          "shopify": 34.98,
+          "amazon": 1385.05,
+          "shopify_txn": 2,
+          "amazon_txn": 92
+        },
+        {
+          "month": "2025-09",
+          "shopify": 102.17,
+          "amazon": 1612.89,
+          "shopify_txn": 5,
+          "amazon_txn": 105
+        },
+        {
+          "month": "2025-10",
+          "shopify": 0.0,
+          "amazon": 2296.45,
+          "shopify_txn": 0,
+          "amazon_txn": 157
+        },
+        {
+          "month": "2025-11",
+          "shopify": 85.39,
+          "amazon": 2902.51,
+          "shopify_txn": 5,
+          "amazon_txn": 182
+        },
+        {
+          "month": "2025-12",
+          "shopify": 255.99,
+          "amazon": 5885.58,
+          "shopify_txn": 5,
+          "amazon_txn": 360
+        },
+        {
+          "month": "2026-01",
+          "shopify": 0.0,
+          "amazon": 3317.83,
+          "shopify_txn": 0,
+          "amazon_txn": 221
+        },
+        {
+          "month": "2026-02",
+          "shopify": 44.98,
+          "amazon": 2947.57,
+          "shopify_txn": 2,
+          "amazon_txn": 182
+        },
+        {
+          "month": "2026-03",
+          "shopify": 135.86,
+          "amazon": 3219.37,
+          "shopify_txn": 5,
+          "amazon_txn": 217
+        },
+        {
+          "month": "2026-04",
+          "shopify": 402.85,
+          "amazon": 2448.42,
+          "shopify_txn": 10,
+          "amazon_txn": 160
+        },
+        {
+          "month": "2026-05",
+          "shopify": 213.85,
+          "amazon": 2737.96,
+          "shopify_txn": 6,
+          "amazon_txn": 172
+        },
+        {
+          "month": "2026-06",
+          "shopify": 129.54,
+          "amazon": 1952.37,
+          "shopify_txn": 5,
+          "amazon_txn": 130
+        },
+        {
+          "month": "2026-07",
+          "shopify": 61.76,
+          "amazon": 1761.31,
+          "shopify_txn": 4,
+          "amazon_txn": 117
+        },
+        {
+          "month": "2026-08",
+          "shopify": 36.6,
+          "amazon": 367.74,
+          "shopify_txn": 2,
+          "amazon_txn": 25
+        }
+      ]
+    },
+    {
+      "state_code": "MO",
+      "state_name": "Missouri",
+      "window_start": "2025-08-16",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_12_months",
+      "shopify_sales": 1703.44,
+      "shopify_orders": 67,
+      "amazon_sales": 31404.92,
+      "amazon_orders": 2044,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 33108.36,
+      "counted_orders": 2111,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 33.1,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,703.44) + amazon($31,404.92) = $33,108.36",
+      "data_coverage": {
+        "shopify_min_date": "2025-08-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-08-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-08",
+          "shopify": 31.99,
+          "amazon": 1379.06,
+          "shopify_txn": 2,
+          "amazon_txn": 90
+        },
+        {
+          "month": "2025-09",
+          "shopify": 109.48,
+          "amazon": 1680.18,
+          "shopify_txn": 5,
+          "amazon_txn": 111
+        },
+        {
+          "month": "2025-10",
+          "shopify": 121.71,
+          "amazon": 2329.65,
+          "shopify_txn": 5,
+          "amazon_txn": 152
+        },
+        {
+          "month": "2025-11",
+          "shopify": 257.78,
+          "amazon": 2709.13,
+          "shopify_txn": 3,
+          "amazon_txn": 177
+        },
+        {
+          "month": "2025-12",
+          "shopify": 283.0,
+          "amazon": 5555.75,
+          "shopify_txn": 11,
+          "amazon_txn": 340
+        },
+        {
+          "month": "2026-01",
+          "shopify": 118.42,
+          "amazon": 3249.45,
+          "shopify_txn": 4,
+          "amazon_txn": 213
+        },
+        {
+          "month": "2026-02",
+          "shopify": 87.45,
+          "amazon": 2981.29,
+          "shopify_txn": 3,
+          "amazon_txn": 190
+        },
+        {
+          "month": "2026-03",
+          "shopify": 117.11,
+          "amazon": 2845.69,
+          "shopify_txn": 8,
+          "amazon_txn": 188
+        },
+        {
+          "month": "2026-04",
+          "shopify": 196.07,
+          "amazon": 2100.45,
+          "shopify_txn": 6,
+          "amazon_txn": 135
+        },
+        {
+          "month": "2026-05",
+          "shopify": 100.68,
+          "amazon": 2327.7,
+          "shopify_txn": 6,
+          "amazon_txn": 158
+        },
+        {
+          "month": "2026-06",
+          "shopify": 112.47,
+          "amazon": 1924.39,
+          "shopify_txn": 6,
+          "amazon_txn": 133
+        },
+        {
+          "month": "2026-07",
+          "shopify": 68.72,
+          "amazon": 2110.33,
+          "shopify_txn": 3,
+          "amazon_txn": 143
+        },
+        {
+          "month": "2026-08",
+          "shopify": 98.56,
+          "amazon": 211.85,
+          "shopify_txn": 5,
+          "amazon_txn": 14
+        }
+      ]
+    },
+    {
+      "state_code": "MS",
+      "state_name": "Mississippi",
+      "window_start": "2025-08-16",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_12_months",
+      "shopify_sales": 175.17,
+      "shopify_orders": 14,
+      "amazon_sales": 8079.6,
+      "amazon_orders": 527,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 175.17,
+      "counted_orders": 14,
+      "threshold_amount": 250000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 0.1,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($175.17) only; amazon($8,079.60) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-08-01",
+        "shopify_max_date": "2026-06-30",
+        "amazon_min_date": "2025-08-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-08",
+          "shopify": 53.63,
+          "amazon": 353.75,
+          "shopify_txn": 3,
+          "amazon_txn": 24
+        },
+        {
+          "month": "2025-09",
+          "shopify": 7.65,
+          "amazon": 393.72,
+          "shopify_txn": 2,
+          "amazon_txn": 25
+        },
+        {
+          "month": "2025-10",
+          "shopify": 7.65,
+          "amazon": 510.42,
+          "shopify_txn": 1,
+          "amazon_txn": 34
+        },
+        {
+          "month": "2025-11",
+          "shopify": 0.0,
+          "amazon": 762.52,
+          "shopify_txn": 0,
+          "amazon_txn": 49
+        },
+        {
+          "month": "2025-12",
+          "shopify": 0.0,
+          "amazon": 1186.16,
+          "shopify_txn": 0,
+          "amazon_txn": 79
+        },
+        {
+          "month": "2026-01",
+          "shopify": 13.99,
+          "amazon": 1073.67,
+          "shopify_txn": 1,
+          "amazon_txn": 67
+        },
+        {
+          "month": "2026-02",
+          "shopify": 0.0,
+          "amazon": 693.53,
+          "shopify_txn": 0,
+          "amazon_txn": 46
+        },
+        {
+          "month": "2026-03",
+          "shopify": 13.99,
+          "amazon": 710.5,
+          "shopify_txn": 1,
+          "amazon_txn": 47
+        },
+        {
+          "month": "2026-04",
+          "shopify": 11.99,
+          "amazon": 499.07,
+          "shopify_txn": 1,
+          "amazon_txn": 34
+        },
+        {
+          "month": "2026-05",
+          "shopify": 33.99,
+          "amazon": 717.5,
+          "shopify_txn": 3,
+          "amazon_txn": 45
+        },
+        {
+          "month": "2026-06",
+          "shopify": 32.28,
+          "amazon": 623.15,
+          "shopify_txn": 2,
+          "amazon_txn": 42
+        },
+        {
+          "month": "2026-07",
+          "shopify": 0.0,
+          "amazon": 455.68,
+          "shopify_txn": 0,
+          "amazon_txn": 30
+        },
+        {
+          "month": "2026-08",
+          "shopify": 0.0,
+          "amazon": 99.93,
+          "shopify_txn": 0,
+          "amazon_txn": 5
+        }
+      ]
+    },
+    {
+      "state_code": "NC",
+      "state_name": "North Carolina",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 3731.67,
+      "shopify_orders": 153,
+      "amazon_sales": 77032.86,
+      "amazon_orders": 5008,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 80764.53,
+      "counted_orders": 5161,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 80.8,
+      "pct_of_txn_threshold": 0,
+      "status": "approaching",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($3,731.67) + amazon($77,032.86) = $80,764.53",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 130.95,
+          "amazon": 3999.33,
+          "shopify_txn": 7,
+          "amazon_txn": 244
+        },
+        {
+          "month": "2025-02",
+          "shopify": 140.5,
+          "amazon": 3326.0,
+          "shopify_txn": 4,
+          "amazon_txn": 189
+        },
+        {
+          "month": "2025-03",
+          "shopify": 367.71,
+          "amazon": 3828.63,
+          "shopify_txn": 10,
+          "amazon_txn": 245
+        },
+        {
+          "month": "2025-04",
+          "shopify": 135.14,
+          "amazon": 3118.3,
+          "shopify_txn": 6,
+          "amazon_txn": 194
+        },
+        {
+          "month": "2025-05",
+          "shopify": 162.1,
+          "amazon": 3193.57,
+          "shopify_txn": 4,
+          "amazon_txn": 211
+        },
+        {
+          "month": "2025-06",
+          "shopify": 173.53,
+          "amazon": 2461.93,
+          "shopify_txn": 8,
+          "amazon_txn": 155
+        },
+        {
+          "month": "2025-07",
+          "shopify": 148.97,
+          "amazon": 2924.74,
+          "shopify_txn": 9,
+          "amazon_txn": 194
+        },
+        {
+          "month": "2025-08",
+          "shopify": 302.81,
+          "amazon": 2640.23,
+          "shopify_txn": 8,
+          "amazon_txn": 169
+        },
+        {
+          "month": "2025-09",
+          "shopify": 215.74,
+          "amazon": 3027.9,
+          "shopify_txn": 8,
+          "amazon_txn": 200
+        },
+        {
+          "month": "2025-10",
+          "shopify": 88.43,
+          "amazon": 3262.47,
+          "shopify_txn": 6,
+          "amazon_txn": 225
+        },
+        {
+          "month": "2025-11",
+          "shopify": 383.46,
+          "amazon": 4949.64,
+          "shopify_txn": 14,
+          "amazon_txn": 323
+        },
+        {
+          "month": "2025-12",
+          "shopify": 112.27,
+          "amazon": 10173.67,
+          "shopify_txn": 6,
+          "amazon_txn": 659
+        },
+        {
+          "month": "2026-01",
+          "shopify": 177.81,
+          "amazon": 5623.9,
+          "shopify_txn": 5,
+          "amazon_txn": 364
+        },
+        {
+          "month": "2026-02",
+          "shopify": 214.5,
+          "amazon": 5461.54,
+          "shopify_txn": 8,
+          "amazon_txn": 344
+        },
+        {
+          "month": "2026-03",
+          "shopify": 187.28,
+          "amazon": 4191.76,
+          "shopify_txn": 6,
+          "amazon_txn": 282
+        },
+        {
+          "month": "2026-04",
+          "shopify": 187.9,
+          "amazon": 3725.46,
+          "shopify_txn": 12,
+          "amazon_txn": 260
+        },
+        {
+          "month": "2026-05",
+          "shopify": 149.53,
+          "amazon": 3755.56,
+          "shopify_txn": 9,
+          "amazon_txn": 251
+        },
+        {
+          "month": "2026-06",
+          "shopify": 51.38,
+          "amazon": 3666.0,
+          "shopify_txn": 3,
+          "amazon_txn": 253
+        },
+        {
+          "month": "2026-07",
+          "shopify": 319.89,
+          "amazon": 3184.06,
+          "shopify_txn": 10,
+          "amazon_txn": 215
+        },
+        {
+          "month": "2026-08",
+          "shopify": 81.77,
+          "amazon": 518.17,
+          "shopify_txn": 10,
+          "amazon_txn": 31
+        }
+      ]
+    },
+    {
+      "state_code": "ND",
+      "state_name": "North Dakota",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 258.41,
+      "shopify_orders": 9,
+      "amazon_sales": 5284.55,
+      "amazon_orders": 343,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 258.41,
+      "counted_orders": 9,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 0.3,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($258.41) only; amazon($5,284.55) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-04-30",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 9.0,
+          "amazon": 101.93,
+          "shopify_txn": 1,
+          "amazon_txn": 6
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 157.89,
+          "shopify_txn": 0,
+          "amazon_txn": 11
+        },
+        {
+          "month": "2025-03",
+          "shopify": 0.0,
+          "amazon": 282.81,
+          "shopify_txn": 0,
+          "amazon_txn": 17
+        },
+        {
+          "month": "2025-04",
+          "shopify": 0.0,
+          "amazon": 83.94,
+          "shopify_txn": 0,
+          "amazon_txn": 6
+        },
+        {
+          "month": "2025-05",
+          "shopify": 53.98,
+          "amazon": 155.89,
+          "shopify_txn": 1,
+          "amazon_txn": 11
+        },
+        {
+          "month": "2025-06",
+          "shopify": 0.0,
+          "amazon": 343.77,
+          "shopify_txn": 0,
+          "amazon_txn": 18
+        },
+        {
+          "month": "2025-07",
+          "shopify": 51.0,
+          "amazon": 258.93,
+          "shopify_txn": 1,
+          "amazon_txn": 17
+        },
+        {
+          "month": "2025-08",
+          "shopify": 0.0,
+          "amazon": 194.87,
+          "shopify_txn": 0,
+          "amazon_txn": 13
+        },
+        {
+          "month": "2025-09",
+          "shopify": 0.0,
+          "amazon": 228.85,
+          "shopify_txn": 0,
+          "amazon_txn": 15
+        },
+        {
+          "month": "2025-10",
+          "shopify": 30.6,
+          "amazon": 207.05,
+          "shopify_txn": 1,
+          "amazon_txn": 15
+        },
+        {
+          "month": "2025-11",
+          "shopify": 58.19,
+          "amazon": 334.77,
+          "shopify_txn": 2,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2025-12",
+          "shopify": 30.6,
+          "amazon": 489.65,
+          "shopify_txn": 1,
+          "amazon_txn": 30
+        },
+        {
+          "month": "2026-01",
+          "shopify": 0.0,
+          "amazon": 518.64,
+          "shopify_txn": 0,
+          "amazon_txn": 35
+        },
+        {
+          "month": "2026-02",
+          "shopify": 0.0,
+          "amazon": 323.08,
+          "shopify_txn": 0,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2026-03",
+          "shopify": 11.05,
+          "amazon": 436.32,
+          "shopify_txn": 1,
+          "amazon_txn": 30
+        },
+        {
+          "month": "2026-04",
+          "shopify": 13.99,
+          "amazon": 339.76,
+          "shopify_txn": 1,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2026-05",
+          "shopify": 0.0,
+          "amazon": 269.81,
+          "shopify_txn": 0,
+          "amazon_txn": 18
+        },
+        {
+          "month": "2026-06",
+          "shopify": 0.0,
+          "amazon": 246.81,
+          "shopify_txn": 0,
+          "amazon_txn": 15
+        },
+        {
+          "month": "2026-07",
+          "shopify": 0.0,
+          "amazon": 225.84,
+          "shopify_txn": 0,
+          "amazon_txn": 14
+        },
+        {
+          "month": "2026-08",
+          "shopify": 0.0,
+          "amazon": 83.94,
+          "shopify_txn": 0,
+          "amazon_txn": 6
+        }
+      ]
+    },
+    {
+      "state_code": "NE",
+      "state_name": "Nebraska",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 2764.76,
+      "shopify_orders": 42,
+      "amazon_sales": 15337.01,
+      "amazon_orders": 977,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 18101.77,
+      "counted_orders": 1019,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 18.1,
+      "pct_of_txn_threshold": 509.5,
+      "status": "exceeded",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($2,764.76) + amazon($15,337.01) = $18,101.77",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 45.5,
+          "amazon": 506.65,
+          "shopify_txn": 2,
+          "amazon_txn": 34
+        },
+        {
+          "month": "2025-02",
+          "shopify": 62.5,
+          "amazon": 1007.37,
+          "shopify_txn": 2,
+          "amazon_txn": 53
+        },
+        {
+          "month": "2025-03",
+          "shopify": 1113.14,
+          "amazon": 710.51,
+          "shopify_txn": 4,
+          "amazon_txn": 46
+        },
+        {
+          "month": "2025-04",
+          "shopify": 246.91,
+          "amazon": 623.57,
+          "shopify_txn": 2,
+          "amazon_txn": 38
+        },
+        {
+          "month": "2025-05",
+          "shopify": 158.05,
+          "amazon": 686.94,
+          "shopify_txn": 3,
+          "amazon_txn": 48
+        },
+        {
+          "month": "2025-06",
+          "shopify": 31.5,
+          "amazon": 585.92,
+          "shopify_txn": 1,
+          "amazon_txn": 31
+        },
+        {
+          "month": "2025-07",
+          "shopify": 288.76,
+          "amazon": 530.81,
+          "shopify_txn": 8,
+          "amazon_txn": 37
+        },
+        {
+          "month": "2025-08",
+          "shopify": 35.7,
+          "amazon": 552.93,
+          "shopify_txn": 1,
+          "amazon_txn": 37
+        },
+        {
+          "month": "2025-09",
+          "shopify": 54.98,
+          "amazon": 558.63,
+          "shopify_txn": 1,
+          "amazon_txn": 36
+        },
+        {
+          "month": "2025-10",
+          "shopify": 102.98,
+          "amazon": 725.88,
+          "shopify_txn": 3,
+          "amazon_txn": 47
+        },
+        {
+          "month": "2025-11",
+          "shopify": 13.99,
+          "amazon": 911.11,
+          "shopify_txn": 1,
+          "amazon_txn": 59
+        },
+        {
+          "month": "2025-12",
+          "shopify": 105.18,
+          "amazon": 2048.85,
+          "shopify_txn": 2,
+          "amazon_txn": 122
+        },
+        {
+          "month": "2026-01",
+          "shopify": 0.0,
+          "amazon": 1100.24,
+          "shopify_txn": 0,
+          "amazon_txn": 71
+        },
+        {
+          "month": "2026-02",
+          "shopify": 161.87,
+          "amazon": 1074.53,
+          "shopify_txn": 4,
+          "amazon_txn": 66
+        },
+        {
+          "month": "2026-03",
+          "shopify": 83.95,
+          "amazon": 890.58,
+          "shopify_txn": 3,
+          "amazon_txn": 58
+        },
+        {
+          "month": "2026-04",
+          "shopify": 20.0,
+          "amazon": 765.46,
+          "shopify_txn": 1,
+          "amazon_txn": 54
+        },
+        {
+          "month": "2026-05",
+          "shopify": 114.21,
+          "amazon": 867.39,
+          "shopify_txn": 2,
+          "amazon_txn": 59
+        },
+        {
+          "month": "2026-06",
+          "shopify": 0.0,
+          "amazon": 620.04,
+          "shopify_txn": 0,
+          "amazon_txn": 44
+        },
+        {
+          "month": "2026-07",
+          "shopify": 94.96,
+          "amazon": 469.67,
+          "shopify_txn": 1,
+          "amazon_txn": 31
+        },
+        {
+          "month": "2026-08",
+          "shopify": 30.58,
+          "amazon": 99.93,
+          "shopify_txn": 1,
+          "amazon_txn": 6
+        }
+      ]
+    },
+    {
+      "state_code": "NJ",
+      "state_name": "New Jersey",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 8742.29,
+      "shopify_orders": 166,
+      "amazon_sales": 76546.6,
+      "amazon_orders": 4951,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 85288.89,
+      "counted_orders": 5117,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 85.3,
+      "pct_of_txn_threshold": 2558.5,
+      "status": "exceeded",
+      "is_registered": true,
+      "formula": "counted_sales = shopify($8,742.29) + amazon($76,546.60) = $85,288.89",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 106.98,
+          "amazon": 4606.94,
+          "shopify_txn": 2,
+          "amazon_txn": 282
+        },
+        {
+          "month": "2025-02",
+          "shopify": 294.45,
+          "amazon": 3336.91,
+          "shopify_txn": 6,
+          "amazon_txn": 222
+        },
+        {
+          "month": "2025-03",
+          "shopify": 85.79,
+          "amazon": 3275.88,
+          "shopify_txn": 3,
+          "amazon_txn": 208
+        },
+        {
+          "month": "2025-04",
+          "shopify": 983.82,
+          "amazon": 3108.73,
+          "shopify_txn": 11,
+          "amazon_txn": 190
+        },
+        {
+          "month": "2025-05",
+          "shopify": 731.31,
+          "amazon": 2968.21,
+          "shopify_txn": 9,
+          "amazon_txn": 191
+        },
+        {
+          "month": "2025-06",
+          "shopify": 349.36,
+          "amazon": 2460.83,
+          "shopify_txn": 7,
+          "amazon_txn": 152
+        },
+        {
+          "month": "2025-07",
+          "shopify": 290.79,
+          "amazon": 2612.78,
+          "shopify_txn": 8,
+          "amazon_txn": 177
+        },
+        {
+          "month": "2025-08",
+          "shopify": 304.12,
+          "amazon": 2438.44,
+          "shopify_txn": 10,
+          "amazon_txn": 158
+        },
+        {
+          "month": "2025-09",
+          "shopify": 367.98,
+          "amazon": 2669.67,
+          "shopify_txn": 12,
+          "amazon_txn": 175
+        },
+        {
+          "month": "2025-10",
+          "shopify": 1316.09,
+          "amazon": 3416.89,
+          "shopify_txn": 10,
+          "amazon_txn": 229
+        },
+        {
+          "month": "2025-11",
+          "shopify": 792.24,
+          "amazon": 5113.96,
+          "shopify_txn": 16,
+          "amazon_txn": 331
+        },
+        {
+          "month": "2025-12",
+          "shopify": 567.66,
+          "amazon": 10332.25,
+          "shopify_txn": 11,
+          "amazon_txn": 642
+        },
+        {
+          "month": "2026-01",
+          "shopify": 298.83,
+          "amazon": 5957.04,
+          "shopify_txn": 11,
+          "amazon_txn": 398
+        },
+        {
+          "month": "2026-02",
+          "shopify": 324.62,
+          "amazon": 5468.68,
+          "shopify_txn": 7,
+          "amazon_txn": 346
+        },
+        {
+          "month": "2026-03",
+          "shopify": 219.45,
+          "amazon": 3986.66,
+          "shopify_txn": 5,
+          "amazon_txn": 264
+        },
+        {
+          "month": "2026-04",
+          "shopify": 347.39,
+          "amazon": 3941.36,
+          "shopify_txn": 9,
+          "amazon_txn": 269
+        },
+        {
+          "month": "2026-05",
+          "shopify": 686.88,
+          "amazon": 3559.44,
+          "shopify_txn": 11,
+          "amazon_txn": 227
+        },
+        {
+          "month": "2026-06",
+          "shopify": 241.04,
+          "amazon": 3902.09,
+          "shopify_txn": 10,
+          "amazon_txn": 262
+        },
+        {
+          "month": "2026-07",
+          "shopify": 273.59,
+          "amazon": 3020.1,
+          "shopify_txn": 4,
+          "amazon_txn": 202
+        },
+        {
+          "month": "2026-08",
+          "shopify": 159.9,
+          "amazon": 369.74,
+          "shopify_txn": 4,
+          "amazon_txn": 26
+        }
+      ]
+    },
+    {
+      "state_code": "NM",
+      "state_name": "New Mexico",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_calendar_year",
+      "shopify_sales": 1083.55,
+      "shopify_orders": 32,
+      "amazon_sales": 13920.33,
+      "amazon_orders": 901,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 1083.55,
+      "counted_orders": 32,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 1.1,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,083.55) only; amazon($13,920.33) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-03-01",
+        "shopify_max_date": "2026-07-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": [
+          "Shopify data starts 2025-03-01, window starts 2025-01-01"
+        ]
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 0.0,
+          "amazon": 569.63,
+          "shopify_txn": 0,
+          "amazon_txn": 35
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 425.7,
+          "shopify_txn": 0,
+          "amazon_txn": 29
+        },
+        {
+          "month": "2025-03",
+          "shopify": 10.79,
+          "amazon": 821.6,
+          "shopify_txn": 1,
+          "amazon_txn": 49
+        },
+        {
+          "month": "2025-04",
+          "shopify": 41.99,
+          "amazon": 663.53,
+          "shopify_txn": 2,
+          "amazon_txn": 46
+        },
+        {
+          "month": "2025-05",
+          "shopify": 42.99,
+          "amazon": 799.15,
+          "shopify_txn": 3,
+          "amazon_txn": 50
+        },
+        {
+          "month": "2025-06",
+          "shopify": 0.0,
+          "amazon": 619.6,
+          "shopify_txn": 0,
+          "amazon_txn": 38
+        },
+        {
+          "month": "2025-07",
+          "shopify": 55.97,
+          "amazon": 691.13,
+          "shopify_txn": 2,
+          "amazon_txn": 47
+        },
+        {
+          "month": "2025-08",
+          "shopify": 0.0,
+          "amazon": 541.62,
+          "shopify_txn": 0,
+          "amazon_txn": 37
+        },
+        {
+          "month": "2025-09",
+          "shopify": 30.58,
+          "amazon": 457.69,
+          "shopify_txn": 3,
+          "amazon_txn": 27
+        },
+        {
+          "month": "2025-10",
+          "shopify": 39.19,
+          "amazon": 768.05,
+          "shopify_txn": 2,
+          "amazon_txn": 50
+        },
+        {
+          "month": "2025-11",
+          "shopify": 29.0,
+          "amazon": 916.36,
+          "shopify_txn": 1,
+          "amazon_txn": 54
+        },
+        {
+          "month": "2025-12",
+          "shopify": 74.28,
+          "amazon": 991.31,
+          "shopify_txn": 2,
+          "amazon_txn": 62
+        },
+        {
+          "month": "2026-01",
+          "shopify": 68.85,
+          "amazon": 825.43,
+          "shopify_txn": 1,
+          "amazon_txn": 56
+        },
+        {
+          "month": "2026-02",
+          "shopify": 11.05,
+          "amazon": 1071.0,
+          "shopify_txn": 1,
+          "amazon_txn": 68
+        },
+        {
+          "month": "2026-03",
+          "shopify": 0.0,
+          "amazon": 873.08,
+          "shopify_txn": 1,
+          "amazon_txn": 60
+        },
+        {
+          "month": "2026-04",
+          "shopify": 10.39,
+          "amazon": 712.8,
+          "shopify_txn": 2,
+          "amazon_txn": 47
+        },
+        {
+          "month": "2026-05",
+          "shopify": 332.91,
+          "amazon": 714.1,
+          "shopify_txn": 5,
+          "amazon_txn": 48
+        },
+        {
+          "month": "2026-06",
+          "shopify": 218.49,
+          "amazon": 691.48,
+          "shopify_txn": 3,
+          "amazon_txn": 48
+        },
+        {
+          "month": "2026-07",
+          "shopify": 117.07,
+          "amazon": 583.2,
+          "shopify_txn": 3,
+          "amazon_txn": 38
+        },
+        {
+          "month": "2026-08",
+          "shopify": 0.0,
+          "amazon": 183.87,
+          "shopify_txn": 0,
+          "amazon_txn": 12
+        }
+      ]
+    },
+    {
+      "state_code": "NV",
+      "state_name": "Nevada",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 1620.59,
+      "shopify_orders": 56,
+      "amazon_sales": 34160.41,
+      "amazon_orders": 2170,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 35781.0,
+      "counted_orders": 2226,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 35.8,
+      "pct_of_txn_threshold": 1113.0,
+      "status": "exceeded",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,620.59) + amazon($34,160.41) = $35,781.00",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 62.5,
+          "amazon": 1269.15,
+          "shopify_txn": 2,
+          "amazon_txn": 79
+        },
+        {
+          "month": "2025-02",
+          "shopify": 244.98,
+          "amazon": 1760.98,
+          "shopify_txn": 5,
+          "amazon_txn": 114
+        },
+        {
+          "month": "2025-03",
+          "shopify": 59.98,
+          "amazon": 1533.74,
+          "shopify_txn": 3,
+          "amazon_txn": 100
+        },
+        {
+          "month": "2025-04",
+          "shopify": 111.75,
+          "amazon": 1994.25,
+          "shopify_txn": 5,
+          "amazon_txn": 126
+        },
+        {
+          "month": "2025-05",
+          "shopify": 62.92,
+          "amazon": 1640.97,
+          "shopify_txn": 3,
+          "amazon_txn": 112
+        },
+        {
+          "month": "2025-06",
+          "shopify": 71.69,
+          "amazon": 1350.08,
+          "shopify_txn": 3,
+          "amazon_txn": 86
+        },
+        {
+          "month": "2025-07",
+          "shopify": 161.4,
+          "amazon": 1413.5,
+          "shopify_txn": 4,
+          "amazon_txn": 91
+        },
+        {
+          "month": "2025-08",
+          "shopify": 181.15,
+          "amazon": 1167.79,
+          "shopify_txn": 5,
+          "amazon_txn": 72
+        },
+        {
+          "month": "2025-09",
+          "shopify": 88.0,
+          "amazon": 1327.38,
+          "shopify_txn": 4,
+          "amazon_txn": 85
+        },
+        {
+          "month": "2025-10",
+          "shopify": 47.0,
+          "amazon": 1273.38,
+          "shopify_txn": 2,
+          "amazon_txn": 87
+        },
+        {
+          "month": "2025-11",
+          "shopify": 63.29,
+          "amazon": 1912.97,
+          "shopify_txn": 3,
+          "amazon_txn": 118
+        },
+        {
+          "month": "2025-12",
+          "shopify": 0.0,
+          "amazon": 2913.62,
+          "shopify_txn": 0,
+          "amazon_txn": 174
+        },
+        {
+          "month": "2026-01",
+          "shopify": 70.09,
+          "amazon": 2164.8,
+          "shopify_txn": 3,
+          "amazon_txn": 142
+        },
+        {
+          "month": "2026-02",
+          "shopify": 9.99,
+          "amazon": 1876.05,
+          "shopify_txn": 1,
+          "amazon_txn": 119
+        },
+        {
+          "month": "2026-03",
+          "shopify": 38.31,
+          "amazon": 2210.76,
+          "shopify_txn": 2,
+          "amazon_txn": 143
+        },
+        {
+          "month": "2026-04",
+          "shopify": 100.99,
+          "amazon": 2361.01,
+          "shopify_txn": 2,
+          "amazon_txn": 151
+        },
+        {
+          "month": "2026-05",
+          "shopify": 56.31,
+          "amazon": 1978.18,
+          "shopify_txn": 3,
+          "amazon_txn": 128
+        },
+        {
+          "month": "2026-06",
+          "shopify": 61.3,
+          "amazon": 2094.09,
+          "shopify_txn": 2,
+          "amazon_txn": 128
+        },
+        {
+          "month": "2026-07",
+          "shopify": 128.94,
+          "amazon": 1677.88,
+          "shopify_txn": 3,
+          "amazon_txn": 100
+        },
+        {
+          "month": "2026-08",
+          "shopify": 0.0,
+          "amazon": 239.83,
+          "shopify_txn": 1,
+          "amazon_txn": 15
+        }
+      ]
+    },
+    {
+      "state_code": "NY",
+      "state_name": "New York",
+      "window_start": "2025-08-16",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_4_quarters",
+      "shopify_sales": 10682.66,
+      "shopify_orders": 283,
+      "amazon_sales": 88248.87,
+      "amazon_orders": 5762,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 98931.53,
+      "counted_orders": 6045,
+      "threshold_amount": 500000,
+      "threshold_transactions": 100,
+      "threshold_test_type": "and",
+      "pct_of_dollar_threshold": 19.8,
+      "pct_of_txn_threshold": 6045.0,
+      "status": "approaching",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($10,682.66) + amazon($88,248.87) = $98,931.53",
+      "data_coverage": {
+        "shopify_min_date": "2025-08-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-08-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-08",
+          "shopify": 769.84,
+          "amazon": 4769.88,
+          "shopify_txn": 16,
+          "amazon_txn": 298
+        },
+        {
+          "month": "2025-09",
+          "shopify": 473.97,
+          "amazon": 5045.83,
+          "shopify_txn": 14,
+          "amazon_txn": 327
+        },
+        {
+          "month": "2025-10",
+          "shopify": 457.72,
+          "amazon": 5580.3,
+          "shopify_txn": 13,
+          "amazon_txn": 368
+        },
+        {
+          "month": "2025-11",
+          "shopify": 1252.54,
+          "amazon": 7501.55,
+          "shopify_txn": 29,
+          "amazon_txn": 488
+        },
+        {
+          "month": "2025-12",
+          "shopify": 1372.94,
+          "amazon": 15379.86,
+          "shopify_txn": 32,
+          "amazon_txn": 980
+        },
+        {
+          "month": "2026-01",
+          "shopify": 844.77,
+          "amazon": 10247.53,
+          "shopify_txn": 25,
+          "amazon_txn": 668
+        },
+        {
+          "month": "2026-02",
+          "shopify": 308.52,
+          "amazon": 8481.85,
+          "shopify_txn": 14,
+          "amazon_txn": 552
+        },
+        {
+          "month": "2026-03",
+          "shopify": 936.84,
+          "amazon": 7662.78,
+          "shopify_txn": 21,
+          "amazon_txn": 507
+        },
+        {
+          "month": "2026-04",
+          "shopify": 1128.55,
+          "amazon": 5872.37,
+          "shopify_txn": 31,
+          "amazon_txn": 395
+        },
+        {
+          "month": "2026-05",
+          "shopify": 1200.9,
+          "amazon": 5626.26,
+          "shopify_txn": 29,
+          "amazon_txn": 373
+        },
+        {
+          "month": "2026-06",
+          "shopify": 804.07,
+          "amazon": 5942.89,
+          "shopify_txn": 29,
+          "amazon_txn": 405
+        },
+        {
+          "month": "2026-07",
+          "shopify": 970.45,
+          "amazon": 5233.19,
+          "shopify_txn": 24,
+          "amazon_txn": 339
+        },
+        {
+          "month": "2026-08",
+          "shopify": 161.55,
+          "amazon": 904.58,
+          "shopify_txn": 6,
+          "amazon_txn": 62
+        }
+      ]
+    },
+    {
+      "state_code": "OH",
+      "state_name": "Ohio",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 5144.25,
+      "shopify_orders": 160,
+      "amazon_sales": 86090.0,
+      "amazon_orders": 5480,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 91234.25,
+      "counted_orders": 5640,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 91.2,
+      "pct_of_txn_threshold": 2820.0,
+      "status": "exceeded",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($5,144.25) + amazon($86,090.00) = $91,234.25",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 221.73,
+          "amazon": 4002.33,
+          "shopify_txn": 6,
+          "amazon_txn": 244
+        },
+        {
+          "month": "2025-02",
+          "shopify": 174.96,
+          "amazon": 3818.57,
+          "shopify_txn": 4,
+          "amazon_txn": 244
+        },
+        {
+          "month": "2025-03",
+          "shopify": 142.74,
+          "amazon": 4333.0,
+          "shopify_txn": 5,
+          "amazon_txn": 260
+        },
+        {
+          "month": "2025-04",
+          "shopify": 216.47,
+          "amazon": 3674.1,
+          "shopify_txn": 5,
+          "amazon_txn": 241
+        },
+        {
+          "month": "2025-05",
+          "shopify": 425.62,
+          "amazon": 3587.77,
+          "shopify_txn": 7,
+          "amazon_txn": 232
+        },
+        {
+          "month": "2025-06",
+          "shopify": 264.43,
+          "amazon": 2519.3,
+          "shopify_txn": 12,
+          "amazon_txn": 155
+        },
+        {
+          "month": "2025-07",
+          "shopify": 134.48,
+          "amazon": 3161.16,
+          "shopify_txn": 6,
+          "amazon_txn": 210
+        },
+        {
+          "month": "2025-08",
+          "shopify": 293.21,
+          "amazon": 2451.32,
+          "shopify_txn": 11,
+          "amazon_txn": 157
+        },
+        {
+          "month": "2025-09",
+          "shopify": 599.51,
+          "amazon": 3050.92,
+          "shopify_txn": 17,
+          "amazon_txn": 188
+        },
+        {
+          "month": "2025-10",
+          "shopify": 163.75,
+          "amazon": 3604.06,
+          "shopify_txn": 6,
+          "amazon_txn": 240
+        },
+        {
+          "month": "2025-11",
+          "shopify": 277.6,
+          "amazon": 6508.18,
+          "shopify_txn": 8,
+          "amazon_txn": 398
+        },
+        {
+          "month": "2025-12",
+          "shopify": 187.41,
+          "amazon": 12094.83,
+          "shopify_txn": 7,
+          "amazon_txn": 741
+        },
+        {
+          "month": "2026-01",
+          "shopify": 41.73,
+          "amazon": 6678.06,
+          "shopify_txn": 2,
+          "amazon_txn": 435
+        },
+        {
+          "month": "2026-02",
+          "shopify": 268.58,
+          "amazon": 6120.69,
+          "shopify_txn": 9,
+          "amazon_txn": 391
+        },
+        {
+          "month": "2026-03",
+          "shopify": 244.03,
+          "amazon": 5475.48,
+          "shopify_txn": 9,
+          "amazon_txn": 349
+        },
+        {
+          "month": "2026-04",
+          "shopify": 275.31,
+          "amazon": 3710.19,
+          "shopify_txn": 9,
+          "amazon_txn": 242
+        },
+        {
+          "month": "2026-05",
+          "shopify": 209.47,
+          "amazon": 3620.98,
+          "shopify_txn": 6,
+          "amazon_txn": 243
+        },
+        {
+          "month": "2026-06",
+          "shopify": 365.58,
+          "amazon": 3566.9,
+          "shopify_txn": 8,
+          "amazon_txn": 248
+        },
+        {
+          "month": "2026-07",
+          "shopify": 343.01,
+          "amazon": 3387.66,
+          "shopify_txn": 10,
+          "amazon_txn": 215
+        },
+        {
+          "month": "2026-08",
+          "shopify": 294.63,
+          "amazon": 724.5,
+          "shopify_txn": 13,
+          "amazon_txn": 47
+        }
+      ]
+    },
+    {
+      "state_code": "OK",
+      "state_name": "Oklahoma",
+      "window_start": "2025-08-16",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_12_months",
+      "shopify_sales": 575.91,
+      "shopify_orders": 58,
+      "amazon_sales": 20065.61,
+      "amazon_orders": 1326,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 575.91,
+      "counted_orders": 58,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 0.6,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": true,
+      "formula": "counted_sales = shopify($575.91) only; amazon($20,065.61) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-08-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-08-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-08",
+          "shopify": 63.0,
+          "amazon": 915.38,
+          "shopify_txn": 1,
+          "amazon_txn": 59
+        },
+        {
+          "month": "2025-09",
+          "shopify": 19.64,
+          "amazon": 1000.62,
+          "shopify_txn": 6,
+          "amazon_txn": 62
+        },
+        {
+          "month": "2025-10",
+          "shopify": 11.99,
+          "amazon": 1298.58,
+          "shopify_txn": 5,
+          "amazon_txn": 87
+        },
+        {
+          "month": "2025-11",
+          "shopify": 106.36,
+          "amazon": 1562.19,
+          "shopify_txn": 6,
+          "amazon_txn": 105
+        },
+        {
+          "month": "2025-12",
+          "shopify": 69.58,
+          "amazon": 4204.91,
+          "shopify_txn": 3,
+          "amazon_txn": 257
+        },
+        {
+          "month": "2026-01",
+          "shopify": 19.38,
+          "amazon": 2199.34,
+          "shopify_txn": 3,
+          "amazon_txn": 149
+        },
+        {
+          "month": "2026-02",
+          "shopify": 24.98,
+          "amazon": 1647.57,
+          "shopify_txn": 5,
+          "amazon_txn": 108
+        },
+        {
+          "month": "2026-03",
+          "shopify": 58.26,
+          "amazon": 1894.09,
+          "shopify_txn": 4,
+          "amazon_txn": 129
+        },
+        {
+          "month": "2026-04",
+          "shopify": 37.4,
+          "amazon": 1476.38,
+          "shopify_txn": 6,
+          "amazon_txn": 103
+        },
+        {
+          "month": "2026-05",
+          "shopify": 11.9,
+          "amazon": 1304.98,
+          "shopify_txn": 6,
+          "amazon_txn": 89
+        },
+        {
+          "month": "2026-06",
+          "shopify": 23.8,
+          "amazon": 1147.26,
+          "shopify_txn": 6,
+          "amazon_txn": 82
+        },
+        {
+          "month": "2026-07",
+          "shopify": 38.0,
+          "amazon": 1300.39,
+          "shopify_txn": 4,
+          "amazon_txn": 88
+        },
+        {
+          "month": "2026-08",
+          "shopify": 91.62,
+          "amazon": 113.92,
+          "shopify_txn": 3,
+          "amazon_txn": 8
+        }
+      ]
+    },
+    {
+      "state_code": "PA",
+      "state_name": "Pennsylvania",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 7820.25,
+      "shopify_orders": 228,
+      "amazon_sales": 87572.81,
+      "amazon_orders": 5612,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 95393.06,
+      "counted_orders": 5840,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 95.4,
+      "pct_of_txn_threshold": 0,
+      "status": "approaching",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($7,820.25) + amazon($87,572.81) = $95,393.06",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 193.99,
+          "amazon": 4317.08,
+          "shopify_txn": 5,
+          "amazon_txn": 271
+        },
+        {
+          "month": "2025-02",
+          "shopify": 125.95,
+          "amazon": 4027.38,
+          "shopify_txn": 3,
+          "amazon_txn": 259
+        },
+        {
+          "month": "2025-03",
+          "shopify": 196.31,
+          "amazon": 3702.43,
+          "shopify_txn": 6,
+          "amazon_txn": 233
+        },
+        {
+          "month": "2025-04",
+          "shopify": 414.71,
+          "amazon": 3554.59,
+          "shopify_txn": 8,
+          "amazon_txn": 227
+        },
+        {
+          "month": "2025-05",
+          "shopify": 463.59,
+          "amazon": 3155.64,
+          "shopify_txn": 12,
+          "amazon_txn": 204
+        },
+        {
+          "month": "2025-06",
+          "shopify": 411.58,
+          "amazon": 3039.99,
+          "shopify_txn": 14,
+          "amazon_txn": 183
+        },
+        {
+          "month": "2025-07",
+          "shopify": 551.73,
+          "amazon": 3382.27,
+          "shopify_txn": 17,
+          "amazon_txn": 223
+        },
+        {
+          "month": "2025-08",
+          "shopify": 517.04,
+          "amazon": 2681.17,
+          "shopify_txn": 16,
+          "amazon_txn": 162
+        },
+        {
+          "month": "2025-09",
+          "shopify": 330.15,
+          "amazon": 2903.3,
+          "shopify_txn": 14,
+          "amazon_txn": 187
+        },
+        {
+          "month": "2025-10",
+          "shopify": 332.31,
+          "amazon": 4103.95,
+          "shopify_txn": 11,
+          "amazon_txn": 273
+        },
+        {
+          "month": "2025-11",
+          "shopify": 380.34,
+          "amazon": 5895.47,
+          "shopify_txn": 11,
+          "amazon_txn": 369
+        },
+        {
+          "month": "2025-12",
+          "shopify": 501.83,
+          "amazon": 12644.24,
+          "shopify_txn": 12,
+          "amazon_txn": 784
+        },
+        {
+          "month": "2026-01",
+          "shopify": 334.76,
+          "amazon": 6635.19,
+          "shopify_txn": 9,
+          "amazon_txn": 439
+        },
+        {
+          "month": "2026-02",
+          "shopify": 235.64,
+          "amazon": 5904.12,
+          "shopify_txn": 8,
+          "amazon_txn": 378
+        },
+        {
+          "month": "2026-03",
+          "shopify": 625.82,
+          "amazon": 4938.46,
+          "shopify_txn": 16,
+          "amazon_txn": 316
+        },
+        {
+          "month": "2026-04",
+          "shopify": 553.76,
+          "amazon": 4243.86,
+          "shopify_txn": 18,
+          "amazon_txn": 281
+        },
+        {
+          "month": "2026-05",
+          "shopify": 443.53,
+          "amazon": 3905.42,
+          "shopify_txn": 15,
+          "amazon_txn": 259
+        },
+        {
+          "month": "2026-06",
+          "shopify": 478.47,
+          "amazon": 4302.65,
+          "shopify_txn": 12,
+          "amazon_txn": 291
+        },
+        {
+          "month": "2026-07",
+          "shopify": 572.29,
+          "amazon": 3608.74,
+          "shopify_txn": 15,
+          "amazon_txn": 232
+        },
+        {
+          "month": "2026-08",
+          "shopify": 156.45,
+          "amazon": 626.86,
+          "shopify_txn": 6,
+          "amazon_txn": 41
+        }
+      ]
+    },
+    {
+      "state_code": "RI",
+      "state_name": "Rhode Island",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_calendar_year",
+      "shopify_sales": 545.71,
+      "shopify_orders": 20,
+      "amazon_sales": 7521.21,
+      "amazon_orders": 494,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 8066.92,
+      "counted_orders": 514,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 8.1,
+      "pct_of_txn_threshold": 257.0,
+      "status": "exceeded",
+      "is_registered": true,
+      "formula": "counted_sales = shopify($545.71) + amazon($7,521.21) = $8,066.92",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 48.49,
+          "amazon": 342.78,
+          "shopify_txn": 1,
+          "amazon_txn": 20
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 328.78,
+          "shopify_txn": 0,
+          "amazon_txn": 21
+        },
+        {
+          "month": "2025-03",
+          "shopify": 0.0,
+          "amazon": 363.76,
+          "shopify_txn": 0,
+          "amazon_txn": 23
+        },
+        {
+          "month": "2025-04",
+          "shopify": 0.0,
+          "amazon": 317.78,
+          "shopify_txn": 0,
+          "amazon_txn": 20
+        },
+        {
+          "month": "2025-05",
+          "shopify": 18.0,
+          "amazon": 252.82,
+          "shopify_txn": 1,
+          "amazon_txn": 17
+        },
+        {
+          "month": "2025-06",
+          "shopify": 31.5,
+          "amazon": 319.78,
+          "shopify_txn": 1,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2025-07",
+          "shopify": 0.0,
+          "amazon": 213.14,
+          "shopify_txn": 1,
+          "amazon_txn": 15
+        },
+        {
+          "month": "2025-08",
+          "shopify": 10.0,
+          "amazon": 210.86,
+          "shopify_txn": 1,
+          "amazon_txn": 13
+        },
+        {
+          "month": "2025-09",
+          "shopify": 78.47,
+          "amazon": 171.88,
+          "shopify_txn": 3,
+          "amazon_txn": 12
+        },
+        {
+          "month": "2025-10",
+          "shopify": 83.88,
+          "amazon": 455.9,
+          "shopify_txn": 2,
+          "amazon_txn": 29
+        },
+        {
+          "month": "2025-11",
+          "shopify": 0.0,
+          "amazon": 536.92,
+          "shopify_txn": 0,
+          "amazon_txn": 37
+        },
+        {
+          "month": "2025-12",
+          "shopify": 53.98,
+          "amazon": 946.64,
+          "shopify_txn": 2,
+          "amazon_txn": 59
+        },
+        {
+          "month": "2026-01",
+          "shopify": 11.99,
+          "amazon": 534.92,
+          "shopify_txn": 1,
+          "amazon_txn": 37
+        },
+        {
+          "month": "2026-02",
+          "shopify": 0.0,
+          "amazon": 575.46,
+          "shopify_txn": 0,
+          "amazon_txn": 37
+        },
+        {
+          "month": "2026-03",
+          "shopify": 77.33,
+          "amazon": 545.84,
+          "shopify_txn": 2,
+          "amazon_txn": 38
+        },
+        {
+          "month": "2026-04",
+          "shopify": 70.94,
+          "amazon": 363.88,
+          "shopify_txn": 3,
+          "amazon_txn": 24
+        },
+        {
+          "month": "2026-05",
+          "shopify": 0.0,
+          "amazon": 309.78,
+          "shopify_txn": 0,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2026-06",
+          "shopify": 33.15,
+          "amazon": 377.53,
+          "shopify_txn": 1,
+          "amazon_txn": 24
+        },
+        {
+          "month": "2026-07",
+          "shopify": 0.0,
+          "amazon": 264.82,
+          "shopify_txn": 0,
+          "amazon_txn": 18
+        },
+        {
+          "month": "2026-08",
+          "shopify": 27.98,
+          "amazon": 87.94,
+          "shopify_txn": 1,
+          "amazon_txn": 6
+        }
+      ]
+    },
+    {
+      "state_code": "SC",
+      "state_name": "South Carolina",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 2780.96,
+      "shopify_orders": 86,
+      "amazon_sales": 39877.99,
+      "amazon_orders": 2607,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 42658.95,
+      "counted_orders": 2693,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 42.7,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($2,780.96) + amazon($39,877.99) = $42,658.95",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 18.0,
+          "amazon": 1722.81,
+          "shopify_txn": 1,
+          "amazon_txn": 116
+        },
+        {
+          "month": "2025-02",
+          "shopify": 23.98,
+          "amazon": 1678.85,
+          "shopify_txn": 1,
+          "amazon_txn": 110
+        },
+        {
+          "month": "2025-03",
+          "shopify": 136.99,
+          "amazon": 2132.74,
+          "shopify_txn": 6,
+          "amazon_txn": 136
+        },
+        {
+          "month": "2025-04",
+          "shopify": 127.48,
+          "amazon": 1857.05,
+          "shopify_txn": 3,
+          "amazon_txn": 115
+        },
+        {
+          "month": "2025-05",
+          "shopify": 298.27,
+          "amazon": 1714.31,
+          "shopify_txn": 7,
+          "amazon_txn": 110
+        },
+        {
+          "month": "2025-06",
+          "shopify": 147.9,
+          "amazon": 1056.57,
+          "shopify_txn": 4,
+          "amazon_txn": 71
+        },
+        {
+          "month": "2025-07",
+          "shopify": 330.88,
+          "amazon": 1413.27,
+          "shopify_txn": 8,
+          "amazon_txn": 99
+        },
+        {
+          "month": "2025-08",
+          "shopify": 70.0,
+          "amazon": 1528.26,
+          "shopify_txn": 2,
+          "amazon_txn": 98
+        },
+        {
+          "month": "2025-09",
+          "shopify": 44.98,
+          "amazon": 1635.17,
+          "shopify_txn": 3,
+          "amazon_txn": 107
+        },
+        {
+          "month": "2025-10",
+          "shopify": 109.65,
+          "amazon": 1661.51,
+          "shopify_txn": 2,
+          "amazon_txn": 115
+        },
+        {
+          "month": "2025-11",
+          "shopify": 229.13,
+          "amazon": 2429.6,
+          "shopify_txn": 3,
+          "amazon_txn": 159
+        },
+        {
+          "month": "2025-12",
+          "shopify": 246.37,
+          "amazon": 4624.02,
+          "shopify_txn": 8,
+          "amazon_txn": 284
+        },
+        {
+          "month": "2026-01",
+          "shopify": 49.48,
+          "amazon": 3331.95,
+          "shopify_txn": 2,
+          "amazon_txn": 219
+        },
+        {
+          "month": "2026-02",
+          "shopify": 64.95,
+          "amazon": 2654.02,
+          "shopify_txn": 2,
+          "amazon_txn": 172
+        },
+        {
+          "month": "2026-03",
+          "shopify": 172.64,
+          "amazon": 2317.63,
+          "shopify_txn": 7,
+          "amazon_txn": 158
+        },
+        {
+          "month": "2026-04",
+          "shopify": 127.4,
+          "amazon": 2147.93,
+          "shopify_txn": 7,
+          "amazon_txn": 138
+        },
+        {
+          "month": "2026-05",
+          "shopify": 176.69,
+          "amazon": 1734.07,
+          "shopify_txn": 5,
+          "amazon_txn": 119
+        },
+        {
+          "month": "2026-06",
+          "shopify": 189.94,
+          "amazon": 1933.52,
+          "shopify_txn": 8,
+          "amazon_txn": 132
+        },
+        {
+          "month": "2026-07",
+          "shopify": 138.47,
+          "amazon": 2010.92,
+          "shopify_txn": 4,
+          "amazon_txn": 128
+        },
+        {
+          "month": "2026-08",
+          "shopify": 77.76,
+          "amazon": 293.79,
+          "shopify_txn": 3,
+          "amazon_txn": 21
+        }
+      ]
+    },
+    {
+      "state_code": "SD",
+      "state_name": "South Dakota",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 313.04,
+      "shopify_orders": 8,
+      "amazon_sales": 5850.51,
+      "amazon_orders": 373,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 6163.55,
+      "counted_orders": 381,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 6.2,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($313.04) + amazon($5,850.51) = $6,163.55",
+      "data_coverage": {
+        "shopify_min_date": "2025-04-01",
+        "shopify_max_date": "2026-07-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": [
+          "Shopify data starts 2025-04-01, window starts 2025-01-01"
+        ]
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 0.0,
+          "amazon": 271.81,
+          "shopify_txn": 0,
+          "amazon_txn": 19
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 173.88,
+          "shopify_txn": 0,
+          "amazon_txn": 12
+        },
+        {
+          "month": "2025-03",
+          "shopify": 0.0,
+          "amazon": 226.85,
+          "shopify_txn": 0,
+          "amazon_txn": 14
+        },
+        {
+          "month": "2025-04",
+          "shopify": 91.0,
+          "amazon": 326.78,
+          "shopify_txn": 1,
+          "amazon_txn": 16
+        },
+        {
+          "month": "2025-05",
+          "shopify": 13.0,
+          "amazon": 267.0,
+          "shopify_txn": 1,
+          "amazon_txn": 19
+        },
+        {
+          "month": "2025-06",
+          "shopify": 0.0,
+          "amazon": 258.83,
+          "shopify_txn": 0,
+          "amazon_txn": 16
+        },
+        {
+          "month": "2025-07",
+          "shopify": 0.0,
+          "amazon": 319.07,
+          "shopify_txn": 0,
+          "amazon_txn": 18
+        },
+        {
+          "month": "2025-08",
+          "shopify": 0.0,
+          "amazon": 115.92,
+          "shopify_txn": 0,
+          "amazon_txn": 7
+        },
+        {
+          "month": "2025-09",
+          "shopify": 0.0,
+          "amazon": 192.87,
+          "shopify_txn": 0,
+          "amazon_txn": 13
+        },
+        {
+          "month": "2025-10",
+          "shopify": 0.0,
+          "amazon": 306.39,
+          "shopify_txn": 0,
+          "amazon_txn": 19
+        },
+        {
+          "month": "2025-11",
+          "shopify": 0.0,
+          "amazon": 375.74,
+          "shopify_txn": 0,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2025-12",
+          "shopify": 0.0,
+          "amazon": 521.63,
+          "shopify_txn": 0,
+          "amazon_txn": 33
+        },
+        {
+          "month": "2026-01",
+          "shopify": 0.0,
+          "amazon": 452.69,
+          "shopify_txn": 0,
+          "amazon_txn": 30
+        },
+        {
+          "month": "2026-02",
+          "shopify": 0.0,
+          "amazon": 393.46,
+          "shopify_txn": 0,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2026-03",
+          "shopify": 101.13,
+          "amazon": 297.79,
+          "shopify_txn": 2,
+          "amazon_txn": 21
+        },
+        {
+          "month": "2026-04",
+          "shopify": 23.98,
+          "amazon": 442.45,
+          "shopify_txn": 1,
+          "amazon_txn": 29
+        },
+        {
+          "month": "2026-05",
+          "shopify": 73.94,
+          "amazon": 285.8,
+          "shopify_txn": 2,
+          "amazon_txn": 18
+        },
+        {
+          "month": "2026-06",
+          "shopify": 0.0,
+          "amazon": 281.79,
+          "shopify_txn": 0,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2026-07",
+          "shopify": 9.99,
+          "amazon": 281.8,
+          "shopify_txn": 1,
+          "amazon_txn": 19
+        },
+        {
+          "month": "2026-08",
+          "shopify": 0.0,
+          "amazon": 57.96,
+          "shopify_txn": 0,
+          "amazon_txn": 4
+        }
+      ]
+    },
+    {
+      "state_code": "TN",
+      "state_name": "Tennessee",
+      "window_start": "2025-08-16",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_12_months",
+      "shopify_sales": 1770.29,
+      "shopify_orders": 78,
+      "amazon_sales": 43848.07,
+      "amazon_orders": 2825,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 1770.29,
+      "counted_orders": 78,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 1.8,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($1,770.29) only; amazon($43,848.07) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-08-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-08-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-08",
+          "shopify": 71.98,
+          "amazon": 2244.46,
+          "shopify_txn": 4,
+          "amazon_txn": 135
+        },
+        {
+          "month": "2025-09",
+          "shopify": 169.75,
+          "amazon": 2523.55,
+          "shopify_txn": 7,
+          "amazon_txn": 162
+        },
+        {
+          "month": "2025-10",
+          "shopify": 150.9,
+          "amazon": 2929.13,
+          "shopify_txn": 4,
+          "amazon_txn": 198
+        },
+        {
+          "month": "2025-11",
+          "shopify": 272.46,
+          "amazon": 3716.05,
+          "shopify_txn": 8,
+          "amazon_txn": 234
+        },
+        {
+          "month": "2025-12",
+          "shopify": 141.45,
+          "amazon": 8156.0,
+          "shopify_txn": 7,
+          "amazon_txn": 514
+        },
+        {
+          "month": "2026-01",
+          "shopify": 36.69,
+          "amazon": 4180.38,
+          "shopify_txn": 2,
+          "amazon_txn": 279
+        },
+        {
+          "month": "2026-02",
+          "shopify": 98.19,
+          "amazon": 4133.5,
+          "shopify_txn": 5,
+          "amazon_txn": 270
+        },
+        {
+          "month": "2026-03",
+          "shopify": 224.37,
+          "amazon": 3769.35,
+          "shopify_txn": 8,
+          "amazon_txn": 234
+        },
+        {
+          "month": "2026-04",
+          "shopify": 120.77,
+          "amazon": 3063.43,
+          "shopify_txn": 8,
+          "amazon_txn": 202
+        },
+        {
+          "month": "2026-05",
+          "shopify": 131.24,
+          "amazon": 2774.04,
+          "shopify_txn": 6,
+          "amazon_txn": 180
+        },
+        {
+          "month": "2026-06",
+          "shopify": 142.0,
+          "amazon": 3152.82,
+          "shopify_txn": 8,
+          "amazon_txn": 210
+        },
+        {
+          "month": "2026-07",
+          "shopify": 144.9,
+          "amazon": 2695.72,
+          "shopify_txn": 6,
+          "amazon_txn": 177
+        },
+        {
+          "month": "2026-08",
+          "shopify": 65.59,
+          "amazon": 509.64,
+          "shopify_txn": 5,
+          "amazon_txn": 30
+        }
+      ]
+    },
+    {
+      "state_code": "TX",
+      "state_name": "Texas",
+      "window_start": "2025-08-16",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_12_months",
+      "shopify_sales": 6283.28,
+      "shopify_orders": 229,
+      "amazon_sales": 143390.59,
+      "amazon_orders": 9241,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 149673.87,
+      "counted_orders": 9470,
+      "threshold_amount": 500000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 29.9,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($6,283.28) + amazon($143,390.59) = $149,673.87",
+      "data_coverage": {
+        "shopify_min_date": "2025-08-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-08-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-08",
+          "shopify": 635.96,
+          "amazon": 8483.37,
+          "shopify_txn": 22,
+          "amazon_txn": 545
+        },
+        {
+          "month": "2025-09",
+          "shopify": 721.85,
+          "amazon": 8191.76,
+          "shopify_txn": 21,
+          "amazon_txn": 526
+        },
+        {
+          "month": "2025-10",
+          "shopify": 485.92,
+          "amazon": 9262.08,
+          "shopify_txn": 17,
+          "amazon_txn": 606
+        },
+        {
+          "month": "2025-11",
+          "shopify": 415.13,
+          "amazon": 11792.54,
+          "shopify_txn": 15,
+          "amazon_txn": 756
+        },
+        {
+          "month": "2025-12",
+          "shopify": 644.22,
+          "amazon": 24114.25,
+          "shopify_txn": 24,
+          "amazon_txn": 1473
+        },
+        {
+          "month": "2026-01",
+          "shopify": 332.94,
+          "amazon": 14842.77,
+          "shopify_txn": 9,
+          "amazon_txn": 996
+        },
+        {
+          "month": "2026-02",
+          "shopify": 180.2,
+          "amazon": 13590.86,
+          "shopify_txn": 9,
+          "amazon_txn": 844
+        },
+        {
+          "month": "2026-03",
+          "shopify": 478.64,
+          "amazon": 12190.18,
+          "shopify_txn": 25,
+          "amazon_txn": 798
+        },
+        {
+          "month": "2026-04",
+          "shopify": 459.67,
+          "amazon": 10021.44,
+          "shopify_txn": 20,
+          "amazon_txn": 660
+        },
+        {
+          "month": "2026-05",
+          "shopify": 850.49,
+          "amazon": 10221.06,
+          "shopify_txn": 22,
+          "amazon_txn": 661
+        },
+        {
+          "month": "2026-06",
+          "shopify": 545.41,
+          "amazon": 9507.85,
+          "shopify_txn": 22,
+          "amazon_txn": 651
+        },
+        {
+          "month": "2026-07",
+          "shopify": 270.09,
+          "amazon": 9366.64,
+          "shopify_txn": 12,
+          "amazon_txn": 609
+        },
+        {
+          "month": "2026-08",
+          "shopify": 262.76,
+          "amazon": 1805.79,
+          "shopify_txn": 11,
+          "amazon_txn": 116
+        }
+      ]
+    },
+    {
+      "state_code": "UT",
+      "state_name": "Utah",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 2290.75,
+      "shopify_orders": 70,
+      "amazon_sales": 41935.17,
+      "amazon_orders": 2747,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 2290.75,
+      "counted_orders": 70,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 2.3,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($2,290.75) only; amazon($41,935.17) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 177.74,
+          "amazon": 1522.96,
+          "shopify_txn": 2,
+          "amazon_txn": 96
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 1689.86,
+          "shopify_txn": 2,
+          "amazon_txn": 108
+        },
+        {
+          "month": "2025-03",
+          "shopify": 102.33,
+          "amazon": 1883.88,
+          "shopify_txn": 3,
+          "amazon_txn": 117
+        },
+        {
+          "month": "2025-04",
+          "shopify": 139.5,
+          "amazon": 1580.94,
+          "shopify_txn": 2,
+          "amazon_txn": 101
+        },
+        {
+          "month": "2025-05",
+          "shopify": 224.62,
+          "amazon": 1708.72,
+          "shopify_txn": 5,
+          "amazon_txn": 115
+        },
+        {
+          "month": "2025-06",
+          "shopify": 215.99,
+          "amazon": 1599.9,
+          "shopify_txn": 3,
+          "amazon_txn": 102
+        },
+        {
+          "month": "2025-07",
+          "shopify": 233.24,
+          "amazon": 1811.91,
+          "shopify_txn": 4,
+          "amazon_txn": 124
+        },
+        {
+          "month": "2025-08",
+          "shopify": 127.97,
+          "amazon": 1473.29,
+          "shopify_txn": 3,
+          "amazon_txn": 94
+        },
+        {
+          "month": "2025-09",
+          "shopify": 9.0,
+          "amazon": 1728.8,
+          "shopify_txn": 1,
+          "amazon_txn": 113
+        },
+        {
+          "month": "2025-10",
+          "shopify": 25.5,
+          "amazon": 1814.2,
+          "shopify_txn": 1,
+          "amazon_txn": 123
+        },
+        {
+          "month": "2025-11",
+          "shopify": 49.5,
+          "amazon": 2182.78,
+          "shopify_txn": 3,
+          "amazon_txn": 147
+        },
+        {
+          "month": "2025-12",
+          "shopify": 106.95,
+          "amazon": 4444.9,
+          "shopify_txn": 4,
+          "amazon_txn": 269
+        },
+        {
+          "month": "2026-01",
+          "shopify": 278.12,
+          "amazon": 3198.69,
+          "shopify_txn": 6,
+          "amazon_txn": 210
+        },
+        {
+          "month": "2026-02",
+          "shopify": 77.45,
+          "amazon": 2402.52,
+          "shopify_txn": 5,
+          "amazon_txn": 155
+        },
+        {
+          "month": "2026-03",
+          "shopify": 0.0,
+          "amazon": 2877.52,
+          "shopify_txn": 0,
+          "amazon_txn": 192
+        },
+        {
+          "month": "2026-04",
+          "shopify": 25.98,
+          "amazon": 3037.39,
+          "shopify_txn": 9,
+          "amazon_txn": 206
+        },
+        {
+          "month": "2026-05",
+          "shopify": 72.16,
+          "amazon": 2398.97,
+          "shopify_txn": 5,
+          "amazon_txn": 162
+        },
+        {
+          "month": "2026-06",
+          "shopify": 159.78,
+          "amazon": 2256.26,
+          "shopify_txn": 5,
+          "amazon_txn": 156
+        },
+        {
+          "month": "2026-07",
+          "shopify": 27.98,
+          "amazon": 2095.84,
+          "shopify_txn": 2,
+          "amazon_txn": 141
+        },
+        {
+          "month": "2026-08",
+          "shopify": 236.94,
+          "amazon": 225.84,
+          "shopify_txn": 5,
+          "amazon_txn": 16
+        }
+      ]
+    },
+    {
+      "state_code": "VA",
+      "state_name": "Virginia",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 3815.56,
+      "shopify_orders": 116,
+      "amazon_sales": 58752.64,
+      "amazon_orders": 3800,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 3815.56,
+      "counted_orders": 116,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 3.8,
+      "pct_of_txn_threshold": 58.0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($3,815.56) only; amazon($58,752.64) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 140.46,
+          "amazon": 2840.13,
+          "shopify_txn": 4,
+          "amazon_txn": 179
+        },
+        {
+          "month": "2025-02",
+          "shopify": 72.67,
+          "amazon": 2891.06,
+          "shopify_txn": 4,
+          "amazon_txn": 180
+        },
+        {
+          "month": "2025-03",
+          "shopify": 161.47,
+          "amazon": 2741.97,
+          "shopify_txn": 4,
+          "amazon_txn": 171
+        },
+        {
+          "month": "2025-04",
+          "shopify": 105.49,
+          "amazon": 2843.02,
+          "shopify_txn": 4,
+          "amazon_txn": 176
+        },
+        {
+          "month": "2025-05",
+          "shopify": 416.23,
+          "amazon": 2094.6,
+          "shopify_txn": 13,
+          "amazon_txn": 140
+        },
+        {
+          "month": "2025-06",
+          "shopify": 136.46,
+          "amazon": 2146.58,
+          "shopify_txn": 7,
+          "amazon_txn": 136
+        },
+        {
+          "month": "2025-07",
+          "shopify": 341.18,
+          "amazon": 2016.94,
+          "shopify_txn": 8,
+          "amazon_txn": 134
+        },
+        {
+          "month": "2025-08",
+          "shopify": 109.16,
+          "amazon": 2265.47,
+          "shopify_txn": 5,
+          "amazon_txn": 144
+        },
+        {
+          "month": "2025-09",
+          "shopify": 118.95,
+          "amazon": 2160.52,
+          "shopify_txn": 5,
+          "amazon_txn": 141
+        },
+        {
+          "month": "2025-10",
+          "shopify": 207.51,
+          "amazon": 2737.15,
+          "shopify_txn": 5,
+          "amazon_txn": 186
+        },
+        {
+          "month": "2025-11",
+          "shopify": 239.83,
+          "amazon": 3709.71,
+          "shopify_txn": 5,
+          "amazon_txn": 231
+        },
+        {
+          "month": "2025-12",
+          "shopify": 342.68,
+          "amazon": 7617.26,
+          "shopify_txn": 9,
+          "amazon_txn": 476
+        },
+        {
+          "month": "2026-01",
+          "shopify": 132.74,
+          "amazon": 4843.13,
+          "shopify_txn": 5,
+          "amazon_txn": 330
+        },
+        {
+          "month": "2026-02",
+          "shopify": 23.88,
+          "amazon": 4459.2,
+          "shopify_txn": 2,
+          "amazon_txn": 282
+        },
+        {
+          "month": "2026-03",
+          "shopify": 88.84,
+          "amazon": 3133.67,
+          "shopify_txn": 3,
+          "amazon_txn": 213
+        },
+        {
+          "month": "2026-04",
+          "shopify": 364.4,
+          "amazon": 2755.59,
+          "shopify_txn": 10,
+          "amazon_txn": 176
+        },
+        {
+          "month": "2026-05",
+          "shopify": 262.75,
+          "amazon": 2595.53,
+          "shopify_txn": 7,
+          "amazon_txn": 166
+        },
+        {
+          "month": "2026-06",
+          "shopify": 79.19,
+          "amazon": 2248.64,
+          "shopify_txn": 2,
+          "amazon_txn": 163
+        },
+        {
+          "month": "2026-07",
+          "shopify": 338.37,
+          "amazon": 2239.73,
+          "shopify_txn": 8,
+          "amazon_txn": 151
+        },
+        {
+          "month": "2026-08",
+          "shopify": 133.3,
+          "amazon": 412.74,
+          "shopify_txn": 6,
+          "amazon_txn": 25
+        }
+      ]
+    },
+    {
+      "state_code": "VT",
+      "state_name": "Vermont",
+      "window_start": "2025-08-16",
+      "window_end": "2026-08-16",
+      "measurement_period": "prior_4_quarters",
+      "shopify_sales": 354.57,
+      "shopify_orders": 10,
+      "amazon_sales": 2011.14,
+      "amazon_orders": 132,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 2365.71,
+      "counted_orders": 142,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 2.4,
+      "pct_of_txn_threshold": 71.0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($354.57) + amazon($2,011.14) = $2,365.71",
+      "data_coverage": {
+        "shopify_min_date": "2025-08-01",
+        "shopify_max_date": "2026-05-31",
+        "amazon_min_date": "2025-08-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-08",
+          "shopify": 102.6,
+          "amazon": 45.97,
+          "shopify_txn": 2,
+          "amazon_txn": 3
+        },
+        {
+          "month": "2025-09",
+          "shopify": 0.0,
+          "amazon": 117.92,
+          "shopify_txn": 0,
+          "amazon_txn": 8
+        },
+        {
+          "month": "2025-10",
+          "shopify": 0.0,
+          "amazon": 169.88,
+          "shopify_txn": 0,
+          "amazon_txn": 12
+        },
+        {
+          "month": "2025-11",
+          "shopify": 0.0,
+          "amazon": 153.89,
+          "shopify_txn": 0,
+          "amazon_txn": 11
+        },
+        {
+          "month": "2025-12",
+          "shopify": 58.7,
+          "amazon": 579.59,
+          "shopify_txn": 3,
+          "amazon_txn": 35
+        },
+        {
+          "month": "2026-01",
+          "shopify": 79.99,
+          "amazon": 209.85,
+          "shopify_txn": 1,
+          "amazon_txn": 15
+        },
+        {
+          "month": "2026-02",
+          "shopify": 68.49,
+          "amazon": 191.87,
+          "shopify_txn": 2,
+          "amazon_txn": 13
+        },
+        {
+          "month": "2026-03",
+          "shopify": 0.0,
+          "amazon": 86.69,
+          "shopify_txn": 0,
+          "amazon_txn": 6
+        },
+        {
+          "month": "2026-04",
+          "shopify": 11.05,
+          "amazon": 142.5,
+          "shopify_txn": 1,
+          "amazon_txn": 7
+        },
+        {
+          "month": "2026-05",
+          "shopify": 33.74,
+          "amazon": 97.93,
+          "shopify_txn": 1,
+          "amazon_txn": 7
+        },
+        {
+          "month": "2026-06",
+          "shopify": 0.0,
+          "amazon": 99.13,
+          "shopify_txn": 0,
+          "amazon_txn": 7
+        },
+        {
+          "month": "2026-07",
+          "shopify": 0.0,
+          "amazon": 99.93,
+          "shopify_txn": 0,
+          "amazon_txn": 7
+        },
+        {
+          "month": "2026-08",
+          "shopify": 0.0,
+          "amazon": 15.99,
+          "shopify_txn": 0,
+          "amazon_txn": 1
+        }
+      ]
+    },
+    {
+      "state_code": "WA",
+      "state_name": "Washington",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 3267.25,
+      "shopify_orders": 93,
+      "amazon_sales": 68740.47,
+      "amazon_orders": 4478,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "high",
+      "counted_sales": 72007.72,
+      "counted_orders": 4571,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 72.0,
+      "pct_of_txn_threshold": 0,
+      "status": "caution",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($3,267.25) + amazon($68,740.47) = $72,007.72",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 116.49,
+          "amazon": 3127.9,
+          "shopify_txn": 3,
+          "amazon_txn": 200
+        },
+        {
+          "month": "2025-02",
+          "shopify": 88.99,
+          "amazon": 4020.28,
+          "shopify_txn": 5,
+          "amazon_txn": 244
+        },
+        {
+          "month": "2025-03",
+          "shopify": 75.97,
+          "amazon": 3445.59,
+          "shopify_txn": 3,
+          "amazon_txn": 208
+        },
+        {
+          "month": "2025-04",
+          "shopify": 162.68,
+          "amazon": 3034.31,
+          "shopify_txn": 4,
+          "amazon_txn": 183
+        },
+        {
+          "month": "2025-05",
+          "shopify": 265.35,
+          "amazon": 3095.17,
+          "shopify_txn": 7,
+          "amazon_txn": 201
+        },
+        {
+          "month": "2025-06",
+          "shopify": 208.43,
+          "amazon": 2532.46,
+          "shopify_txn": 4,
+          "amazon_txn": 168
+        },
+        {
+          "month": "2025-07",
+          "shopify": 123.11,
+          "amazon": 3195.84,
+          "shopify_txn": 3,
+          "amazon_txn": 212
+        },
+        {
+          "month": "2025-08",
+          "shopify": 361.18,
+          "amazon": 2334.31,
+          "shopify_txn": 8,
+          "amazon_txn": 154
+        },
+        {
+          "month": "2025-09",
+          "shopify": 11.99,
+          "amazon": 2619.83,
+          "shopify_txn": 1,
+          "amazon_txn": 168
+        },
+        {
+          "month": "2025-10",
+          "shopify": 120.9,
+          "amazon": 3181.44,
+          "shopify_txn": 4,
+          "amazon_txn": 211
+        },
+        {
+          "month": "2025-11",
+          "shopify": 60.56,
+          "amazon": 3337.23,
+          "shopify_txn": 2,
+          "amazon_txn": 214
+        },
+        {
+          "month": "2025-12",
+          "shopify": 244.67,
+          "amazon": 6705.2,
+          "shopify_txn": 7,
+          "amazon_txn": 434
+        },
+        {
+          "month": "2026-01",
+          "shopify": 124.84,
+          "amazon": 4647.48,
+          "shopify_txn": 5,
+          "amazon_txn": 309
+        },
+        {
+          "month": "2026-02",
+          "shopify": 128.18,
+          "amazon": 3733.4,
+          "shopify_txn": 5,
+          "amazon_txn": 241
+        },
+        {
+          "month": "2026-03",
+          "shopify": 181.22,
+          "amazon": 4340.68,
+          "shopify_txn": 5,
+          "amazon_txn": 289
+        },
+        {
+          "month": "2026-04",
+          "shopify": 205.11,
+          "amazon": 3923.93,
+          "shopify_txn": 6,
+          "amazon_txn": 264
+        },
+        {
+          "month": "2026-05",
+          "shopify": 316.44,
+          "amazon": 3882.48,
+          "shopify_txn": 9,
+          "amazon_txn": 253
+        },
+        {
+          "month": "2026-06",
+          "shopify": 181.36,
+          "amazon": 3736.03,
+          "shopify_txn": 5,
+          "amazon_txn": 266
+        },
+        {
+          "month": "2026-07",
+          "shopify": 72.33,
+          "amazon": 3240.04,
+          "shopify_txn": 1,
+          "amazon_txn": 217
+        },
+        {
+          "month": "2026-08",
+          "shopify": 217.45,
+          "amazon": 606.87,
+          "shopify_txn": 6,
+          "amazon_txn": 42
+        }
+      ]
+    },
+    {
+      "state_code": "WI",
+      "state_name": "Wisconsin",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 3410.54,
+      "shopify_orders": 100,
+      "amazon_sales": 48879.78,
+      "amazon_orders": 3143,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 52290.32,
+      "counted_orders": 3243,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 52.3,
+      "pct_of_txn_threshold": 0,
+      "status": "caution",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($3,410.54) + amazon($48,879.78) = $52,290.32",
+      "data_coverage": {
+        "shopify_min_date": "2025-01-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": []
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 166.5,
+          "amazon": 2283.46,
+          "shopify_txn": 3,
+          "amazon_txn": 143
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 2184.53,
+          "shopify_txn": 1,
+          "amazon_txn": 138
+        },
+        {
+          "month": "2025-03",
+          "shopify": 263.29,
+          "amazon": 2261.12,
+          "shopify_txn": 6,
+          "amazon_txn": 141
+        },
+        {
+          "month": "2025-04",
+          "shopify": 43.49,
+          "amazon": 1813.75,
+          "shopify_txn": 2,
+          "amazon_txn": 117
+        },
+        {
+          "month": "2025-05",
+          "shopify": 333.42,
+          "amazon": 1894.7,
+          "shopify_txn": 10,
+          "amazon_txn": 127
+        },
+        {
+          "month": "2025-06",
+          "shopify": 159.59,
+          "amazon": 1236.18,
+          "shopify_txn": 5,
+          "amazon_txn": 78
+        },
+        {
+          "month": "2025-07",
+          "shopify": 139.93,
+          "amazon": 1795.75,
+          "shopify_txn": 5,
+          "amazon_txn": 117
+        },
+        {
+          "month": "2025-08",
+          "shopify": 189.61,
+          "amazon": 1332.7,
+          "shopify_txn": 7,
+          "amazon_txn": 86
+        },
+        {
+          "month": "2025-09",
+          "shopify": 118.91,
+          "amazon": 1949.17,
+          "shopify_txn": 7,
+          "amazon_txn": 122
+        },
+        {
+          "month": "2025-10",
+          "shopify": 165.57,
+          "amazon": 2096.19,
+          "shopify_txn": 6,
+          "amazon_txn": 139
+        },
+        {
+          "month": "2025-11",
+          "shopify": 247.46,
+          "amazon": 3523.96,
+          "shopify_txn": 6,
+          "amazon_txn": 219
+        },
+        {
+          "month": "2025-12",
+          "shopify": 178.72,
+          "amazon": 6757.15,
+          "shopify_txn": 5,
+          "amazon_txn": 416
+        },
+        {
+          "month": "2026-01",
+          "shopify": 201.88,
+          "amazon": 3913.86,
+          "shopify_txn": 5,
+          "amazon_txn": 253
+        },
+        {
+          "month": "2026-02",
+          "shopify": 118.38,
+          "amazon": 3609.37,
+          "shopify_txn": 3,
+          "amazon_txn": 228
+        },
+        {
+          "month": "2026-03",
+          "shopify": 87.0,
+          "amazon": 2925.12,
+          "shopify_txn": 2,
+          "amazon_txn": 195
+        },
+        {
+          "month": "2026-04",
+          "shopify": 154.14,
+          "amazon": 2200.25,
+          "shopify_txn": 6,
+          "amazon_txn": 143
+        },
+        {
+          "month": "2026-05",
+          "shopify": 235.11,
+          "amazon": 2377.66,
+          "shopify_txn": 6,
+          "amazon_txn": 162
+        },
+        {
+          "month": "2026-06",
+          "shopify": 156.12,
+          "amazon": 2563.37,
+          "shopify_txn": 5,
+          "amazon_txn": 175
+        },
+        {
+          "month": "2026-07",
+          "shopify": 324.93,
+          "amazon": 1891.68,
+          "shopify_txn": 5,
+          "amazon_txn": 125
+        },
+        {
+          "month": "2026-08",
+          "shopify": 126.49,
+          "amazon": 269.81,
+          "shopify_txn": 5,
+          "amazon_txn": 19
+        }
+      ]
+    },
+    {
+      "state_code": "WV",
+      "state_name": "West Virginia",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 616.12,
+      "shopify_orders": 18,
+      "amazon_sales": 7943.38,
+      "amazon_orders": 523,
+      "marketplace_sales_included": true,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 8559.5,
+      "counted_orders": 541,
+      "threshold_amount": 100000,
+      "threshold_transactions": 200,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 8.6,
+      "pct_of_txn_threshold": 270.5,
+      "status": "exceeded",
+      "is_registered": true,
+      "formula": "counted_sales = shopify($616.12) + amazon($7,943.38) = $8,559.50",
+      "data_coverage": {
+        "shopify_min_date": "2025-04-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": [
+          "Shopify data starts 2025-04-01, window starts 2025-01-01"
+        ]
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 0.0,
+          "amazon": 208.86,
+          "shopify_txn": 0,
+          "amazon_txn": 13
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 295.79,
+          "shopify_txn": 0,
+          "amazon_txn": 21
+        },
+        {
+          "month": "2025-03",
+          "shopify": 0.0,
+          "amazon": 421.97,
+          "shopify_txn": 0,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2025-04",
+          "shopify": 95.99,
+          "amazon": 251.82,
+          "shopify_txn": 2,
+          "amazon_txn": 18
+        },
+        {
+          "month": "2025-05",
+          "shopify": 8.5,
+          "amazon": 378.53,
+          "shopify_txn": 1,
+          "amazon_txn": 25
+        },
+        {
+          "month": "2025-06",
+          "shopify": 0.0,
+          "amazon": 207.87,
+          "shopify_txn": 0,
+          "amazon_txn": 10
+        },
+        {
+          "month": "2025-07",
+          "shopify": 56.19,
+          "amazon": 316.28,
+          "shopify_txn": 3,
+          "amazon_txn": 21
+        },
+        {
+          "month": "2025-08",
+          "shopify": 0.0,
+          "amazon": 324.78,
+          "shopify_txn": 0,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2025-09",
+          "shopify": 69.28,
+          "amazon": 392.73,
+          "shopify_txn": 2,
+          "amazon_txn": 27
+        },
+        {
+          "month": "2025-10",
+          "shopify": 0.0,
+          "amazon": 385.32,
+          "shopify_txn": 0,
+          "amazon_txn": 27
+        },
+        {
+          "month": "2025-11",
+          "shopify": 20.0,
+          "amazon": 465.67,
+          "shopify_txn": 1,
+          "amazon_txn": 31
+        },
+        {
+          "month": "2025-12",
+          "shopify": 10.2,
+          "amazon": 937.35,
+          "shopify_txn": 2,
+          "amazon_txn": 61
+        },
+        {
+          "month": "2026-01",
+          "shopify": 0.0,
+          "amazon": 674.53,
+          "shopify_txn": 0,
+          "amazon_txn": 44
+        },
+        {
+          "month": "2026-02",
+          "shopify": 0.0,
+          "amazon": 597.84,
+          "shopify_txn": 0,
+          "amazon_txn": 40
+        },
+        {
+          "month": "2026-03",
+          "shopify": 0.0,
+          "amazon": 556.21,
+          "shopify_txn": 0,
+          "amazon_txn": 38
+        },
+        {
+          "month": "2026-04",
+          "shopify": 0.0,
+          "amazon": 479.16,
+          "shopify_txn": 0,
+          "amazon_txn": 32
+        },
+        {
+          "month": "2026-05",
+          "shopify": 223.93,
+          "amazon": 359.77,
+          "shopify_txn": 3,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2026-06",
+          "shopify": 37.97,
+          "amazon": 340.13,
+          "shopify_txn": 1,
+          "amazon_txn": 27
+        },
+        {
+          "month": "2026-07",
+          "shopify": 58.96,
+          "amazon": 255.82,
+          "shopify_txn": 2,
+          "amazon_txn": 17
+        },
+        {
+          "month": "2026-08",
+          "shopify": 35.1,
+          "amazon": 92.95,
+          "shopify_txn": 1,
+          "amazon_txn": 5
+        }
+      ]
+    },
+    {
+      "state_code": "WY",
+      "state_name": "Wyoming",
+      "window_start": "2025-01-01",
+      "window_end": "2026-08-16",
+      "measurement_period": "current_or_prior_calendar_year",
+      "shopify_sales": 372.55,
+      "shopify_orders": 12,
+      "amazon_sales": 6143.97,
+      "amazon_orders": 385,
+      "marketplace_sales_included": false,
+      "marketplace_rule_confidence": "medium",
+      "counted_sales": 372.55,
+      "counted_orders": 12,
+      "threshold_amount": 100000,
+      "threshold_transactions": null,
+      "threshold_test_type": "or",
+      "pct_of_dollar_threshold": 0.4,
+      "pct_of_txn_threshold": 0,
+      "status": "under",
+      "is_registered": false,
+      "formula": "counted_sales = shopify($372.55) only; amazon($6,143.97) excluded per state rule",
+      "data_coverage": {
+        "shopify_min_date": "2025-06-01",
+        "shopify_max_date": "2026-08-31",
+        "amazon_min_date": "2025-01-01",
+        "amazon_max_date": "2026-08-31",
+        "gaps": [
+          "Shopify data starts 2025-06-01, window starts 2025-01-01"
+        ]
+      },
+      "monthly_breakdown": [
+        {
+          "month": "2025-01",
+          "shopify": 0.0,
+          "amazon": 227.84,
+          "shopify_txn": 0,
+          "amazon_txn": 15
+        },
+        {
+          "month": "2025-02",
+          "shopify": 0.0,
+          "amazon": 364.76,
+          "shopify_txn": 0,
+          "amazon_txn": 20
+        },
+        {
+          "month": "2025-03",
+          "shopify": 0.0,
+          "amazon": 199.86,
+          "shopify_txn": 0,
+          "amazon_txn": 14
+        },
+        {
+          "month": "2025-04",
+          "shopify": 0.0,
+          "amazon": 431.61,
+          "shopify_txn": 0,
+          "amazon_txn": 28
+        },
+        {
+          "month": "2025-05",
+          "shopify": 0.0,
+          "amazon": 316.59,
+          "shopify_txn": 0,
+          "amazon_txn": 17
+        },
+        {
+          "month": "2025-06",
+          "shopify": 8.5,
+          "amazon": 242.84,
+          "shopify_txn": 1,
+          "amazon_txn": 17
+        },
+        {
+          "month": "2025-07",
+          "shopify": 136.05,
+          "amazon": 279.3,
+          "shopify_txn": 3,
+          "amazon_txn": 20
+        },
+        {
+          "month": "2025-08",
+          "shopify": 27.63,
+          "amazon": 252.83,
+          "shopify_txn": 1,
+          "amazon_txn": 16
+        },
+        {
+          "month": "2025-09",
+          "shopify": 20.99,
+          "amazon": 167.18,
+          "shopify_txn": 1,
+          "amazon_txn": 12
+        },
+        {
+          "month": "2025-10",
+          "shopify": 0.0,
+          "amazon": 217.44,
+          "shopify_txn": 0,
+          "amazon_txn": 15
+        },
+        {
+          "month": "2025-11",
+          "shopify": 11.2,
+          "amazon": 237.83,
+          "shopify_txn": 1,
+          "amazon_txn": 17
+        },
+        {
+          "month": "2025-12",
+          "shopify": 53.13,
+          "amazon": 549.51,
+          "shopify_txn": 1,
+          "amazon_txn": 37
+        },
+        {
+          "month": "2026-01",
+          "shopify": 0.0,
+          "amazon": 307.92,
+          "shopify_txn": 0,
+          "amazon_txn": 21
+        },
+        {
+          "month": "2026-02",
+          "shopify": 16.15,
+          "amazon": 312.79,
+          "shopify_txn": 1,
+          "amazon_txn": 21
+        },
+        {
+          "month": "2026-03",
+          "shopify": 0.0,
+          "amazon": 465.64,
+          "shopify_txn": 0,
+          "amazon_txn": 26
+        },
+        {
+          "month": "2026-04",
+          "shopify": 0.0,
+          "amazon": 286.55,
+          "shopify_txn": 0,
+          "amazon_txn": 18
+        },
+        {
+          "month": "2026-05",
+          "shopify": 0.0,
+          "amazon": 605.57,
+          "shopify_txn": 0,
+          "amazon_txn": 24
+        },
+        {
+          "month": "2026-06",
+          "shopify": 33.96,
+          "amazon": 260.2,
+          "shopify_txn": 1,
+          "amazon_txn": 20
+        },
+        {
+          "month": "2026-07",
+          "shopify": 0.0,
+          "amazon": 361.75,
+          "shopify_txn": 0,
+          "amazon_txn": 22
+        },
+        {
+          "month": "2026-08",
+          "shopify": 64.94,
+          "amazon": 55.96,
+          "shopify_txn": 2,
+          "amazon_txn": 5
+        }
+      ]
+    }
+  ],
+  "data_coverage": {
+    "shopify": {
+      "min_date": "2023-09-01",
+      "max_date": "2026-08-31",
+      "records": 1375,
+      "total_sales": 229135.04999999984
+    },
+    "amazon": {
+      "min_date": "2024-01-01",
+      "max_date": "2026-08-31",
+      "records": 1627,
+      "total_sales": 2910245.9299999983
+    }
+  },
+  "data_gaps": [],
+  "validation": [
+    {
+      "check": "A \u2014 Sales totals",
+      "status": "PASS",
+      "details": "Shopify $145,372 across 46 states, Amazon $2,225,732 across 46 states"
+    },
+    {
+      "check": "B \u2014 No double-count",
+      "status": "PASS",
+      "details": "No duplicates after source dedup"
+    },
+    {
+      "check": "C \u2014 Marketplace rule completeness",
+      "status": "PASS",
+      "details": "All states have marketplace counting rule set"
+    },
+    {
+      "check": "D \u2014 Window consistency",
+      "status": "PASS",
+      "details": "Period types in use: 12mo_ending_sep30, current_or_prior_calendar_year, prior_12_months, prior_4_quarters, prior_calendar_year"
+    },
+    {
+      "check": "E \u2014 Data coverage",
+      "status": "WARN",
+      "details": "Coverage gaps in 6 states: HI, ME, NM, SD, WV, WY"
+    }
+  ],
+  "disclaimer": "DISCLAIMER: This is a monitoring and research aid \u2014 NOT legal, tax, or CPA advice. Economic nexus thresholds, measurement periods, and marketplace-counting rules are sourced from public guidance and may be outdated. The CPA must independently verify each state's rules before advising the client."
+}

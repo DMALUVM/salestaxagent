@@ -727,6 +727,64 @@ def inventory_presence_export(fmt, out_dir, state, validate_only, no_upload):
                 click.echo(f"  Storage upload failed (non-fatal): {e}", err=True)
 
 
+@cli.command("economic-nexus-audit")
+@click.option("--format", "fmt", type=click.Choice(["pdf", "csv", "json", "all"]),
+              default="all", help="Output format")
+@click.option("--out", "out_dir", default="exports/cpa",
+              help="Output directory")
+@click.option("--no-upload", is_flag=True, help="Skip Supabase Storage upload")
+def economic_nexus_audit(fmt, out_dir, no_upload):
+    """CPA Export: Economic Nexus Audit — transparent per-state analysis."""
+    from pathlib import Path
+    from datetime import datetime, timezone
+    from src.exports.economic_nexus_audit import (
+        build_audit, build_pdf, build_csv, build_meta, upload_exports,
+    )
+
+    audit = build_audit()
+    exceeded = [s["state_code"] for s in audit["states"] if s["status"] == "exceeded"]
+    approaching = [s["state_code"] for s in audit["states"] if s["status"] == "approaching"]
+
+    # Print validation
+    for v in audit["validation"]:
+        icon = "PASS" if v["status"] == "PASS" else "WARN"
+        click.echo(f"  [{icon}] {v['check']}: {v['details']}")
+
+    click.echo(f"\nExceeded ({len(exceeded)}): {', '.join(exceeded)}")
+    click.echo(f"Approaching ({len(approaching)}): {', '.join(approaching)}")
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    if fmt in ("pdf", "all"):
+        pdf_bytes = build_pdf(audit)
+        p = out / f"Economic_Nexus_Audit_{ts}.pdf"
+        p.write_bytes(bytes(pdf_bytes) if isinstance(pdf_bytes, bytearray) else pdf_bytes)
+        click.echo(f"PDF: {p} ({len(pdf_bytes):,} bytes)")
+
+    if fmt in ("csv", "all"):
+        csv_content = build_csv(audit)
+        p = out / f"Economic_Nexus_Audit_{ts}.csv"
+        p.write_text(csv_content, encoding="utf-8")
+        click.echo(f"CSV: {p}")
+
+    if fmt in ("json", "all"):
+        import json
+        p = out / f"Economic_Nexus_Audit_{ts}.json"
+        p.write_text(json.dumps(audit, indent=2, default=str), encoding="utf-8")
+        click.echo(f"JSON: {p}")
+
+    if not no_upload and fmt == "all":
+        click.echo("Uploading to Supabase Storage...")
+        try:
+            results = upload_exports(audit)
+            ok = sum(1 for v in results.values() if v)
+            click.echo(f"  Uploaded {ok}/{len(results)} files to cpa-exports/economic-nexus/")
+        except Exception as e:
+            click.echo(f"  Storage upload failed (non-fatal): {e}", err=True)
+
+
 @cli.command("registration-triage")
 @click.option("--format", "fmt", type=click.Choice(["md", "csv", "all"]),
               default="all", help="Output format")
@@ -1248,6 +1306,16 @@ def _run_cpa_exports():
     except Exception as e:
         print(f"[CPA Export] Registration triage error: {e}")
 
+    try:
+        from src.exports.economic_nexus_audit import build_audit, upload_exports as upload_econ
+        audit = build_audit()
+        results = upload_econ(audit)
+        ok = sum(1 for v in results.values() if v)
+        exceeded = [s["state_code"] for s in audit["states"] if s["status"] == "exceeded"]
+        print(f"[CPA Export] Economic nexus audit: {ok}/{len(results)} files, {len(exceeded)} exceeded")
+    except Exception as e:
+        print(f"[CPA Export] Economic nexus audit error: {e}")
+
 
 def _run_job_worker():
     """Poll agent_jobs for pending work and execute."""
@@ -1280,10 +1348,8 @@ def _run_job_worker():
         print(f"[Job Worker] Running job {job_id}: {job_type}")
 
         try:
-            if job_type == "export_cpa":
-                _run_cpa_exports()
-            elif job_type == "export_triage":
-                _run_cpa_exports()  # runs both
+            if job_type in ("export_cpa", "export_triage", "export_economic_audit"):
+                _run_cpa_exports()  # runs all three: inventory, triage, economic
             else:
                 raise ValueError(f"Unknown job type: {job_type}")
 
