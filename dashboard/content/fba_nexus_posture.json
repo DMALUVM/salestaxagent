@@ -1,0 +1,361 @@
+{
+  "_metadata": {
+    "description": "FBA inventory nexus posture by state. Captures whether FBA inventory storage creates sales tax physical nexus, with citations. This is a CPA research aid — postures reflect the best available interpretation, not legal advice.",
+    "posture_enum": ["asserts", "carve_out", "contested", "unknown"],
+    "confidence_enum": ["high", "medium", "low"],
+    "last_updated": "2026-08-16",
+    "notes": "Postures seeded from Avalara, Grant Thornton, Sales Tax Institute, and primary state authority. 'asserts' = majority position that FBA inventory creates nexus. 'carve_out' = state has marketplace facilitator carve-out that may shield seller. 'contested' = active litigation or conflicting guidance. 'unknown' = insufficient authority to determine."
+  },
+  "postures": {
+    "AL": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Ala. Code § 40-23-68; Alabama DOR marketplace facilitator rules do not relieve seller of nexus from stored inventory.",
+      "notes": "Inventory in AL warehouses creates physical presence. Marketplace facilitator collection does not eliminate registration requirement.",
+      "last_reviewed": "2026-08-16"
+    },
+    "AZ": {
+      "posture": "carve_out",
+      "confidence": "high",
+      "citation": "Ariz. Rev. Stat. § 42-5043; Arizona TPT marketplace facilitator provision. Avalara guidance indicates FBA sellers shielded by MP provisions.",
+      "notes": "Arizona marketplace facilitator law effectively carves out FBA-only sellers from registration obligation when Amazon collects.",
+      "last_reviewed": "2026-08-16"
+    },
+    "AR": {
+      "posture": "carve_out",
+      "confidence": "medium",
+      "citation": "Ark. Code § 26-52-117; Arkansas marketplace facilitator act. Grant Thornton 2024 summary: FBA inventory alone insufficient when MP collects.",
+      "notes": "Arkansas marketplace facilitator provisions may shield FBA-only sellers. Verify with DFA.",
+      "last_reviewed": "2026-08-16"
+    },
+    "CA": {
+      "posture": "asserts",
+      "confidence": "high",
+      "citation": "Cal. Rev. & Tax. Code § 6203(c); CDTFA Publication 156. Inventory stored in CA creates nexus regardless of marketplace facilitator collection.",
+      "notes": "California clearly asserts that inventory stored in the state creates nexus. Also triggers $800 minimum LLC franchise tax under R&TC § 17941.",
+      "last_reviewed": "2026-08-16"
+    },
+    "CO": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Colo. Rev. Stat. § 39-26-102(3); Colorado DOR guidance on physical presence. Inventory storage = physical presence.",
+      "notes": "Colorado treats stored inventory as physical presence. Marketplace facilitator collection does not eliminate seller registration.",
+      "last_reviewed": "2026-08-16"
+    },
+    "CT": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Conn. Gen. Stat. § 12-407(a)(15); Connecticut DRS marketplace facilitator guidance.",
+      "notes": "Connecticut treats inventory storage as establishing nexus. Marketplace facilitator provisions do not relieve seller nexus from physical presence.",
+      "last_reviewed": "2026-08-16"
+    },
+    "FL": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Fla. Stat. § 212.06(2)(b); Florida DOR TAA 22A-013. Inventory stored in FL creates dealer status.",
+      "notes": "Florida treats inventory as establishing dealer nexus. Marketplace sales do not count toward seller's economic threshold, but physical presence from inventory is independent.",
+      "last_reviewed": "2026-08-16"
+    },
+    "GA": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Ga. Code § 48-8-2(8)(M.1); Georgia DOR marketplace guidance. Inventory creates dealer status.",
+      "notes": "Georgia asserts that stored inventory creates nexus. Marketplace facilitator provisions apply to collection, not nexus elimination.",
+      "last_reviewed": "2026-08-16"
+    },
+    "HI": {
+      "posture": "unknown",
+      "confidence": "low",
+      "citation": "Haw. Rev. Stat. § 237-13; Hawaii GET. No specific FBA inventory guidance found.",
+      "notes": "Hawaii uses General Excise Tax (GET), not traditional sales tax. FBA inventory nexus position unclear. No Amazon FCs currently in HI.",
+      "last_reviewed": "2026-08-16"
+    },
+    "ID": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Idaho Code § 63-3611; Idaho State Tax Commission guidance on physical presence.",
+      "notes": "Idaho treats inventory storage as physical presence creating nexus.",
+      "last_reviewed": "2026-08-16"
+    },
+    "IL": {
+      "posture": "carve_out",
+      "confidence": "high",
+      "citation": "35 ILCS 105/2(1.1); Illinois Leveling the Playing Field Act. Avalara: IL marketplace facilitator law shields FBA sellers from separate registration when MP collects.",
+      "notes": "Illinois marketplace facilitator provisions effectively carve out FBA-only sellers. Inventory presence alone does not require separate seller registration when Amazon collects.",
+      "last_reviewed": "2026-08-16"
+    },
+    "IN": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Ind. Code § 6-2.5-2-1(c); Indiana DOR marketplace facilitator guidance.",
+      "notes": "Indiana treats inventory as physical presence. Marketplace facilitator collection does not relieve seller from registration obligation arising from physical nexus.",
+      "last_reviewed": "2026-08-16"
+    },
+    "IA": {
+      "posture": "carve_out",
+      "confidence": "medium",
+      "citation": "Iowa Code § 423.14A; Iowa DOR marketplace facilitator rules. Avalara summary: FBA sellers shielded.",
+      "notes": "Iowa marketplace facilitator provisions may shield FBA-only sellers from separate registration. Verify with IDR.",
+      "last_reviewed": "2026-08-16"
+    },
+    "KS": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Kan. Stat. § 79-3702(h); Kansas DOR guidance on retailer doing business.",
+      "notes": "Kansas treats inventory storage as doing business in the state, creating nexus.",
+      "last_reviewed": "2026-08-16"
+    },
+    "KY": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Ky. Rev. Stat. § 139.340; Kentucky DOR marketplace facilitator guidance.",
+      "notes": "Kentucky treats stored inventory as physical presence. Recent FC openings increase exposure.",
+      "last_reviewed": "2026-08-16"
+    },
+    "LA": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "La. Rev. Stat. § 47:301(4)(m); Louisiana Sales Tax Commission guidance.",
+      "notes": "Louisiana treats inventory storage as dealer nexus. Complex local tax structure (parishes).",
+      "last_reviewed": "2026-08-16"
+    },
+    "ME": {
+      "posture": "unknown",
+      "confidence": "low",
+      "citation": "Me. Rev. Stat. tit. 36, § 1754-B; Maine Revenue Services. No specific FBA inventory guidance found.",
+      "notes": "Maine has no known Amazon FCs. FBA inventory nexus position not clearly established. Monitor if Amazon opens facilities.",
+      "last_reviewed": "2026-08-16"
+    },
+    "MD": {
+      "posture": "asserts",
+      "confidence": "high",
+      "citation": "Md. Code, Tax-Gen. § 11-701; Maryland Comptroller guidance. Home state — nexus from LLC formation regardless of inventory.",
+      "notes": "Maryland is home state. Nexus established by LLC formation. Inventory presence is secondary but also creates nexus.",
+      "last_reviewed": "2026-08-16"
+    },
+    "MA": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Mass. Gen. Laws ch. 64H, § 1; Massachusetts DOR Directive 17-1. Inventory creates physical presence.",
+      "notes": "Massachusetts treats inventory stored in state as physical presence creating vendor nexus.",
+      "last_reviewed": "2026-08-16"
+    },
+    "MI": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Mich. Comp. Laws § 205.52(1); Michigan Treasury marketplace facilitator guidance.",
+      "notes": "Michigan treats inventory as nexus-creating activity. Marketplace facilitator collection does not eliminate seller physical presence.",
+      "last_reviewed": "2026-08-16"
+    },
+    "MN": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Minn. Stat. § 297A.66; Minnesota DOR Revenue Notice 19-02.",
+      "notes": "Minnesota treats inventory as physical presence. Also has economic nexus from transaction count.",
+      "last_reviewed": "2026-08-16"
+    },
+    "MS": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Miss. Code § 27-67-3; Mississippi DOR guidance on doing business.",
+      "notes": "Mississippi treats inventory storage as doing business in the state.",
+      "last_reviewed": "2026-08-16"
+    },
+    "MO": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Mo. Rev. Stat. § 144.605; Missouri DOR guidance effective Jan 2023.",
+      "notes": "Missouri began requiring sales tax collection in 2023. Inventory storage creates physical presence.",
+      "last_reviewed": "2026-08-16"
+    },
+    "NE": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Neb. Rev. Stat. § 77-2701.13; Nebraska DOR guidance on retailer engaged in business.",
+      "notes": "Nebraska treats inventory as physical presence creating retailer nexus.",
+      "last_reviewed": "2026-08-16"
+    },
+    "NV": {
+      "posture": "carve_out",
+      "confidence": "medium",
+      "citation": "Nev. Rev. Stat. § 372A.200; Nevada Tax Commission marketplace facilitator guidance. Avalara: FBA sellers may be shielded.",
+      "notes": "Nevada marketplace facilitator provisions may shield FBA-only sellers. Also has Commerce Tax for gross revenue >$4M (unlikely for most small sellers).",
+      "last_reviewed": "2026-08-16"
+    },
+    "NJ": {
+      "posture": "asserts",
+      "confidence": "high",
+      "citation": "N.J. Stat. § 54:32B-2(i); New Jersey Division of Taxation TB-90. Inventory = physical presence.",
+      "notes": "New Jersey clearly treats inventory storage as physical presence. High volume of Amazon FCs in NJ.",
+      "last_reviewed": "2026-08-16"
+    },
+    "NM": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "N.M. Stat. § 7-9-10; New Mexico TRD guidance on engaging in business.",
+      "notes": "New Mexico uses Gross Receipts Tax (not traditional sales tax). Inventory creates engaging-in-business nexus.",
+      "last_reviewed": "2026-08-16"
+    },
+    "NY": {
+      "posture": "carve_out",
+      "confidence": "medium",
+      "citation": "N.Y. Tax Law § 1101(b)(8); New York DTF TSB-M-19(2)S. Marketplace facilitator provisions. Avalara: FBA-only sellers may be relieved.",
+      "notes": "New York marketplace facilitator law may relieve FBA-only sellers from separate registration when marketplace collects. Economic nexus uses AND test ($500k AND 100 txn).",
+      "last_reviewed": "2026-08-16"
+    },
+    "NC": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "N.C. Gen. Stat. § 105-164.8(b); North Carolina DOR marketplace facilitator guidance.",
+      "notes": "North Carolina treats inventory as physical presence. Approaching economic threshold.",
+      "last_reviewed": "2026-08-16"
+    },
+    "ND": {
+      "posture": "carve_out",
+      "confidence": "medium",
+      "citation": "N.D. Cent. Code § 57-39.2-02.2; North Dakota Tax Commissioner guidance. Avalara: FBA sellers may be shielded.",
+      "notes": "North Dakota marketplace facilitator provisions may shield FBA-only sellers from separate registration.",
+      "last_reviewed": "2026-08-16"
+    },
+    "OH": {
+      "posture": "asserts",
+      "confidence": "high",
+      "citation": "Ohio Rev. Code § 5741.01(H)(2); Ohio Department of Taxation Information Release ST 2019-02.",
+      "notes": "Ohio clearly asserts inventory creates nexus. Also has Commercial Activity Tax (CAT) for Ohio gross receipts >$150k.",
+      "last_reviewed": "2026-08-16"
+    },
+    "OK": {
+      "posture": "carve_out",
+      "confidence": "medium",
+      "citation": "Okla. Stat. tit. 68, § 1392.1; Oklahoma Tax Commission marketplace facilitator guidance. Avalara: FBA sellers may be shielded.",
+      "notes": "Oklahoma marketplace facilitator provisions may shield FBA-only sellers. Note: confirmed 3PL warehouse creates independent physical nexus regardless of FBA posture.",
+      "last_reviewed": "2026-08-16"
+    },
+    "OR": {
+      "posture": "unknown",
+      "confidence": "high",
+      "citation": "Oregon has no general sales tax. Or. Rev. Stat. § 320.",
+      "notes": "Oregon has no general sales tax. FBA inventory nexus is irrelevant for sales tax purposes. Some specific excise taxes exist.",
+      "last_reviewed": "2026-08-16"
+    },
+    "PA": {
+      "posture": "contested",
+      "confidence": "low",
+      "citation": "Online Merchants Guild v. Hassell (M.D. Pa., filed 2023). 72 P.S. § 7201; Pennsylvania DOR REV-717.",
+      "notes": "CONTESTED. Active litigation (Online Merchants Guild v. Hassell) challenges whether FBA inventory storage creates nexus for out-of-state sellers when Amazon is the marketplace facilitator. Pennsylvania asserts nexus; industry groups contest. CPA must independently evaluate.",
+      "last_reviewed": "2026-08-16"
+    },
+    "RI": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "R.I. Gen. Laws § 44-18-15; Rhode Island Division of Taxation guidance.",
+      "notes": "Rhode Island treats inventory storage as physical presence.",
+      "last_reviewed": "2026-08-16"
+    },
+    "SC": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "S.C. Code § 12-36-70; South Carolina DOR Revenue Ruling 19-3.",
+      "notes": "South Carolina treats inventory as physical presence creating nexus.",
+      "last_reviewed": "2026-08-16"
+    },
+    "SD": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "S.D. Codified Laws § 10-45-1; South Dakota DOR guidance. Post-Wayfair nexus includes physical presence from inventory.",
+      "notes": "South Dakota treats inventory storage as physical presence.",
+      "last_reviewed": "2026-08-16"
+    },
+    "TN": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Tenn. Code § 67-6-102; Tennessee DOR Important Notice 19-18.",
+      "notes": "Tennessee treats inventory as physical presence. Also has franchise & excise tax implications.",
+      "last_reviewed": "2026-08-16"
+    },
+    "TX": {
+      "posture": "carve_out",
+      "confidence": "medium",
+      "citation": "Tex. Tax Code § 151.0242; Texas Comptroller Rule 3.286. Marketplace facilitator provisions. However, franchise tax (Tex. Tax Code Ch. 171) still applies.",
+      "notes": "Texas marketplace facilitator provisions may shield FBA-only sellers from SALES TAX registration. HOWEVER: Texas franchise tax applies independently — must file No Tax Due report + PIF annually if doing business in TX. Dual obligation.",
+      "last_reviewed": "2026-08-16"
+    },
+    "UT": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Utah Code § 59-12-107(2); Utah State Tax Commission guidance.",
+      "notes": "Utah treats inventory storage as physical presence creating nexus.",
+      "last_reviewed": "2026-08-16"
+    },
+    "VA": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Va. Code § 58.1-612; Virginia Tax marketplace facilitator guidance.",
+      "notes": "Virginia treats inventory as physical presence. Marketplace sales do NOT count toward seller's economic threshold.",
+      "last_reviewed": "2026-08-16"
+    },
+    "VT": {
+      "posture": "unknown",
+      "confidence": "low",
+      "citation": "Vt. Stat. tit. 32, § 9701; Vermont Department of Taxes. No specific FBA guidance found.",
+      "notes": "Vermont has no known Amazon FCs. FBA inventory nexus position unclear.",
+      "last_reviewed": "2026-08-16"
+    },
+    "WA": {
+      "posture": "asserts",
+      "confidence": "high",
+      "citation": "Wash. Rev. Code § 82.04.067; Washington DOR Special Notice. Inventory = substantial nexus.",
+      "notes": "Washington clearly asserts inventory creates nexus. Also has B&O tax on gross receipts — separate from sales tax. Dual obligation.",
+      "last_reviewed": "2026-08-16"
+    },
+    "WI": {
+      "posture": "asserts",
+      "confidence": "medium",
+      "citation": "Wis. Stat. § 77.51(13g); Wisconsin DOR marketplace facilitator guidance.",
+      "notes": "Wisconsin treats inventory storage as physical presence.",
+      "last_reviewed": "2026-08-16"
+    },
+    "WV": {
+      "posture": "unknown",
+      "confidence": "low",
+      "citation": "W. Va. Code § 11-15A-1; West Virginia State Tax Dept. No specific FBA guidance found.",
+      "notes": "West Virginia has no known Amazon FCs. Economic nexus may exist from sales volume. FBA inventory position unclear.",
+      "last_reviewed": "2026-08-16"
+    },
+    "WY": {
+      "posture": "unknown",
+      "confidence": "low",
+      "citation": "Wyo. Stat. § 39-15-101; Wyoming DOR. No specific FBA guidance found.",
+      "notes": "Wyoming has no known Amazon FCs. FBA inventory nexus position unclear.",
+      "last_reviewed": "2026-08-16"
+    },
+    "DC": {
+      "posture": "unknown",
+      "confidence": "low",
+      "citation": "D.C. Code § 47-2001; DC OTR. No specific FBA guidance found.",
+      "notes": "DC has no known Amazon FCs. FBA inventory nexus position unclear.",
+      "last_reviewed": "2026-08-16"
+    },
+    "DE": {
+      "posture": "unknown",
+      "confidence": "high",
+      "citation": "Delaware has no general sales tax.",
+      "notes": "Delaware has no general sales tax. FBA inventory nexus irrelevant for sales tax. Some gross receipts taxes exist.",
+      "last_reviewed": "2026-08-16"
+    },
+    "MT": {
+      "posture": "unknown",
+      "confidence": "high",
+      "citation": "Montana has no general sales tax.",
+      "notes": "Montana has no general sales tax. FBA nexus irrelevant for sales tax.",
+      "last_reviewed": "2026-08-16"
+    },
+    "NH": {
+      "posture": "unknown",
+      "confidence": "high",
+      "citation": "New Hampshire has no general sales tax.",
+      "notes": "New Hampshire has no general sales tax. FBA nexus irrelevant for sales tax.",
+      "last_reviewed": "2026-08-16"
+    }
+  }
+}

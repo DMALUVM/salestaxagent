@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-08-16T16:16:06.319846Z",
+  "state_count": 42,
+  "total_events": 129125,
+  "data_as_of": "2026-08-16",
+  "validation": [
+    {
+      "check": "A \u2014 Coverage",
+      "status": "PASS",
+      "details": "42 states, 129,125 events, dates 2024-01-01 to 2026-08-16"
+    },
+    {
+      "check": "B \u2014 Consistency vs nexus_status",
+      "status": "WARN",
+      "details": "IL: 5565 events but physical_nexus=false; AR: 207 events but physical_nexus=false; NV: 2609 events but physical_nexus=false; NY: 4314 events but physical_nexus=false; AZ: 4021 events but physical_nexus=false"
+    },
+    {
+      "check": "C \u2014 Date integrity",
+      "status": "WARN",
+      "details": "1994 events with null state_code"
+    },
+    {
+      "check": "D \u2014 Dedup / range compression",
+      "status": "PASS",
+      "details": "Consecutive months compressed into ranges; duplicates collapsed"
+    },
+    {
+      "check": "E \u2014 Confidence",
+      "status": "WARN",
+      "details": "CONTESTED: PA; FBA carve-out states (nexus not asserted): IL, AR, NV, NY, AZ, OK, IA, DE, OR, ND"
+    }
+  ],
+  "formats": [
+    "md",
+    "csv",
+    "pdf"
+  ]
+}

@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type { IngestionLog, ResearchTask } from "@/lib/types";
 import { LoadingState } from "@/components/loading";
+import { Disclaimer } from "@/components/disclaimer";
 import { fileTypeLabel } from "@/lib/channels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,9 @@ import {
   FileUp,
   Loader2,
   AlertTriangle,
+  FileText,
+  Download,
+  FileSpreadsheet,
 } from "lucide-react";
 
 function timeAgo(dateStr: string) {
@@ -334,6 +338,212 @@ function FileUploadCard({ onComplete }: { onComplete: () => void }) {
   );
 }
 
+// ── CPA Exports Card ──────────────────────────────────────
+
+interface ExportMeta {
+  available: boolean;
+  generated_at?: string;
+  state_count?: number;
+  total_events?: number;
+  data_as_of?: string;
+  validation?: { check: string; status: string; details: string }[];
+  error?: string;
+}
+
+function CPAExportsCard() {
+  const [meta, setMeta] = useState<ExportMeta | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/exports/inventory-presence", { method: "POST" })
+      .then((r) => r.json())
+      .then((d) => {
+        setMeta(d);
+        setLoading(false);
+      })
+      .catch(() => {
+        setMeta({ available: false, error: "Failed to check export status" });
+        setLoading(false);
+      });
+  }, []);
+
+  async function handleDownload(format: string) {
+    setDownloading(format);
+    try {
+      const res = await fetch(
+        `/api/exports/inventory-presence?format=${format}`,
+      );
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error ?? "Download failed");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download =
+        res.headers.get("content-disposition")?.match(/filename="(.+)"/)?.[1] ??
+        `inventory_presence.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(`Download failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  const hasWarnings = meta?.validation?.some((v) => v.status !== "PASS");
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm font-medium">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          CPA Exports — FBA Inventory Presence
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Disclaimer />
+
+        {loading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Checking export status...
+          </div>
+        ) : meta?.available ? (
+          <>
+            {/* Status row */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-lg border bg-muted/30 p-2.5">
+                <p className="text-[11px] text-muted-foreground">Generated</p>
+                <p className="text-sm font-medium">
+                  {meta.generated_at
+                    ? new Date(meta.generated_at).toLocaleDateString()
+                    : "—"}
+                </p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-2.5">
+                <p className="text-[11px] text-muted-foreground">States</p>
+                <p className="text-sm font-medium">{meta.state_count ?? "—"}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-2.5">
+                <p className="text-[11px] text-muted-foreground">Events</p>
+                <p className="text-sm font-medium">
+                  {meta.total_events?.toLocaleString() ?? "—"}
+                </p>
+              </div>
+              <div className="rounded-lg border bg-muted/30 p-2.5">
+                <p className="text-[11px] text-muted-foreground">Data as-of</p>
+                <p className="text-sm font-medium">{meta.data_as_of ?? "—"}</p>
+              </div>
+            </div>
+
+            {/* Validation checks */}
+            {meta.validation && meta.validation.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Validation Checks
+                  {hasWarnings && (
+                    <span className="ml-1 text-amber-600 dark:text-amber-400">
+                      — warnings present
+                    </span>
+                  )}
+                </p>
+                <div className="grid gap-1">
+                  {meta.validation.map((v) => (
+                    <div
+                      key={v.check}
+                      className="flex items-start gap-2 text-xs"
+                    >
+                      {v.status === "PASS" ? (
+                        <CheckCircle className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />
+                      ) : (
+                        <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-500" />
+                      )}
+                      <span>
+                        <span className="font-medium">{v.check}</span>:{" "}
+                        <span className="text-muted-foreground">
+                          {v.details.length > 100
+                            ? v.details.slice(0, 100) + "..."
+                            : v.details}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Download buttons */}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={() => handleDownload("pdf")}
+                disabled={!!downloading}
+              >
+                {downloading === "pdf" ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Download PDF
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleDownload("csv")}
+                disabled={!!downloading}
+              >
+                {downloading === "csv" ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <FileSpreadsheet className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Download CSV
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleDownload("md")}
+                disabled={!!downloading}
+              >
+                {downloading === "md" ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <FileText className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Download Markdown
+              </Button>
+            </div>
+          </>
+        ) : (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div>
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  No export available
+                </p>
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  Generate the CPA report from the command line:
+                </p>
+                <code className="mt-1 block rounded bg-amber-100 px-2 py-1 text-xs dark:bg-amber-900/50">
+                  python -m src.main inventory-presence-export --format all
+                </code>
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function SPAPIRefreshCard({ onComplete }: { onComplete: () => void }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -452,6 +662,8 @@ export default function DataPage() {
       <FileUploadCard onComplete={refetchLogs} />
 
       <SPAPIRefreshCard onComplete={refetchLogs} />
+
+      <CPAExportsCard />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>

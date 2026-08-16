@@ -1,0 +1,1080 @@
+state_code,state_name,month,event_count_approx,first_evidence,last_evidence,fc_codes,sources,physical_nexus_flag,confidence,fba_position
+AL,Alabama,2024-01,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-02,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-03,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-04,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-05,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-06,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-07,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-08,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-09,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-10,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-11,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2024-12,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2025-01,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2025-02,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2025-03,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2025-08,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2025-09,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2025-10,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2025-11,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2025-12,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2026-01,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2026-02,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2026-03,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2026-04,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2026-05,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2026-06,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2026-07,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AL,Alabama,2026-08,,2024-01-01,2026-08-15,BHM1|TAX-RPT-AL,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+AR,Arkansas,2024-01,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-02,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-03,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-04,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-05,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-06,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-07,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-08,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-09,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-10,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-11,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2024-12,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2025-01,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2025-02,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2025-03,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2025-08,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2025-09,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2025-10,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2025-11,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2025-12,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2026-01,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2026-02,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AR,Arkansas,2026-07,,2024-01-01,2026-07-30,LIT1|TAX-RPT-AR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-01,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-02,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-03,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-04,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-05,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-06,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-07,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-08,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-09,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-10,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-11,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2024-12,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2025-01,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2025-02,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2025-03,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2025-08,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2025-09,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2025-10,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2025-11,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2025-12,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2026-01,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2026-02,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2026-03,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2026-04,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2026-05,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2026-06,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2026-07,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+AZ,Arizona,2026-08,,2024-01-01,2026-08-16,GYR1|GYR2|GYR3|PGA1|PHX3|PHX5|PHX6|SAZ1|SAZ2|SAZ3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+CA,California,2024-01,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-02,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-03,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-04,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-05,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-06,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-07,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-08,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-09,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-10,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-11,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2024-12,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2025-01,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2025-02,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2025-03,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2025-08,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2025-09,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2025-10,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2025-11,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2025-12,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2026-01,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2026-02,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2026-03,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2026-04,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2026-05,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2026-06,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2026-07,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CA,California,2026-08,,2024-01-01,2026-08-16,BFL1|BFL2|FAT1|LAX9|LGB3|LGB7|LGB8|MCC1|OAK4|ONT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+CO,Colorado,2024-01,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-02,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-03,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-04,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-05,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-06,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-07,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-08,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-09,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-10,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-11,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2024-12,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2025-01,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2025-02,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2025-03,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2025-08,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2025-09,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2025-10,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2025-11,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2025-12,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2026-01,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2026-02,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2026-03,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2026-04,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2026-05,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2026-06,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2026-07,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CO,Colorado,2026-08,,2024-01-01,2026-08-16,BJC1|DEN3|DEN4|DEN9|SCO1|SCO2|TAX-RPT-CO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-01,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-02,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-03,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-04,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-05,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-06,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-07,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-08,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-09,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-10,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-11,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2024-12,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2025-01,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2025-02,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2025-03,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2025-08,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2025-09,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2025-10,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2025-11,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2025-12,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2026-01,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2026-02,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2026-03,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2026-04,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2026-05,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2026-06,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2026-07,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+CT,Connecticut,2026-08,,2024-01-01,2026-08-15,BDL2|BDL3|BDL4|TAX-RPT-CT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+DE,Delaware,2024-02,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2024-03,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2024-04,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2024-05,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2024-06,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2024-07,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2024-08,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2024-09,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2024-10,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2024-11,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2024-12,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2025-01,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2025-02,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+DE,Delaware,2025-03,,2024-02-01,2025-03-01,TAX-RPT-DE,2024Jan1-2026Aug10_CustomCombinedTax.csv,no,medium,false
+FL,Florida,2024-01,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-02,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-03,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-04,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-05,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-06,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-07,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-08,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-09,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-10,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-11,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2024-12,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2025-01,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2025-02,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2025-03,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2025-08,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2025-09,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2025-10,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2025-11,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2025-12,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2026-01,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2026-02,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2026-03,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2026-04,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2026-05,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2026-06,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2026-07,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+FL,Florida,2026-08,,2024-01-01,2026-08-16,DAB2|HIA1|JAX2|JAX7|MCO1|MIA1|PBI3|SFL1|SFL2|SFL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+GA,Georgia,2024-01,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-02,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-03,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-04,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-05,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-06,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-07,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-08,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-09,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-10,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-11,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2024-12,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2025-01,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2025-02,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2025-03,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2025-08,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2025-09,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2025-10,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2025-11,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2025-12,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2026-01,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2026-02,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2026-03,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2026-04,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2026-05,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2026-06,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2026-07,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+GA,Georgia,2026-08,,2024-01-01,2026-08-15,AGS1|AGS2|ATL2|ATL7|CSG1|RYY2|SAV4|SGA1|SGA2|TAX-RPT-GA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IA,Iowa,2024-01,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-02,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-03,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-04,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-05,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-06,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-07,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-08,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-09,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-10,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-11,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2024-12,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2025-01,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2025-02,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2025-03,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2025-08,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2025-09,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2025-10,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2025-11,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2025-12,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2026-01,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2026-02,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2026-03,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2026-04,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2026-05,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2026-06,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2026-07,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+IA,Iowa,2026-08,,2024-01-01,2026-08-15,DSM5|SIA2|TAX-RPT-IA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+ID,Idaho,2024-01,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-02,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-03,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-04,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-05,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-06,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-07,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-08,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-09,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-10,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-11,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2024-12,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2025-01,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2025-02,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2025-03,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2025-08,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2025-09,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2025-10,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2025-11,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2025-12,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2026-01,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2026-02,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2026-03,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2026-04,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2026-05,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2026-06,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2026-07,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ID,Idaho,2026-08,,2024-01-01,2026-08-14,BOI2|SID1|TAX-RPT-ID,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IL,Illinois,2024-01,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-02,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-03,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-04,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-05,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-06,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-07,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-08,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-09,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-10,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-11,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2024-12,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2025-01,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2025-02,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2025-03,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2025-08,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2025-09,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2025-10,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2025-11,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2025-12,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2026-01,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2026-02,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2026-03,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2026-04,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2026-05,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2026-06,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2026-07,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IL,Illinois,2026-08,,2024-01-01,2026-08-16,IGQ1|MDW2|MDW4|MDW7|MLI1|ORD5|RFD2|SIL1|SIL2|SIL3,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+IN,Indiana,2024-01,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-02,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-03,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-04,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-05,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-06,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-07,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-08,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-09,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-10,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-11,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2024-12,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2025-01,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2025-02,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2025-03,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2025-08,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2025-09,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2025-10,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2025-11,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2025-12,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2026-01,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2026-02,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2026-03,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2026-04,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2026-05,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2026-06,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2026-07,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+IN,Indiana,2026-08,,2024-01-01,2026-08-16,FWA4|FWA6|IND1|IND8|IND9|SBN1|SIN9|TAX-RPT-IN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-01,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-03,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-04,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-05,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-06,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-07,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-08,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-09,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-10,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-11,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2024-12,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2025-01,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2025-02,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2025-03,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KS,Kansas,2025-11,,2024-01-01,2025-11-24,MCI7|TAX-RPT-KS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2025-08,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2025-09,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2025-10,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2025-11,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2025-12,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2026-01,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2026-02,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2026-03,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2026-04,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2026-05,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2026-06,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2026-07,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+KY,Kentucky,2026-08,,2025-08-04,2026-08-15,BKY1|CVG2|LEX1|LEX2|SDF1|SDF6|SDF8|SDF9|SKY2,spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2024-09,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2024-10,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2024-11,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2024-12,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2025-01,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2025-02,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2025-03,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2025-08,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2025-09,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2025-10,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2025-11,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2025-12,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2026-01,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2026-02,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2026-03,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2026-04,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2026-05,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2026-06,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2026-07,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+LA,Louisiana,2026-08,,2024-09-01,2026-08-15,BTR1|SHV1|TAX-RPT-LA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2024-03,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2024-04,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2024-05,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2024-06,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2024-07,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2024-08,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2024-09,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2024-10,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2024-11,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2024-12,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2025-01,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2025-02,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2025-03,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2025-08,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2025-09,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2025-10,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2025-11,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2025-12,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2026-01,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2026-02,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2026-03,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2026-04,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2026-05,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2026-06,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2026-07,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MA,Massachusetts,2026-08,,2024-03-01,2026-08-16,BOS3|ORH3|SMA1|SMA2|TAX-RPT-MA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MD,Maryland,2024-01,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-02,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-03,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-04,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-05,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-06,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-07,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-08,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-09,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-10,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-11,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2024-12,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2025-01,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2025-02,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2025-03,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2025-08,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2025-09,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2025-10,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2025-11,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2025-12,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2026-01,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2026-02,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2026-03,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2026-04,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2026-05,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2026-06,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2026-07,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MD,Maryland,2026-08,,2024-01-01,2026-08-16,BWI2|HGR5|MTN1|SMD1|TAX-RPT-MD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+MI,Michigan,2024-01,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-02,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-03,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-04,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-05,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-06,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-07,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-08,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-09,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-10,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-11,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2024-12,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2025-01,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2025-02,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2025-03,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2025-08,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2025-09,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2025-10,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2025-11,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2025-12,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2026-01,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2026-02,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2026-03,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2026-04,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2026-05,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2026-06,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2026-07,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MI,Michigan,2026-08,,2024-01-01,2026-08-15,DET3|DET6|DTW1|GRR1|LAN2|SMI1|TAX-RPT-MI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,true
+MN,Minnesota,2024-01,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-02,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-03,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-04,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-05,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-06,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-07,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-08,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-09,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-10,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-11,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2024-12,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2025-01,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2025-02,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2025-03,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2025-08,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2025-09,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2025-10,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2025-11,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2025-12,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2026-01,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2026-02,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2026-03,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2026-04,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2026-05,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2026-06,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2026-07,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MN,Minnesota,2026-08,,2024-01-01,2026-08-15,MSP1|SMN1|TAX-RPT-MN,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-01,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-02,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-03,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-04,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-05,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-06,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-07,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-08,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-09,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-10,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-11,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2024-12,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2025-01,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2025-02,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2025-03,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2025-08,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2025-09,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2025-10,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2025-11,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2025-12,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2026-01,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2026-02,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2026-03,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2026-04,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2026-05,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2026-06,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2026-07,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MO,Missouri,2026-08,,2024-01-01,2026-08-15,MKC6|SMO1|SMO2|STL3|STL8|TAX-RPT-MO,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-02,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-03,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-04,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-05,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-06,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-07,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-08,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-09,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-10,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-11,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2024-12,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2025-01,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2025-02,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2025-03,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2025-08,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2025-09,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2025-10,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2025-11,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2025-12,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2026-01,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2026-02,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2026-03,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2026-04,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2026-05,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2026-06,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2026-07,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+MS,Mississippi,2026-08,,2024-02-01,2026-08-15,JAN1|TAX-RPT-MS,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-01,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-02,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-03,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-04,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-05,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-06,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-07,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-08,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-09,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-10,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-11,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2024-12,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2025-01,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2025-02,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2025-03,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2025-08,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2025-09,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2025-10,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2025-11,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2025-12,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2026-01,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2026-02,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2026-03,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2026-04,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2026-05,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2026-06,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2026-07,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NC,North Carolina,2026-08,,2024-01-01,2026-08-16,CLT2|CLT4|RDU1|RDU2|RDU4|SNC2|SNC3|SNC6|TAX-RPT-NC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+ND,North Dakota,2025-08,,2025-08-09,2026-04-27,FAR1,spapi_inventory_ledger,no,medium,false
+ND,North Dakota,2025-09,,2025-08-09,2026-04-27,FAR1,spapi_inventory_ledger,no,medium,false
+ND,North Dakota,2025-10,,2025-08-09,2026-04-27,FAR1,spapi_inventory_ledger,no,medium,false
+ND,North Dakota,2025-11,,2025-08-09,2026-04-27,FAR1,spapi_inventory_ledger,no,medium,false
+ND,North Dakota,2025-12,,2025-08-09,2026-04-27,FAR1,spapi_inventory_ledger,no,medium,false
+ND,North Dakota,2026-01,,2025-08-09,2026-04-27,FAR1,spapi_inventory_ledger,no,medium,false
+ND,North Dakota,2026-04,,2025-08-09,2026-04-27,FAR1,spapi_inventory_ledger,no,medium,false
+NE,Nebraska,2024-01,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-02,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-03,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-04,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-05,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-06,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-07,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-08,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-09,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-10,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-11,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2024-12,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2025-01,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2025-02,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2025-03,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2025-08,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2025-09,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2025-10,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2025-11,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2025-12,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2026-01,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2026-02,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2026-03,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2026-04,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2026-05,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2026-06,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2026-07,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NE,Nebraska,2026-08,,2024-01-01,2026-08-15,OMA2|SNE1|TAX-RPT-NE,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NJ,New Jersey,2024-01,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-02,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-03,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-04,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-05,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-06,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-07,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-08,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-09,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-10,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-11,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2024-12,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2025-01,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2025-02,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2025-03,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2025-08,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2025-09,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2025-10,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2025-11,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2025-12,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2026-01,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2026-02,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2026-03,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2026-04,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2026-05,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2026-06,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2026-07,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NJ,New Jersey,2026-08,,2024-01-01,2026-08-16,ABE2|ABE4|ABE8|ACY1|EWR4|EWR7|EWR9|LGA9|SNJ1|SNJ2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+NM,New Mexico,2024-02,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2024-03,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2024-04,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2024-05,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2024-06,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2024-07,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2024-08,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2024-09,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2024-10,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2024-11,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2024-12,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2025-01,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2025-02,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2025-03,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2025-08,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2025-09,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2025-10,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2025-11,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2025-12,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2026-01,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2026-02,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2026-03,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2026-04,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2026-05,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2026-06,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2026-07,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NM,New Mexico,2026-08,,2024-02-01,2026-08-15,ABQ1|ABQ2|TAX-RPT-NM,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+NV,Nevada,2024-01,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-02,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-03,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-04,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-05,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-06,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-07,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-08,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-09,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-10,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-11,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2024-12,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2025-01,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2025-02,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2025-03,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2025-08,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2025-09,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2025-10,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2025-11,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2025-12,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2026-01,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2026-02,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2026-03,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2026-04,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2026-05,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2026-06,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2026-07,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NV,Nevada,2026-08,,2024-01-01,2026-08-16,LAS1|LAS2|LAS7|SNV1|TAX-RPT-NV|VGT1|VGT2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+NY,New York,2024-01,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-02,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-03,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-04,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-05,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-06,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-07,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-08,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-09,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-10,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-11,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2024-12,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2025-01,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2025-02,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2025-03,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2025-08,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2025-09,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2025-10,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2025-11,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2025-12,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2026-01,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2026-02,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2026-03,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2026-04,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2026-05,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2026-06,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2026-07,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+NY,New York,2026-08,,2024-01-01,2026-08-16,JFK8|JHW1|ROC1|SNY1|SNY2|SNY5|SWF2|SWF4|SYR1|TAX-RPT-NY,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,high,false
+OH,Ohio,2024-01,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-02,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-03,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-04,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-05,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-06,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-07,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-08,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-09,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-10,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-11,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2024-12,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2025-01,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2025-02,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2025-03,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2025-08,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2025-09,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2025-10,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2025-11,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2025-12,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2026-01,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2026-02,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2026-03,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2026-04,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2026-05,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2026-06,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2026-07,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OH,Ohio,2026-08,,2024-01-01,2026-08-16,AKC1|CLE2|CLE3|CMH1|CMH4|CMH7|LUK2|MQJ1|PCW1|SOH1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,unknown_default_true
+OK,Oklahoma,2024-01,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-02,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-03,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-04,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-05,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-06,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-07,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-08,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-09,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-10,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-11,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2024-12,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2025-01,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2025-02,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2025-03,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2025-08,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2025-09,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2025-10,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2025-11,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2025-12,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2026-01,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2026-02,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2026-03,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2026-04,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2026-05,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2026-06,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2026-07,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OK,Oklahoma,2026-08,,2024-01-01,2026-08-16,OKC1|SOK1|TAX-RPT-OK|TUL2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,false
+OR,Oregon,2024-02,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2024-03,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2024-04,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2024-05,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2024-06,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2024-07,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2024-08,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2024-09,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2024-10,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2024-11,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2024-12,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2025-01,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2025-02,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2025-03,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2025-08,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2025-09,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2025-10,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2025-11,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2025-12,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2026-01,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2026-02,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2026-03,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2026-04,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2026-05,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2026-06,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2026-07,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+OR,Oregon,2026-08,,2024-02-01,2026-08-15,PDX7|PDX8|PDX9|SOR3|TAX-RPT-OR,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,no,medium,false
+PA,Pennsylvania,2024-02,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2024-03,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2024-04,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2024-05,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2024-06,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2024-07,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2024-08,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2024-09,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2024-10,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2024-11,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2024-12,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2025-01,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2025-02,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2025-03,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2025-08,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2025-09,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2025-10,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2025-11,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2025-12,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2026-01,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2026-02,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2026-03,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2026-04,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2026-05,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2026-06,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2026-07,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+PA,Pennsylvania,2026-08,,2024-02-01,2026-08-15,AVP1|LBE1|PHL1|PHL7|RDG1|SPA1|SPA4|SPA5|TAX-RPT-PA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,contested,contested
+RI,Rhode Island,2024-11,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2024-12,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2025-01,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2025-02,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2025-03,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2025-08,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2025-09,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2025-10,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2025-11,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2025-12,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2026-01,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2026-02,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2026-03,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2026-04,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2026-05,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2026-06,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2026-07,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+RI,Rhode Island,2026-08,,2024-11-01,2026-08-15,PVD2|TAX-RPT-RI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-01,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-02,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-03,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-04,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-05,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-06,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-07,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-08,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-09,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-10,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-11,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2024-12,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2025-01,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2025-02,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2025-03,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2025-08,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2025-09,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2025-10,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2025-11,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2025-12,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2026-01,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2026-02,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2026-03,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2026-04,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2026-05,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2026-06,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2026-07,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SC,South Carolina,2026-08,,2024-01-01,2026-08-15,CAE1|SSC4|TAX-RPT-SC,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2024-03,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2024-04,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2024-05,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2024-06,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2024-07,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2024-08,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2024-09,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2024-10,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2024-11,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2024-12,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2025-01,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2025-02,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2025-03,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2025-08,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2025-09,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2025-10,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2025-11,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2025-12,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2026-01,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2026-02,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2026-03,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2026-04,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2026-05,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2026-06,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2026-07,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+SD,South Dakota,2026-08,,2024-03-01,2026-08-16,FSD1|TAX-RPT-SD,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-02,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-03,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-04,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-05,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-06,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-07,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-08,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-09,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-10,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-11,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2024-12,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2025-01,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2025-02,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2025-03,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2025-08,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2025-09,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2025-10,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2025-11,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2025-12,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2026-01,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2026-02,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2026-03,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2026-04,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2026-05,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2026-06,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2026-07,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TN,Tennessee,2026-08,,2024-02-01,2026-08-16,BNA3|BNA6|CHA1|MEM1|MEM3|MEM4|MQY1|STN1|TAX-RPT-TN|TEN1,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+TX,Texas,2024-01,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-02,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-03,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-04,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-05,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-06,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-07,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-08,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-09,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-10,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-11,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2024-12,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2025-01,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2025-02,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2025-03,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2025-08,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2025-09,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2025-10,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2025-11,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2025-12,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2026-01,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2026-02,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2026-03,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2026-04,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2026-05,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2026-06,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2026-07,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+TX,Texas,2026-08,,2024-01-01,2026-08-16,AFW1|AUS2|AUS3|DAL2|DAL3|DFW7|ELP1|FTW1|FTW6|HOU2,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,conditional
+UT,Utah,2024-03,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2024-04,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2024-05,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2024-06,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2024-07,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2024-08,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2024-09,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2024-10,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2024-11,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2024-12,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2025-01,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2025-02,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2025-03,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2025-08,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2025-09,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2025-10,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2025-11,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2025-12,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2026-01,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2026-02,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2026-03,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2026-04,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2026-05,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2026-06,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2026-07,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+UT,Utah,2026-08,,2024-03-01,2026-08-16,SLC1|SLC2|SUT1|SUT2|TAX-RPT-UT,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-01,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-02,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-03,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-04,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-05,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-06,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-07,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-08,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-09,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-10,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-11,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2024-12,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2025-01,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2025-02,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2025-03,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2025-08,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2025-09,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2025-10,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2025-11,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2025-12,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2026-01,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2026-02,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2026-03,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2026-04,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2026-05,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2026-06,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2026-07,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+VA,Virginia,2026-08,,2024-01-01,2026-08-16,DCA1|DCA6|ORF2|ORF3|ORF4|RIC2|RIC4|SVA2|TAX-RPT-VA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WA,Washington,2024-01,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-02,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-03,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-04,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-05,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-06,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-07,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-08,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-09,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-10,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-11,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2024-12,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2025-01,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2025-02,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2025-03,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2025-08,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2025-09,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2025-10,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2025-11,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2025-12,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2026-01,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2026-02,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2026-03,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2026-04,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2026-05,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2026-06,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2026-07,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WA,Washington,2026-08,,2024-01-01,2026-08-16,BFI4|GEG1|GEG2|PAE2|SWA1|SWA2|SWA4|TAX-RPT-WA,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,high,true
+WI,Wisconsin,2024-01,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-02,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-03,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-04,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-05,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-06,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-07,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-08,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-09,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-10,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-11,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2024-12,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2025-01,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2025-02,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2025-03,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2025-08,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2025-09,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2025-10,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2025-11,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2025-12,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2026-01,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2026-02,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2026-03,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2026-04,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2026-05,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2026-06,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2026-07,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true
+WI,Wisconsin,2026-08,,2024-01-01,2026-08-15,MKE1|MKE2|SWI1|TAX-RPT-WI,2024Jan1-2026Aug10_CustomCombinedTax.csv|spapi_inventory_ledger,yes,medium,unknown_default_true

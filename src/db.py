@@ -148,3 +148,63 @@ def log_ingestion(filename: str, file_type: str, file_hash: str | None = None,
         "error_message": error_message,
     }
     insert_rows("ingestion_log", [row])
+
+
+# ── Supabase Storage helpers ───────────────────────────────
+
+def ensure_storage_bucket(bucket: str) -> None:
+    """Create a private storage bucket if it doesn't exist."""
+    client = get_client()
+    try:
+        client.storage.get_bucket(bucket)
+    except Exception:
+        try:
+            client.storage.create_bucket(bucket, options={"public": False})
+        except Exception:
+            pass  # bucket may already exist from a race
+
+
+def upload_to_storage(bucket: str, path: str, data: bytes | bytearray, content_type: str) -> str | None:
+    """Upload bytes to Supabase Storage. Returns the path on success."""
+    client = get_client()
+    ensure_storage_bucket(bucket)
+    # Ensure data is bytes (fpdf.output() returns bytearray)
+    if isinstance(data, bytearray):
+        data = bytes(data)
+    try:
+        client.storage.from_(bucket).upload(
+            path, data,
+            file_options={"content-type": content_type, "upsert": "true"},
+        )
+        return path
+    except Exception as e:
+        # Retry with remove + upload if upsert not supported
+        try:
+            client.storage.from_(bucket).remove([path])
+            client.storage.from_(bucket).upload(
+                path, data,
+                file_options={"content-type": content_type},
+            )
+            return path
+        except Exception:
+            print(f"Storage upload failed for {path}: {e}")
+            return None
+
+
+def download_from_storage(bucket: str, path: str) -> bytes | None:
+    """Download a file from Supabase Storage. Returns bytes or None."""
+    client = get_client()
+    try:
+        return client.storage.from_(bucket).download(path)
+    except Exception:
+        return None
+
+
+def create_signed_url(bucket: str, path: str, expires_in: int = 3600) -> str | None:
+    """Create a signed download URL (valid for expires_in seconds)."""
+    client = get_client()
+    try:
+        result = client.storage.from_(bucket).create_signed_url(path, expires_in)
+        return result.get("signedURL") or result.get("signedUrl")
+    except Exception:
+        return None

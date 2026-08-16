@@ -92,3 +92,11 @@ def load_fc_codes() -> dict[str, str]:
     with open(path) as f:
         data = json.load(f)
     return data.get("fc_codes", {})
+
+
+def load_fba_nexus_posture() -> dict[str, dict]:
+    """Load per-state FBA nexus posture config (posture, citation, notes)."""
+    path = PROJECT_ROOT / "config" / "fba_nexus_posture.json"
+    with open(path) as f:
+        data = json.load(f)
+    return data.get("postures", {})

@@ -643,6 +643,128 @@ def playbook_cmd(state_code, export_path, unregistered, nexus_only):
         click.echo(md)
 
 
+@cli.command("inventory-presence-export")
+@click.option("--format", "fmt", type=click.Choice(["md", "csv", "pdf", "all"]),
+              default="all", help="Output format")
+@click.option("--out", "out_dir", default="exports/cpa",
+              help="Output directory")
+@click.option("--state", default=None, help="Single state filter (e.g., CA)")
+@click.option("--validate-only", is_flag=True,
+              help="Run validation checks only, no export")
+@click.option("--no-upload", is_flag=True,
+              help="Skip uploading to Supabase Storage")
+def inventory_presence_export(fmt, out_dir, state, validate_only, no_upload):
+    """CPA Export: FBA Inventory Presence by State (MD + CSV + PDF)."""
+    from pathlib import Path
+    from datetime import datetime, timezone
+    from src.exports.inventory_presence import (
+        build_markdown, build_csv, build_pdf, build_metadata,
+        upload_exports, _gather_state_evidence, _run_validation,
+    )
+
+    if validate_only:
+        evidence = _gather_state_evidence()
+        results = _run_validation(evidence)
+        for v in results:
+            icon = "PASS" if v["status"] == "PASS" else "WARN"
+            click.echo(f"  [{icon}] {v['check']}: {v['details']}")
+        failed = any(v["status"] != "PASS" for v in results)
+        click.echo(f"\n{'WARNINGS present' if failed else 'All checks passed'}")
+        return
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    suffix = f"_{state}" if state else ""
+    base = f"Tallowbourn_FBA_Inventory_Presence_{ts}"
+
+    md_content = None
+    csv_content = None
+    pdf_bytes = None
+
+    if fmt in ("md", "all"):
+        md_content = build_markdown(state_filter=state)
+        # Latest
+        (out / f"inventory_presence_latest{suffix}.md").write_text(md_content, encoding="utf-8")
+        # Timestamped
+        p = out / f"{base}{suffix}.md"
+        p.write_text(md_content, encoding="utf-8")
+        click.echo(f"Markdown: {p}")
+
+    if fmt in ("csv", "all"):
+        csv_content = build_csv(state_filter=state)
+        (out / f"inventory_presence_latest{suffix}.csv").write_text(csv_content, encoding="utf-8")
+        p = out / f"{base}{suffix}.csv"
+        p.write_text(csv_content, encoding="utf-8")
+        click.echo(f"CSV: {p}")
+
+    if fmt in ("pdf", "all"):
+        pdf_bytes = build_pdf(state_filter=state)
+        (out / f"inventory_presence_latest{suffix}.pdf").write_bytes(pdf_bytes)
+        p = out / f"{base}{suffix}.pdf"
+        p.write_bytes(pdf_bytes)
+        click.echo(f"PDF: {p} ({len(pdf_bytes):,} bytes)")
+
+    # Write metadata sidecar
+    if fmt == "all":
+        meta = build_metadata(state_filter=state)
+        import json
+        (out / "inventory_presence_meta.json").write_text(
+            json.dumps(meta, indent=2), encoding="utf-8")
+        click.echo(f"Metadata: {out / 'inventory_presence_meta.json'}")
+
+    # Upload to Supabase Storage
+    if not no_upload and fmt == "all" and not state:
+        if md_content and csv_content and pdf_bytes:
+            click.echo("Uploading to Supabase Storage...")
+            try:
+                meta = build_metadata()
+                results = upload_exports(md_content, csv_content, pdf_bytes, meta)
+                ok = sum(1 for v in results.values() if v)
+                click.echo(f"  Uploaded {ok}/{len(results)} files to cpa-exports bucket")
+            except Exception as e:
+                click.echo(f"  Storage upload failed (non-fatal): {e}", err=True)
+
+
+@cli.command("registration-triage")
+@click.option("--format", "fmt", type=click.Choice(["md", "csv", "all"]),
+              default="all", help="Output format")
+@click.option("--out", "out_dir", default="exports/cpa",
+              help="Output directory")
+def registration_triage(fmt, out_dir):
+    """CPA Export: Registration Triage by state (research aid, not advice)."""
+    from pathlib import Path
+    from src.exports.registration_triage import build_markdown, build_csv, build_triage_rows
+
+    rows = build_triage_rows()
+
+    # Print summary to console
+    from collections import Counter
+    buckets = Counter(r["triage_bucket"] for r in rows)
+    click.echo("Registration Triage Summary:")
+    for b in ["A_discuss", "D_entity_tax", "C_economic_watch", "B_monitor"]:
+        if buckets.get(b):
+            states = [r["state_code"] for r in rows if r["triage_bucket"] == b]
+            click.echo(f"  {b}: {buckets[b]} states — {', '.join(states)}")
+    click.echo()
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    if fmt in ("md", "all"):
+        md = build_markdown()
+        p = out / "registration_triage.md"
+        p.write_text(md, encoding="utf-8")
+        click.echo(f"Markdown: {p}")
+
+    if fmt in ("csv", "all"):
+        csv_content = build_csv()
+        p = out / "registration_triage.csv"
+        p.write_text(csv_content, encoding="utf-8")
+        click.echo(f"CSV: {p}")
+
+
 @cli.command("integrity-check")
 def integrity_check():
     """Verify data integrity: SKU case, duplicate keys, channel totals."""
