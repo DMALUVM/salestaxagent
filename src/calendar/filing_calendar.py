@@ -183,6 +183,12 @@ def generate_filings_for_state(state_code: str, frequency: str, due_day: int = 2
 
 
 def get_upcoming_deadlines(days_ahead: int | None = None) -> list[dict]:
+    """Return upcoming + overdue filing deadlines.
+
+    Skips periods whose period_end <= last_filed_through for that state.
+    This prevents false OVERDUE for historically-generated calendar entries
+    that the user has already filed (tracked via nexus_status.last_filed_through).
+    """
     if days_ahead is None:
         days_ahead = settings.alert_days_before_deadline
 
@@ -191,36 +197,49 @@ def get_upcoming_deadlines(days_ahead: int | None = None) -> list[dict]:
 
     all_filings = fetch_all("filing_calendar", order="due_date")
 
+    # Build last_filed_through lookup from nexus_status
+    nexus_rows = fetch_all("nexus_status")
+    filed_through: dict[str, str] = {}
+    for n in nexus_rows:
+        ft = n.get("last_filed_through")
+        if ft:
+            filed_through[n["state_code"]] = str(ft)
+
+    def _is_already_filed(filing: dict) -> bool:
+        """True if this period is covered by last_filed_through."""
+        sc = filing.get("state_code", "")
+        ft = filed_through.get(sc)
+        if not ft:
+            return False
+        pe = str(filing.get("period_end", ""))
+        return pe <= ft
+
     upcoming = []
     for filing in all_filings:
         if filing.get("status") in ("filed", "not_required"):
             continue
+        if _is_already_filed(filing):
+            continue
 
         due_str = filing.get("due_date")
-        if isinstance(due_str, str):
-            due = date.fromisoformat(due_str)
-        else:
-            due = due_str
+        due = date.fromisoformat(due_str) if isinstance(due_str, str) else due_str
 
         if due and today <= due <= cutoff:
-            days_until = (due - today).days
-            filing["days_until_due"] = days_until
+            filing["days_until_due"] = (due - today).days
             upcoming.append(filing)
 
     overdue = []
     for filing in all_filings:
         if filing.get("status") in ("filed", "not_required"):
             continue
+        if _is_already_filed(filing):
+            continue
 
         due_str = filing.get("due_date")
-        if isinstance(due_str, str):
-            due = date.fromisoformat(due_str)
-        else:
-            due = due_str
+        due = date.fromisoformat(due_str) if isinstance(due_str, str) else due_str
 
         if due and due < today:
-            days_overdue = (today - due).days
-            filing["days_overdue"] = days_overdue
+            filing["days_overdue"] = (today - due).days
             filing["status"] = "late"
             overdue.append(filing)
 

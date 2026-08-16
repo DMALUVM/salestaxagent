@@ -93,6 +93,8 @@ def evaluate_physical_nexus() -> dict:
         if not rule.get("has_sales_tax", True):
             continue
 
+        existing = None  # Reset per state — critical for preservation logic
+
         fba_position = str(rule.get("fba_inventory_creates_nexus", "unknown_default_true"))
 
         # Map the string enum to nexus determination

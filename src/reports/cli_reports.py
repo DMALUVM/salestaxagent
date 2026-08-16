@@ -21,7 +21,13 @@ def nexus_summary() -> str:
     physical = [r for r in records if r.get("has_physical_nexus")]
     economic = [r for r in records if r.get("has_economic_nexus")]
     registered = [r for r in records if r.get("is_registered")]
-    action_needed = [r for r in records if r.get("requires_action") and not r.get("is_registered")]
+    # Action needed = nexus present AND not registered (never flag registered states)
+    action_needed = [
+        r for r in records
+        if not r.get("is_registered")
+        and (r.get("has_physical_nexus") or r.get("has_economic_nexus"))
+        and r.get("requires_action")
+    ]
 
     lines.append(f"Physical nexus:  {len(physical)} states")
     lines.append(f"Economic nexus:  {len(economic)} states")
