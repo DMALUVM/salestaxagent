@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type { NexusStatus, StateRule, SalesByState } from "@/lib/types";
 import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
+import { isRegistered } from "@/lib/compliance-status";
 import { NexusBadge } from "@/components/status-badge";
 import { ConfidenceBadge } from "@/components/confidence-badge";
 import { Disclaimer } from "@/components/disclaimer";
@@ -121,7 +122,7 @@ function EconomicCell({
 
   let statusLabel = "";
   if (n.has_economic_nexus) {
-    if (n.is_registered) {
+    if (isRegistered(n.is_registered)) {
       statusLabel = "Registered \u2014 see Filings";
     } else if (currentlyExceeded) {
       if (isAnd)
@@ -181,7 +182,7 @@ function EconomicCell({
       {statusLabel && (
         <p
           className={`text-xs font-medium ${
-            n.is_registered
+            isRegistered(n.is_registered)
               ? "text-emerald-600 dark:text-emerald-400"
               : "text-red-600 dark:text-red-400"
           }`}
@@ -280,7 +281,7 @@ function NexusTable({
                   />
                 </TableCell>
                 <TableCell>
-                  {n.is_registered ? (
+                  {isRegistered(n.is_registered) ? (
                     <Badge
                       variant="outline"
                       className="text-xs border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
@@ -346,20 +347,20 @@ export default function NexusPage() {
   // Base: exclude registered unless toggle is on
   const filtered = showRegistered
     ? searched
-    : searched.filter((n) => !n.is_registered);
+    : searched.filter((n) => !isRegistered(n.is_registered));
 
-  const registeredCount = searched.filter((n) => n.is_registered).length;
+  const registeredCount = searched.filter((n) => isRegistered(n.is_registered)).length;
 
   // Unregistered exposure: nexus exists but not registered
   const unregExposure = filtered.filter(
     (n) =>
-      !n.is_registered && (n.has_physical_nexus || n.has_economic_nexus),
+      !isRegistered(n.is_registered) && (n.has_physical_nexus || n.has_economic_nexus),
   );
 
   // Approaching: no nexus yet, progress >= 50%, not registered
   const approaching = filtered.filter((n) => {
     if (n.has_physical_nexus || n.has_economic_nexus) return false;
-    if (n.is_registered) return false;
+    if (isRegistered(n.is_registered)) return false;
     return (n.economic_progress_percent ?? 0) >= 50;
   });
 
@@ -369,12 +370,12 @@ export default function NexusPage() {
       !n.has_physical_nexus &&
       !n.has_economic_nexus &&
       (n.economic_progress_percent ?? 0) < 50 &&
-      !n.is_registered,
+      !isRegistered(n.is_registered),
   );
 
   // Registered (only shown when toggle is on)
   const registeredStates = showRegistered
-    ? searched.filter((n) => n.is_registered)
+    ? searched.filter((n) => isRegistered(n.is_registered))
     : [];
 
   const defaultTab = unregExposure.length > 0

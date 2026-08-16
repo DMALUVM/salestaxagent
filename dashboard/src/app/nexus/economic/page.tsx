@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type { NexusStatus, SalesByState } from "@/lib/types";
 import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
+import { isRegistered } from "@/lib/compliance-status";
 import { Disclaimer } from "@/components/disclaimer";
 import { LoadingState } from "@/components/loading";
 import { Badge } from "@/components/ui/badge";
@@ -273,9 +274,25 @@ export default function EconomicNexusAuditPage() {
       .catch(() => {});
   }, []);
 
+  // Merge live is_registered from nexus_status over potentially stale Storage data.
+  // The Storage JSON may have been generated before recent registrations.
+  const mergedAudit = useMemo(() => {
+    if (auditStates.length === 0 || l1) return auditStates;
+    const regMap = new Map(
+      nexusRows.map((n) => [n.state_code, isRegistered(n.is_registered)]),
+    );
+    return auditStates.map((s) => {
+      const liveReg = regMap.get(s.state_code);
+      if (liveReg !== undefined && liveReg !== s.is_registered) {
+        return { ...s, is_registered: liveReg };
+      }
+      return s;
+    });
+  }, [auditStates, nexusRows, l1]);
+
   // Build audit from live DB if Storage is empty
   const liveAudit = useMemo(() => {
-    if (auditStates.length > 0) return auditStates;
+    if (mergedAudit.length > 0) return mergedAudit;
     if (l1 || l2 || !nexusRows.length) return [];
 
     // Build a simplified live audit from nexus_status + sales_by_state
@@ -334,12 +351,18 @@ export default function EconomicNexusAuditPage() {
   }, [auditStates, nexusRows, salesRows, l1, l2]);
 
   const states = liveAudit;
-  // Registration-aware buckets.
-  const isReg = (s: StateAudit) => s.is_registered === true;
+  // Registration-aware buckets using shared isRegistered() helper.
+  const isReg = (s: StateAudit) => isRegistered(s.is_registered);
   const isExceededOrApproaching = (s: StateAudit) =>
     s.status === "exceeded" || s.status === "exceeded_txn" || s.status === "approaching";
   const needsReg = states.filter((s) => isExceededOrApproaching(s) && !isReg(s));
   const registeredStates = states.filter((s) => isReg(s));
+
+  // DEBUG (dev only): log registered codes for cross-page verification
+  if (typeof window !== "undefined" && states.length > 0) {
+    const regCodes = states.filter((s) => isReg(s)).map((s) => s.state_code).sort();
+    console.log(`[EconomicAudit] registered: ${regCodes.length} states:`, regCodes);
+  }
   const all = states;
 
   function applySearch(list: StateAudit[]) {

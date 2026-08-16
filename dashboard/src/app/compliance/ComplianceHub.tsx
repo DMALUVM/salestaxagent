@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSupabaseQuery } from "@/lib/hooks";
+import { isRegistered as isReg } from "@/lib/compliance-status";
 import type { NexusStatus, FranchiseTaxFlag } from "@/lib/types";
 import { ConfidenceBadge } from "@/components/confidence-badge";
 import { NexusBadge, SeverityBadge } from "@/components/status-badge";
@@ -129,7 +130,7 @@ export default function ComplianceHub() {
           state_name: STATE_NAMES[n.state_code] ?? n.state_code,
           has_physical: n.has_physical_nexus,
           has_economic: n.has_economic_nexus,
-          is_registered: n.is_registered,
+          is_registered: isReg(n.is_registered),
           confidence: n.confidence ?? "medium",
           physical_since: n.physical_nexus_since,
           economic_pct: n.economic_progress_percent ?? 0,

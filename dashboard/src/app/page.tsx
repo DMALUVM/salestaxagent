@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSupabaseQuery } from "@/lib/hooks";
+import { isRegistered } from "@/lib/compliance-status";
 import type {
   NexusStatus,
   FilingEntry,
@@ -128,9 +129,9 @@ export default function PulsePage() {
     .slice(0, 3);
   const criticalFlags = (flags ?? []).filter((f) => f.severity === "critical");
   const unregNexus = nexus.filter(
-    (n) => !n.is_registered && (n.has_physical_nexus || n.has_economic_nexus),
+    (n) => !isRegistered(n.is_registered) && (n.has_physical_nexus || n.has_economic_nexus),
   );
-  const econExceeded = nexus.filter((n) => n.has_economic_nexus && !n.is_registered);
+  const econExceeded = nexus.filter((n) => n.has_economic_nexus && !isRegistered(n.is_registered));
 
   // Top 3 critical items
   const criticalItems: { label: string; href: string }[] = [];
@@ -221,7 +222,7 @@ export default function PulsePage() {
               Registered States
             </p>
             <p className="mt-1 text-2xl font-semibold tabular-nums">
-              {nexus.filter((n) => n.is_registered).length}
+              {nexus.filter((n) => isRegistered(n.is_registered)).length}
             </p>
             <p className="text-xs text-muted-foreground">
               {nexus.filter((n) => n.has_physical_nexus).length} physical nexus

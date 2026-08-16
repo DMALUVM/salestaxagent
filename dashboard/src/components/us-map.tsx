@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { isRegistered } from "@/lib/compliance-status";
 import { useUSGeo, useDarkMode } from "@/lib/use-us-geo";
 import type { GeoFeature } from "@/lib/use-us-geo";
 import type {
@@ -120,15 +121,15 @@ export function computeStateStatuses(
     );
     const isOverdue = overdue.length > 0;
     const hasNexus = n?.has_physical_nexus || n?.has_economic_nexus;
-    const isRegistered = n?.is_registered ?? false;
+    const stateRegistered = isRegistered(isRegistered(n?.is_registered));
     const econExceeded = n?.has_economic_nexus ?? false;
     const econApproaching = (n?.economic_progress_percent ?? 0) >= 50;
 
-    if (isOverdue || hasCriticalFlag || (econExceeded && !isRegistered))
+    if (isOverdue || hasCriticalFlag || (econExceeded && !stateRegistered))
       tier = "critical";
-    else if (!isRegistered && ((hasNexus) || econApproaching))
+    else if (!stateRegistered && ((hasNexus) || econApproaching))
       tier = "watch";
-    else if (isRegistered) tier = "registered";
+    else if (stateRegistered) tier = "registered";
 
     result[sc] = {
       tier,
@@ -287,7 +288,7 @@ function StateDrawer({
             <div className="grid grid-cols-2 gap-2 text-sm">
               <span>Registered</span>
               <span className="text-right">
-                {n?.is_registered ? (
+                {isRegistered(n?.is_registered) ? (
                   <span className="flex items-center justify-end gap-1 text-emerald-600 dark:text-emerald-400">
                     <ShieldCheck className="h-3.5 w-3.5" /> Yes
                   </span>
@@ -295,7 +296,7 @@ function StateDrawer({
                   <span className="text-muted-foreground">No</span>
                 )}
               </span>
-              {n?.is_registered && (
+              {n && isRegistered(n.is_registered) && (
                 <>
                   <span>Frequency</span>
                   <span className="text-right capitalize text-muted-foreground">
@@ -334,7 +335,7 @@ function StateDrawer({
           </div>
 
           {/* Sales since filing */}
-          {n?.is_registered && (
+          {isRegistered(n?.is_registered) && (
             <div className="space-y-2">
               <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 Since Last Filing

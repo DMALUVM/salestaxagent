@@ -14,6 +14,7 @@ import {
   AMAZON,
   STATE_TAX_RATES,
 } from "@/lib/channels";
+import { isRegistered } from "@/lib/compliance-status";
 import { LoadingState } from "@/components/loading";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -186,7 +187,7 @@ export default function LiabilityPage() {
   }, [rules]);
 
   const liabilities = useMemo(() => {
-    const registered = nexus.filter((n) => n.is_registered);
+    const registered = nexus.filter((n) => isRegistered(n.is_registered));
     if (registered.length === 0) return [];
 
     const rows: StateLiability[] = [];
