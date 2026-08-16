@@ -348,24 +348,39 @@ interface ExportMeta {
   data_as_of?: string;
   validation?: { check: string; status: string; details: string }[];
   error?: string;
+  hint?: string;
+  supabase_error?: string;
+  bucket?: string;
+  key?: string;
 }
 
 function CPAExportsCard() {
   const [meta, setMeta] = useState<ExportMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenMsg, setRegenMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/exports/inventory-presence", { method: "POST" })
+  function fetchMeta() {
+    setLoading(true);
+    fetch("/api/exports/inventory-presence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    })
       .then((r) => r.json())
       .then((d) => {
         setMeta(d);
         setLoading(false);
       })
       .catch(() => {
-        setMeta({ available: false, error: "Failed to check export status" });
+        setMeta({ available: false, error: "Failed to reach API" });
         setLoading(false);
       });
+  }
+
+  useEffect(() => {
+    fetchMeta();
   }, []);
 
   async function handleDownload(format: string) {
@@ -376,7 +391,7 @@ function CPAExportsCard() {
       );
       if (!res.ok) {
         const err = await res.json();
-        alert(err.error ?? "Download failed");
+        alert(err.hint ?? err.error ?? "Download failed");
         return;
       }
       const blob = await res.blob();
@@ -397,7 +412,61 @@ function CPAExportsCard() {
     }
   }
 
+  async function handleRegenerate() {
+    setRegenerating(true);
+    setRegenMsg(null);
+    try {
+      const res = await fetch("/api/exports/inventory-presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "regenerate" }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        setRegenMsg("Export job enqueued. Waiting for agent...");
+        // Poll meta for updates (up to 2 min)
+        let attempts = 0;
+        const origTime = meta?.generated_at ?? "";
+        const poll = setInterval(async () => {
+          attempts++;
+          try {
+            const r2 = await fetch("/api/exports/inventory-presence", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({}),
+            });
+            const m2 = await r2.json();
+            if (m2.available && m2.generated_at !== origTime) {
+              clearInterval(poll);
+              setMeta(m2);
+              setRegenerating(false);
+              setRegenMsg("Export updated!");
+              setTimeout(() => setRegenMsg(null), 3000);
+            }
+          } catch { /* ignore */ }
+          if (attempts >= 24) {
+            clearInterval(poll);
+            setRegenerating(false);
+            setRegenMsg("Timed out waiting. Agent may process it shortly.");
+          }
+        }, 5000);
+      } else {
+        setRegenMsg(d.hint ?? d.error ?? "Failed to enqueue job");
+        setRegenerating(false);
+      }
+    } catch (e) {
+      setRegenMsg(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setRegenerating(false);
+    }
+  }
+
   const hasWarnings = meta?.validation?.some((v) => v.status !== "PASS");
+
+  // Stale check: >36 hours since last export
+  const isStale =
+    meta?.available && meta.generated_at
+      ? Date.now() - new Date(meta.generated_at).getTime() > 36 * 60 * 60 * 1000
+      : false;
 
   return (
     <Card>
@@ -417,13 +486,26 @@ function CPAExportsCard() {
           </div>
         ) : meta?.available ? (
           <>
+            {/* Stale banner */}
+            {isStale && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                <span className="text-xs text-amber-800 dark:text-amber-300">
+                  Agent may be offline — last export{" "}
+                  {meta.generated_at
+                    ? timeAgo(meta.generated_at)
+                    : "unknown"}
+                </span>
+              </div>
+            )}
+
             {/* Status row */}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded-lg border bg-muted/30 p-2.5">
                 <p className="text-[11px] text-muted-foreground">Generated</p>
                 <p className="text-sm font-medium">
                   {meta.generated_at
-                    ? new Date(meta.generated_at).toLocaleDateString()
+                    ? timeAgo(meta.generated_at)
                     : "—"}
                 </p>
               </div>
@@ -479,7 +561,7 @@ function CPAExportsCard() {
               </div>
             )}
 
-            {/* Download buttons */}
+            {/* Download + Refresh buttons */}
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
@@ -519,22 +601,47 @@ function CPAExportsCard() {
                 )}
                 Download Markdown
               </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleRegenerate}
+                disabled={regenerating}
+              >
+                {regenerating ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Refresh Now
+              </Button>
             </div>
+            {regenMsg && (
+              <p className="text-xs text-muted-foreground">{regenMsg}</p>
+            )}
           </>
         ) : (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-              <div>
+              <div className="space-y-1.5">
                 <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                  No export available
+                  {meta?.error ?? "No export available"}
                 </p>
-                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                  Generate the CPA report from the command line:
-                </p>
-                <code className="mt-1 block rounded bg-amber-100 px-2 py-1 text-xs dark:bg-amber-900/50">
-                  python -m src.main inventory-presence-export --format all
-                </code>
+                {meta?.hint && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {meta.hint}
+                  </p>
+                )}
+                {meta?.supabase_error && (
+                  <p className="text-[11px] font-mono text-amber-600 dark:text-amber-500">
+                    Supabase: {meta.supabase_error}
+                  </p>
+                )}
+                {meta?.bucket && meta?.key && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-500">
+                    Looked for: {meta.bucket}/{meta.key}
+                  </p>
+                )}
               </div>
             </div>
           </div>

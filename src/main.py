@@ -916,6 +916,25 @@ def run():
         )
         click.echo("[Scheduler] Source monitoring every Monday at 07:00")
 
+        # CPA export: daily at 06:30 ET
+        scheduler.add_job(
+            _run_cpa_exports,
+            "cron",
+            hour=6,
+            minute=30,
+            id="cpa_exports",
+        )
+        click.echo("[Scheduler] CPA exports daily at 06:30")
+
+        # Agent job worker: poll every 45 seconds
+        scheduler.add_job(
+            _run_job_worker,
+            "interval",
+            seconds=45,
+            id="job_worker",
+        )
+        click.echo("[Scheduler] Job worker every 45s")
+
         click.echo("\nAgent is running. Watching for files and running scheduled tasks.\n")
 
         def _shutdown(signum, frame):
@@ -1111,5 +1130,117 @@ def _run_source_monitoring():
         print(f"[Source Monitor] Error: {e}")
 
 
+def _run_cpa_exports():
+    """Generate CPA exports (inventory presence + triage) and upload to Storage."""
+    try:
+        from src.exports.inventory_presence import (
+            build_markdown, build_csv, build_pdf, build_metadata, upload_exports,
+        )
+        md = build_markdown()
+        csv_content = build_csv()
+        pdf_bytes = build_pdf()
+        meta = build_metadata()
+        results = upload_exports(md, csv_content, pdf_bytes, meta)
+        ok = sum(1 for v in results.values() if v)
+        print(f"[CPA Export] Inventory presence: {ok}/{len(results)} files uploaded")
+    except Exception as e:
+        print(f"[CPA Export] Inventory presence error: {e}")
+
+    try:
+        from src.exports.registration_triage import (
+            build_markdown as triage_md, build_csv as triage_csv,
+            build_triage_rows,
+        )
+        from src.db import upload_to_storage
+        import json as _json
+        from datetime import datetime, timezone
+
+        rows = triage_rows = build_triage_rows()
+        md = triage_md()
+        csv_c = triage_csv()
+        meta_t = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "state_count": len(rows),
+            "buckets": {},
+        }
+        from collections import Counter
+        for b, cnt in Counter(r["triage_bucket"] for r in rows).items():
+            meta_t["buckets"][b] = cnt
+
+        upload_to_storage("cpa-exports", "registration-triage/latest.md",
+                          md.encode("utf-8"), "text/markdown")
+        upload_to_storage("cpa-exports", "registration-triage/latest.csv",
+                          csv_c.encode("utf-8"), "text/csv")
+        upload_to_storage("cpa-exports", "registration-triage/meta.json",
+                          _json.dumps(meta_t, indent=2).encode("utf-8"), "application/json")
+        print(f"[CPA Export] Registration triage: 3 files uploaded")
+    except Exception as e:
+        print(f"[CPA Export] Registration triage error: {e}")
+
+
+def _run_job_worker():
+    """Poll agent_jobs for pending work and execute."""
+    from src.db import get_client
+
+    try:
+        client = get_client()
+        # Claim oldest pending job
+        result = client.table("agent_jobs") \
+            .select("*") \
+            .eq("status", "pending") \
+            .order("created_at") \
+            .limit(1) \
+            .execute()
+
+        if not result.data:
+            return
+
+        job = result.data[0]
+        job_id = job["id"]
+        job_type = job["job_type"]
+
+        # Mark as running
+        from datetime import datetime, timezone
+        client.table("agent_jobs") \
+            .update({"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}) \
+            .eq("id", job_id) \
+            .execute()
+
+        print(f"[Job Worker] Running job {job_id}: {job_type}")
+
+        try:
+            if job_type == "export_cpa":
+                _run_cpa_exports()
+            elif job_type == "export_triage":
+                _run_cpa_exports()  # runs both
+            else:
+                raise ValueError(f"Unknown job type: {job_type}")
+
+            client.table("agent_jobs") \
+                .update({"status": "done", "finished_at": datetime.now(timezone.utc).isoformat()}) \
+                .eq("id", job_id) \
+                .execute()
+            print(f"[Job Worker] Job {job_id} completed")
+
+        except Exception as e:
+            client.table("agent_jobs") \
+                .update({
+                    "status": "error",
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "error_text": str(e)[:500],
+                }) \
+                .eq("id", job_id) \
+                .execute()
+            print(f"[Job Worker] Job {job_id} failed: {e}")
+
+    except Exception as e:
+        # Table might not exist yet — silently skip
+        msg = str(e)
+        if "agent_jobs" in msg and ("not exist" in msg or "PGRST205" in msg):
+            return  # table not created yet, skip silently
+        print(f"[Job Worker] Error: {e}")
+
+
+# Also trigger CPA export after successful ingest runs
 if __name__ == "__main__":
     cli()

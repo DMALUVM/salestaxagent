@@ -20,85 +20,165 @@ const FILE_EXTENSIONS: Record<string, string> = {
  * GET /api/exports/inventory-presence?format=pdf|md|csv
  *
  * Downloads the latest CPA inventory presence export from Supabase Storage.
- * Returns the file with proper Content-Type and Content-Disposition headers.
+ * The Storage bucket is private — requires SUPABASE_SERVICE_KEY on the server.
  */
 export async function GET(request: NextRequest) {
   const format = request.nextUrl.searchParams.get("format") ?? "pdf";
 
   if (!CONTENT_TYPES[format]) {
     return Response.json(
-      { error: `Invalid format: ${format}. Use pdf, md, or csv.` },
+      { ok: false, error: `Invalid format: ${format}. Use pdf, md, or csv.` },
       { status: 400 },
     );
   }
 
-  const sb = getServerSupabase();
-  const path = `${PREFIX}/latest.${FILE_EXTENSIONS[format]}`;
+  const key = `${PREFIX}/latest.${FILE_EXTENSIONS[format]}`;
 
+  let sb;
   try {
-    const { data, error } = await sb.storage.from(BUCKET).download(path);
-
-    if (error || !data) {
-      return Response.json(
-        {
-          error: "Export not found. Run the export from the CLI first: python -m src.main inventory-presence-export --format all",
-          detail: error?.message,
-        },
-        { status: 404 },
-      );
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    const filename = `Tallowbourn_FBA_Inventory_Presence_${today}.${FILE_EXTENSIONS[format]}`;
-
-    // data is a Blob in the browser SDK, ArrayBuffer in Node
-    const bytes = data instanceof Blob
-      ? Buffer.from(await data.arrayBuffer())
-      : Buffer.from(data as ArrayBuffer);
-
-    return new Response(bytes, {
-      headers: {
-        "Content-Type": CONTENT_TYPES[format],
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Cache-Control": "no-cache",
-      },
-    });
+    sb = getServerSupabase();
   } catch (e) {
     return Response.json(
-      { error: "Failed to download export", detail: String(e) },
+      {
+        ok: false,
+        error: "Supabase not configured on this server",
+        hint: "Set SUPABASE_URL and SUPABASE_SERVICE_KEY env vars on Vercel",
+        detail: String(e),
+      },
       { status: 500 },
     );
   }
-}
 
-/**
- * GET /api/exports/inventory-presence?format=meta
- *
- * Returns the metadata sidecar (validation results, timestamps).
- */
-export async function POST() {
-  // Return metadata about the latest export
-  const sb = getServerSupabase();
+  const { data, error } = await sb.storage.from(BUCKET).download(key);
 
-  try {
-    const { data, error } = await sb.storage
-      .from(BUCKET)
-      .download(`${PREFIX}/meta.json`);
+  if (error || !data) {
+    // Try to distinguish "bucket doesn't exist" vs "file doesn't exist" vs "auth"
+    const msg = error?.message ?? "unknown";
+    const isAuth =
+      msg.includes("security") ||
+      msg.includes("policy") ||
+      msg.includes("not authorized") ||
+      msg.includes("Invalid JWT");
+    const hint = isAuth
+      ? "The Storage bucket is private. Ensure SUPABASE_SERVICE_KEY (not anon key) is set on Vercel."
+      : "Run the export: python -m src.main inventory-presence-export --format all";
 
-    if (error || !data) {
-      return Response.json({
-        available: false,
-        error: "No export found. Generate one from the CLI first.",
-      });
-    }
+    return Response.json(
+      {
+        ok: false,
+        error: "Export file not found",
+        bucket: BUCKET,
+        key,
+        supabase_error: msg,
+        hint,
+      },
+      { status: 404 },
+    );
+  }
 
-    const bytes = data instanceof Blob
+  const today = new Date().toISOString().slice(0, 10);
+  const filename = `Tallowbourn_FBA_Inventory_Presence_${today}.${FILE_EXTENSIONS[format]}`;
+
+  const bytes =
+    data instanceof Blob
       ? Buffer.from(await data.arrayBuffer())
       : Buffer.from(data as ArrayBuffer);
 
-    const meta = JSON.parse(bytes.toString("utf-8"));
-    return Response.json({ available: true, ...meta });
-  } catch {
-    return Response.json({ available: false, error: "Failed to read metadata" });
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": CONTENT_TYPES[format],
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Cache-Control": "no-cache",
+    },
+  });
+}
+
+/**
+ * POST /api/exports/inventory-presence
+ *
+ * Returns metadata about the latest export (validation, timestamp).
+ * Also used to trigger regeneration by inserting an agent_jobs row.
+ */
+export async function POST(request: NextRequest) {
+  let sb;
+  try {
+    sb = getServerSupabase();
+  } catch (e) {
+    return Response.json({
+      available: false,
+      error: "Supabase not configured",
+      hint: "Set SUPABASE_URL and SUPABASE_SERVICE_KEY env vars",
+    });
   }
+
+  // Check if this is a regenerate request
+  let body: Record<string, unknown> = {};
+  try {
+    body = await request.json();
+  } catch {
+    // empty body = metadata request
+  }
+
+  if (body.action === "regenerate") {
+    // Insert a job row for the agent to pick up
+    const { data: job, error: jobErr } = await sb
+      .from("agent_jobs")
+      .insert({
+        job_type: "export_cpa",
+        status: "pending",
+        payload: { formats: ["md", "csv", "pdf"], report: "inventory_presence" },
+      })
+      .select("id")
+      .single();
+
+    if (jobErr) {
+      return Response.json({
+        ok: false,
+        error: "Failed to enqueue export job",
+        detail: jobErr.message,
+        hint: "Ensure the agent_jobs table exists in Supabase",
+      });
+    }
+
+    return Response.json({
+      ok: true,
+      job_id: job?.id,
+      message: "Export job enqueued. Agent will process it shortly.",
+    });
+  }
+
+  // Default: return metadata
+  const { data, error } = await sb.storage
+    .from(BUCKET)
+    .download(`${PREFIX}/meta.json`);
+
+  if (error || !data) {
+    const msg = error?.message ?? "unknown";
+    const isAuth =
+      msg.includes("security") ||
+      msg.includes("policy") ||
+      msg.includes("not authorized") ||
+      msg.includes("Invalid JWT");
+
+    return Response.json({
+      available: false,
+      error: isAuth
+        ? "Storage auth failed — SUPABASE_SERVICE_KEY may be missing or wrong"
+        : "No export found in Storage",
+      hint: isAuth
+        ? "On Vercel, set SUPABASE_SERVICE_KEY to the service_role key from Supabase dashboard > Settings > API"
+        : "Run: python -m src.main inventory-presence-export --format all",
+      bucket: BUCKET,
+      key: `${PREFIX}/meta.json`,
+      supabase_error: msg,
+    });
+  }
+
+  const bytes =
+    data instanceof Blob
+      ? Buffer.from(await data.arrayBuffer())
+      : Buffer.from(data as ArrayBuffer);
+
+  const meta = JSON.parse(bytes.toString("utf-8"));
+  return Response.json({ available: true, ...meta });
 }
