@@ -13,3 +13,9 @@ build/
 .pytest_cache/
 .vercel
 .env*
+.next/
+.cache/
+logs/
+.env
+.venv/
+dashboard/node_modules/

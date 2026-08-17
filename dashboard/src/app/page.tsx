@@ -1,35 +1,28 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
-import { useSupabaseQuery } from "@/lib/hooks";
+import { useSupabaseQuery, useSalesDaily } from "@/lib/hooks";
 import { isRegistered } from "@/lib/compliance-status";
+import { buildRecommendations } from "@/lib/registration-model";
 import type {
   NexusStatus,
   FilingEntry,
   FranchiseTaxFlag,
+  SalesDaily,
   SalesByState,
   IngestionLog,
+  StateRule,
 } from "@/lib/types";
 import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
 import { LoadingState } from "@/components/loading";
-import { SeverityBadge } from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { isConfigured } from "@/lib/supabase";
 import {
   AlertTriangle,
   Calendar,
   ChevronRight,
-  DollarSign,
-  MapPin,
-  Package,
   Shield,
-  ShoppingBag,
-  TrendingUp,
-  FileDown,
-  Map,
-  ClipboardCheck,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -37,11 +30,28 @@ import {
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
-function fmtD(n: number) {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** YYYY-MM-DD in local time (not UTC — avoids timezone shift bugs). */
+function localDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-type ChFilter = "all" | "shopify" | "amazon";
+/** Format YoY %: "+22% YoY", "−5% YoY", or "n/a" when null. Never shows 0% as missing. */
+function fmtYoY(pct: number | null): string {
+  if (pct === null) return "n/a";
+  const sign = pct >= 0 ? "+" : "\u2212";
+  return `${sign}${Math.abs(Math.round(pct))}% YoY`;
+}
+
+function yoyColor(pct: number | null): string {
+  if (pct === null) return "text-muted-foreground";
+  if (pct > 0) return "text-emerald-600 dark:text-emerald-400";
+  if (pct < 0) return "text-red-500 dark:text-red-400";
+  return "text-muted-foreground";
+}
 
 function SetupPrompt() {
   return (
@@ -57,183 +67,394 @@ function SetupPrompt() {
   );
 }
 
-function timeAgo(s: string) {
-  const d = Date.now() - new Date(s).getTime();
-  const m = Math.floor(d / 60000);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
-}
-
 // ---------------------------------------------------------------------------
 
-export default function PulsePage() {
+export default function OwnerHQ() {
   if (!isConfigured()) return <SetupPrompt />;
 
-  const [ch, setCh] = useState<ChFilter>("all");
-
-  const { data: sales, loading: l1 } = useSupabaseQuery<SalesByState>("sales_by_state");
+  const { data: salesDaily, loading: l1 } = useSalesDaily<SalesDaily>();
   const { data: nexus, loading: l2 } = useSupabaseQuery<NexusStatus>("nexus_status");
   const { data: filings, loading: l3 } = useSupabaseQuery<FilingEntry>("filing_calendar", {
-    orderBy: "due_date", ascending: true,
+    orderBy: "due_date",
+    ascending: true,
   });
   const { data: flags } = useSupabaseQuery<FranchiseTaxFlag>("franchise_tax_flags", {
     filters: { status: "open" },
   });
   const { data: logs } = useSupabaseQuery<IngestionLog>("ingestion_log", {
-    orderBy: "ingested_at", limit: 5,
+    orderBy: "ingested_at",
+    limit: 10,
   });
+  const { data: stateRules } = useSupabaseQuery<StateRule>("state_rules");
+  const { data: salesByState } = useSupabaseQuery<SalesByState>("sales_by_state");
 
-  // ── Compute period boundaries ──
-  const now = new Date();
-  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const lastMonth = now.getMonth() === 0
-    ? `${now.getFullYear() - 1}-12`
-    : `${now.getFullYear()}-${String(now.getMonth()).padStart(2, "0")}`;
+  // ── Date boundaries (local time, not UTC) ──
+  const todayStr = localDate(new Date());
 
-  const mtd = useMemo(() => {
-    let gross = 0, orders = 0;
-    for (const s of sales) {
-      if (!s.period_start?.startsWith(thisMonth)) continue;
-      const c = normalizeChannel(s.channel);
-      if (ch !== "all" && c !== ch) continue;
-      gross += s.gross_sales;
-      orders += s.order_count;
+  const computed = useMemo(() => {
+    const now = new Date();
+
+    // yesterday = today - 1 day (local)
+    const yd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const yesterday = localDate(yd);
+
+    // yoyDate = yesterday - 52 weeks / 364 days (same weekday last year)
+    const yoy = new Date(yd.getFullYear(), yd.getMonth(), yd.getDate() - 364);
+    const yoyDate = localDate(yoy);
+
+    // mtdStart = first of yesterday's month
+    const mtdStart = yesterday.slice(0, 8) + "01";
+
+    // Month name for subtitle
+    const mtdMonthName = yd.toLocaleString(undefined, { month: "long" });
+
+    // ── Aggregate sales_daily ──
+    let ydShopify = 0,
+      ydAmazon = 0,
+      mtdShopify = 0,
+      mtdAmazon = 0,
+      yoyShopify = 0,
+      yoyAmazon = 0;
+    let ydShopifyOrders = 0,
+      ydAmazonOrders = 0;
+
+    for (const row of salesDaily) {
+      const ch = normalizeChannel(row.channel);
+      if (row.sale_date === yesterday) {
+        if (ch === SHOPIFY) {
+          ydShopify += Number(row.gross_sales);
+          ydShopifyOrders += Number(row.order_count);
+        } else if (ch === AMAZON) {
+          ydAmazon += Number(row.gross_sales);
+          ydAmazonOrders += Number(row.order_count);
+        }
+      }
+      if (row.sale_date >= mtdStart && row.sale_date <= yesterday) {
+        if (ch === SHOPIFY) mtdShopify += Number(row.gross_sales);
+        else if (ch === AMAZON) mtdAmazon += Number(row.gross_sales);
+      }
+      if (row.sale_date === yoyDate) {
+        if (ch === SHOPIFY) yoyShopify += Number(row.gross_sales);
+        else if (ch === AMAZON) yoyAmazon += Number(row.gross_sales);
+      }
     }
-    return { gross, orders };
-  }, [sales, thisMonth, ch]);
 
-  const lastMo = useMemo(() => {
-    let gross = 0, orders = 0;
-    for (const s of sales) {
-      if (!s.period_start?.startsWith(lastMonth)) continue;
-      const c = normalizeChannel(s.channel);
-      if (ch !== "all" && c !== ch) continue;
-      gross += s.gross_sales;
-      orders += s.order_count;
+    const ydTotal = ydShopify + ydAmazon;
+    const yoyTotal = yoyShopify + yoyAmazon;
+    const hasYoyData = salesDaily.some((r) => r.sale_date === yoyDate);
+    const yoyPct = hasYoyData && yoyTotal > 0 ? ((ydTotal / yoyTotal) - 1) * 100 : null;
+    const yoyShopifyPct = hasYoyData && yoyShopify > 0 ? ((ydShopify / yoyShopify) - 1) * 100 : null;
+    const yoyAmazonPct = hasYoyData && yoyAmazon > 0 ? ((ydAmazon / yoyAmazon) - 1) * 100 : null;
+    const mtdTotal = mtdShopify + mtdAmazon;
+    const hasYdData = salesDaily.some((r) => r.sale_date === yesterday);
+
+    // ── 30-day chart data ──
+    // Build a lookup map first (O(n) instead of O(n*30))
+    const dailyMap = new Map<string, { shopify: number; amazon: number }>();
+    for (const row of salesDaily) {
+      const key = row.sale_date;
+      const ch = normalizeChannel(row.channel);
+      let entry = dailyMap.get(key);
+      if (!entry) {
+        entry = { shopify: 0, amazon: 0 };
+        dailyMap.set(key, entry);
+      }
+      if (ch === SHOPIFY) entry.shopify += Number(row.gross_sales);
+      else if (ch === AMAZON) entry.amazon += Number(row.gross_sales);
     }
-    return { gross, orders };
-  }, [sales, lastMonth, ch]);
+
+    const last30: { date: string; shopify: number; amazon: number }[] = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - i);
+      const ds = localDate(d);
+      const entry = dailyMap.get(ds);
+      last30.push({
+        date: ds,
+        shopify: entry?.shopify ?? 0,
+        amazon: entry?.amazon ?? 0,
+      });
+    }
+
+    // ── Data freshness ──
+    let maxShopifyDate = "";
+    let maxAmazonDate = "";
+    for (const row of salesDaily) {
+      const ch = normalizeChannel(row.channel);
+      if (ch === SHOPIFY && row.sale_date > maxShopifyDate) maxShopifyDate = row.sale_date;
+      if (ch === AMAZON && row.sale_date > maxAmazonDate) maxAmazonDate = row.sale_date;
+    }
+
+    const nowMs = Date.now();
+    const isStale = (dateStr: string) => {
+      if (!dateStr) return true;
+      const ms = nowMs - new Date(dateStr + "T23:59:59").getTime();
+      return ms > 36 * 3600 * 1000;
+    };
+    const shopifyStale = isStale(maxShopifyDate);
+    const amazonStale = isStale(maxAmazonDate);
+
+    return {
+      yesterday,
+      ydShopify,
+      ydAmazon,
+      ydTotal,
+      ydShopifyOrders,
+      ydAmazonOrders,
+      mtdTotal,
+      mtdMonthName,
+      yoyPct,
+      yoyShopifyPct,
+      yoyAmazonPct,
+      hasYdData,
+      last30,
+      maxShopifyDate,
+      maxAmazonDate,
+      shopifyStale,
+      amazonStale,
+    };
+  }, [salesDaily, todayStr]);
+
+  // ── Actions (shared model — must be before any early return) ──
+  const recs = useMemo(
+    () => buildRecommendations(stateRules ?? [], nexus ?? [], salesByState ?? [], flags ?? []),
+    [stateRules, nexus, salesByState, flags],
+  );
+
+  const { overdue, registerNowCount, actionCount, nextFiling, nextFilingDays, criticalItems } = useMemo(() => {
+    const od = (filings ?? []).filter(
+      (f) => (f.status === "pending" || f.status === "late") && f.due_date < todayStr,
+    );
+    const regNow = recs.filter((r) => r.recommendation === "REGISTER_NOW");
+    const regNowCount = regNow.length;
+    const ac = od.length + regNowCount;
+
+    const nf = (filings ?? []).find(
+      (f) => f.status === "pending" && f.due_date >= todayStr,
+    );
+    const nfDays = nf
+      ? Math.ceil((new Date(nf.due_date).getTime() - Date.now()) / 86400000)
+      : null;
+
+    const items: { label: string; href: string }[] = [];
+    for (const r of regNow.slice(0, 3)) {
+      const reason = r.has_economic_nexus ? "economic crossed" : r.fba_present ? "T1 FBA + direct" : "home/3PL";
+      items.push({ label: `${r.state_code} — register (${reason})`, href: "/registrations" });
+    }
+    if (od.length > 0)
+      items.push({ label: `${od.length} overdue filing${od.length > 1 ? "s" : ""}`, href: "/filings" });
+    for (const r of recs.filter((r) => r.recommendation === "REVIEW").slice(0, 2))
+      items.push({ label: `${r.state_code} — review with CPA`, href: "/registrations" });
+
+    return {
+      overdue: od,
+      registerNowCount: regNowCount,
+      actionCount: ac,
+      nextFiling: nf,
+      nextFilingDays: nfDays,
+      criticalItems: items,
+    };
+  }, [filings, recs, todayStr]);
 
   if (l1 || l2 || l3) return <LoadingState />;
 
-  const today = now.toISOString().slice(0, 10);
-
-  // ── Tax actions ──
-  const overdue = filings.filter(
-    (f) => (f.status === "pending" || f.status === "late") && f.due_date < today,
-  );
+  // ── Upcoming deadlines ──
   const upcoming = filings
-    .filter((f) => f.status === "pending" && f.due_date >= today)
-    .slice(0, 3);
-  const criticalFlags = (flags ?? []).filter((f) => f.severity === "critical");
-  const unregNexus = nexus.filter(
-    (n) => !isRegistered(n.is_registered) && (n.has_physical_nexus || n.has_economic_nexus),
-  );
-  const econExceeded = nexus.filter((n) => n.has_economic_nexus && !isRegistered(n.is_registered));
+    .filter((f) => f.status === "pending" && f.due_date >= todayStr)
+    .slice(0, 4);
 
-  // Top 3 critical items
-  const criticalItems: { label: string; href: string }[] = [];
-  for (const f of criticalFlags.slice(0, 2))
-    criticalItems.push({ label: `${f.state_code} — ${f.flag_type.replace(/_/g, " ")}`, href: "/nexus" });
-  for (const sc of econExceeded.slice(0, 2))
-    criticalItems.push({ label: `${sc.state_code} — economic threshold exceeded`, href: "/nexus" });
-  if (overdue.length > 0)
-    criticalItems.push({ label: `${overdue.length} overdue filing${overdue.length > 1 ? "s" : ""}`, href: "/calendar" });
-
-  const actionCount = overdue.length + criticalFlags.length + unregNexus.length;
-  const lastSync = logs?.find((l) => l.status === "success");
-
-  const chLabel = ch === "all" ? "All Channels" : ch === "amazon" ? "Amazon" : "Shopify";
+  // ── Chart max ──
+  const chartMax = Math.max(...computed.last30.map((d) => d.shopify + d.amazon), 1);
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Pulse</h1>
-          <p className="text-sm text-muted-foreground">
-            Daily command center
-            {lastSync && (
-              <span className="ml-1">
-                &middot; Synced {timeAgo(lastSync.ingested_at)} ago
-              </span>
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Owner HQ</h1>
+        <p className="text-sm text-muted-foreground">Daily command center</p>
+      </div>
+
+      {/* ── Hero strip: 6 stat cards ── */}
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+        {/* 1. Yesterday */}
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Yesterday
+            </p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">
+              {computed.hasYdData ? `$${fmt(Math.round(computed.ydTotal))}` : "\u2014"}
+            </p>
+            <p className={`text-xs font-medium ${computed.hasYdData ? yoyColor(computed.yoyPct) : "text-muted-foreground"}`}>
+              {computed.hasYdData ? fmtYoY(computed.yoyPct) : "No daily data"}
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* 2. Shopify */}
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Shopify
+            </p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">
+              ${fmt(Math.round(computed.ydShopify))}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {fmt(computed.ydShopifyOrders)} orders
+              {computed.hasYdData && (
+                <span className={`ml-1.5 font-medium ${yoyColor(computed.yoyShopifyPct)}`}>
+                  {fmtYoY(computed.yoyShopifyPct)}
+                </span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* 3. Amazon */}
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Amazon
+            </p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">
+              ${fmt(Math.round(computed.ydAmazon))}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {fmt(computed.ydAmazonOrders)} orders
+              {computed.hasYdData && (
+                <span className={`ml-1.5 font-medium ${yoyColor(computed.yoyAmazonPct)}`}>
+                  {fmtYoY(computed.yoyAmazonPct)}
+                </span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* 4. MTD */}
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              MTD
+            </p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums">
+              ${fmt(Math.round(computed.mtdTotal))}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {computed.mtdMonthName}
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* 5. Next Filing */}
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Next Filing
+            </p>
+            {nextFiling ? (
+              <Link href="/filings" className="block">
+                <p className="mt-1 text-2xl font-semibold tabular-nums">
+                  {nextFiling.state_code}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {nextFilingDays}d &middot; {nextFiling.due_date.slice(5)}
+                </p>
+              </Link>
+            ) : (
+              <>
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-muted-foreground">
+                  None due
+                </p>
+                <p className="text-xs text-muted-foreground">&nbsp;</p>
+              </>
             )}
-          </p>
-        </div>
-        <div className="inline-flex rounded-lg border bg-muted p-0.5">
-          {(["all", "amazon", "shopify"] as ChFilter[]).map((v) => (
-            <button
-              key={v}
-              onClick={() => setCh(v)}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                ch === v
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {v === "all" ? "All" : v === "amazon" ? "Amazon" : "Shopify"}
-            </button>
-          ))}
-        </div>
-      </div>
+          </CardContent>
+        </Card>
 
-      {/* ── Sales cards ── */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        {/* 6. Actions */}
+        <Card className={actionCount > 0 ? "border-amber-500/40" : ""}>
           <CardContent className="p-4">
             <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              MTD Gross ({chLabel})
+              Actions
             </p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">
-              ${fmt(Math.round(mtd.gross))}
-            </p>
-            <p className="text-xs text-muted-foreground">{fmt(mtd.orders)} orders</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Last Month ({chLabel})
-            </p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">
-              ${fmt(Math.round(lastMo.gross))}
-            </p>
-            <p className="text-xs text-muted-foreground">{fmt(lastMo.orders)} orders</p>
-          </CardContent>
-        </Card>
-        <Card className={actionCount > 0 ? "border-amber-500/30" : ""}>
-          <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Open Tax Actions
-            </p>
-            <p className={`mt-1 text-2xl font-semibold tabular-nums ${actionCount > 0 ? "text-amber-500" : ""}`}>
-              {actionCount}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {overdue.length > 0 ? `${overdue.length} overdue` : "No overdue"}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Registered States
-            </p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">
-              {nexus.filter((n) => isRegistered(n.is_registered)).length}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {nexus.filter((n) => n.has_physical_nexus).length} physical nexus
-            </p>
+            <Link href={overdue.length > 0 ? "/filings" : "/registrations"}>
+              <p
+                className={`mt-1 text-2xl font-semibold tabular-nums ${
+                  actionCount > 0 ? "text-amber-500" : ""
+                }`}
+              >
+                {actionCount}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {overdue.length > 0
+                  ? `${overdue.length} overdue`
+                  : actionCount > 0
+                    ? "Needs attention"
+                    : "All clear"}
+              </p>
+            </Link>
           </CardContent>
         </Card>
       </div>
 
-      {/* ── Critical items + Deadlines ── */}
+      {/* ── 30-Day Chart ── */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">
+            Last 30 Days
+            {computed.last30.some((d) => d.shopify + d.amazon > 0) ? "" : " — no data"}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-px" style={{ height: "160px" }}>
+            {computed.last30.map((day) => {
+              const total = day.shopify + day.amazon;
+              const barH = chartMax > 0 ? (total / chartMax) * 160 : 0;
+              const shopifyH = total > 0 ? (day.shopify / total) * barH : 0;
+              const amazonH = barH - shopifyH;
+              return (
+                <div
+                  key={day.date}
+                  className="flex-1 flex flex-col justify-end min-w-0"
+                  title={`${day.date}\nShopify: $${fmt(Math.round(day.shopify))}\nAmazon: $${fmt(Math.round(day.amazon))}\nTotal: $${fmt(Math.round(total))}`}
+                >
+                  {amazonH > 0 && (
+                    <div
+                      className="w-full rounded-t-sm bg-orange-400"
+                      style={{ height: `${amazonH}px` }}
+                    />
+                  )}
+                  {shopifyH > 0 && (
+                    <div
+                      className={`w-full bg-blue-500 ${amazonH <= 0 ? "rounded-t-sm" : ""}`}
+                      style={{ height: `${shopifyH}px` }}
+                    />
+                  )}
+                  {barH === 0 && (
+                    <div className="w-full bg-muted" style={{ height: "1px" }} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+            <span>30d ago</span>
+            <span className="flex items-center gap-3">
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-2 w-2 rounded-sm bg-blue-500" /> Shopify
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-2 w-2 rounded-sm bg-orange-400" /> Amazon
+              </span>
+            </span>
+            <span>today</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Top Actions + Next Deadlines ── */}
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Critical items */}
+        {/* Top Actions */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium">
@@ -243,12 +464,10 @@ export default function PulsePage() {
           </CardHeader>
           <CardContent>
             {criticalItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No critical items. You&apos;re in good shape.
-              </p>
+              <p className="text-sm text-muted-foreground">All clear.</p>
             ) : (
               <div className="space-y-2">
-                {criticalItems.slice(0, 4).map((item, i) => (
+                {criticalItems.slice(0, 5).map((item, i) => (
                   <Link key={i} href={item.href}>
                     <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted">
                       <span>{item.label}</span>
@@ -261,7 +480,7 @@ export default function PulsePage() {
           </CardContent>
         </Card>
 
-        {/* Next deadlines */}
+        {/* Next Deadlines */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm font-medium">
@@ -275,7 +494,7 @@ export default function PulsePage() {
             ) : (
               <div className="space-y-2">
                 {overdue.slice(0, 2).map((f) => (
-                  <Link key={f.id} href="/calendar">
+                  <Link key={f.id} href="/filings">
                     <div className="flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm dark:border-red-900 dark:bg-red-950">
                       <span className="font-medium text-red-700 dark:text-red-300">
                         OVERDUE — {f.state_code} {f.period_label}
@@ -286,95 +505,67 @@ export default function PulsePage() {
                     </div>
                   </Link>
                 ))}
-                {upcoming.map((f) => {
-                  const days = Math.ceil(
-                    (new Date(f.due_date).getTime() - Date.now()) / 86400000,
-                  );
-                  return (
-                    <div
-                      key={f.id}
-                      className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
-                    >
-                      <span>
-                        {f.state_code}{" "}
-                        <span className="text-muted-foreground">{f.period_label}</span>
-                      </span>
-                      <span
-                        className={`text-xs font-medium ${
-                          days <= 7 ? "text-red-500" : days <= 14 ? "text-amber-500" : "text-muted-foreground"
-                        }`}
+                {upcoming
+                  .filter((_, i) => i < 4 - Math.min(overdue.length, 2))
+                  .map((f) => {
+                    const days = Math.ceil(
+                      (new Date(f.due_date).getTime() - Date.now()) / 86400000,
+                    );
+                    return (
+                      <div
+                        key={f.id}
+                        className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
                       >
-                        {days}d &middot; {f.due_date.slice(5)}
-                      </span>
-                    </div>
-                  );
-                })}
+                        <span>
+                          {f.state_code}{" "}
+                          <span className="text-muted-foreground">{f.period_label}</span>
+                        </span>
+                        <span
+                          className={`text-xs font-medium ${
+                            days <= 7
+                              ? "text-red-500"
+                              : days <= 14
+                                ? "text-amber-500"
+                                : "text-muted-foreground"
+                          }`}
+                        >
+                          {days}d &middot; {f.due_date.slice(5)}
+                        </span>
+                      </div>
+                    );
+                  })}
               </div>
             )}
           </CardContent>
         </Card>
       </div>
 
-      {/* ── Quick links ── */}
-      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {[
-          { href: "/sales-map", icon: Map, label: "Sales Map" },
-          { href: "/liability", icon: DollarSign, label: "What Do I Owe?" },
-          { href: "/registrations", icon: ClipboardCheck, label: "Registrations" },
-          { href: "/skus", icon: Package, label: "SKU Performance" },
-          { href: "/nexus", icon: MapPin, label: "Nexus Monitor" },
-          { href: "/data", icon: FileDown, label: "Data & Export" },
-        ].map(({ href, icon: Icon, label }) => (
-          <Link key={href} href={href}>
-            <Card className="transition-colors hover:border-primary/30">
-              <CardContent className="flex flex-col items-center gap-2 p-4 text-center">
-                <Icon className="h-5 w-5 text-muted-foreground" />
-                <span className="text-xs font-medium">{label}</span>
-              </CardContent>
-            </Card>
+      {/* ── Data health footer ── */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 p-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-4">
+            <span>
+              Shopify:{" "}
+              <span className={computed.shopifyStale ? "text-amber-500 font-medium" : ""}>
+                {computed.maxShopifyDate || "never"}
+              </span>
+            </span>
+            <span>&middot;</span>
+            <span>
+              Amazon:{" "}
+              <span className={computed.amazonStale ? "text-amber-500 font-medium" : ""}>
+                {computed.maxAmazonDate || "never"}
+              </span>
+            </span>
+            {(computed.shopifyStale || computed.amazonStale) && (
+              <span className="text-amber-500">Data may be stale (&gt;36h)</span>
+            )}
+          </div>
+          <Link href="/data" className="text-xs font-medium text-primary hover:underline">
+            Data &amp; Export
           </Link>
-        ))}
-      </div>
-
-      {/* ── Sync health ── */}
-      {logs && logs.length > 0 && (
-        <Card>
-          <CardContent className="flex flex-wrap items-center gap-4 p-3 text-xs text-muted-foreground">
-            {(() => {
-              const shopifySync = logs.find(
-                (l) => l.status === "success" && l.file_type?.startsWith("shopify"),
-              );
-              const amazonSync = logs.find(
-                (l) => l.status === "success" && l.file_type?.startsWith("amazon"),
-              );
-              const stale = (l: typeof shopifySync) =>
-                l ? (Date.now() - new Date(l.ingested_at).getTime()) / 3600000 > 36 : true;
-
-              return (
-                <>
-                  <span>
-                    Shopify:{" "}
-                    <span className={stale(shopifySync) ? "text-amber-500 font-medium" : ""}>
-                      {shopifySync ? timeAgo(shopifySync.ingested_at) + " ago" : "never"}
-                    </span>
-                  </span>
-                  <span>
-                    Amazon:{" "}
-                    <span className={stale(amazonSync) ? "text-amber-500 font-medium" : ""}>
-                      {amazonSync ? timeAgo(amazonSync.ingested_at) + " ago" : "never"}
-                    </span>
-                  </span>
-                  {(stale(shopifySync) || stale(amazonSync)) && (
-                    <span className="text-amber-500">
-                      Data may be stale (&gt;36h)
-                    </span>
-                  )}
-                </>
-              );
-            })()}
-          </CardContent>
-        </Card>
-      )}
+        </CardContent>
+      </Card>
 
       <p className="text-center text-[11px] text-muted-foreground/60">
         Monitoring aid — not legal or tax advice.

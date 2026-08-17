@@ -229,9 +229,9 @@ def ingest_shopify_csv(file_path: str | Path, dry_run: bool = False) -> dict:
 
 def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
     if not settings.shopify_enabled:
-        return {"error": "Shopify API not configured. Set SHOPIFY_SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN (or CLIENT_ID + SECRET) in .env"}
+        return {"error": "Shopify API not configured. Set SHOPIFY_SHOP_DOMAIN and SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET in .env"}
 
-    from src.shopify_auth import auth_headers
+    from src.shopify_auth import auth_headers, auth_headers_with_retry
     base_url = f"https://{settings.shopify_shop_domain}/admin/api/2024-01/orders.json"
     headers = auth_headers()
 
@@ -246,9 +246,16 @@ def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
 
     all_orders = []
     url = base_url
+    retried = False
 
     while url:
         resp = httpx.get(url, headers=headers, params=params if url == base_url else None, timeout=30)
+        if resp.status_code == 401 and not retried:
+            new_headers = auth_headers_with_retry(401)
+            if new_headers:
+                headers = new_headers
+                retried = True
+                continue  # retry same URL with fresh token
         if resp.status_code != 200:
             return {"error": f"Shopify API error {resp.status_code}: {resp.text[:500]}"}
 

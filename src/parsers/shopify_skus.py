@@ -46,7 +46,7 @@ def fetch_shopify_skus() -> dict:
     if not settings.shopify_enabled:
         return {"error": "Shopify not configured"}
 
-    from src.shopify_auth import auth_headers
+    from src.shopify_auth import auth_headers, auth_headers_with_retry
     base_url = f"https://{settings.shopify_shop_domain}/admin/api/2024-01/orders.json"
     headers = auth_headers()
     params = {
@@ -57,9 +57,16 @@ def fetch_shopify_skus() -> dict:
 
     all_orders = []
     url = base_url
+    retried = False
 
     while url:
         resp = httpx.get(url, headers=headers, params=params if url == base_url else None, timeout=30)
+        if resp.status_code == 401 and not retried:
+            new_headers = auth_headers_with_retry(401)
+            if new_headers:
+                headers = new_headers
+                retried = True
+                continue
         if resp.status_code != 200:
             return {"error": f"Shopify API {resp.status_code}: {resp.text[:300]}"}
         data = resp.json()

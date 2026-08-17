@@ -133,6 +133,251 @@ def test_alert():
         click.echo(f"Failed to send alert: {result.get('error')}")
 
 
+@cli.command("alerts-dry-run")
+def alerts_dry_run():
+    """Show what Telegram alerts WOULD send today without actually sending."""
+    from src.alerts.telegram_policy import (
+        build_filing_alerts, build_franchise_alerts, should_send, dedupe_key,
+    )
+
+    click.echo("=== ALERTS DRY RUN ===\n")
+    click.echo("Filing alerts (from last_filed_through + frequency):")
+    filing = build_filing_alerts()
+    if filing:
+        for a in filing:
+            send = should_send(a)
+            icon = "SEND" if send else "SKIP"
+            click.echo(f"  [{icon}] {a['type']:>15s}  {a['state_code']}  "
+                       f"due={a.get('due_date')}  days={a.get('days')}")
+    else:
+        click.echo("  (none)")
+
+    click.echo("\nFranchise alerts (open flags, 7d cooldown):")
+    franchise = build_franchise_alerts()
+    if franchise:
+        for a in franchise:
+            send = should_send(a)
+            icon = "SEND" if send else "SKIP"
+            click.echo(f"  [{icon}] {a['state_code']}: {a['message'][:60]}")
+    else:
+        click.echo("  (none)")
+
+    click.echo("\nEconomic crossed alerts: (requires analyze run to detect transitions)")
+    click.echo("  Run 'python -m src.main analyze' to evaluate threshold crossings.\n")
+
+    total = len(filing) + len(franchise)
+    would_send = sum(1 for a in filing + franchise if should_send(a))
+    click.echo(f"Total: {total} alerts evaluated, {would_send} would send, "
+               f"{total - would_send} suppressed by policy/dedupe")
+
+
+@cli.command("sales-day")
+@click.option("--date", "date_str", default=None, help="Date to inspect (YYYY-MM-DD, default: yesterday Pacific)")
+@click.option("--refresh/--no-refresh", default=False, help="Re-fetch from SP-API before reporting")
+def sales_day(date_str, refresh):
+    """Debug: show Amazon + Shopify daily totals vs sources for a specific date."""
+    from datetime import date as d, timedelta
+    from zoneinfo import ZoneInfo
+
+    LA = ZoneInfo("America/Los_Angeles")
+
+    if date_str:
+        target = d.fromisoformat(date_str)
+    else:
+        from datetime import datetime
+        target = datetime.now(LA).date() - timedelta(days=1)
+
+    click.echo(f"=== Sales Day: {target} (Pacific) ===\n")
+
+    # Refresh if requested
+    if refresh:
+        click.echo("Refreshing from SP-API (narrow fetch)...")
+        from src.amazon_sp.client import request_and_download
+        from src.amazon_sp.reports import ORDERS_REPORT
+        from src.sales_daily import upsert_amazon_daily_from_tsv
+        content = request_and_download(
+            ORDERS_REPORT,
+            target - timedelta(days=1),
+            target + timedelta(days=1),
+        )
+        r = upsert_amazon_daily_from_tsv(content)
+        click.echo(f"  Wrote {r['days_written']} days, ${r['total_sales']:,.2f}\n")
+
+    # Show stored values
+    from src.sales_daily import fetch_daily
+    rows = fetch_daily(target, target)
+    click.echo("Stored in sales_daily:")
+    for r in rows:
+        click.echo(f"  {r['channel']}: ${float(r['gross_sales']):,.2f}  ({r['order_count']} orders)  source={r.get('source','?')}")
+    if not rows:
+        click.echo("  (no rows)")
+
+    # Live SP-API comparison
+    click.echo("\nLive SP-API (narrow fetch, item-price, Pacific tz, excl cancelled):")
+    try:
+        import csv, io
+        from collections import defaultdict
+        from src.amazon_sp.client import request_and_download
+        from src.amazon_sp.reports import (
+            ORDERS_REPORT, _detect_delimiter, _build_header_lookup, _get, _parse_money,
+        )
+        from src.sales_daily import _to_tz_date
+
+        content = request_and_download(
+            ORDERS_REPORT,
+            target - timedelta(days=1),
+            target + timedelta(days=1),
+        )
+        first_line = content.split("\n", 1)[0]
+        delimiter = _detect_delimiter(first_line)
+        reader = csv.DictReader(io.StringIO(content), delimiter=delimiter, quotechar='"')
+        H = _build_header_lookup(reader.fieldnames)
+
+        total = 0.0
+        orders = set()
+        statuses = defaultdict(int)
+
+        for row in reader:
+            pd_str = _get(row, H, "purchase-date")
+            sale_date = _to_tz_date(pd_str, LA)
+            if sale_date != target:
+                continue
+
+            status = _get(row, H, "order-status").lower()
+            statuses[status] += 1
+            if status == "cancelled":
+                continue
+
+            price = _parse_money(_get(row, H, "item-price"))
+            total += price
+            orders.add(_get(row, H, "amazon-order-id"))
+
+        click.echo(f"  Amazon item-price: ${total:,.2f}  ({len(orders)} orders)")
+        click.echo(f"  Statuses: {dict(statuses)}")
+
+        # Compare
+        stored_amz = sum(float(r['gross_sales']) for r in rows if r['channel'] == 'amazon')
+        if stored_amz > 0:
+            delta = abs(total - stored_amz) / total * 100 if total > 0 else 0
+            click.echo(f"\n  Stored vs live: ${stored_amz:,.2f} vs ${total:,.2f} ({delta:.1f}% delta)")
+            if delta > 5:
+                click.echo(f"  ⚠ Gap > 5% — run with --refresh to update")
+        elif total > 0:
+            click.echo(f"\n  ⚠ No stored Amazon data but live shows ${total:,.2f} — run with --refresh")
+
+    except Exception as e:
+        click.echo(f"  Error fetching live data: {e}")
+
+
+@cli.command("daily-digest")
+@click.option("--dry-run", is_flag=True, help="Print message without sending")
+def daily_digest(dry_run):
+    """Send (or preview) the morning sales digest via Telegram."""
+    from src.alerts.daily_digest import send_digest, build_digest_message
+
+    if dry_run:
+        msg = build_digest_message(dry_run=True)
+        if msg:
+            click.echo("=== DAILY DIGEST (dry run) ===\n")
+            click.echo(msg.replace("<b>", "").replace("</b>", "")
+                       .replace("<i>", "").replace("</i>", ""))
+        else:
+            click.echo("No data for digest.")
+        return
+
+    result = send_digest()
+    if result.get("sent"):
+        click.echo("Digest sent.")
+    elif result.get("reason"):
+        click.echo(f"Not sent: {result['reason']}")
+    else:
+        click.echo(f"Failed: {result.get('error', 'unknown')}")
+
+
+@cli.command("cpa-pack")
+@click.option("--period", default="all", help="Period label (e.g., 2026-Q2)")
+@click.option("--out", "out_dir", default="exports/cpa", help="Output directory")
+def cpa_pack(period, out_dir):
+    """Generate a zipped CPA export pack with all reports."""
+    from src.exports.cpa_pack import build_pack
+    path = build_pack(period=period, out_dir=out_dir)
+    click.echo(f"CPA Pack: {path} ({path.stat().st_size:,} bytes)")
+
+
+@cli.command("spapi-settlements")
+@click.option("--days", default=90, help="Days back to fetch (default 90)")
+@click.option("--dry-run", is_flag=True, help="List reports without writing to DB")
+def spapi_settlements(days, dry_run):
+    """Fetch Amazon settlement reports via SP-API.
+
+    Settlement reports are Amazon-generated; we only retrieve them.
+    This command uses getReports (list) — it never calls createReport.
+    """
+    from datetime import date as d, timedelta
+    from src.amazon_sp.settlements import fetch_settlements
+
+    end = d.today() - timedelta(days=1)
+    start = end - timedelta(days=days)
+
+    if dry_run:
+        click.echo("DRY RUN — listing reports only, no data will be written.\n")
+
+    click.echo(f"Listing settlement reports created since: {start}")
+
+    def _on_poll(status, elapsed):
+        click.echo(f"  {status}")
+
+    try:
+        result = fetch_settlements(start, end, dry_run=dry_run, on_poll=_on_poll)
+        click.echo(f"\nReports found: {result.get('reports_found', 0)}")
+        click.echo(f"Reports DONE:  {result.get('reports_done', 0)}")
+        click.echo(f"Reports skipped: {result.get('reports_skipped', 0)}")
+        click.echo(f"Reports ingested: {result.get('reports_ingested', 0)}")
+        click.echo(f"Settlements: {result.get('settlements', 0)}")
+        click.echo(f"Rows: {result['rows_total']} parsed, {result.get('rows_inserted', 0)} inserted")
+        if result.get("totals_by_type"):
+            click.echo("Totals by type:")
+            for k, v in sorted(result["totals_by_type"].items()):
+                click.echo(f"  {k}: ${v:,.2f}")
+    except Exception as e:
+        click.echo(f"Error: {e}")
+
+
+@cli.command("reconcile-amazon")
+@click.option("--days", default=30, help="Days back to reconcile")
+@click.option("--start", "start_str", default=None, help="Start date (YYYY-MM-DD)")
+@click.option("--end", "end_str", default=None, help="End date (YYYY-MM-DD)")
+def reconcile_amazon(days, start_str, end_str):
+    """Compare order-based Amazon sales vs settlement data."""
+    from datetime import date as d, timedelta
+    from src.amazon_sp.settlements import reconcile
+
+    if start_str:
+        s = start_str
+        e = end_str or d.today().isoformat()
+    else:
+        end = d.today()
+        start = end - timedelta(days=days)
+        s, e = start.isoformat(), end.isoformat()
+
+    click.echo(f"Reconciling Amazon: {s} to {e}\n")
+    result = reconcile(s, e)
+
+    click.echo(f"Order-based gross:     ${result['order_based_gross']:>12,.2f}")
+    click.echo(f"Settlement principal:  ${result['settlement_principal']:>12,.2f}")
+    click.echo(f"Settlement fees:       ${result['settlement_fees']:>12,.2f}")
+    click.echo(f"Settlement refunds:    ${result['settlement_refunds']:>12,.2f}")
+    click.echo(f"Settlement other:      ${result['settlement_other']:>12,.2f}")
+    click.echo(f"Delta (order-settle):  ${result['delta']:>12,.2f} ({result['delta_pct']:+.1f}%)")
+
+    if not result["has_settlement_data"]:
+        click.echo("\n⚠️  No settlement data found. Run: python -m src.main spapi-settlements --days 90")
+
+    click.echo("\nExpected gaps:")
+    for gap in result["expected_gaps"]:
+        click.echo(f"  • {gap}")
+
+
 @cli.command("backfill-shopify-skus")
 def backfill_shopify_skus():
     """Pull Shopify line items and populate sales_by_sku (monthly grain)."""
@@ -542,6 +787,161 @@ def spapi_refresh(days, dry_run):
     click.echo("\nDone.")
 
 
+@cli.command("backfill-sales-daily")
+@click.option("--days", default=400, help="Days back to backfill (default 400)")
+@click.option("--dry-run", is_flag=True, help="Show counts without writing")
+def backfill_sales_daily(days, dry_run):
+    """Backfill sales_daily from Shopify + Amazon SP-API orders."""
+    from datetime import date as d, timedelta
+    from src.amazon_sp.client import request_and_download
+    from src.amazon_sp.reports import ORDERS_REPORT, _date_chunks
+
+    end = d.today() - timedelta(days=1)
+    start = end - timedelta(days=days)
+
+    click.echo(f"Backfilling sales_daily: {start} to {end}")
+    if dry_run:
+        click.echo("DRY RUN — no data will be written.\n")
+
+    # ── Shopify ──────────────────────────────────────────────
+    from src.config import settings
+    shopify_result = {"days_written": 0, "total_sales": 0, "order_count": 0}
+    if settings.shopify_enabled:
+        click.echo("\n--- Shopify ---")
+        try:
+            import httpx
+            from src.shopify_auth import auth_headers, auth_headers_with_retry
+
+            base_url = f"https://{settings.shopify_shop_domain}/admin/api/2024-01/orders.json"
+            headers = auth_headers()
+            params = {
+                "status": "any",
+                "limit": 250,
+                "fields": "id,name,created_at,financial_status,subtotal_price,"
+                           "total_tax,shipping_address",
+                "created_at_min": start.isoformat() + "T00:00:00Z",
+            }
+
+            all_orders = []
+            url = base_url
+            retried = False
+            while url:
+                resp = httpx.get(
+                    url, headers=headers,
+                    params=params if url == base_url else None,
+                    timeout=30,
+                )
+                if resp.status_code == 401 and not retried:
+                    new_h = auth_headers_with_retry(401)
+                    if new_h:
+                        headers = new_h
+                        retried = True
+                        continue
+                if resp.status_code != 200:
+                    click.echo(f"  Shopify API error: {resp.status_code}")
+                    break
+                data = resp.json()
+                orders = data.get("orders", [])
+                all_orders.extend(orders)
+                click.echo(f"  Fetched {len(all_orders)} orders...")
+
+                link_header = resp.headers.get("link", "")
+                url = None
+                if 'rel="next"' in link_header:
+                    for part in link_header.split(","):
+                        if 'rel="next"' in part:
+                            url = part.split("<")[1].split(">")[0]
+                            break
+
+            click.echo(f"  Total Shopify orders: {len(all_orders)}")
+
+            if all_orders and not dry_run:
+                from src.sales_daily import upsert_shopify_daily
+                shopify_result = upsert_shopify_daily(all_orders)
+                click.echo(f"  Written: {shopify_result['days_written']} days, "
+                           f"${shopify_result['total_sales']:,.0f}, "
+                           f"{shopify_result['order_count']} orders")
+            elif all_orders:
+                # Dry-run: count what would be written
+                from src.sales_daily import _to_ny_date
+                from collections import defaultdict
+                daily_count: dict = defaultdict(int)
+                for order in all_orders:
+                    addr = order.get("shipping_address") or {}
+                    if addr.get("country_code", "") not in ("US", ""):
+                        continue
+                    created = order.get("created_at", "")
+                    sale_date = _to_ny_date(created)
+                    if sale_date:
+                        daily_count[sale_date] += 1
+                click.echo(f"  Would write: {len(daily_count)} days")
+        except Exception as e:
+            click.echo(f"  Shopify error: {e}")
+    else:
+        click.echo("\nShopify not configured, skipping.")
+
+    # ── Amazon SP-API ────────────────────────────────────────
+    amazon_result = {"days_written": 0, "total_sales": 0, "order_count": 0}
+    if settings.amazon_sp_enabled:
+        click.echo("\n--- Amazon SP-API ---")
+        chunks = _date_chunks(start, end)
+        total_days = 0
+
+        for i, (c_start, c_end) in enumerate(chunks, 1):
+            label = c_start.strftime("%Y-%m")
+            click.echo(f"  Chunk {i}/{len(chunks)} ({label})...")
+
+            try:
+                content = request_and_download(
+                    ORDERS_REPORT, c_start, c_end,
+                )
+                if dry_run:
+                    # Count lines for dry-run
+                    lines = content.count("\n")
+                    click.echo(f"    {lines} lines (dry-run, not writing)")
+                else:
+                    from src.sales_daily import upsert_amazon_daily_from_tsv
+                    chunk_result = upsert_amazon_daily_from_tsv(content)
+                    total_days += chunk_result["days_written"]
+                    amazon_result["total_sales"] += chunk_result["total_sales"]
+                    amazon_result["order_count"] += chunk_result["order_count"]
+                    click.echo(f"    {chunk_result['days_written']} days, "
+                               f"${chunk_result['total_sales']:,.0f}")
+            except Exception as e:
+                click.echo(f"    Error: {e}")
+
+        amazon_result["days_written"] = total_days
+
+        # Narrow trailing fetch for last 3 days — SP-API reports for wider
+        # date ranges may omit very recent pending orders
+        if not dry_run:
+            try:
+                from datetime import date as d2
+                trail_start = d2.today() - timedelta(days=3)
+                trail_end = d2.today()
+                click.echo(f"  Trailing fetch ({trail_start} to {trail_end})...")
+                trail_content = request_and_download(ORDERS_REPORT, trail_start, trail_end)
+                from src.sales_daily import upsert_amazon_daily_from_tsv as _upsert
+                tr = _upsert(trail_content)
+                click.echo(f"    {tr['days_written']} days refreshed, ${tr['total_sales']:,.0f}")
+            except Exception as e:
+                click.echo(f"    Trailing fetch error: {e}")
+
+        click.echo(f"  Amazon total: {amazon_result['days_written']} days, "
+                   f"${amazon_result['total_sales']:,.0f}")
+    else:
+        click.echo("\nAmazon SP-API not configured, skipping.")
+
+    # ── Summary ──────────────────────────────────────────────
+    click.echo(f"\n=== Summary ===")
+    click.echo(f"Shopify: {shopify_result['days_written']} days, "
+               f"${shopify_result['total_sales']:,.0f}")
+    click.echo(f"Amazon:  {amazon_result['days_written']} days, "
+               f"${amazon_result['total_sales']:,.0f}")
+    if dry_run:
+        click.echo("\n(Dry run — nothing written)")
+
+
 def _print_spapi_result(label: str, result: dict):
     click.echo(f"\n  {label} Results:")
     if result.get("chunks", 0) > 1:
@@ -906,6 +1306,366 @@ def registration_triage(fmt, out_dir):
         click.echo(f"CSV: {p}")
 
 
+@cli.command("inventory-sync")
+@click.option("--dry-run", is_flag=True, help="Parse without writing to DB")
+def inventory_sync(dry_run):
+    """Pull FBA inventory: restock recommendations, planning data, stock levels."""
+    from src.inventory.sync import sync_all
+
+    if dry_run:
+        click.echo("DRY RUN — no data will be written.\n")
+
+    def _on_poll(status, elapsed):
+        click.echo(f"  {status}")
+
+    results = sync_all(dry_run=dry_run, on_poll=_on_poll)
+
+    for name in ["fba_summaries", "restock", "planning"]:
+        r = results.get(name, {})
+        if "error" in r:
+            click.echo(f"\n{name}: ERROR — {r['error'][:200]}")
+        else:
+            click.echo(f"\n{name}: {r.get('rows_total', 0)} rows"
+                       f" ({r.get('rows_inserted', 0)} inserted)")
+
+    if results.get("errors"):
+        click.echo(f"\n{len(results['errors'])} error(s) — check SP-API roles "
+                   "(Amazon Fulfillment, Inventory and Order Management)")
+
+
+@cli.command("inventory-velocity")
+@click.option("--days", default=400, help="Days of order history to analyze")
+@click.option("--dry-run", is_flag=True, help="Compute without writing to DB")
+def inventory_velocity(days, dry_run):
+    """Recompute SKU velocity + seasonality from Amazon + Shopify orders."""
+    from src.inventory.velocity import compute_velocity
+
+    click.echo(f"Computing velocity from {days} days of order history...\n")
+    result = compute_velocity(amazon_days=days, shopify_days=days, dry_run=dry_run)
+
+    click.echo(f"Amazon SKUs:      {result['amazon_skus']}")
+    click.echo(f"Shopify SKUs:     {result['shopify_skus']}")
+    click.echo(f"Total SKUs:       {result['skus']}")
+    click.echo(f"Seasonality weeks: {result['seasonality_weeks']}")
+    click.echo(f"Forward multiplier: {result['avg_forward_mult']:.3f}")
+    click.echo(f"Rows inserted:    {result['rows_inserted']}")
+
+    if dry_run:
+        click.echo("\n(Dry run — nothing written)")
+
+
+@cli.command("plan-sku")
+@click.option("--sku", required=True, help="Seller SKU to plan")
+@click.option("--until", "until_date", default="2027-03-31", help="Plan through date (default: end of Q1)")
+@click.option("--buffer-days", default=14, help="Safety buffer days beyond --until")
+@click.option("--fba-min-days", default=60, help="Minimum FBA sellable cover (days)")
+@click.option("--use-awd/--no-awd", default=True, help="Include AWD in FBA supply (default: yes)")
+@click.option("--receiving-days", default=28, help="Normal FBA check-in lead time")
+@click.option("--peak-receiving-days", default=35, help="Peak (Q4-Q1) FBA check-in lead time")
+@click.option("--stress", default=1.0, type=float, help="Demand stress multiplier (e.g. 1.25 or 1.4)")
+def plan_sku_cmd(sku, until_date, buffer_days, fba_min_days, use_awd, receiving_days, peak_receiving_days, stress):
+    """Forward sell-through plan for a single SKU.
+
+    Two views:
+      1. FBA Risk — sellable FBA cover, breach of 60d floor, transfers needed
+      2. Production gap — total owned vs demand, what to manufacture
+    """
+    from datetime import date as d, timedelta
+    from src.db import fetch_all
+
+    end = d.fromisoformat(until_date) + timedelta(days=buffer_days)
+    today = d.today()
+    horizon_days = (end - today).days
+
+    snaps = {r["sku"]: r for r in fetch_all("inventory_snapshots")}
+    vels = {r["sku"]: r for r in fetch_all("sku_velocity")}
+    awds = {r["sku"]: r for r in fetch_all("inventory_awd")}
+    tpls = {r["sku"]: r for r in _safe_fetch_main("inventory_3pl_snapshots")}
+
+    snap = snaps.get(sku)
+    vel = vels.get(sku)
+    if not snap and not vel:
+        click.echo(f"SKU {sku} not found. Available: {', '.join(sorted(set(snaps)|set(vels))[:10])}")
+        return
+
+    season = {}
+    for r in fetch_all("seasonality_weekly"):
+        if r.get("sku") == "_account_" and r.get("year") == 0:
+            season[int(r["week"])] = float(r.get("multiplier", 1.0) or 1.0)
+
+    fba = (int((snap or {}).get("fulfillable", 0) or 0)
+           + int((snap or {}).get("reserved", 0) or 0)
+           + int((snap or {}).get("researching", 0) or 0)
+           + int((snap or {}).get("unfulfillable", 0) or 0))
+    inbound = (int((snap or {}).get("inbound_working", 0) or 0)
+               + int((snap or {}).get("inbound_shipped", 0) or 0)
+               + int((snap or {}).get("inbound_receiving", 0) or 0))
+    awd_oh = int(awds.get(sku, {}).get("awd_on_hand", 0) or 0)
+    tpl_oh = int(tpls.get(sku, {}).get("available", 0) or 0)
+
+    amz_daily = float((vel or {}).get("amazon_u_30", 0) or 0)
+    shop_daily = float((vel or {}).get("shopify_u_30", 0) or 0)
+    base_daily = float((vel or {}).get("total_u_30", 0) or 0)
+
+    if base_daily <= 0:
+        click.echo(f"No velocity data for {sku}")
+        return
+
+    product_name = (vel or {}).get("product_name") or (snap or {}).get("product_name") or ""
+    fba_supply = fba + inbound + (awd_oh if use_awd else 0)
+    owned_total = fba + inbound + awd_oh + tpl_oh
+
+    # Header
+    click.echo(f"{'='*70}")
+    click.echo(f"  PLAN: {sku}")
+    if product_name:
+        click.echo(f"  {product_name[:65]}")
+    click.echo(f"  {today} → {end} ({horizon_days}d, buffer {buffer_days}d)")
+    click.echo(f"  Policy: ≥{fba_min_days}d FBA cover, {receiving_days}d check-in"
+               f" ({peak_receiving_days}d peak)"
+               + (f", stress ×{stress}" if stress != 1.0 else ""))
+    click.echo(f"{'='*70}")
+
+    click.echo(f"\n  DEMAND (30d calibrated)")
+    click.echo(f"    Amazon:  {amz_daily:>6.1f} u/day")
+    click.echo(f"    Shopify: {shop_daily:>6.1f} u/day")
+    click.echo(f"    Total:   {base_daily:>6.1f} u/day"
+               + (f" → {base_daily * stress:.1f} stressed" if stress != 1.0 else ""))
+
+    click.echo(f"\n  INVENTORY")
+    click.echo(f"    FBA on-hand:  {fba:>7,}   ({fba / base_daily:.0f}d at V30)")
+    click.echo(f"    Inbound:      {inbound:>7,}")
+    click.echo(f"    AWD:          {awd_oh:>7,}{'  ← in FBA supply' if use_awd else ''}")
+    click.echo(f"    3PL:          {tpl_oh:>7,}")
+    click.echo(f"    ─────────────────────")
+    click.echo(f"    FBA supply:   {fba_supply:>7,}")
+    click.echo(f"    Owned total:  {owned_total:>7,}")
+
+    # Walk forward — track FBA burn AND when FBA drops below fba_min_days
+    remaining = fba
+    total_demand = 0
+    stockout_week = None
+    breach_week = None  # when FBA cover < fba_min_days
+
+    click.echo(f"\n  WEEKLY FORECAST")
+    click.echo(f"  {'Wk':<4} {'Dates':<24} {'Mult':>5} {'Demand':>7} {'FBA':>7} {'Cover':>6} {'':>8}")
+    click.echo(f"  {'-'*65}")
+
+    cursor = today
+    while cursor <= end:
+        week_end = min(cursor + timedelta(days=6), end)
+        days = (week_end - cursor).days + 1
+        iso_wk = cursor.isocalendar()[1]
+        mult = season.get(iso_wk, 1.0)
+        demand = round(base_daily * days * mult * stress)
+        total_demand += demand
+        remaining -= demand
+
+        # Forward demand rate for this week (for cover calc)
+        daily_rate = base_daily * mult * stress
+        cover = max(remaining, 0) / daily_rate if daily_rate > 0 else 9999
+
+        note = ""
+        if remaining <= 0 and stockout_week is None:
+            stockout_week = cursor
+            note = "STOCKOUT"
+        elif remaining <= 0:
+            note = "OUT"
+        elif cover < fba_min_days and breach_week is None:
+            breach_week = cursor
+            note = f"<{fba_min_days}d"
+        elif cover < fba_min_days:
+            note = f"<{fba_min_days}d"
+
+        click.echo(
+            f"  W{iso_wk:<3} {cursor} → {week_end}  {mult:>5.2f} {demand:>7,} "
+            f"{max(remaining, 0):>7,} {cover:>5.0f}d {note:>8}"
+        )
+
+        cursor = week_end + timedelta(days=1)
+
+    click.echo(f"  {'-'*65}")
+
+    avg_daily = total_demand / horizon_days if horizon_days > 0 else base_daily
+    uplift = ((avg_daily / base_daily) - 1) * 100 if base_daily > 0 else 0
+
+    click.echo(f"\n  DEMAND SUMMARY")
+    click.echo(f"    Predicted:           {total_demand:>8,} units")
+    click.echo(f"    Avg daily (horizon): {avg_daily:>8.1f} u/day (base {base_daily:.1f}, {uplift:+.0f}% seasonal)")
+
+    # ── 1. FBA RISK ──
+    fba_dos_now = fba / base_daily if base_daily > 0 else 9999
+    status = "OK"
+    if fba_dos_now < fba_min_days:
+        status = "CRITICAL" if not breach_week or (breach_week - today).days <= receiving_days else "LOW"
+    elif breach_week:
+        status = "PLAN"
+
+    click.echo(f"\n  {'─'*50}")
+    click.echo(f"  1. FBA SELLABLE COVER  [{status}]")
+    click.echo(f"    FBA on-hand today:   {fba:>7,}  = {fba_dos_now:.0f}d cover")
+    click.echo(f"    Policy floor:        {fba_min_days}d")
+
+    if breach_week:
+        breach_days = (breach_week - today).days
+        ship_by = breach_week - timedelta(days=receiving_days)
+        click.echo(f"    Breaches {fba_min_days}d floor:   {breach_week}  ({breach_days}d from now)")
+        click.echo(f"    Latest ship-create:  {ship_by}  ({receiving_days}d check-in)")
+        if breach_days <= receiving_days:
+            click.echo(f"    ⚠ PAST SHIP-CREATE DEADLINE — create inbound NOW")
+    elif stockout_week:
+        click.echo(f"    Breaches {fba_min_days}d floor:   already breached (FBA cover {fba_dos_now:.0f}d)")
+        click.echo(f"    ⚠ BELOW POLICY FLOOR — create inbound NOW")
+
+    if stockout_week:
+        click.echo(f"    FBA exhausted:       {stockout_week}  ({(stockout_week - today).days}d)")
+
+    # Transfer recommendations
+    fba_gap = max(total_demand - fba_supply, 0)
+    if fba_gap > 0 or fba_dos_now < fba_min_days:
+        click.echo(f"\n    TRANSFER INTO FBA:")
+        transfer_needed = max(total_demand - fba, 0)
+
+        if use_awd and awd_oh > 0:
+            t = min(awd_oh, transfer_needed)
+            click.echo(f"      AWD → FBA:         {t:>7,} units")
+            transfer_needed -= t
+
+        if tpl_oh > 0 and transfer_needed > 0:
+            t = min(tpl_oh, transfer_needed)
+            click.echo(f"      3PL → FBA:         {t:>7,} units")
+            transfer_needed -= t
+
+        if transfer_needed > 0:
+            click.echo(f"      Still need:        {transfer_needed:>7,} units (from production)")
+
+    # ── 2. PRODUCTION GAP ──
+    click.echo(f"\n  {'─'*50}")
+    click.echo(f"  2. PRODUCTION GAP")
+
+    produce = max(total_demand - owned_total, 0)
+    click.echo(f"    Owned (all):         {owned_total:>8,}")
+    click.echo(f"    Demand:              {total_demand:>8,}")
+    click.echo(f"    Produce:             {produce:>8,} units")
+
+    if produce == 0 and fba_gap > 0:
+        click.echo(f"\n    ✓ Enough owned inventory — transfer {min(fba_gap, tpl_oh + awd_oh):,} into FBA.")
+    elif produce > 0:
+        click.echo(f"\n    ⚠ Produce {produce:,} units + transfer existing stock to FBA.")
+    else:
+        click.echo(f"\n    ✓ Fully covered through {end}.")
+
+    click.echo()
+
+
+def _safe_fetch_main(table):
+    from src.db import fetch_all
+    try:
+        return fetch_all(table)
+    except Exception:
+        return []
+
+
+@cli.command("capacity-plan")
+@click.option("--top", default=20, help="Show top N SKUs")
+def capacity_plan_cmd(top):
+    """Holiday capacity plan: FBA + AWD + 3PL with capacity constraints."""
+    from src.inventory.capacity import build_capacity_plan
+
+    plan = build_capacity_plan()
+
+    click.echo("=== FBA Capacity ===")
+    for c in plan["capacity"]:
+        bar = "BLOCKED" if c["blocked"] else "OK"
+        click.echo(f"  {c['month']}  limit={c['limit_ft3']:>7.1f}  used={c['used_ft3']:>7.1f}  "
+                   f"headroom={c['headroom_ft3']:>7.1f}  proposed={c['proposed_ft3']:>6.1f}  [{bar}]  ({c['source']})")
+
+    click.echo(f"\nReceiving lead time: {plan['receiving_days']}d")
+    click.echo(f"\n=== Top {top} SKU Plans ===")
+    click.echo(f"{'SKU':<20} {'Flag':<8} {'FBA':>5} {'AWD':>5} {'3PL':>5} "
+               f"{'V30':>5} {'DOS':>5} {'Produce':>8} {'→FBA':>5} {'→AWD':>5} {'ft³':>6}")
+    click.echo("-" * 105)
+
+    for p in plan["sku_plans"][:top]:
+        if p["total_u_30"] <= 0 and p["fba_on_hand"] <= 0:
+            continue
+        click.echo(
+            f"{p['sku'][:20]:<20} {p['flag']:<8} {p['fba_on_hand']:>5} "
+            f"{p['awd_on_hand']:>5} {p['tpl_available']:>5} "
+            f"{p['total_u_30']:>5.1f} {p['dos_fba_only']:>5.0f} "
+            f"{p['produce_qty']:>8} {p['send_to_fba']:>5} "
+            f"{p['send_to_awd']:>5} {p['fba_ft3_impact']:>6.1f}"
+        )
+
+
+@cli.command("inventory-3pl-sync")
+@click.option("--dry-run", is_flag=True, help="Fetch without writing to DB")
+def inventory_3pl_sync(dry_run):
+    """Pull 3PL inventory from Ship Sidekick."""
+    from src.shipsidekick.client import sync_3pl
+
+    if dry_run:
+        click.echo("DRY RUN — no data will be written.\n")
+
+    try:
+        result = sync_3pl(dry_run=dry_run)
+        click.echo(f"SKUs found:    {result['rows_total']}")
+        click.echo(f"Rows inserted: {result['rows_inserted']}")
+        if result['rows_total'] > 0:
+            click.echo(f"\nSKUs: {', '.join(result['skus'][:10])}"
+                       + (f" ... +{len(result['skus'])-10} more" if len(result['skus']) > 10 else ""))
+    except Exception as e:
+        click.echo(f"Error: {e}")
+
+
+@cli.command("inventory-report")
+@click.option("--top", default=20, help="Show top N SKUs")
+def inventory_report_cmd(top):
+    """Terminal summary: at-risk SKUs, stockout ETA, reorder list."""
+    from src.inventory.report import build_report
+
+    report = build_report()
+    s = report["summary"]
+    settings = report["settings"]
+
+    click.echo(f"=== Inventory Report ===")
+    click.echo(f"Settings: target={settings['target_cover_days']}d cover, "
+               f"lead={settings['lead_time_days']}d, "
+               f"holiday={'ON' if settings['holiday_mode'] else 'off'}, "
+               f"inbound={'included' if settings['include_inbound'] else 'excluded'}")
+    click.echo(f"\nActive SKUs:        {s['active_skus']}")
+    click.echo(f"FBA <60d cover:     {s['at_risk_skus']}")
+    click.echo(f"Our reorder total:  {s['total_our_reorder']:,} units")
+    click.echo(f"Amazon recommended: {s['total_amz_recommended']:,} units")
+    click.echo(f"Portfolio cover:    {s['portfolio_weeks_cover']} weeks\n")
+
+    rows = report["rows"][:top]
+    if not rows:
+        click.echo("No inventory data. Run: inventory-sync then inventory-velocity")
+        return
+
+    click.echo(f"{'SKU':<20} {'Flag':<9} {'FBA':>5} {'AWD':>5} {'3PL':>5} "
+               f"{'V30':>5} {'DOS':>5} {'→FBA':>6} {'Produce':>8} {'ShipBy':>10}")
+    click.echo("-" * 90)
+
+    for r in rows:
+        shop_badge = " *" if r["shopify_share_pct"] >= 20 else ""
+        dos_str = f"{r['dos']:.0f}" if r['dos'] < 9999 else "—"
+        ship_by = r.get("ship_by", "")
+        click.echo(
+            f"{r['sku'][:20]:<20} {r['flag']:<9} {r['fba_on_hand']:>5} "
+            f"{r.get('awd_on_hand', 0):>5} {r['tpl_available']:>5} "
+            f"{r['total_u_30']:>5.1f} {dos_str:>5} "
+            f"{r.get('transfer_to_fba', 0):>6} {r['our_reorder_qty']:>8} "
+            f"{ship_by or '—':>10}{shop_badge}"
+        )
+
+    click.echo(f"\nPolicy: ≥60d FBA cover. DOS = FBA-only at current velocity.")
+    click.echo(f"→FBA = units to transfer into FBA to reach 60d floor.")
+    click.echo(f"* = Shopify share >= 20% of 30d demand")
+    click.echo(f"Projections use Amazon + Shopify unit demand for matched SKUs.")
+
+
 @cli.command("integrity-check")
 def integrity_check():
     """Verify data integrity: SKU case, duplicate keys, channel totals."""
@@ -1067,6 +1827,49 @@ def run():
         )
         click.echo("[Scheduler] CPA exports daily at 06:30")
 
+        # Morning digest at 08:00
+        scheduler.add_job(
+            _run_daily_digest,
+            "cron",
+            hour=8,
+            minute=0,
+            id="daily_digest",
+        )
+        click.echo("[Scheduler] Daily digest at 08:00")
+
+        # Weekly settlement pull (Monday 06:30)
+        if settings.amazon_sp_enabled:
+            scheduler.add_job(
+                _run_settlement_pull,
+                "cron",
+                day_of_week="mon",
+                hour=6,
+                minute=30,
+                id="settlement_pull",
+            )
+            click.echo("[Scheduler] Settlement pull weekly Monday 06:30")
+
+        # Inventory sync + velocity daily at 06:30
+        if settings.amazon_sp_enabled:
+            scheduler.add_job(
+                _run_inventory_sync,
+                "cron",
+                hour=6,
+                minute=30,
+                id="inventory_sync",
+            )
+            click.echo("[Scheduler] Inventory sync daily at 06:30")
+
+        # 3PL sync daily at 06:35
+        scheduler.add_job(
+            _run_3pl_sync,
+            "cron",
+            hour=6,
+            minute=35,
+            id="3pl_sync",
+        )
+        click.echo("[Scheduler] 3PL sync daily at 06:35")
+
         # Agent job worker: poll every 45 seconds
         scheduler.add_job(
             _run_job_worker,
@@ -1127,6 +1930,8 @@ def _run_shopify_poll():
                 rows_inserted=inserted,
                 status="success",
             )
+            # Also update sales_daily for the last 14 days
+            _update_shopify_daily()
             return  # success — done
         except Exception as e:
             last_err = e
@@ -1147,87 +1952,105 @@ def _run_shopify_poll():
     )
 
 
+def _update_shopify_daily():
+    """Re-aggregate recent Shopify orders into sales_daily."""
+    try:
+        from datetime import date, timedelta
+        from src.config import settings
+        if not settings.shopify_enabled:
+            return
+        import httpx
+        from src.shopify_auth import auth_headers, auth_headers_with_retry
+        from src.sales_daily import upsert_shopify_daily
+
+        since = date.today() - timedelta(days=14)
+        base_url = f"https://{settings.shopify_shop_domain}/admin/api/2024-01/orders.json"
+        headers = auth_headers()
+        params = {
+            "status": "any", "limit": 250,
+            "fields": "id,name,created_at,financial_status,subtotal_price,total_tax,shipping_address",
+            "created_at_min": since.isoformat() + "T00:00:00Z",
+        }
+        all_orders = []
+        url = base_url
+        retried = False
+        while url:
+            resp = httpx.get(url, headers=headers,
+                             params=params if url == base_url else None, timeout=30)
+            if resp.status_code == 401 and not retried:
+                new_h = auth_headers_with_retry(401)
+                if new_h:
+                    headers = new_h
+                    retried = True
+                    continue
+            if resp.status_code != 200:
+                break
+            orders = resp.json().get("orders", [])
+            all_orders.extend(orders)
+            link_header = resp.headers.get("link", "")
+            url = None
+            if 'rel="next"' in link_header:
+                for part in link_header.split(","):
+                    if 'rel="next"' in part:
+                        url = part.split("<")[1].split(">")[0]
+                        break
+
+        if all_orders:
+            r = upsert_shopify_daily(all_orders)
+            print(f"[Shopify Daily] {r['days_written']} days updated")
+    except Exception as e:
+        print(f"[Shopify Daily] Error: {e}")
+
+
 def _run_daily_analysis():
-    """Run physical + economic nexus analysis, gather deadlines, and send
-    a SINGLE Telegram summary.  Dedicated threshold-crossed alerts are
-    sent only for states that newly exceed their threshold on THIS run.
+    """Run nexus analysis + policy-filtered Telegram alerts.
+
+    Only actionable alerts are sent:
+    - Filing deadlines (computed from last_filed_through, not stale calendar)
+    - Economic threshold NEWLY crossed AND unregistered
+    - Franchise flags (critical/warning, max 1x/7d per state)
+
+    NEVER sends: approaching %, physical nexus lists, job status, heartbeats.
     """
     from src.db import fetch_all
     from src.engines.physical_nexus import evaluate_physical_nexus
     from src.engines.economic_nexus import evaluate_economic_nexus
-    from src.calendar.filing_calendar import get_upcoming_deadlines
-    from src.alerts.telegram import (
-        send_daily_summary,
-        send_threshold_crossed,
-        send_telegram,
-    )
-    from datetime import date
+    from src.alerts.telegram_policy import run_policy_alerts
+    from src.alerts.telegram import send_telegram
 
     try:
         # Snapshot which states had economic nexus BEFORE this run
+        prior_nexus = fetch_all("nexus_status")
         prior_econ = {
             r["state_code"]
-            for r in fetch_all("nexus_status")
+            for r in prior_nexus
             if r.get("has_economic_nexus")
+        }
+        registered = {
+            r["state_code"]
+            for r in prior_nexus
+            if r.get("is_registered")
         }
 
         # ── Run engines ──
         phys = evaluate_physical_nexus()
         econ = evaluate_economic_nexus()
 
-        # ── Detect newly crossed thresholds ──
+        # ── Detect newly crossed thresholds (unregistered only) ──
         current_econ = set(econ.get("exceeded_threshold", []))
         newly_crossed = sorted(current_econ - prior_econ)
+        newly_crossed_unreg = [sc for sc in newly_crossed if sc not in registered]
 
-        # Send dedicated alert per newly crossed state
-        for sc in newly_crossed:
-            detail = econ.get("details", {}).get(sc, {})
-            notes = detail.get("action_notes", "")
-            send_threshold_crossed(
-                sc,
-                detail.get("threshold_amount", 0),
-                detail.get("threshold_amount_cfg", 100000),
-                notes[:200] if notes else f"${detail.get('threshold_amount',0):,.0f}",
-            )
-
-        # ── Gather deadlines ──
-        deadlines = get_upcoming_deadlines()
-        today = date.today().isoformat()
-        overdue = [d for d in deadlines if d.get("days_overdue")]
-        upcoming = [d for d in deadlines if d.get("days_until_due") is not None
-                    and not d.get("days_overdue")]
-
-        # ── Gather franchise flags ──
-        flags = fetch_all("franchise_tax_flags", {"status": "open"})
-        critical_flags = [f for f in flags if f.get("severity") == "critical"]
-        warning_flags = [f for f in flags if f.get("severity") == "warning"]
-
-        # ── Count action needed (unregistered nexus states) ──
-        nexus_all = fetch_all("nexus_status")
-        action_needed = sum(
-            1 for n in nexus_all
-            if not n.get("is_registered")
-            and (n.get("has_physical_nexus") or n.get("has_economic_nexus"))
-        )
-
-        # ── Send single summary ──
-        send_daily_summary(
-            phys_nexus_count=len(phys.get("nexus_states", [])),
-            new_phys_states=phys.get("new_nexus_states", []),
-            econ_exceeded=sorted(current_econ),
-            econ_approaching=econ.get("approaching_threshold", []),
-            newly_crossed=newly_crossed,
-            critical_flags=critical_flags,
-            warning_flags=warning_flags,
-            overdue_count=len(overdue),
-            upcoming_deadlines=upcoming,
-            action_needed=action_needed,
+        # ── Run policy-filtered alerts ──
+        alert_result = run_policy_alerts(
+            newly_crossed_unreg=newly_crossed_unreg,
+            econ_details=econ.get("details", {}),
         )
 
         print(f"[Daily Analysis] Physical: {len(phys.get('nexus_states', []))} states, "
               f"Economic exceeded: {len(current_econ)}, "
-              f"Newly crossed: {newly_crossed}, "
-              f"Overdue: {len(overdue)}")
+              f"Newly crossed (unreg): {newly_crossed_unreg}, "
+              f"Alerts: {alert_result['sent']} sent / {alert_result['suppressed']} suppressed")
 
     except Exception as e:
         print(f"[Daily Analysis] Error: {e}")
@@ -1255,12 +2078,15 @@ def _run_deadline_check():
 def _run_spapi_refresh():
     from datetime import date, timedelta, datetime, timezone
     from src.amazon_sp.reports import fetch_orders, fetch_inventory
+    from src.amazon_sp.client import request_and_download
+    from src.amazon_sp.reports import ORDERS_REPORT
     from src.db import log_ingestion
 
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=7)
     errors = []
+    orders_content = None
     try:
         orders = fetch_orders(start, end)
         inserted = orders.get("rows_inserted", 0)
@@ -1283,6 +2109,22 @@ def _run_spapi_refresh():
             status="failed",
             error_message=str(e)[:500],
         )
+
+    # Update sales_daily — narrow window including today so Pacific-day
+    # boundaries are fully captured (scheduler runs at 06:00 UTC = 11 PM
+    # Pacific previous day, so yesterday-Pacific may still be incomplete).
+    # The upsert overwrites stale monthly-chunk data with fresh narrow data.
+    try:
+        from src.sales_daily import upsert_amazon_daily_from_tsv
+        daily_start = end - timedelta(days=4)
+        daily_end = date.today() + timedelta(days=1)  # include today
+        content = request_and_download(ORDERS_REPORT, daily_start, daily_end)
+        r = upsert_amazon_daily_from_tsv(content)
+        print(f"[SP-API Daily] {r['days_written']} days, "
+              f"${r['total_sales']:,.0f}, {r['order_count']} orders")
+    except Exception as e:
+        print(f"[SP-API Daily] Error: {e}")
+
     try:
         inv = fetch_inventory(start, end)
         inserted = inv.get("rows_inserted", 0)
@@ -1340,6 +2182,72 @@ def _run_source_monitoring():
                 pass
     except Exception as e:
         print(f"[Source Monitor] Error: {e}")
+
+
+def _run_daily_digest():
+    """Send morning sales digest via Telegram (at most once per day)."""
+    try:
+        from src.alerts.daily_digest import send_digest
+        result = send_digest()
+        if result.get("sent"):
+            print("[Digest] Sent")
+        elif result.get("reason"):
+            print(f"[Digest] Skipped: {result['reason']}")
+    except Exception as e:
+        print(f"[Digest] Error: {e}")
+
+
+def _run_settlement_pull():
+    """Weekly settlement report pull (last 45 days).
+
+    Uses list_reports (getReports) — never calls createReport.
+    Settlement reports are Amazon-generated; we only retrieve them.
+    """
+    try:
+        from datetime import date, timedelta
+        from src.amazon_sp.settlements import fetch_settlements
+        end = date.today() - timedelta(days=1)
+        start = end - timedelta(days=45)
+        result = fetch_settlements(start, end)
+        print(f"[Settlements] {result.get('reports_ingested', 0)} reports, "
+              f"{result.get('settlements', 0)} settlements, "
+              f"{result.get('rows_inserted', 0)} rows inserted")
+    except Exception as e:
+        print(f"[Settlements] Error: {e}")
+
+
+def _run_inventory_sync():
+    """Daily inventory sync: FBA summaries + restock + velocity."""
+    try:
+        from src.inventory.sync import sync_all
+        results = sync_all()
+        for name in ["fba_summaries", "restock", "planning"]:
+            r = results.get(name, {})
+            if "error" in r:
+                print(f"[Inventory] {name}: {r['error'][:100]}")
+            else:
+                print(f"[Inventory] {name}: {r.get('rows_total', 0)} rows")
+    except Exception as e:
+        print(f"[Inventory Sync] Error: {e}")
+
+    try:
+        from src.inventory.velocity import compute_velocity
+        r = compute_velocity(amazon_days=100, shopify_days=100)
+        print(f"[Inventory Velocity] {r['skus']} SKUs, "
+              f"mult={r['avg_forward_mult']:.2f}, "
+              f"{r['rows_inserted']} rows")
+    except Exception as e:
+        print(f"[Inventory Velocity] Error: {e}")
+
+
+def _run_3pl_sync():
+    """Daily 3PL inventory sync from Ship Sidekick."""
+    try:
+        from src.shipsidekick.client import sync_3pl
+        r = sync_3pl()
+        print(f"[3PL] {r['rows_total']} SKUs, {r['rows_inserted']} upserted")
+    except Exception as e:
+        print(f"[3PL] Error: {e}")
 
 
 def _run_cpa_exports():
