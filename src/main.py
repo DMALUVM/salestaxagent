@@ -1666,6 +1666,24 @@ def inventory_report_cmd(top):
     click.echo(f"Projections use Amazon + Shopify unit demand for matched SKUs.")
 
 
+@cli.command("github-backup")
+@click.option("--dry-run", is_flag=True, help="Show what would be committed without pushing")
+def github_backup(dry_run):
+    """Push project state to a dated backup/* branch on GitHub."""
+    from src.maintenance.github_backup import run_backup
+
+    result = run_backup(dry_run=dry_run)
+
+    if result["status"] == "success":
+        click.echo(f"Backup: {result['message']}")
+    elif result["status"] == "dry_run":
+        click.echo(f"Dry run: {result['message']}")
+    elif result["status"] == "nothing_to_backup":
+        click.echo("Nothing to back up — working tree matches HEAD.")
+    else:
+        click.echo(f"Backup failed: {result.get('error', result['status'])}")
+
+
 @cli.command("integrity-check")
 def integrity_check():
     """Verify data integrity: SKU case, duplicate keys, channel totals."""
@@ -1869,6 +1887,17 @@ def run():
             id="3pl_sync",
         )
         click.echo("[Scheduler] 3PL sync daily at 06:35")
+
+        # Weekly GitHub backup (Sunday 09:00)
+        scheduler.add_job(
+            _run_github_backup,
+            "cron",
+            day_of_week="sun",
+            hour=9,
+            minute=0,
+            id="github_backup",
+        )
+        click.echo("[Scheduler] GitHub backup weekly Sunday 09:00")
 
         # Agent job worker: poll every 45 seconds
         scheduler.add_job(
@@ -2248,6 +2277,21 @@ def _run_3pl_sync():
         print(f"[3PL] {r['rows_total']} SKUs, {r['rows_inserted']} upserted")
     except Exception as e:
         print(f"[3PL] Error: {e}")
+
+
+def _run_github_backup():
+    """Weekly GitHub backup to backup/* branch."""
+    try:
+        from src.maintenance.github_backup import run_backup
+        r = run_backup()
+        if r["status"] == "success":
+            print(f"[Backup] {r['message']}")
+        elif r["status"] == "nothing_to_backup":
+            print("[Backup] Nothing to back up")
+        else:
+            print(f"[Backup] {r['status']}: {r.get('error', '')[:200]}")
+    except Exception as e:
+        print(f"[Backup] Error: {e}")
 
 
 def _run_cpa_exports():
