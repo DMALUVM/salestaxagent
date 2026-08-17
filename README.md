@@ -562,3 +562,40 @@ Maps Amazon fulfillment center codes (e.g., "DFW7") to US states. This is extens
 3. **Historical Nexus Analysis** — Determine retroactive obligations and voluntary disclosure program options
 4. ~~**Amazon SP-API Integration**~~ — Done. Orders + Inventory Ledger with auto-chunking.
 5. ~~**Vercel Dashboard**~~ — Done. See [Dashboard](#dashboard) section
+
+---
+
+## Daily Autonomous Loop
+
+The agent runs on a Mac Mini via launchd (`com.tallowbourn.salestax`). It starts on boot and restarts on crash.
+
+| Job | Schedule | What it does |
+|---|---|---|
+| shopify_poll | Every 2h | Fetch Shopify orders → sales_by_state |
+| spapi_refresh | 06:00 daily | Amazon SP-API orders + inventory ledger |
+| inventory_sync | 06:30 daily | FBA snapshots + restock + AWD |
+| 3pl_sync | 06:35 daily | Ship Sidekick 3PL stock |
+| cpa_exports | 06:30 daily | Generate CPA export PDFs/CSVs |
+| daily_analysis | 08:00 daily | Run nexus engines + policy alerts |
+| daily_digest | 08:05 daily | Telegram morning summary |
+| deadline_check | 09:00 daily | Log upcoming filing deadlines |
+| source_monitoring | Mon 07:00 | Check state DOR page changes |
+| job_worker | Every 45s | Process async export jobs |
+
+## What You Still Do Manually
+
+- **File returns**: The system calculates what you owe. You or your CPA file with each state's DOR portal.
+- **Register in new states**: The system recommends when to register. You complete registration on the state website or via SST.
+- **Review CPA notes**: Franchise tax (CA $800, TX PIR), B&O (WA), and contested positions need CPA confirmation.
+- **Confirm Seller Central**: Daily Amazon totals should match SC Business Reports (item-price, Pacific tz).
+- **Inventory reorders**: The system forecasts demand. You decide production quantities and create inbound shipments.
+
+## Tax Channel Rules
+
+| Channel | Source | Who Remits | In Seller Liability? |
+|---|---|---|---|
+| shopify (Online Store) | source_name="web" | **Seller** | Yes |
+| shopify_shop (Shop channel) | source_name=numeric app ID | **Shopify** | No (marketplace) |
+| amazon | SP-API orders | **Amazon** | No (marketplace) |
+
+Shop Pay on your website is NOT the Shop channel. A customer using Shop Pay to check out on your Online Store = `source_name="web"` = seller-responsible.
