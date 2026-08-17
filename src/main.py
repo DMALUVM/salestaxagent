@@ -1024,13 +1024,21 @@ def plan_sku_cmd(sku, until_date, fba_min_days):
 @cli.command("filing-packet")
 @click.option("--state", default=None, help="Single state or all registered")
 @click.option("--out", default="exports/filings", help="Output directory")
-def filing_packet_cmd(state, out):
-    """Export filing packet CSV for registered states."""
-    from datetime import date as d
+@click.option("--end-date", default=None, help="Period end (default: yesterday)")
+def filing_packet_cmd(state, out, end_date):
+    """Export filing packet CSV for registered states.
+
+    Uses actual period end (yesterday or --end-date), not future month-end.
+    Current month sales are prorated by days elapsed.
+    """
+    from datetime import date as d, timedelta
     from pathlib import Path
     from src.db import fetch_all
     from src.channels import normalize_channel, is_seller_responsible, display_label
-    import csv
+    import calendar, csv
+
+    yesterday = d.today() - timedelta(days=1)
+    cutoff = d.fromisoformat(end_date) if end_date else yesterday
 
     nexus = fetch_all("nexus_status")
     sales = fetch_all("sales_by_state")
@@ -1043,30 +1051,64 @@ def filing_packet_cmd(state, out):
     for n in registered:
         sc = n["state_code"]
         lft = n.get("last_filed_through") or ""
+        period_start = (d.fromisoformat(lft) + timedelta(days=1)).isoformat() if lft else ""
         rows_out = []
+
         for s in sales:
             if s.get("state_code") != sc:
                 continue
-            if lft and s.get("period_end", "") <= lft:
+            ps = s.get("period_start", "")
+            pe = s.get("period_end", "")
+            if not ps:
                 continue
+            # Skip rows entirely before open period
+            if lft and pe <= lft:
+                continue
+            # Skip rows entirely after cutoff
+            if ps > cutoff.isoformat():
+                continue
+
             ch = normalize_channel(s.get("channel", ""))
+            gross = float(s.get("gross_sales", 0) or 0)
+            tax = float(s.get("tax_collected", 0) or 0)
+            orders = int(s.get("order_count", 0) or 0)
+
+            # Determine actual period end (capped at cutoff)
+            actual_pe = min(pe, cutoff.isoformat())
+
+            # Prorate if this is a partial month (the monthly record extends
+            # past the cutoff — meaning we're mid-month)
+            if pe > cutoff.isoformat() and ps <= cutoff.isoformat():
+                try:
+                    ps_date = d.fromisoformat(ps)
+                    pe_date = d.fromisoformat(pe)
+                    total_days = (pe_date - ps_date).days + 1
+                    elapsed_days = (cutoff - ps_date).days + 1
+                    if total_days > 0 and elapsed_days < total_days:
+                        ratio = elapsed_days / total_days
+                        gross = round(gross * ratio, 2)
+                        tax = round(tax * ratio, 2)
+                        orders = round(orders * ratio)
+                except (ValueError, TypeError):
+                    pass
+
             rows_out.append({
                 "state": sc,
-                "period_start": s.get("period_start"),
-                "period_end": s.get("period_end"),
+                "period_start": max(ps, period_start) if period_start else ps,
+                "period_end": actual_pe,
                 "channel": ch,
                 "channel_label": display_label(ch),
                 "seller_responsible": is_seller_responsible(ch),
-                "gross_sales": float(s.get("gross_sales", 0) or 0),
-                "tax_collected": float(s.get("tax_collected", 0) or 0),
-                "order_count": int(s.get("order_count", 0) or 0),
+                "gross_sales": gross,
+                "tax_collected": tax,
+                "order_count": orders,
             })
 
         if not rows_out:
             click.echo(f"  {sc}: no activity since {lft or 'never'}")
             continue
 
-        fname = Path(out) / f"filing_{sc}_{d.today().isoformat()}.csv"
+        fname = Path(out) / f"filing_{sc}_{cutoff.isoformat()}.csv"
         with open(fname, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(rows_out[0].keys()))
             w.writeheader()

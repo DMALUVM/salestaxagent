@@ -216,24 +216,37 @@ export default function LiabilityPage() {
       let amzAll = 0;
       let amzSince = 0;
 
+      // Cutoff: yesterday (never include the full current month when partial)
+      const yd = new Date();
+      yd.setDate(yd.getDate() - 1);
+      const cutoff = `${yd.getFullYear()}-${String(yd.getMonth() + 1).padStart(2, "0")}-${String(yd.getDate()).padStart(2, "0")}`;
+
       for (const s of sales) {
         if (s.state_code !== sc) continue;
         const ch = normalizeChannel(s.channel);
-        const amt = s.gross_sales;
-        // Only count sales AFTER filed_through.
-        // If filed_through is null → show $0 (NOT all-time).
-        const afterFiling = filedThrough ? s.period_end > filedThrough : false;
+        const ps = s.period_start ?? "";
+        const pe = s.period_end ?? "";
+        let amt = Number(s.gross_sales) || 0;
 
-        if (ch === SHOPIFY) {
-          shopAll += amt;
-          if (afterFiling) shopSince += amt;
-        } else if (ch === SHOPIFY_SHOP) {
-          shopChannelAll += amt;
-          if (afterFiling) shopChannelSince += amt;
-        } else if (ch === AMAZON) {
-          amzAll += amt;
-          if (afterFiling) amzSince += amt;
+        // Skip rows before open period or after cutoff
+        if (filedThrough && pe <= filedThrough) continue;
+        if (ps > cutoff) continue;
+
+        // Prorate current month if it extends past cutoff
+        if (pe > cutoff && ps <= cutoff) {
+          const psD = new Date(ps + "T00:00:00");
+          const peD = new Date(pe + "T00:00:00");
+          const cutD = new Date(cutoff + "T00:00:00");
+          const total = Math.round((peD.getTime() - psD.getTime()) / 86400000) + 1;
+          const elapsed = Math.round((cutD.getTime() - psD.getTime()) / 86400000) + 1;
+          if (total > 0 && elapsed < total) amt = Math.round(amt * elapsed / total * 100) / 100;
         }
+
+        const afterFiling = !!filedThrough;
+        shopAll += ch === SHOPIFY ? amt : 0;
+        if (afterFiling && ch === SHOPIFY) shopSince += amt;
+        if (ch === SHOPIFY_SHOP) { shopChannelAll += amt; if (afterFiling) shopChannelSince += amt; }
+        if (ch === AMAZON) { amzAll += amt; if (afterFiling) amzSince += amt; }
       }
 
       rows.push({

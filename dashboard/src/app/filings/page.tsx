@@ -156,15 +156,37 @@ export default function FilingsPage() {
       const nextDue = computeNextDue(lft, freq, dueDay);
       if (!nextDue) continue;
 
-      // Sum seller-responsible sales since last_filed_through
-      // (Shopify Online Store only — excludes Shop channel and Amazon)
+      // Sum seller-responsible sales since last_filed_through through yesterday.
+      // Complete past months use full monthly totals.
+      // Current (partial) month is prorated by days elapsed.
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const cutoff = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+
       let shopifySince = 0;
       for (const s of sales) {
         if (s.state_code !== n.state_code) continue;
         if (!isSellerResponsible(s.channel ?? "")) continue;
-        if (lft && s.period_end <= lft) continue;
-        shopifySince += Number(s.gross_sales) || 0;
+        const pe = s.period_end ?? "";
+        const ps = s.period_start ?? "";
+        if (lft && pe <= lft) continue;
+        if (ps > cutoff) continue;
+
+        let gross = Number(s.gross_sales) || 0;
+        // Prorate if current month extends past cutoff
+        if (pe > cutoff && ps <= cutoff) {
+          const psDate = new Date(ps + "T00:00:00");
+          const peDate = new Date(pe + "T00:00:00");
+          const cutDate = new Date(cutoff + "T00:00:00");
+          const totalDays = Math.round((peDate.getTime() - psDate.getTime()) / 86400000) + 1;
+          const elapsed = Math.round((cutDate.getTime() - psDate.getTime()) / 86400000) + 1;
+          if (totalDays > 0 && elapsed < totalDays) {
+            gross = Math.round(gross * elapsed / totalDays * 100) / 100;
+          }
+        }
+        shopifySince += gross;
       }
+      shopifySince = Math.round(shopifySince * 100) / 100;
 
       const rate = STATE_TAX_RATES[n.state_code] ?? 0;
       const estTax = shopifySince * rate;
