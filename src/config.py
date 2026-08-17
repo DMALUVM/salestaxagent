@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     amazon_sp_refresh_token: str = ""
     amazon_sp_marketplace_id: str = "ATVPDKIKX0DER"
 
+    shipsidekick_api_key: str = ""
+    shipsidekick_org_slug: str = "tallowbourn"
+    shipsidekick_base_url: str = "https://www.shipsidekick.com"
+
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 

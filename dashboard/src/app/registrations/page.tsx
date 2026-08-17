@@ -148,26 +148,24 @@ function EditDialog({
         return;
       }
 
-      // Update registration fields only — do NOT overwrite engine-computed
-      // nexus or progress data.
-      const { error: nexusErr } = await sb
-        .from("nexus_status")
-        .update({
+      // Save via service-role API route (bypasses RLS)
+      const regResp = await fetch("/api/registrations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          state_code: reg.state_code,
           is_registered: form.is_registered,
-          assigned_frequency: form.is_registered
-            ? form.assigned_frequency || null
-            : null,
+          assigned_frequency: form.is_registered ? form.assigned_frequency || null : null,
           registration_date: form.is_registered
             ? reg.registration_date ?? new Date().toISOString().slice(0, 10)
             : null,
-          last_filed_through: form.is_registered
-            ? form.last_filed_through || null
-            : null,
-        })
-        .eq("state_code", reg.state_code);
+          last_filed_through: form.is_registered ? form.last_filed_through || null : null,
+        }),
+      });
+      const regResult = await regResp.json();
 
-      if (nexusErr) {
-        setError(nexusErr.message);
+      if (!regResp.ok) {
+        setError(regResult.error ?? "Save failed");
         setSaving(false);
         return;
       }

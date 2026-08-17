@@ -2,3 +2,2187 @@ Execution of job "_run_job_worker (trigger: interval[0:00:45], next run at: 2026
 Execution of job "_run_job_worker (trigger: interval[0:00:45], next run at: 2026-08-16 12:54:41 EDT)" skipped: maximum number of running instances reached (1)
 Execution of job "_run_job_worker (trigger: interval[0:00:45], next run at: 2026-08-16 12:55:26 EDT)" skipped: maximum number of running instances reached (1)
 Execution of job "_run_job_worker (trigger: interval[0:00:45], next run at: 2026-08-16 12:56:11 EDT)" skipped: maximum number of running instances reached (1)
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1466, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 999, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1466, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 999, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1466, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 999, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1466, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 999, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1466, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 999, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1466, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 999, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1477, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 999, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1477, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 999, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1493, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1493, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1493, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1508, in <module>
+    cli()
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1015, in run
+    from src.watcher.folder_watcher import start_watcher
+  File "/Users/maloney_assistant/sales-tax-agent/src/watcher/folder_watcher.py", line 11, in <module>
+    from src.config import settings
+  File "/Users/maloney_assistant/sales-tax-agent/src/config.py", line 81, in <module>
+    settings = Settings()
+               ^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic_settings/main.py", line 262, in __init__
+    super().__init__(**__pydantic_self__.__class__._settings_build_values(sources, init_kwargs))
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/pydantic/main.py", line 263, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+shipsidekick_api_key
+  Extra inputs are not permitted [type=extra_forbidden, input_value='ea9003f9-4af7-4e13-8999-a89ab3d3ab59', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_org_slug
+  Extra inputs are not permitted [type=extra_forbidden, input_value='tallowbourn', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+shipsidekick_base_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
