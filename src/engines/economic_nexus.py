@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from src.db import fetch_all, upsert_rows, log_audit
-from src.channels import AMAZON, SHOPIFY, normalize_channel, is_marketplace
+from src.channels import AMAZON, SHOPIFY, SHOPIFY_SHOP, normalize_channel, is_marketplace
 from src.config import load_state_rules, settings
 
 
@@ -172,7 +172,11 @@ def evaluate_economic_nexus(reference_date: date | None = None) -> dict:
             state_sales[sc]["total_amount"] += amount
             state_sales[sc]["total_transactions"] += transactions
 
-            if channel == SHOPIFY:
+            if channel in (SHOPIFY, SHOPIFY_SHOP):
+                # Both Online Store and Shop channel count toward
+                # Shopify-side threshold calculations (Shop channel
+                # is marketplace-facilitated for tax, but still counts
+                # toward economic nexus thresholds per most state rules).
                 state_sales[sc]["shopify_amount"] += amount
                 state_sales[sc]["shopify_transactions"] += transactions
                 # Shopify/direct always counts toward threshold

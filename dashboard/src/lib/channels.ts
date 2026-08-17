@@ -6,8 +6,9 @@
  */
 
 // Canonical channel names (match the DB CHECK constraint on sales_by_state)
-export const SHOPIFY = "shopify" as const;
-export const AMAZON = "amazon" as const;
+export const SHOPIFY = "shopify" as const;        // seller-responsible
+export const SHOPIFY_SHOP = "shopify_shop" as const; // Shopify remits (Shop channel)
+export const AMAZON = "amazon" as const;           // Amazon remits
 export const OTHER = "other" as const;
 
 const CHANNEL_MAP: Record<string, string> = {
@@ -15,6 +16,8 @@ const CHANNEL_MAP: Record<string, string> = {
   shopify_api: SHOPIFY,
   shopify_orders: SHOPIFY,
   shopify_csv: SHOPIFY,
+  shopify_shop: SHOPIFY_SHOP,
+  shop_channel: SHOPIFY_SHOP,
   amazon: AMAZON,
   amazon_inventory: AMAZON,
   amazon_sales: AMAZON,
@@ -32,16 +35,23 @@ export function normalizeChannel(raw: string): string {
   return key;
 }
 
-/** True if this channel is a marketplace facilitator (Amazon). */
+/** True if this channel is a marketplace facilitator (Amazon or Shop channel). */
 export function isMarketplace(channel: string): boolean {
-  return normalizeChannel(channel) === AMAZON;
+  const c = normalizeChannel(channel);
+  return c === AMAZON || c === SHOPIFY_SHOP;
+}
+
+/** True if the seller must remit tax for this channel. */
+export function isSellerResponsible(channel: string): boolean {
+  return !isMarketplace(channel) && normalizeChannel(channel) !== OTHER;
 }
 
 /** Human-readable label for a channel. */
 export function channelLabel(channel: string): string {
   const c = normalizeChannel(channel);
-  if (c === SHOPIFY) return "Shopify";
-  if (c === AMAZON) return "Amazon FBA";
+  if (c === SHOPIFY) return "Shopify (seller)";
+  if (c === SHOPIFY_SHOP) return "Shop Channel (Shopify remits)";
+  if (c === AMAZON) return "Amazon (Amazon remits)";
   return channel;
 }
 

@@ -11,6 +11,7 @@ import type {
 import {
   normalizeChannel,
   SHOPIFY,
+  SHOPIFY_SHOP,
   AMAZON,
   STATE_TAX_RATES,
 } from "@/lib/channels";
@@ -155,9 +156,11 @@ interface StateLiability {
   filed_through: string | null;
   has_filed_through: boolean;
   shopify_since_filing: number;
+  shop_channel_since_filing: number;
   amazon_since_filing: number;
   seller_est_tax: number;
   shopify_all_time: number;
+  shop_channel_all_time: number;
   amazon_all_time: number;
 }
 
@@ -208,6 +211,8 @@ export default function LiabilityPage() {
 
       let shopAll = 0;
       let shopSince = 0;
+      let shopChannelAll = 0;
+      let shopChannelSince = 0;
       let amzAll = 0;
       let amzSince = 0;
 
@@ -222,6 +227,9 @@ export default function LiabilityPage() {
         if (ch === SHOPIFY) {
           shopAll += amt;
           if (afterFiling) shopSince += amt;
+        } else if (ch === SHOPIFY_SHOP) {
+          shopChannelAll += amt;
+          if (afterFiling) shopChannelSince += amt;
         } else if (ch === AMAZON) {
           amzAll += amt;
           if (afterFiling) amzSince += amt;
@@ -238,9 +246,11 @@ export default function LiabilityPage() {
         filed_through: filedThrough,
         has_filed_through: !!filedThrough,
         shopify_since_filing: shopSince,
+        shop_channel_since_filing: shopChannelSince,
         amazon_since_filing: amzSince,
         seller_est_tax: shopSince * rate,
         shopify_all_time: shopAll,
+        shop_channel_all_time: shopChannelAll,
         amazon_all_time: amzAll,
       });
     }

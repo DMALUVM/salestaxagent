@@ -239,7 +239,7 @@ def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
         "status": "any",
         "limit": 250,
         "fields": "id,name,created_at,financial_status,total_price,subtotal_price,"
-                   "total_tax,shipping_address",
+                   "total_tax,shipping_address,source_name",
     }
     if since_date:
         params["created_at_min"] = since_date.isoformat() + "T00:00:00Z"
@@ -264,8 +264,12 @@ def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
                     url = part.split("<")[1].split(">")[0]
                     break
 
-    # Aggregate by (state, month) — same granularity as amazon_spapi
-    monthly_agg: dict[tuple[str, date], dict] = defaultdict(lambda: {
+    # Aggregate by (state, channel, month)
+    # Channel is determined by source_name: "web" etc. → shopify (seller),
+    # numeric app ID → shopify_shop (Shopify remits since 2025-01-01)
+    from src.channels import classify_shopify_order, SHOPIFY_SHOP
+
+    monthly_agg: dict[tuple[str, str, date], dict] = defaultdict(lambda: {
         "order_count": 0, "gross_sales": 0.0, "tax_collected": 0.0,
     })
 
@@ -285,20 +289,23 @@ def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
         if not order_date:
             continue
 
+        source_name = order.get("source_name", "")
+        channel = classify_shopify_order(source_name, order_date)
         month_key = _month_start(order_date)
-        agg = monthly_agg[(state_code, month_key)]
+
+        agg = monthly_agg[(state_code, channel, month_key)]
         agg["order_count"] += 1
         agg["gross_sales"] += float(order.get("subtotal_price", 0) or 0)
         agg["tax_collected"] += float(order.get("total_tax", 0) or 0)
 
     sales = []
     all_states: set[str] = set()
-    for (state_code, month_start_date), agg in monthly_agg.items():
+    for (state_code, channel, month_start_date), agg in monthly_agg.items():
         period_end = _month_end(month_start_date)
         all_states.add(state_code)
         sales.append(SalesByState(
             state_code=state_code,
-            channel="shopify",
+            channel=channel,
             period_start=month_start_date,
             period_end=period_end,
             order_count=agg["order_count"],
@@ -309,10 +316,9 @@ def fetch_shopify_orders_api(since_date: date | None = None) -> dict:
         ))
 
     # Delete old shopify rows for states we're about to replace.
-    # This cleans up legacy all-time aggregate rows that predate
-    # the monthly-granularity change.
     for sc in all_states:
         delete_rows("sales_by_state", {"state_code": sc, "channel": "shopify"})
+        delete_rows("sales_by_state", {"state_code": sc, "channel": "shopify_shop"})
 
     rows = [s.model_dump() for s in sales]
     inserted = upsert_rows(

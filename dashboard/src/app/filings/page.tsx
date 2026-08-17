@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type { NexusStatus, StateRule, SalesByState } from "@/lib/types";
-import { normalizeChannel, SHOPIFY, STATE_TAX_RATES } from "@/lib/channels";
+import { normalizeChannel, isSellerResponsible, SHOPIFY, STATE_TAX_RATES } from "@/lib/channels";
 import { LoadingState } from "@/components/loading";
 import { EmptyState } from "@/components/empty-state";
 import { Disclaimer } from "@/components/disclaimer";
@@ -156,11 +156,12 @@ export default function FilingsPage() {
       const nextDue = computeNextDue(lft, freq, dueDay);
       if (!nextDue) continue;
 
-      // Sum Shopify sales since last_filed_through
+      // Sum seller-responsible sales since last_filed_through
+      // (Shopify Online Store only — excludes Shop channel and Amazon)
       let shopifySince = 0;
       for (const s of sales) {
         if (s.state_code !== n.state_code) continue;
-        if (normalizeChannel(s.channel ?? "") !== SHOPIFY) continue;
+        if (!isSellerResponsible(s.channel ?? "")) continue;
         if (lft && s.period_end <= lft) continue;
         shopifySince += Number(s.gross_sales) || 0;
       }

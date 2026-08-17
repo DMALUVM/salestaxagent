@@ -47,6 +47,7 @@ def get_access_token() -> str:
             json={
                 "client_id": settings.shopify_client_id,
                 "client_secret": settings.shopify_client_secret,
+                "grant_type": "client_credentials",
             },
             timeout=15,
         )

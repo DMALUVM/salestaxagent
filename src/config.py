@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     shipsidekick_org_slug: str = "tallowbourn"
     shipsidekick_base_url: str = "https://www.shipsidekick.com"
 
+    github_backup_enabled: bool = False
+
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
