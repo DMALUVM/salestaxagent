@@ -18,6 +18,7 @@ import {
   Sun,
   ListChecks,
   TrendingUp,
+  Warehouse,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -36,6 +37,7 @@ const primaryLinks: NavItem[] = [
   { href: "/liability", label: "What Do I Owe?", icon: DollarSign },
   { href: "/calendar", label: "Filing Calendar", icon: Calendar },
   { href: "/registrations", label: "Registrations", icon: ClipboardCheck },
+  { href: "/inventory", label: "Inventory", icon: Warehouse },
 ];
 
 const monitorLinks: NavItem[] = [

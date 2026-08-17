@@ -206,3 +206,92 @@ export interface RegistrationRow {
   notes: string | null;
   filing_frequency_default: string | null;
 }
+
+export interface SalesDaily {
+  sale_date: string;
+  channel: string;
+  gross_sales: number;
+  order_count: number;
+  source: string;
+  updated_at: string;
+}
+
+export interface InventorySnapshot {
+  sku: string;
+  asin: string | null;
+  fnsku: string | null;
+  product_name: string | null;
+  fulfillable: number;
+  inbound_working: number;
+  inbound_shipped: number;
+  inbound_receiving: number;
+  reserved: number;
+  researching: number;
+  unfulfillable: number;
+  total_quantity: number;
+}
+
+export interface SkuVelocity {
+  sku: string;
+  asin: string | null;
+  product_name: string | null;
+  amazon_u_7: number;
+  amazon_u_14: number;
+  amazon_u_30: number;
+  amazon_u_90: number;
+  shopify_u_7: number;
+  shopify_u_14: number;
+  shopify_u_30: number;
+  shopify_u_90: number;
+  total_u_7: number;
+  total_u_14: number;
+  total_u_30: number;
+  total_u_90: number;
+  seasonality_mult: number;
+  seasonal_total_u_30: number;
+}
+
+export interface InventoryRestock {
+  sku: string;
+  asin: string | null;
+  product_name: string | null;
+  recommended_qty: number;
+  recommended_ship_date: string | null;
+  days_of_supply: number | null;
+  units_sold_30: number;
+  available: number;
+  inbound: number;
+  alert: string | null;
+}
+
+export interface InventorySettings {
+  target_cover_days: number;
+  lead_time_days: number;
+  holiday_mode: boolean;
+  include_inbound: boolean;
+  include_3pl: boolean;
+  include_awd: boolean;
+  receiving_days_normal: number;
+  receiving_days_peak: number;
+  awd_to_fba_days: number;
+  production_lead_days: number;
+  peak_start_date: string | null;
+  peak_end_date: string | null;
+}
+
+export interface SeasonalityWeekly {
+  week: number;
+  multiplier: number;
+  units_actual: number;
+  baseline_units: number;
+}
+
+export interface Inventory3plSnapshot {
+  sku: string;
+  product_name: string | null;
+  available: number;
+  committed: number;
+  reserved: number;
+  incoming: number;
+  warehouse: string | null;
+}
