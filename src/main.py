@@ -922,6 +922,163 @@ def github_backup(dry_run):
         click.echo(f"Backup failed: {result.get('error', result['status'])}")
 
 
+@cli.command("inventory-sync")
+@click.option("--dry-run", is_flag=True)
+def inventory_sync_cmd(dry_run):
+    """Pull FBA inventory: restock, planning, stock levels, AWD."""
+    from src.inventory.sync import sync_all
+    if dry_run:
+        click.echo("DRY RUN\n")
+    results = sync_all(dry_run=dry_run)
+    for name in ["fba_summaries", "awd", "restock", "planning"]:
+        r = results.get(name, {})
+        if "error" in r:
+            click.echo(f"{name}: ERROR — {r['error'][:200]}")
+        else:
+            click.echo(f"{name}: {r.get('rows_total', 0)} rows ({r.get('rows_inserted', 0)} inserted)")
+
+
+@cli.command("inventory-velocity")
+@click.option("--days", default=400)
+@click.option("--dry-run", is_flag=True)
+def inventory_velocity_cmd(days, dry_run):
+    """Recompute SKU velocity + seasonality from order history."""
+    from src.inventory.velocity import compute_velocity
+    click.echo(f"Computing velocity from {days} days of history...\n")
+    r = compute_velocity(amazon_days=days, shopify_days=days, dry_run=dry_run)
+    click.echo(f"Amazon SKUs: {r['amazon_skus']}")
+    click.echo(f"Shopify SKUs: {r['shopify_skus']}")
+    click.echo(f"Total: {r['skus']}, seasonality weeks: {r['seasonality_weeks']}")
+    click.echo(f"Forward multiplier: {r['avg_forward_mult']:.3f}")
+    click.echo(f"Rows inserted: {r['rows_inserted']}")
+
+
+@cli.command("inventory-report")
+@click.option("--top", default=20)
+def inventory_report_cmd(top):
+    """Terminal summary: at-risk SKUs, reorder list."""
+    from src.inventory.report import build_report
+    report = build_report()
+    s = report["summary"]
+    click.echo(f"Active SKUs:     {s['active_skus']}")
+    click.echo(f"FBA <60d cover:  {s['at_risk_skus']}")
+    click.echo(f"Reorder total:   {s['total_our_reorder']:,} units")
+    click.echo(f"Portfolio cover: {s['portfolio_weeks_cover']} weeks\n")
+    for r in report["rows"][:top]:
+        dos_str = f"{r['dos']:.0f}" if r['dos'] < 9999 else "—"
+        click.echo(f"  {r['sku'][:22]:<22} {r['flag']:<9} FBA={r['fba_on_hand']:>5} V30={r['total_u_30']:>5.1f} DOS={dos_str:>4}")
+
+
+@cli.command("inventory-3pl-sync")
+@click.option("--dry-run", is_flag=True)
+def inventory_3pl_sync_cmd(dry_run):
+    """Pull 3PL inventory from Ship Sidekick."""
+    from src.shipsidekick.client import sync_3pl
+    r = sync_3pl(dry_run=dry_run)
+    click.echo(f"SKUs: {r['rows_total']}, inserted: {r['rows_inserted']}")
+
+
+@cli.command("plan-sku")
+@click.option("--sku", required=True)
+@click.option("--until", "until_date", default="2027-03-31")
+@click.option("--fba-min-days", default=60)
+def plan_sku_cmd(sku, until_date, fba_min_days):
+    """Forward sell-through plan for a single SKU."""
+    from datetime import date as d, timedelta
+    from src.db import fetch_all
+    end = d.fromisoformat(until_date) + timedelta(days=14)
+    today = d.today()
+    vels = {r["sku"]: r for r in fetch_all("sku_velocity")}
+    snaps = {r["sku"]: r for r in fetch_all("inventory_snapshots")}
+    awds = {r["sku"]: r for r in fetch_all("inventory_awd")}
+    vel = vels.get(sku)
+    snap = snaps.get(sku)
+    if not vel:
+        click.echo(f"SKU {sku} not found in sku_velocity")
+        return
+    base = float(vel.get("total_u_30", 0) or 0)
+    fba = sum(int(snap.get(k, 0) or 0) for k in ["fulfillable","reserved","researching","unfulfillable"]) if snap else 0
+    awd = int(awds.get(sku, {}).get("awd_on_hand", 0) or 0)
+    click.echo(f"SKU: {sku}  V30={base:.1f}  FBA={fba}  AWD={awd}  DOS={fba/base:.0f}d" if base > 0 else f"SKU: {sku}  V30=0")
+    # Simple forecast
+    season = {}
+    for r in fetch_all("seasonality_weekly"):
+        if r.get("sku") == "_account_" and r.get("year") == 0:
+            season[int(r["week"])] = float(r.get("multiplier", 1.0) or 1.0)
+    remaining, total_demand = fba, 0
+    cursor = today
+    while cursor <= end:
+        wk_end = min(cursor + timedelta(days=6), end)
+        days = (wk_end - cursor).days + 1
+        mult = season.get(cursor.isocalendar()[1], 1.0)
+        demand = round(base * days * mult)
+        total_demand += demand
+        remaining -= demand
+        if remaining <= 0 and remaining + demand > 0:
+            click.echo(f"  FBA stockout: {cursor}")
+        cursor = wk_end + timedelta(days=1)
+    click.echo(f"Demand through {end}: {total_demand:,} units")
+    click.echo(f"FBA gap: {max(total_demand - fba, 0):,}")
+
+
+@cli.command("filing-packet")
+@click.option("--state", default=None, help="Single state or all registered")
+@click.option("--out", default="exports/filings", help="Output directory")
+def filing_packet_cmd(state, out):
+    """Export filing packet CSV for registered states."""
+    from datetime import date as d
+    from pathlib import Path
+    from src.db import fetch_all
+    from src.channels import normalize_channel, is_seller_responsible, display_label
+    import csv
+
+    nexus = fetch_all("nexus_status")
+    sales = fetch_all("sales_by_state")
+    registered = [n for n in nexus if n.get("is_registered")]
+    if state:
+        registered = [n for n in registered if n["state_code"] == state.upper()]
+
+    Path(out).mkdir(parents=True, exist_ok=True)
+
+    for n in registered:
+        sc = n["state_code"]
+        lft = n.get("last_filed_through") or ""
+        rows_out = []
+        for s in sales:
+            if s.get("state_code") != sc:
+                continue
+            if lft and s.get("period_end", "") <= lft:
+                continue
+            ch = normalize_channel(s.get("channel", ""))
+            rows_out.append({
+                "state": sc,
+                "period_start": s.get("period_start"),
+                "period_end": s.get("period_end"),
+                "channel": ch,
+                "channel_label": display_label(ch),
+                "seller_responsible": is_seller_responsible(ch),
+                "gross_sales": float(s.get("gross_sales", 0) or 0),
+                "tax_collected": float(s.get("tax_collected", 0) or 0),
+                "order_count": int(s.get("order_count", 0) or 0),
+            })
+
+        if not rows_out:
+            click.echo(f"  {sc}: no activity since {lft or 'never'}")
+            continue
+
+        fname = Path(out) / f"filing_{sc}_{d.today().isoformat()}.csv"
+        with open(fname, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(rows_out[0].keys()))
+            w.writeheader()
+            w.writerows(rows_out)
+
+        seller = sum(r["gross_sales"] for r in rows_out if r["seller_responsible"])
+        total = sum(r["gross_sales"] for r in rows_out)
+        click.echo(f"  {sc}: {fname.name} ({len(rows_out)} rows, seller=${seller:,.0f}, total=${total:,.0f})")
+
+    click.echo(f"\nDisclaimer: Filing packets are reference data only. Does not submit to any DOR.")
+
+
 @cli.command("integrity-check")
 def integrity_check():
     """Verify data integrity: SKU case, duplicate keys, channel totals."""
@@ -1082,6 +1239,37 @@ def run():
             id="cpa_exports",
         )
         click.echo("[Scheduler] CPA exports daily at 06:30")
+
+        # Morning digest at 08:05 (after daily analysis)
+        scheduler.add_job(
+            _run_daily_digest,
+            "cron",
+            hour=8,
+            minute=5,
+            id="daily_digest",
+        )
+        click.echo("[Scheduler] Daily digest at 08:05")
+
+        # Inventory sync daily at 06:30 (after SP-API refresh)
+        if settings.amazon_sp_enabled:
+            scheduler.add_job(
+                _run_inventory_sync,
+                "cron",
+                hour=6,
+                minute=30,
+                id="inventory_sync",
+            )
+            click.echo("[Scheduler] Inventory sync daily at 06:30")
+
+        # 3PL sync daily at 06:35
+        scheduler.add_job(
+            _run_3pl_sync,
+            "cron",
+            hour=6,
+            minute=35,
+            id="3pl_sync",
+        )
+        click.echo("[Scheduler] 3PL sync daily at 06:35")
 
         # Weekly GitHub backup (Sunday 09:00)
         scheduler.add_job(
@@ -1367,6 +1555,51 @@ def _run_source_monitoring():
                 pass
     except Exception as e:
         print(f"[Source Monitor] Error: {e}")
+
+
+def _run_daily_digest():
+    """Send morning sales digest via Telegram."""
+    try:
+        from src.alerts.daily_digest import send_digest
+        result = send_digest()
+        if result.get("sent"):
+            print("[Digest] Sent")
+        elif result.get("reason"):
+            print(f"[Digest] Skipped: {result['reason']}")
+    except Exception as e:
+        print(f"[Digest] Error: {e}")
+
+
+def _run_inventory_sync():
+    """Daily inventory sync: FBA summaries + restock + AWD + velocity."""
+    try:
+        from src.inventory.sync import sync_all
+        results = sync_all()
+        for name in ["fba_summaries", "awd", "restock", "planning"]:
+            r = results.get(name, {})
+            if "error" in r:
+                print(f"[Inventory] {name}: {r['error'][:100]}")
+            else:
+                print(f"[Inventory] {name}: {r.get('rows_total', 0)} rows")
+    except Exception as e:
+        print(f"[Inventory Sync] Error: {e}")
+
+    try:
+        from src.inventory.velocity import compute_velocity
+        r = compute_velocity(amazon_days=100, shopify_days=100)
+        print(f"[Velocity] {r['skus']} SKUs, mult={r['avg_forward_mult']:.2f}")
+    except Exception as e:
+        print(f"[Velocity] Error: {e}")
+
+
+def _run_3pl_sync():
+    """Daily 3PL inventory sync from Ship Sidekick."""
+    try:
+        from src.shipsidekick.client import sync_3pl
+        r = sync_3pl()
+        print(f"[3PL] {r['rows_total']} SKUs, {r['rows_inserted']} upserted")
+    except Exception as e:
+        print(f"[3PL] Error: {e}")
 
 
 def _run_github_backup():

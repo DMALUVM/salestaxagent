@@ -149,10 +149,56 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
     parts.append(f"MTD Amazon:  ${amazon_mtd:,.2f}")
     parts.append(f"MTD Total:   ${total_mtd:,.2f}")
 
+    # Overdue filings
+    overdue_lines: list[str] = []
+    for n in nexus_rows:
+        is_reg = n.get("is_registered")
+        if is_reg is not True and is_reg != "true" and is_reg != 1:
+            continue
+        freq = n.get("assigned_frequency")
+        lft = n.get("last_filed_through")
+        if not freq or not lft:
+            continue
+        due_info = _compute_next_due(lft, freq, 20)
+        if due_info and due_info["days_until"] < 0:
+            sc = n.get("state_code", "??")
+            overdue_lines.append(f"  ⚠️ {sc}: OVERDUE ({abs(due_info['days_until'])}d past due)")
+
+    if overdue_lines:
+        parts.append("")
+        parts.append("<b>OVERDUE:</b>")
+        parts.extend(overdue_lines[:5])
+
     if filing_lines:
         parts.append("")
         parts.append("<b>Upcoming Filings:</b>")
         parts.extend(filing_lines)
+
+    # Stale sync warning
+    try:
+        logs = fetch_all("ingestion_log")
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        shopify_ok = any(
+            l.get("status") == "success" and "shopify" in (l.get("file_type") or "")
+            and (now - datetime.fromisoformat(l["ingested_at"].replace("Z", "+00:00"))).total_seconds() < 36 * 3600
+            for l in logs
+        )
+        spapi_ok = any(
+            l.get("status") == "success" and "amazon" in (l.get("file_type") or "")
+            and (now - datetime.fromisoformat(l["ingested_at"].replace("Z", "+00:00"))).total_seconds() < 36 * 3600
+            for l in logs
+        )
+        stale = []
+        if not shopify_ok:
+            stale.append("Shopify")
+        if not spapi_ok:
+            stale.append("SP-API")
+        if stale:
+            parts.append("")
+            parts.append(f"⚠️ Data stale: {', '.join(stale)} sync >36h ago")
+    except Exception:
+        pass
 
     parts.append("")
     parts.append(f"<i>{ref.isoformat()} -- monitoring aid, not tax advice.</i>")
