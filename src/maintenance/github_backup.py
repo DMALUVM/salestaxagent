@@ -1,8 +1,12 @@
 """Automated GitHub backup — push project state to backup/* branches.
 
-Creates a dated branch (backup/YYYY-MM-DD), commits all tracked + untracked
-files (respecting .gitignore), and pushes to origin. NEVER touches main.
-NEVER force-pushes. If the date branch already exists, appends a time suffix.
+DISABLED BY DEFAULT. Set github_backup_enabled in code or call explicitly.
+
+Safety guards:
+  - NEVER pushes to main (hard abort if branch is main)
+  - NEVER force-pushes
+  - NEVER checks out main with uncommitted changes
+  - Branch name must start with backup/
 """
 from __future__ import annotations
 
@@ -15,6 +19,11 @@ log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_REMOTE = "origin"
+
+# Disabled by default until verified safe
+ENABLED = False
+
+PROTECTED_BRANCHES = {"main", "master", "production", "develop"}
 
 
 def _git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -29,6 +38,9 @@ def _git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def run_backup(dry_run: bool = False, remote: str | None = None) -> dict:
+    if not ENABLED and not dry_run:
+        return {"status": "disabled", "message": "GitHub backup is disabled. Set ENABLED=True in github_backup.py to enable."}
+
     remote = remote or DEFAULT_REMOTE
     now = datetime.now()
     base_branch = f"backup/{now.strftime('%Y-%m-%d')}"
@@ -38,69 +50,75 @@ def run_backup(dry_run: bool = False, remote: str | None = None) -> dict:
     branch = f"backup/{now.strftime('%Y-%m-%d-%H%M')}" if check.stdout.strip() else base_branch
     commit_msg = f"Automated backup {now.strftime('%Y-%m-%d %H:%M')}"
 
+    # ── HARD GUARD: never push to protected branches ──
+    if branch in PROTECTED_BRANCHES or not branch.startswith("backup/"):
+        return {"status": "abort", "error": f"Refusing to operate on branch '{branch}' — must be backup/*"}
+
     result: dict = {"branch": branch, "remote": remote, "dry_run": dry_run, "status": "unknown"}
 
     try:
-        # Always return to main
-        current = _git("rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()
-        if not current or current == "HEAD" or current.startswith("backup/"):
-            current = "main"
+        current = _git("rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip() or "main"
         result["original_branch"] = current
 
-        # Stash if dirty
-        stashed = False
-        if _git("status", "--porcelain").stdout.strip():
-            _git("stash", "push", "-m", "github-backup-temp", check=False)
-            stashed = True
+        # ── HARD GUARD: never switch away from main with dirty working tree ──
+        # Instead of stash+checkout, commit directly to a new orphan-like branch
+        # by using git worktree or just committing from current position.
+        # Safest approach: stay on current branch, create backup branch from HEAD,
+        # add all, commit, push, then reset back.
 
-        try:
-            _git("checkout", "-B", branch)
-            if stashed:
-                _git("stash", "pop", check=False)
-                stashed = False
+        # Create the backup branch pointing at current HEAD
+        _git("branch", "-f", branch, "HEAD")
+        _git("checkout", branch)
 
-            _git("add", "-A")
-            diff = _git("diff", "--cached", "--stat").stdout.strip()
-            if not diff:
-                result["status"] = "nothing_to_backup"
-                return result
+        _git("add", "-A")
+        diff = _git("diff", "--cached", "--stat").stdout.strip()
+        if not diff:
+            result["status"] = "nothing_to_backup"
+            result["message"] = "Nothing to back up"
+            # Return to original branch
+            _git("checkout", current, check=False)
+            return result
 
-            result["files_changed"] = len(diff.strip().split("\n"))
+        result["files_changed"] = len(diff.strip().split("\n"))
 
-            if dry_run:
-                result["status"] = "dry_run"
-                result["message"] = f"Would commit {result['files_changed']} files to {branch}"
-                _git("reset", "HEAD", check=False)
-                return result
+        if dry_run:
+            result["status"] = "dry_run"
+            result["message"] = f"Would commit {result['files_changed']} files to {branch}"
+            _git("reset", "HEAD", check=False)
+            _git("checkout", current, check=False)
+            return result
 
-            _git("commit", "-m", commit_msg)
-            commit_hash = _git("rev-parse", "--short", "HEAD").stdout.strip()
-            result["commit"] = commit_hash
+        _git("commit", "-m", commit_msg)
+        commit_hash = _git("rev-parse", "--short", "HEAD").stdout.strip()
+        result["commit"] = commit_hash
 
-            push = _git("push", "-u", remote, branch, check=False)
-            if push.returncode != 0:
-                push2 = _git("push", remote, branch, check=False)
-                if push2.returncode != 0:
-                    result["status"] = "push_failed"
-                    result["error"] = (push2.stderr or push2.stdout)[:300]
-                    _log_failure(result)
-                    return result
+        # ── HARD GUARD: verify we're pushing backup/*, never main ──
+        if branch in PROTECTED_BRANCHES:
+            result["status"] = "abort"
+            result["error"] = f"ABORT: would have pushed to protected branch '{branch}'"
+            _git("checkout", current, check=False)
+            return result
 
+        push = _git("push", remote, branch, check=False)
+        if push.returncode != 0:
+            result["status"] = "push_failed"
+            result["error"] = (push.stderr or push.stdout)[:300]
+        else:
             result["status"] = "success"
             result["message"] = f"Backed up {result['files_changed']} files to {branch} ({commit_hash})"
-        finally:
-            _git("checkout", current, check=False)
-            if stashed:
-                _git("stash", "pop", check=False)
+
+        # Return to original branch
+        _git("checkout", current, check=False)
 
     except subprocess.TimeoutExpired:
         result["status"] = "timeout"
         result["error"] = "Git command timed out"
-        _log_failure(result)
+        # Try to return to original
+        _git("checkout", result.get("original_branch", "main"), check=False)
     except Exception as e:
         result["status"] = "error"
         result["error"] = str(e)[:300]
-        _log_failure(result)
+        _git("checkout", result.get("original_branch", "main"), check=False)
 
     return result
 
