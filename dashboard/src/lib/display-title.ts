@@ -1,19 +1,36 @@
 /**
  * Brand rewriter for product display titles.
  *
- * Amazon listings use the legal brand name "Dr. Dave's Primal Essence"
- * but the dashboard should display "Tallowbourn" consistently.
+ * Canonical brand: Tallowbourn. Old Amazon listings may still use legacy
+ * brand forms which must never appear in the dashboard UI.
  */
 
-const BRAND_NEW = "Tallowbourn";
+const BRAND = "Tallowbourn";
 
-// Case-insensitive pattern for all known variations
-const BRAND_PATTERN = /Dr\.?\s*Dave'?s?\s*Primal\s*Essence/gi;
+// Ordered from longest to shortest to avoid partial matches.
+// Each pattern is case-insensitive and accounts for curly/straight quotes.
+const BRAND_PATTERNS: [RegExp, string][] = [
+  // Full legacy brand: "Dr. Dave's Primal Essence" (all apostrophe variants)
+  [/Dr\.?\s*Dave[''\u2019]?s?\s+Primal\s+Essence\s*/gi, `${BRAND} `],
+  // "Primal Essence" as standalone brand phrase (not inside another word)
+  [/\bPrimal\s+Essence\s*/gi, `${BRAND} `],
+  // Leading "Dr. Dave's" (with or without period/apostrophe)
+  [/^Dr\.?\s*Dave[''\u2019]?s?\s*/gi, `${BRAND} `],
+];
+
+function rewriteBrand(title: string): string {
+  let out = title;
+  for (const [pattern, replacement] of BRAND_PATTERNS) {
+    out = out.replace(pattern, replacement);
+  }
+  // Clean up double spaces / leading/trailing whitespace
+  return out.replace(/\s{2,}/g, " ").trim();
+}
 
 /**
  * Rewrite the brand name in a product title for display.
  *
- * Prefers shopifyTitle when available (already uses "Tallowbourn").
+ * Prefers shopifyTitle when available (already uses Tallowbourn).
  * Falls back to amazonTitle with brand replacement.
  *
  * Returns "Untitled" if both inputs are empty/null.
@@ -22,16 +39,8 @@ export function displayTitle(
   amazonTitle?: string | null,
   shopifyTitle?: string | null,
 ): string {
-  // Prefer Shopify title (already branded correctly)
-  if (shopifyTitle && shopifyTitle.trim()) {
-    return shopifyTitle.trim();
-  }
-
-  // Rewrite Amazon title
-  if (amazonTitle && amazonTitle.trim()) {
-    return amazonTitle.trim().replace(BRAND_PATTERN, BRAND_NEW);
-  }
-
+  if (shopifyTitle?.trim()) return rewriteBrand(shopifyTitle.trim());
+  if (amazonTitle?.trim()) return rewriteBrand(amazonTitle.trim());
   return "Untitled";
 }
 

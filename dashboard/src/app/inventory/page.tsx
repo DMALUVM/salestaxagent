@@ -388,7 +388,7 @@ export default function InventoryPage() {
     const body = filtered
       .map(
         (r) =>
-          `"${r.sku}","${r.asin}","${r.product_name.replace(/"/g, '""')}",${r.fba_on_hand},${r.awd_on_hand},${r.tpl_available},${r.inbound},${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.flag}`,
+          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_on_hand},${r.awd_on_hand},${r.tpl_available},${r.inbound},${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.flag}`,
       )
       .join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });

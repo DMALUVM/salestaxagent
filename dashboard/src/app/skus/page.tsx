@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type { SalesBySku } from "@/lib/types";
 import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
+import { displayTitle } from "@/lib/display-title";
 import { LoadingState } from "@/components/loading";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
@@ -228,7 +229,7 @@ function DetailDrawer({
         </SheetHeader>
         <div className="mt-3 space-y-5">
           {sku.title && (
-            <p className="text-sm text-muted-foreground">{sku.title}</p>
+            <p className="text-sm text-muted-foreground">{displayTitle(sku.title)}</p>
           )}
 
           {/* Summary */}
@@ -486,7 +487,7 @@ export default function SkusPage() {
                         )}
                       </TableCell>
                       <TableCell className="hidden max-w-[180px] truncate text-sm md:table-cell">
-                        {a.title ?? "—"}
+                        {displayTitle(a.title) || "—"}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{fmt(a.units)}</TableCell>
                       <TableCell className="text-right tabular-nums">${fmtD(a.grossSales)}</TableCell>
