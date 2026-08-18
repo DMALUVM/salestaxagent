@@ -1049,6 +1049,83 @@ def parse_sales_traffic(content: str) -> dict:
     }
 
 
+MERCHANT_LISTINGS_REPORT = "GET_MERCHANT_LISTINGS_ALL_DATA"
+
+
+def _resolve_asin_titles(asin_rows: list[dict]) -> None:
+    """Resolve product titles for parent ASINs.  Best-effort, never blocks.
+
+    Priority:
+      1. Direct match in sku_velocity / fba_returns (child ASIN = parent)
+      2. Prefix match (parent shares first 6 chars with a child)
+      3. Merchant Listings report (fetches from SP-API; has parent ASINs)
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    missing = [r for r in asin_rows if not r.get("product_name")]
+    if not missing:
+        return
+
+    # Step 1+2: local title sources
+    try:
+        title_map: dict[str, str] = {}
+        for r in fetch_all("sku_velocity"):
+            if r.get("asin") and r.get("product_name"):
+                title_map[r["asin"]] = r["product_name"]
+        for r in fetch_all("fba_returns"):
+            if r.get("asin") and r.get("product_name") and r["asin"] not in title_map:
+                title_map[r["asin"]] = r["product_name"]
+
+        for row in asin_rows:
+            if row.get("product_name"):
+                continue
+            parent = row.get("parent_asin", "")
+            if parent in title_map:
+                row["product_name"] = title_map[parent]
+                continue
+            prefix = parent[:6]
+            for child_asin, title in title_map.items():
+                if child_asin.startswith(prefix):
+                    row["product_name"] = title.split(" - ")[0].strip()
+                    break
+    except Exception:
+        pass
+
+    # Step 3: fetch merchant listings for still-missing ASINs
+    still_missing = [r for r in asin_rows if not r.get("product_name")]
+    if not still_missing:
+        return
+
+    try:
+        from datetime import timedelta as _td
+        content = request_and_download(
+            MERCHANT_LISTINGS_REPORT,
+            date.today() - _td(days=1), date.today(),
+        )
+        listing_map: dict[str, str] = {}
+        reader = csv.DictReader(io.StringIO(content), delimiter="\t", quotechar='"')
+        if reader.fieldnames:
+            H = _build_header_lookup(reader.fieldnames)
+            for lrow in reader:
+                asin = _get(lrow, H, "asin1", "asin")
+                title = _get(lrow, H, "item-name", "title")
+                if asin and title:
+                    listing_map[asin] = title
+
+        resolved = 0
+        for row in still_missing:
+            parent = row.get("parent_asin", "")
+            if parent in listing_map:
+                row["product_name"] = listing_map[parent]
+                resolved += 1
+
+        if resolved:
+            log.info("Resolved %d ASIN titles from merchant listings report", resolved)
+    except Exception as e:
+        log.debug("Merchant listings title fetch failed (non-fatal): %s", e)
+
+
 def fetch_sales_traffic(
     start: date, end: date,
     dry_run: bool = False, on_poll: callable | None = None,
@@ -1069,41 +1146,24 @@ def fetch_sales_traffic(
     if dry_run:
         return summary
 
-    # Resolve parent ASIN titles from existing child ASIN data
+    # Resolve parent ASIN titles from existing data, then catalog fallback
     if parsed["asin_rows"]:
-        try:
-            title_map: dict[str, str] = {}
-            for r in fetch_all("sku_velocity"):
-                if r.get("asin") and r.get("product_name"):
-                    title_map[r["asin"]] = r["product_name"]
-            for r in fetch_all("fba_returns"):
-                if r.get("asin") and r.get("product_name") and r["asin"] not in title_map:
-                    title_map[r["asin"]] = r["product_name"]
-
-            for row in parsed["asin_rows"]:
-                parent = row.get("parent_asin", "")
-                # Direct match
-                if parent in title_map:
-                    row["product_name"] = title_map[parent]
-                    continue
-                # Prefix match: parent ASIN often shares first 6 chars with children
-                prefix = parent[:6]
-                for child_asin, title in title_map.items():
-                    if child_asin.startswith(prefix):
-                        # Shorten to product line (before variant)
-                        short = title.split(" - ")[0].strip()
-                        row["product_name"] = short
-                        break
-        except Exception:
-            pass  # title resolution is best-effort
+        _resolve_asin_titles(parsed["asin_rows"])
 
     inserted = 0
     if parsed["daily_rows"]:
         inserted += upsert_rows("amazon_sales_traffic", parsed["daily_rows"],
                                 on_conflict="date")
     if parsed["asin_rows"]:
-        inserted += upsert_rows("amazon_asin_traffic", parsed["asin_rows"],
-                                on_conflict="parent_asin")
+        try:
+            inserted += upsert_rows("amazon_asin_traffic", parsed["asin_rows"],
+                                    on_conflict="parent_asin")
+        except Exception:
+            # product_name column may not exist yet — retry without it
+            for row in parsed["asin_rows"]:
+                row.pop("product_name", None)
+            inserted += upsert_rows("amazon_asin_traffic", parsed["asin_rows"],
+                                    on_conflict="parent_asin")
 
     summary["rows_inserted"] = inserted
     return summary

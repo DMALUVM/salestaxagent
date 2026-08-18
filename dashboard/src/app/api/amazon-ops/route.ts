@@ -79,7 +79,19 @@ export async function GET() {
           }
         }
 
-        // No fake titles — if no match, ASIN shows as-is on the dashboard
+        // Step 3: Check inventory_restock for more ASIN→title mappings
+        if (!row.product_name) {
+          try {
+            const restock = await sb.from("inventory_restock").select("asin,product_name");
+            for (const r of restock.data ?? []) {
+              if (r.asin === parentAsin && r.product_name) {
+                row.product_name = r.product_name;
+                break;
+              }
+            }
+          } catch { /* ok */ }
+        }
+        // No fake titles — unresolved ASINs show raw code
       }
     }
 
