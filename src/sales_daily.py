@@ -6,16 +6,23 @@ Amazon uses America/Los_Angeles for day boundaries.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+import csv
+import io
+import logging
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from src.channels import SHOPIFY, AMAZON
 from src.db import upsert_rows, get_client
 
+log = logging.getLogger(__name__)
 
 TZ_SHOPIFY = ZoneInfo("America/New_York")
 TZ_AMAZON = ZoneInfo("America/Los_Angeles")
+NY = TZ_SHOPIFY
+LA = TZ_AMAZON
 
 
 # ── Helpers ────────────────────────────────────────────────
@@ -69,6 +76,32 @@ def _to_la_date(value: Any) -> date | None:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=TZ_AMAZON)
             return dt.astimezone(TZ_AMAZON).date()
+        except (ValueError, TypeError):
+            pass
+        try:
+            return date.fromisoformat(value[:10])
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def _to_tz_date(value: Any, tz: ZoneInfo) -> date | None:
+    """Convert a datetime string/object to a date in the given timezone."""
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.astimezone(tz).date()
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            dt = datetime.fromisoformat(value)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=tz)
+            return dt.astimezone(tz).date()
         except (ValueError, TypeError):
             pass
         try:
@@ -295,3 +328,154 @@ def fetch_daily(start: date, end: date) -> list[dict]:
         offset += page_size
 
     return all_rows
+
+
+# ── Auto-sync from SP-API / Shopify API ──────────────────
+
+
+def sync_amazon_daily(days: int = 7) -> dict:
+    """Fetch Amazon SP-API orders report and aggregate into sales_daily.
+
+    Uses the same orders report as velocity.  Includes ALL non-cancelled
+    orders (Pending, Unshipped, Shipped, etc.) with purchase-date in
+    America/Los_Angeles timezone — matching Seller Central day boundaries.
+
+    Aggregates to one row per (sale_date, channel) since sales_daily
+    has columns: sale_date, channel, gross_sales, order_count, source.
+    """
+    from src.amazon_sp.client import request_and_download
+    from src.amazon_sp.reports import (
+        ORDERS_REPORT, _date_chunks, _detect_delimiter,
+        _build_header_lookup, _get, _parse_money,
+    )
+
+    end = date.today()
+    start = end - timedelta(days=days)
+
+    # Track unique order IDs per day to avoid double-counting line items
+    day_orders: dict[str, set[str]] = defaultdict(set)
+    day_gross: dict[str, float] = defaultdict(float)
+
+    for c_start, c_end in _date_chunks(start, end):
+        try:
+            content = request_and_download(ORDERS_REPORT, c_start, c_end)
+        except Exception as e:
+            log.warning("sync_amazon_daily: chunk %s failed: %s", c_start, e)
+            continue
+
+        first_line = content.split("\n", 1)[0]
+        delimiter = _detect_delimiter(first_line)
+        reader = csv.DictReader(io.StringIO(content), delimiter=delimiter, quotechar='"')
+        if not reader.fieldnames:
+            continue
+
+        H = _build_header_lookup(reader.fieldnames)
+
+        for row in reader:
+            status = _get(row, H, "order-status").lower()
+            if status == "cancelled":
+                continue  # skip cancelled, include pending/shipped/etc.
+
+            pd_str = _get(row, H, "purchase-date")
+            sale_date = _to_tz_date(pd_str, LA)
+            if not sale_date:
+                continue
+
+            price = _parse_money(_get(row, H, "item-price"))
+            order_id = _get(row, H, "amazon-order-id", "order-id")
+
+            ds = sale_date.isoformat()
+            day_gross[ds] += price
+            if order_id:
+                day_orders[ds].add(order_id)
+
+    rows = []
+    for ds in sorted(day_gross):
+        rows.append({
+            "sale_date": ds,
+            "channel": AMAZON,
+            "gross_sales": round(day_gross[ds], 2),
+            "order_count": len(day_orders.get(ds, set())),
+            "source": "amazon_spapi",
+        })
+
+    if not rows:
+        return {"rows_upserted": 0, "days": 0, "total_gross": 0}
+
+    count = upsert_rows("sales_daily", rows, on_conflict="sale_date,channel")
+    total_gross = sum(r["gross_sales"] for r in rows)
+
+    return {
+        "rows_upserted": count,
+        "days": len(rows),
+        "total_gross": round(total_gross, 2),
+    }
+
+
+def sync_shopify_daily(days: int = 7) -> dict:
+    """Fetch Shopify orders via API and aggregate into sales_daily.
+
+    Uses America/New_York timezone for day boundaries.
+    Aggregates to one row per (sale_date, channel).
+    """
+    from src.config import settings
+    if not settings.shopify_enabled:
+        return {"rows_upserted": 0, "days": 0, "error": "Shopify not configured"}
+
+    import httpx
+    from src.shopify_auth import auth_headers
+
+    since = date.today() - timedelta(days=days)
+    base_url = f"https://{settings.shopify_shop_domain}/admin/api/2024-01/orders.json"
+    headers = auth_headers()
+    params = {
+        "status": "any",
+        "created_at_min": since.isoformat() + "T00:00:00",
+        "limit": "250",
+        "fields": "id,created_at,processed_at,total_price,financial_status",
+    }
+
+    orders: list[dict] = []
+    url: str | None = base_url
+
+    while url:
+        resp = httpx.get(url, headers=headers, params=params if url == base_url else None, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        orders.extend(data.get("orders", []))
+        link = resp.headers.get("link", "")
+        url = None
+        if 'rel="next"' in link:
+            for part in link.split(","):
+                if 'rel="next"' in part:
+                    url = part.split("<")[1].split(">")[0]
+                    break
+
+    # Aggregate to day level
+    day_gross: dict[str, float] = defaultdict(float)
+    day_orders: dict[str, int] = defaultdict(int)
+
+    for order in orders:
+        dt_str = order.get("processed_at") or order.get("created_at")
+        sale_date = _to_tz_date(dt_str, NY)
+        if not sale_date:
+            continue
+        ds = sale_date.isoformat()
+        day_gross[ds] += _safe_float(order.get("total_price"))
+        day_orders[ds] += 1
+
+    rows = []
+    for ds in sorted(day_gross):
+        rows.append({
+            "sale_date": ds,
+            "channel": SHOPIFY,
+            "gross_sales": round(day_gross[ds], 2),
+            "order_count": day_orders[ds],
+            "source": "shopify_api",
+        })
+
+    if not rows:
+        return {"rows_upserted": 0, "days": 0}
+
+    count = upsert_rows("sales_daily", rows, on_conflict="sale_date,channel")
+    return {"rows_upserted": count, "days": len(rows)}

@@ -506,6 +506,28 @@ def spapi_inventory(start_str, end_str, dry_run):
     _print_spapi_result("SP-API Inventory Ledger", result)
 
 
+@cli.command("sync-daily")
+@click.option("--days", default=7, help="Days back to sync")
+def sync_daily_cmd(days):
+    """Sync sales_daily from SP-API + Shopify (Amazon LA tz, pending included)."""
+    from src.sales_daily import sync_amazon_daily, sync_shopify_daily
+
+    click.echo(f"Syncing Amazon daily sales ({days}d, Pacific timezone, incl. pending)...")
+    try:
+        result = sync_amazon_daily(days=days)
+        click.echo(f"  Amazon: {result.get('rows_upserted', 0)} rows, "
+                   f"${result.get('total_gross', 0):,.2f}")
+    except Exception as e:
+        click.echo(f"  Amazon error: {e}")
+
+    click.echo(f"Syncing Shopify daily sales ({days}d, Eastern timezone)...")
+    try:
+        result = sync_shopify_daily(days=days)
+        click.echo(f"  Shopify: {result.get('rows_upserted', 0)} rows")
+    except Exception as e:
+        click.echo(f"  Shopify error: {e}")
+
+
 @cli.command("spapi-refresh")
 @click.option("--days", default=30, help="Number of days back to fetch (default 30)")
 @click.option("--dry-run", is_flag=True)
@@ -1905,6 +1927,23 @@ def _run_spapi_refresh():
             status="failed",
             error_message=str(e)[:500],
         )
+    # ── Sync sales_daily (Amazon + Shopify) ──
+    try:
+        from src.sales_daily import sync_amazon_daily
+        amz_daily = sync_amazon_daily(days=7)
+        print(f"[SP-API] {ts} Daily sales: {amz_daily.get('rows_upserted', 0)} rows, "
+              f"${amz_daily.get('total_gross', 0):,.0f}")
+    except Exception as e:
+        errors.append(f"Daily sales: {e}")
+        print(f"[SP-API] {ts} Daily sales error: {e}")
+
+    try:
+        from src.sales_daily import sync_shopify_daily
+        shop_daily = sync_shopify_daily(days=7)
+        print(f"[SP-API] {ts} Shopify daily: {shop_daily.get('rows_upserted', 0)} rows")
+    except Exception as e:
+        print(f"[SP-API] {ts} Shopify daily error: {e}")
+
     if errors:
         try:
             from src.alerts.telegram import send_telegram
