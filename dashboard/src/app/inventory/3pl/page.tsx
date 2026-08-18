@@ -64,17 +64,24 @@ export default function TplCostsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(true); setUploadMsg(null);
-    const text = await file.text();
-    // Save to incoming/3pl/ via upload API
-    const resp = await fetch("/api/upload", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename: file.name, content: text, category: "3pl" }),
-    });
-    if (resp.ok) {
-      setUploadMsg(`Uploaded ${file.name}. Run 'python -m src.main import-3pl incoming/3pl/${file.name}' to ingest.`);
-    } else {
-      setUploadMsg("Upload failed");
+    try {
+      const text = await file.text();
+      const resp = await fetch("/api/3pl-costs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, content: text }),
+      });
+      const result = await resp.json();
+      if (resp.ok && result.success) {
+        setUploadMsg(`Imported ${file.name}: ${result.months?.join(", ")} — ${result.monthly_count} months, ${result.fee_count} fees, ${result.detail_count} detail rows`);
+        // Refresh data
+        const fresh = await fetch("/api/3pl-costs").then((r) => r.json());
+        setData(fresh);
+      } else {
+        setUploadMsg(result.error || "Upload failed — unknown error");
+      }
+    } catch (err) {
+      setUploadMsg(`Upload error: ${err instanceof Error ? err.message : String(err)}`);
     }
     setUploading(false);
     e.target.value = "";
