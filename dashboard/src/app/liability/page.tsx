@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type {
   NexusStatus,
@@ -29,6 +29,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   DollarSign,
   AlertTriangle,
@@ -37,6 +46,8 @@ import {
   Info,
   CalendarClock,
   Download,
+  CheckCircle,
+  Save,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -164,6 +175,115 @@ interface StateLiability {
   shopify_all_time: number;
   shop_channel_all_time: number;
   amazon_all_time: number;
+  filing_status: "ok" | "due_soon" | "overdue" | "unknown";
+}
+
+// ---------------------------------------------------------------------------
+// Mark Filed dialog
+// ---------------------------------------------------------------------------
+
+function MarkFiledDialog({
+  row, open, onOpenChange, onFiled,
+}: {
+  row: StateLiability; open: boolean;
+  onOpenChange: (o: boolean) => void; onFiled: () => void;
+}) {
+  const [periodEnd, setPeriodEnd] = useState(row.next_due ? "" : "");
+  const [confirmation, setConfirmation] = useState("");
+  const [amount, setAmount] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Default period_end: try to derive from frequency
+    const ft = row.filed_through;
+    if (ft && row.frequency) {
+      const d = new Date(ft + "T00:00:00");
+      if (row.frequency === "monthly") d.setMonth(d.getMonth() + 1);
+      else if (row.frequency === "quarterly") d.setMonth(d.getMonth() + 3);
+      else if (row.frequency?.includes("semi")) d.setMonth(d.getMonth() + 6);
+      else if (row.frequency === "annual") d.setFullYear(d.getFullYear() + 1);
+      // period_end = last day of the derived month
+      const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+      setPeriodEnd(last.toISOString().slice(0, 10));
+    }
+    setConfirmation(""); setAmount(""); setNotes(""); setError(null);
+  }, [row, open]);
+
+  async function handleSave() {
+    if (!confirmation.trim()) { setError("Confirmation number is required"); return; }
+    if (!periodEnd) { setError("Period end date is required"); return; }
+    setSaving(true); setError(null);
+    try {
+      const resp = await fetch("/api/filing-events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          state_code: row.state_code,
+          period_start: row.filed_through
+            ? new Date(new Date(row.filed_through + "T00:00:00").getTime() + 86400000).toISOString().slice(0, 10)
+            : periodEnd.slice(0, 7) + "-01",
+          period_end: periodEnd,
+          confirmation_number: confirmation.trim(),
+          amount_reported: amount ? parseFloat(amount) : null,
+          notes: notes || null,
+        }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) { setError(result.error || "Failed"); setSaving(false); return; }
+      setSaving(false);
+      onOpenChange(false);
+      onFiled();
+    } catch (e) {
+      setError(String(e));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Mark Filed — {row.state_code} {row.state_name}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-2">
+          <div>
+            <label className="text-sm font-medium">Period End Date</label>
+            <Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} className="mt-1" />
+            <p className="mt-1 text-xs text-muted-foreground">Last day of the period you just filed (e.g. 2026-09-30 for Q3)</p>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Confirmation Number *</label>
+            <Input value={confirmation} onChange={(e) => setConfirmation(e.target.value)}
+              placeholder="State filing confirmation #" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Amount Reported</label>
+            <Input type="number" step="0.01" value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="Optional — tax amount reported" className="mt-1" />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Notes</label>
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional notes" rows={2} className="mt-1" />
+          </div>
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+              {error}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button onClick={handleSave} disabled={saving}>
+            <CheckCircle className="mr-1.5 h-3.5 w-3.5" />
+            {saving ? "Saving..." : "Mark as Filed"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +291,7 @@ interface StateLiability {
 // ---------------------------------------------------------------------------
 
 export default function LiabilityPage() {
-  const { data: nexus, loading: l1 } = useSupabaseQuery<NexusStatus>(
+  const { data: nexus, loading: l1, refetch: refetchNexus } = useSupabaseQuery<NexusStatus>(
     "nexus_status",
   );
   const { data: rules, loading: l2 } = useSupabaseQuery<StateRule>(
@@ -180,6 +300,7 @@ export default function LiabilityPage() {
   const { data: sales, loading: l3 } = useSupabaseQuery<SalesByState>(
     "sales_by_state",
   );
+  const [filingRow, setFilingRow] = useState<StateLiability | null>(null);
   const { data: filings, loading: l4 } = useSupabaseQuery<FilingEntry>(
     "filing_calendar",
     { orderBy: "due_date", ascending: true },
@@ -226,7 +347,7 @@ export default function LiabilityPage() {
       for (const s of sales) {
         if (s.state_code !== sc) continue;
         // P0-1: exclude quarantined sources (legacy Amazon CSV)
-        if (isQuarantinedSource((s as unknown as Record<string, unknown>).source as string)) continue;
+        if (isQuarantinedSource(s.source)) continue;
         const ch = normalizeChannel(s.channel);
         const pe = s.period_end ?? "";
         const amt = Number(s.gross_sales) || 0;
@@ -257,10 +378,23 @@ export default function LiabilityPage() {
         shopify_all_time: shopAll,
         shop_channel_all_time: shopChannelAll,
         amazon_all_time: amzAll,
+        filing_status: (() => {
+          if (!nd) return "unknown" as const;
+          if ((nd.days ?? 99) < 0) return "overdue" as const;
+          if ((nd.days ?? 99) <= 14) return "due_soon" as const;
+          return "ok" as const;
+        })(),
       });
     }
 
-    rows.sort((a, b) => b.seller_est_tax - a.seller_est_tax);
+    rows.sort((a, b) => {
+      // Overdue first, then due_soon, then by est_tax desc
+      const statusOrder = { overdue: 0, due_soon: 1, unknown: 2, ok: 3 };
+      const sa = statusOrder[a.filing_status] ?? 3;
+      const sb2 = statusOrder[b.filing_status] ?? 3;
+      if (sa !== sb2) return sa - sb2;
+      return b.seller_est_tax - a.seller_est_tax;
+    });
     return rows;
   }, [nexus, sales, ruleMap, filings]);
 
@@ -436,6 +570,8 @@ export default function LiabilityPage() {
                       <TableHead className="text-right text-muted-foreground">
                         Amazon (ref)
                       </TableHead>
+                      <TableHead className="w-20">Status</TableHead>
+                      <TableHead className="w-16" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -547,6 +683,26 @@ export default function LiabilityPage() {
                             ? `$${fmt(row.amazon_since_filing)}`
                             : "$0.00"}
                         </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`text-[10px] ${
+                            row.filing_status === "overdue" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300" :
+                            row.filing_status === "due_soon" ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300" :
+                            row.filing_status === "ok" ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300" :
+                            ""
+                          }`}>
+                            {row.filing_status === "overdue" ? "OVERDUE" :
+                             row.filing_status === "due_soon" ? "DUE SOON" :
+                             row.filing_status === "ok" ? "OK" : "SET DATE"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {row.has_filed_through && (
+                            <Button variant="outline" size="sm" className="text-xs h-7"
+                              onClick={() => setFilingRow(row)}>
+                              <CheckCircle className="mr-1 h-3 w-3" /> Filed
+                            </Button>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
 
@@ -565,12 +721,24 @@ export default function LiabilityPage() {
                       <TableCell className="text-right tabular-nums text-muted-foreground">
                         ${fmt(totals.amazon)}
                       </TableCell>
+                      <TableCell />
+                      <TableCell />
                     </TableRow>
                   </TableBody>
                 </Table>
               </div>
             </CardContent>
           </Card>
+
+          {/* Mark Filed dialog */}
+          {filingRow && (
+            <MarkFiledDialog
+              row={filingRow}
+              open={!!filingRow}
+              onOpenChange={(o) => { if (!o) setFilingRow(null); }}
+              onFiled={() => { refetchNexus(); setFilingRow(null); }}
+            />
+          )}
 
           {/* Explanation */}
           <Card>

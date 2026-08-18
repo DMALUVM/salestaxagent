@@ -2014,19 +2014,27 @@ def _run_source_monitoring():
 
 def _run_daily_digest():
     """Send morning sales digest via Telegram."""
+    from src.db import job_start, job_finish
+    run_id = job_start("daily_digest")
     try:
         from src.alerts.daily_digest import send_digest
         result = send_digest()
         if result.get("sent"):
             print("[Digest] Sent")
+            job_finish(run_id, "success", "Sent")
         elif result.get("reason"):
             print(f"[Digest] Skipped: {result['reason']}")
+            job_finish(run_id, "success", f"Skipped: {result['reason']}")
     except Exception as e:
         print(f"[Digest] Error: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
 
 
 def _run_inventory_sync():
     """Daily inventory sync: FBA summaries + restock + AWD + velocity."""
+    from src.db import job_start, job_finish
+    run_id = job_start("inventory_sync")
+    errors = []
     try:
         from src.inventory.sync import sync_all
         results = sync_all()
@@ -2034,10 +2042,12 @@ def _run_inventory_sync():
             r = results.get(name, {})
             if "error" in r:
                 print(f"[Inventory] {name}: {r['error'][:100]}")
+                errors.append(f"{name}: {r['error'][:80]}")
             else:
                 print(f"[Inventory] {name}: {r.get('rows_total', 0)} rows")
     except Exception as e:
         print(f"[Inventory Sync] Error: {e}")
+        errors.append(str(e)[:200])
 
     try:
         from src.inventory.velocity import compute_velocity
@@ -2045,16 +2055,26 @@ def _run_inventory_sync():
         print(f"[Velocity] {r['skus']} SKUs, mult={r['avg_forward_mult']:.2f}")
     except Exception as e:
         print(f"[Velocity] Error: {e}")
+        errors.append(f"velocity: {e}")
+
+    if errors:
+        job_finish(run_id, "fail", "; ".join(errors))
+    else:
+        job_finish(run_id, "success", "FBA + AWD + restock + velocity synced")
 
 
 def _run_3pl_sync():
     """Daily 3PL inventory sync from Ship Sidekick."""
+    from src.db import job_start, job_finish
+    run_id = job_start("3pl_sync")
     try:
         from src.shipsidekick.client import sync_3pl
         r = sync_3pl()
         print(f"[3PL] {r['rows_total']} SKUs, {r['rows_inserted']} upserted")
+        job_finish(run_id, "success", f"{r['rows_total']} SKUs, {r['rows_inserted']} upserted")
     except Exception as e:
         print(f"[3PL] Error: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
 
 
 def _run_github_backup():
@@ -2074,6 +2094,9 @@ def _run_github_backup():
 
 def _run_cpa_exports():
     """Generate CPA exports (inventory presence + triage) and upload to Storage."""
+    from src.db import job_start, job_finish
+    run_id = job_start("cpa_exports")
+    cpa_errors = []
     try:
         from src.exports.inventory_presence import (
             build_markdown, build_csv, build_pdf, build_metadata, upload_exports,
@@ -2087,6 +2110,7 @@ def _run_cpa_exports():
         print(f"[CPA Export] Inventory presence: {ok}/{len(results)} files uploaded")
     except Exception as e:
         print(f"[CPA Export] Inventory presence error: {e}")
+        cpa_errors.append(f"inv presence: {e}")
 
     try:
         from src.exports.registration_triage import (
@@ -2118,6 +2142,7 @@ def _run_cpa_exports():
         print(f"[CPA Export] Registration triage: 3 files uploaded")
     except Exception as e:
         print(f"[CPA Export] Registration triage error: {e}")
+        cpa_errors.append(f"reg triage: {e}")
 
     try:
         from src.exports.economic_nexus_audit import build_audit, upload_exports as upload_econ
@@ -2128,6 +2153,12 @@ def _run_cpa_exports():
         print(f"[CPA Export] Economic nexus audit: {ok}/{len(results)} files, {len(exceeded)} exceeded")
     except Exception as e:
         print(f"[CPA Export] Economic nexus audit error: {e}")
+        cpa_errors.append(f"econ audit: {e}")
+
+    if cpa_errors:
+        job_finish(run_id, "fail", "; ".join(cpa_errors))
+    else:
+        job_finish(run_id, "success", "All CPA exports uploaded")
 
 
 def _run_job_worker():

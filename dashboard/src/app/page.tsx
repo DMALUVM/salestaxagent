@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSupabaseQuery, useSalesDaily } from "@/lib/hooks";
 import { isRegistered } from "@/lib/compliance-status";
@@ -108,6 +108,15 @@ export default function Pulse() {
     orderBy: "ingested_at",
     limit: 10,
   });
+
+  // B2: Job health
+  const [jobRuns, setJobRuns] = useState<Array<{ job_name: string; status: string; started_at: string; message: string | null }>>([]);
+  useEffect(() => {
+    if (!configured) return;
+    fetch("/api/job-runs").then((r) => r.json()).then((d) => {
+      if (d.runs) setJobRuns(d.runs);
+    }).catch(() => {});
+  }, [configured]);
   const { data: stateRules } = useSupabaseQuery<StateRule>("state_rules");
   const { data: salesByState } = useSupabaseQuery<SalesByState>("sales_by_state");
 
@@ -549,6 +558,30 @@ export default function Pulse() {
           </div>
         </CardContent>
       </Card>
+
+      {/* B2: Job health */}
+      {jobRuns.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium text-muted-foreground">Automation Health</CardTitle>
+          </CardHeader>
+          <CardContent className="p-3">
+            <div className="flex flex-wrap gap-3">
+              {jobRuns.map((j) => {
+                const ago = Math.round((Date.now() - new Date(j.started_at).getTime()) / 3600000);
+                const agoStr = ago < 1 ? "<1h" : ago < 24 ? `${ago}h` : `${Math.round(ago / 24)}d`;
+                return (
+                  <div key={j.job_name} className="flex items-center gap-1.5 text-xs" title={j.message || ""}>
+                    <span className={`h-2 w-2 rounded-full ${j.status === "success" ? "bg-emerald-500" : j.status === "fail" ? "bg-red-500" : "bg-amber-500"}`} />
+                    <span className="text-muted-foreground">{j.job_name.replace(/_/g, " ")}</span>
+                    <span className="tabular-nums text-muted-foreground/60">{agoStr}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* P0-5: Trust surface */}
       <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
