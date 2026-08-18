@@ -1021,6 +1021,32 @@ def plan_sku_cmd(sku, until_date, fba_min_days):
     click.echo(f"FBA gap: {max(total_demand - fba, 0):,}")
 
 
+@cli.command("import-forecast")
+@click.argument("file_path")
+@click.option("--dry-run", is_flag=True)
+def import_forecast_cmd(file_path, dry_run):
+    """Import holiday forecast from xlsx into forecast_weekly."""
+    from src.parsers.forecast_xlsx import import_forecast
+
+    if dry_run:
+        click.echo("DRY RUN\n")
+
+    result = import_forecast(file_path, dry_run=dry_run)
+    click.echo(f"File: {result['file']}")
+    click.echo(f"Variants: {', '.join(result['variants'])}")
+    click.echo(f"SKUs: {', '.join(result['skus'])}")
+    click.echo(f"Weeks: {result['weeks']}")
+    click.echo(f"Rows: {result['rows_total']} parsed, {result['rows_inserted']} inserted")
+
+    if dry_run:
+        # Show sample
+        from src.parsers.forecast_xlsx import parse_forecast
+        parsed = parse_forecast(file_path)
+        click.echo("\nSample rows:")
+        for r in parsed["rows"][:9]:
+            click.echo(f"  {r['sku']} {r['week_start']} {r['scenario']:<20} {r['units']:>8.0f}")
+
+
 @cli.command("filing-packet")
 @click.option("--state", default=None, help="Single state or all registered")
 @click.option("--out", default="exports/filings", help="Output directory")

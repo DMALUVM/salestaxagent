@@ -86,6 +86,7 @@ export default function PlanSkuPage() {
   const seasonality = (raw?.seasonality ?? []) as SeasonalityWeekly[];
   const awdList = (raw?.awd ?? []) as { sku: string; awd_on_hand: number }[];
   const tplList = (raw?.tpl ?? []) as { sku: string; available: number }[];
+  const forecastRows = (raw?.forecast ?? []) as { sku: string; week_start: string; scenario: string; units: number }[];
 
   const skuOptions = useMemo(() => {
     const set = new Set([
@@ -109,6 +110,17 @@ export default function PlanSkuPage() {
     const seasonMap = new Map<number, number>();
     for (const s of seasonality)
       seasonMap.set(Number(s.week), Number(s.multiplier));
+
+    // Holiday forecast: prefer imported weekly series when available
+    const skuForecast = forecastRows.filter((f) => f.sku === selectedSku);
+    const forecastMap = new Map<string, number>(); // week_start → units
+    const scenarioKey = "correction_factor"; // default scenario
+    for (const f of skuForecast) {
+      if (f.scenario === scenarioKey) {
+        forecastMap.set(f.week_start, Number(f.units));
+      }
+    }
+    const hasForecast = forecastMap.size > 0;
 
     const fba =
       Number(snap?.fulfillable ?? 0) +
@@ -158,7 +170,13 @@ export default function PlanSkuPage() {
         ) || 1;
       const clampedWk = ((isoWk - 1) % 52) + 1;
       const mult = seasonMap.get(clampedWk) ?? 1.0;
-      const demand = Math.round(baseDaily * days * mult * stress);
+
+      // Use imported forecast if available for this week, else velocity × seasonality
+      const weekKey = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+      const forecastUnits = forecastMap.get(weekKey);
+      const demand = forecastUnits != null
+        ? Math.round(forecastUnits * stress)
+        : Math.round(baseDaily * days * mult * stress);
       totalDemand += demand;
       remaining -= demand;
 
