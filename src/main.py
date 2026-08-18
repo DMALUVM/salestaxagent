@@ -528,6 +528,69 @@ def sync_daily_cmd(days):
         click.echo(f"  Shopify error: {e}")
 
 
+@cli.command("spapi-probe")
+def spapi_probe_cmd():
+    """Probe which SP-API report types are authorized with current credentials."""
+    from datetime import date as d, timedelta
+    from src.amazon_sp.client import create_report
+
+    end = d.today() - timedelta(days=1)
+    start = end - timedelta(days=7)
+
+    reports = [
+        ("GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL", "All Orders"),
+        ("GET_LEDGER_DETAIL_VIEW_DATA", "Inventory Ledger"),
+        ("GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA", "FBA Customer Returns"),
+        ("GET_FBA_STORAGE_FEE_CHARGES_DATA", "FBA Storage Fees"),
+        ("GET_FBA_REIMBURSEMENTS_DATA", "FBA Reimbursements"),
+        ("GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA", "FBA Fee Preview"),
+        ("GET_SALES_AND_TRAFFIC_REPORT", "Sales & Traffic (BA)"),
+        ("GET_BRAND_ANALYTICS_REPEAT_PURCHASE_REPORT", "Repeat Purchase (BA)"),
+        ("GET_FBA_FULFILLMENT_CUSTOMER_SHIPMENT_SALES_DATA", "FBA Shipment Sales"),
+        ("GET_FBA_SNS_FORECAST_DATA", "Subscribe & Save Forecast"),
+        ("GET_FBA_SNS_PERFORMANCE_DATA", "Subscribe & Save Performance"),
+    ]
+
+    click.echo(f"Probing {len(reports)} report types ({start} to {end})")
+    click.echo(f"{'Report':<40} {'Status'}")
+    click.echo("-" * 55)
+    for rt, label in reports:
+        try:
+            create_report(rt, start, end)
+            click.echo(f"  {label:<40} OK")
+        except Exception as e:
+            err = str(e)
+            status = "403 (not authorized)" if "403" in err or "Forbidden" in err else f"ERROR: {err[:40]}"
+            click.echo(f"  {label:<40} {status}")
+
+
+@cli.command("spapi-returns")
+@click.option("--days", default=30, help="Days back to fetch")
+@click.option("--dry-run", is_flag=True)
+def spapi_returns_cmd(days, dry_run):
+    """Fetch FBA customer returns via SP-API."""
+    from datetime import date as d, timedelta
+    from src.amazon_sp.reports import fetch_fba_returns
+
+    end = d.today() - timedelta(days=1)
+    start = end - timedelta(days=days)
+    if dry_run:
+        click.echo("DRY RUN\n")
+
+    click.echo(f"Fetching FBA returns: {start} to {end}")
+
+    def _on_poll(status, elapsed):
+        click.echo(f"  [{elapsed}s] {status}")
+
+    result = fetch_fba_returns(start, end, dry_run=dry_run, on_poll=_on_poll)
+    click.echo(f"Returns: {result['rows_parsed']} parsed, {result['rows_inserted']} inserted")
+    click.echo(f"SKUs: {', '.join(result['skus_found'][:10])}")
+    if result["reasons"]:
+        click.echo("Reasons:")
+        for reason, count in sorted(result["reasons"].items(), key=lambda x: -x[1]):
+            click.echo(f"  {reason}: {count}")
+
+
 @cli.command("spapi-refresh")
 @click.option("--days", default=30, help="Number of days back to fetch (default 30)")
 @click.option("--dry-run", is_flag=True)
@@ -1971,6 +2034,14 @@ def _run_spapi_refresh():
         print(f"[SP-API] {ts} Shopify daily: {shop_daily.get('rows_upserted', 0)} rows")
     except Exception as e:
         print(f"[SP-API] {ts} Shopify daily error: {e}")
+
+    # FBA returns (30d window, once daily)
+    try:
+        from src.amazon_sp.reports import fetch_fba_returns
+        returns = fetch_fba_returns(start, end)
+        print(f"[SP-API] {ts} Returns: {returns.get('rows_inserted', 0)} rows")
+    except Exception as e:
+        print(f"[SP-API] {ts} Returns error: {e}")
 
     if errors:
         job_finish(run_id, "fail", "; ".join(errors[:3]))

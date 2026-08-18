@@ -24,6 +24,7 @@ from src.amazon_sp.client import request_and_download
 ORDERS_REPORT = "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL"
 INVENTORY_LEDGER_REPORT = "GET_LEDGER_DETAIL_VIEW_DATA"
 FBA_SHIPMENTS_REPORT = "GET_AMAZON_FULFILLED_SHIPMENTS_DATA_GENERAL"
+FBA_RETURNS_REPORT = "GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA"
 
 SOURCE_LABEL = "amazon_spapi"
 
@@ -867,6 +868,108 @@ def fetch_inventory(
             "unknown_fcs": sorted(parsed["unknown_fcs"]),
         },
         rows_affected=inserted,
+    )
+
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# FBA Customer Returns
+# ---------------------------------------------------------------------------
+
+def parse_fba_returns(content: str) -> dict:
+    """Parse GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA report."""
+    result: dict = {
+        "rows_total": 0, "rows_parsed": 0, "rows_skipped": 0,
+        "warnings": [], "return_records": [],
+        "skus_found": set(), "reasons": {},
+    }
+
+    first_line = content.split("\n", 1)[0]
+    delimiter = _detect_delimiter(first_line)
+    reader = csv.DictReader(io.StringIO(content), delimiter=delimiter, quotechar='"')
+    if not reader.fieldnames:
+        return result
+
+    H = _build_header_lookup(reader.fieldnames)
+    from collections import Counter
+    reason_counts: Counter = Counter()
+
+    for row in reader:
+        result["rows_total"] += 1
+        return_date = _get(row, H, "return-date")
+        order_id = _get(row, H, "order-id")
+        sku = _get(row, H, "sku")
+        if not return_date or not order_id or not sku:
+            result["rows_skipped"] += 1
+            continue
+
+        try:
+            qty = max(int(float(_get(row, H, "quantity") or "1")), 1)
+        except (ValueError, TypeError):
+            qty = 1
+
+        reason = _get(row, H, "reason")
+        reason_counts[reason] += qty
+
+        result["return_records"].append({
+            "return_date": return_date,
+            "order_id": order_id,
+            "sku": sku,
+            "asin": _get(row, H, "asin") or None,
+            "fnsku": _get(row, H, "fnsku") or None,
+            "product_name": _get(row, H, "product-name") or None,
+            "quantity": qty,
+            "fulfillment_center": _get(row, H, "fulfillment-center-id") or None,
+            "disposition": _get(row, H, "detailed-disposition") or None,
+            "reason": reason or None,
+            "status": _get(row, H, "status") or None,
+            "customer_comments": _get(row, H, "customer-comments") or None,
+            "source_file": SOURCE_LABEL,
+        })
+        result["skus_found"].add(sku)
+        result["rows_parsed"] += 1
+
+    result["reasons"] = dict(reason_counts)
+    result["skus_found"] = sorted(result["skus_found"])
+    return result
+
+
+def fetch_fba_returns(
+    start: date, end: date,
+    dry_run: bool = False, on_poll: callable | None = None,
+) -> dict:
+    """Fetch FBA returns report and upsert into fba_returns."""
+    content = request_and_download(FBA_RETURNS_REPORT, start, end, on_poll=on_poll)
+    parsed = parse_fba_returns(content)
+
+    summary = {
+        "report_type": "fba_returns",
+        "period": f"{start} to {end}",
+        "rows_total": parsed["rows_total"],
+        "rows_parsed": parsed["rows_parsed"],
+        "rows_skipped": parsed["rows_skipped"],
+        "skus_found": parsed["skus_found"],
+        "reasons": parsed["reasons"],
+        "dry_run": dry_run,
+        "rows_inserted": 0,
+    }
+
+    if dry_run or not parsed["return_records"]:
+        return summary
+
+    inserted = upsert_rows(
+        "fba_returns", parsed["return_records"],
+        on_conflict="return_date,order_id,sku,quantity,reason",
+    )
+    summary["rows_inserted"] = inserted
+
+    log_ingestion(
+        filename=f"spapi_returns_{start}_{end}",
+        file_type="amazon_returns",
+        rows_total=parsed["rows_total"],
+        rows_inserted=inserted,
+        rows_skipped=parsed["rows_skipped"],
     )
 
     return summary

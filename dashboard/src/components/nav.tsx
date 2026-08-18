@@ -19,6 +19,7 @@ import {
   ListChecks,
   TrendingUp,
   Warehouse,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -41,6 +42,7 @@ const primaryLinks: NavItem[] = [
 ];
 
 const monitorLinks: NavItem[] = [
+  { href: "/inventory/returns", label: "FBA Returns", icon: RotateCcw },
   { href: "/inventory/3pl", label: "3PL Costs", icon: Package },
   { href: "/sales-map", label: "Sales Map", icon: MapPinned },
   { href: "/skus", label: "SKU Performance", icon: Package },
