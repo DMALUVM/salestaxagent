@@ -152,6 +152,35 @@ def log_ingestion(filename: str, file_type: str, file_hash: str | None = None,
 
 # ── Supabase Storage helpers ───────────────────────────────
 
+def job_start(job_name: str) -> str | None:
+    """Record a job starting. Returns the row ID for job_finish()."""
+    try:
+        result = get_client().table("job_runs").insert({
+            "job_name": job_name,
+            "status": "running",
+        }).execute()
+        return result.data[0]["id"] if result.data else None
+    except Exception:
+        return None
+
+
+def job_finish(run_id: str | None, status: str = "success",
+               message: str | None = None, stats: dict | None = None) -> None:
+    """Mark a job run as finished."""
+    if not run_id:
+        return
+    try:
+        from datetime import datetime, timezone
+        get_client().table("job_runs").update({
+            "status": status,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "message": (message or "")[:1000] if message else None,
+            "stats": stats,
+        }).eq("id", run_id).execute()
+    except Exception:
+        pass  # best-effort — don't crash the job
+
+
 def ensure_storage_bucket(bucket: str) -> None:
     """Create a private storage bucket if it doesn't exist."""
     client = get_client()

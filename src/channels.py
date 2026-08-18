@@ -117,6 +117,36 @@ def is_seller_responsible(channel: str) -> bool:
     return c == SHOPIFY  # only Online Store / web orders
 
 
+# ---------------------------------------------------------------------------
+# Source-of-truth policy  (P0-1)
+#
+# Amazon Custom Combined Tax is QUARANTINED.  It may remain in the DB for
+# audit but must never contribute to nexus / liability math.  SP-API
+# (amazon_spapi) is the single authoritative Amazon source.
+# ---------------------------------------------------------------------------
+
+QUARANTINED_SOURCES = frozenset({
+    "amazon_custom_combined_tax",
+    "amazon_tax_report",
+})
+
+
+def is_quarantined_source(source: str | None) -> bool:
+    """True if the source string belongs to the quarantine list.
+
+    Quarantined sources must NOT feed nexus or liability calculations.
+    They may remain in the DB for historical audit.
+    """
+    if not source:
+        return False
+    return source.strip().lower() in QUARANTINED_SOURCES
+
+
+def sources_for_nexus_and_liability() -> list[str]:
+    """Canonical list of non-quarantined Amazon + Shopify sources."""
+    return ["amazon_spapi", "shopify_api", "shopify"]
+
+
 def display_label(channel: str) -> str:
     """Human-readable label for a channel."""
     canon = normalize_channel(channel)

@@ -535,22 +535,31 @@ export default function Pulse() {
         </Card>
       </div>
 
-      {/* ── Data health footer ── */}
+      {/* ── Data + job health ── */}
       <Card>
-        <CardContent className="flex flex-wrap items-center justify-between gap-4 p-3 text-xs text-muted-foreground">
-          <div className="flex flex-wrap gap-4">
-            <span>Shopify: <span className={sales.shopifyStale ? "text-amber-500 font-medium" : ""}>{sales.maxShopifyDate || "never"}</span></span>
-            <span>&middot;</span>
-            <span>Amazon: <span className={sales.amazonStale ? "text-amber-500 font-medium" : ""}>{sales.maxAmazonDate || "never"}</span></span>
-            {(sales.shopifyStale || sales.amazonStale) && <span className="text-amber-500">Data may be stale (&gt;36h)</span>}
+        <CardContent className="p-3 text-xs text-muted-foreground space-y-1.5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap gap-4">
+              <span>Shopify: <span className={sales.shopifyStale ? "text-amber-500 font-medium" : ""}>{sales.maxShopifyDate || "never"}</span></span>
+              <span>&middot;</span>
+              <span>Amazon: <span className={sales.amazonStale ? "text-amber-500 font-medium" : ""}>{sales.maxAmazonDate || "never"}</span></span>
+              {(sales.shopifyStale || sales.amazonStale) && <span className="text-amber-500">Data may be stale (&gt;36h)</span>}
+            </div>
+            <Link href="/data" className="text-xs font-medium text-primary hover:underline">Data &amp; Export</Link>
           </div>
-          <Link href="/data" className="text-xs font-medium text-primary hover:underline">Data &amp; Export</Link>
         </CardContent>
       </Card>
 
-      <p className="text-center text-[11px] text-muted-foreground/60">
-        Monitoring aid — not legal or tax advice.
-      </p>
+      {/* P0-5: Trust surface */}
+      <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
+        <span>
+          This is a monitoring and research aid, not legal or tax advice.
+          Sales channels: Shopify (seller-responsible) and Amazon (marketplace-remitted, reference only).
+          Tax rates are state-level approximations; local surcharges may apply.
+          Amazon Custom Combined Tax data is quarantined from calculations.
+          Consult a qualified CPA before acting on any position.
+        </span>
+      </div>
     </div>
   );
 }

@@ -1745,10 +1745,11 @@ def run():
 
 def _run_shopify_poll():
     from src.parsers.shopify_orders import fetch_shopify_orders_api
-    from src.db import log_ingestion
+    from src.db import log_ingestion, job_start, job_finish
     from datetime import datetime, timezone
     import time
 
+    run_id = job_start("shopify_poll")
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     attempts = 0
     last_err = None
@@ -1768,6 +1769,8 @@ def _run_shopify_poll():
                 rows_inserted=inserted,
                 status="success",
             )
+            job_finish(run_id, "success", f"{orders} orders, {inserted} rows",
+                       {"orders": orders, "rows_inserted": inserted})
             return  # success — done
         except Exception as e:
             last_err = e
@@ -1786,6 +1789,7 @@ def _run_shopify_poll():
         status="failed",
         error_message=err_text,
     )
+    job_finish(run_id, "fail", err_text)
 
 
 def _run_daily_analysis():
@@ -1793,7 +1797,7 @@ def _run_daily_analysis():
     a SINGLE Telegram summary.  Dedicated threshold-crossed alerts are
     sent only for states that newly exceed their threshold on THIS run.
     """
-    from src.db import fetch_all
+    from src.db import fetch_all, job_start, job_finish
     from src.engines.physical_nexus import evaluate_physical_nexus
     from src.engines.economic_nexus import evaluate_economic_nexus
     from src.calendar.filing_calendar import get_upcoming_deadlines
@@ -1804,6 +1808,7 @@ def _run_daily_analysis():
     )
     from datetime import date
 
+    run_id = job_start("daily_analysis")
     try:
         # Snapshot which states had economic nexus BEFORE this run
         prior_econ = {
@@ -1869,9 +1874,12 @@ def _run_daily_analysis():
               f"Economic exceeded: {len(current_econ)}, "
               f"Newly crossed: {newly_crossed}, "
               f"Overdue: {len(overdue)}")
+        job_finish(run_id, "success",
+                   f"Phys {len(phys.get('nexus_states', []))}, Econ {len(current_econ)}, Overdue {len(overdue)}")
 
     except Exception as e:
         print(f"[Daily Analysis] Error: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
         try:
             send_telegram(f"🚨 <b>Daily Analysis Failed</b>\n\n{str(e)[:300]}")
         except Exception:
@@ -1896,8 +1904,9 @@ def _run_deadline_check():
 def _run_spapi_refresh():
     from datetime import date, timedelta, datetime, timezone
     from src.amazon_sp.reports import fetch_orders, fetch_inventory
-    from src.db import log_ingestion
+    from src.db import log_ingestion, job_start, job_finish
 
+    run_id = job_start("spapi_refresh")
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=7)
@@ -1964,6 +1973,7 @@ def _run_spapi_refresh():
         print(f"[SP-API] {ts} Shopify daily error: {e}")
 
     if errors:
+        job_finish(run_id, "fail", "; ".join(errors[:3]))
         try:
             from src.alerts.telegram import send_telegram
             send_telegram(
@@ -1972,6 +1982,8 @@ def _run_spapi_refresh():
             )
         except Exception:
             pass
+    else:
+        job_finish(run_id, "success", f"Orders + inventory + daily sales synced")
 
 
 def _run_source_monitoring():

@@ -10,6 +10,7 @@ import type {
 } from "@/lib/types";
 import {
   normalizeChannel,
+  isQuarantinedSource,
   SHOPIFY,
   SHOPIFY_SHOP,
   AMAZON,
@@ -224,6 +225,8 @@ export default function LiabilityPage() {
 
       for (const s of sales) {
         if (s.state_code !== sc) continue;
+        // P0-1: exclude quarantined sources (legacy Amazon CSV)
+        if (isQuarantinedSource((s as unknown as Record<string, unknown>).source as string)) continue;
         const ch = normalizeChannel(s.channel);
         const pe = s.period_end ?? "";
         const amt = Number(s.gross_sales) || 0;
@@ -305,11 +308,11 @@ export default function LiabilityPage() {
         <div className="space-y-1 text-sm text-amber-800 dark:text-amber-300">
           <p className="font-medium">Estimate only &mdash; not for filing</p>
           <p className="text-xs text-amber-700 dark:text-amber-400">
-            Base state-level rates, no local surcharges. Amazon collects and
-            remits on its orders &mdash; those are{" "}
-            <strong>not your liability</strong>. Excludes Shop channel orders
-            where Shopify collects and remits tax. Consult your CPA for
-            filing-ready numbers.
+            <strong>Methodology:</strong> Seller-responsible Shopify Online Store
+            sales &times; state base rate. Amazon and Shop channel are marketplace-
+            remitted (shown for reference, not your liability). Local surcharges not
+            included. Legacy Amazon Custom Combined Tax data is quarantined and
+            excluded. Consult your CPA for filing-ready numbers.
           </p>
         </div>
       </div>

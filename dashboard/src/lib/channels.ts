@@ -59,6 +59,24 @@ export function channelLabel(channel: string): string {
   return channel;
 }
 
+// ---------------------------------------------------------------------------
+// Source-of-truth policy  (P0-1)
+//
+// Amazon Custom Combined Tax is QUARANTINED. SP-API is primary.
+// Quarantined sources must NOT feed nexus or liability calculations.
+// ---------------------------------------------------------------------------
+
+const QUARANTINED_SOURCES = new Set([
+  "amazon_custom_combined_tax",
+  "amazon_tax_report",
+]);
+
+/** True if this source is quarantined from nexus/liability math. */
+export function isQuarantinedSource(source: string | null | undefined): boolean {
+  if (!source) return false;
+  return QUARANTINED_SOURCES.has(source.trim().toLowerCase());
+}
+
 /** Human-readable label for a file_type from ingestion_log. */
 export function fileTypeLabel(fileType: string): string {
   const labels: Record<string, string> = {

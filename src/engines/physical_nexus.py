@@ -188,7 +188,8 @@ def evaluate_physical_nexus() -> dict:
         if existing:
             for keep_field in (
                 "is_registered", "registration_date", "assigned_frequency",
-                "last_filed_through", "has_economic_nexus", "economic_nexus_since",
+                "last_filed_through", "account_number",
+                "has_economic_nexus", "economic_nexus_since",
                 "economic_progress_amount", "economic_progress_transactions",
                 "economic_progress_percent", "compliance_resolved",
                 "compliance_resolved_at", "compliance_hidden", "compliance_notes",
@@ -257,7 +258,8 @@ def evaluate_physical_nexus() -> dict:
             if existing:
                 for keep_field in (
                     "is_registered", "registration_date", "assigned_frequency",
-                    "last_filed_through", "has_economic_nexus", "economic_nexus_since",
+                    "last_filed_through", "account_number",
+                    "has_economic_nexus", "economic_nexus_since",
                     "economic_progress_amount", "economic_progress_transactions",
                     "economic_progress_percent", "compliance_resolved",
                     "compliance_resolved_at", "compliance_hidden", "compliance_notes",

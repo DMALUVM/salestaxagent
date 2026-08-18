@@ -107,8 +107,17 @@ def evaluate_economic_nexus(reference_date: date | None = None) -> dict:
     # never discard records that a state might still count.
     global_lookback_start = min(lookback_windows.values())
 
+    # P0-1: Hard-exclude quarantined sources (legacy Amazon CSV) before
+    # any aggregation.  SP-API is the single authoritative Amazon source.
+    from src.channels import is_quarantined_source
+    sales_records = [
+        r for r in sales_records
+        if not is_quarantined_source(r.get("source"))
+    ]
+
     # Deduplicate: prefer amazon_spapi over amazon_custom_combined_tax
     # for the same (state, channel, period) to avoid double-counting.
+    # (Mostly a no-op now that quarantined sources are pre-filtered.)
     sales_records = _dedup_sales_records(sales_records)
 
     # First pass: bucket every record by state, filtering only by the
@@ -302,6 +311,8 @@ def evaluate_economic_nexus(reference_date: date | None = None) -> dict:
                 nexus_row["registration_date"] = existing.get("registration_date")
                 nexus_row["assigned_frequency"] = existing.get("assigned_frequency")
                 nexus_row["last_filed_through"] = existing.get("last_filed_through")
+            if existing.get("account_number"):
+                nexus_row["account_number"] = existing["account_number"]
             for keep_field in (
                 "compliance_resolved", "compliance_resolved_at",
                 "compliance_hidden", "compliance_notes",

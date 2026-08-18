@@ -479,6 +479,14 @@ function CPAExportsCard() {
       <CardContent className="space-y-4">
         <Disclaimer />
 
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+          <span>
+            Amazon Custom Combined Tax CSV data is <strong>quarantined</strong> from nexus
+            and liability calculations. SP-API (amazon_spapi) is the authoritative Amazon source.
+            Legacy CSV rows remain in the database for audit reference only.
+          </span>
+        </div>
+
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
