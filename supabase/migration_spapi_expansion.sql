@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS amazon_sales_traffic (
 CREATE TABLE IF NOT EXISTS amazon_asin_traffic (
   parent_asin text NOT NULL,
   child_asin text,
+  product_name text,
   units_ordered integer DEFAULT 0,
   ordered_product_sales numeric DEFAULT 0,
   sessions integer DEFAULT 0,

@@ -19,6 +19,7 @@ interface TrafficDay {
 }
 interface AsinTraffic {
   parent_asin: string; child_asin: string | null;
+  product_name: string | null;
   units_ordered: number; ordered_product_sales: number;
   sessions: number; unit_session_pct: number; buy_box_pct: number;
 }
@@ -190,13 +191,13 @@ export default function AmazonOpsPage() {
               {asinTraffic.length > 0 && (
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">ASIN Performance (period)</CardTitle>
+                    <CardTitle className="text-sm font-medium">Product Performance (period)</CardTitle>
                   </CardHeader>
                   <CardContent className="p-0 overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>ASIN</TableHead>
+                          <TableHead>Product</TableHead>
                           <TableHead className="text-right">Units</TableHead>
                           <TableHead className="text-right">Sales</TableHead>
                           <TableHead className="text-right">Sessions</TableHead>
@@ -206,7 +207,12 @@ export default function AmazonOpsPage() {
                       <TableBody>
                         {asinTraffic.map((a) => (
                           <TableRow key={a.parent_asin}>
-                            <TableCell className="font-medium text-xs">{a.parent_asin}</TableCell>
+                            <TableCell>
+                              <div className="font-medium text-sm">
+                                {a.product_name || a.parent_asin}
+                              </div>
+                              <span className="text-[10px] text-muted-foreground">{a.parent_asin}</span>
+                            </TableCell>
                             <TableCell className="text-right tabular-nums">{fmt(a.units_ordered)}</TableCell>
                             <TableCell className="text-right tabular-nums">${fmtD(a.ordered_product_sales)}</TableCell>
                             <TableCell className="text-right tabular-nums">{fmt(a.sessions)}</TableCell>

@@ -1069,6 +1069,34 @@ def fetch_sales_traffic(
     if dry_run:
         return summary
 
+    # Resolve parent ASIN titles from existing child ASIN data
+    if parsed["asin_rows"]:
+        try:
+            title_map: dict[str, str] = {}
+            for r in fetch_all("sku_velocity"):
+                if r.get("asin") and r.get("product_name"):
+                    title_map[r["asin"]] = r["product_name"]
+            for r in fetch_all("fba_returns"):
+                if r.get("asin") and r.get("product_name") and r["asin"] not in title_map:
+                    title_map[r["asin"]] = r["product_name"]
+
+            for row in parsed["asin_rows"]:
+                parent = row.get("parent_asin", "")
+                # Direct match
+                if parent in title_map:
+                    row["product_name"] = title_map[parent]
+                    continue
+                # Prefix match: parent ASIN often shares first 6 chars with children
+                prefix = parent[:6]
+                for child_asin, title in title_map.items():
+                    if child_asin.startswith(prefix):
+                        # Shorten to product line (before variant)
+                        short = title.split(" - ")[0].strip()
+                        row["product_name"] = short
+                        break
+        except Exception:
+            pass  # title resolution is best-effort
+
     inserted = 0
     if parsed["daily_rows"]:
         inserted += upsert_rows("amazon_sales_traffic", parsed["daily_rows"],
