@@ -80,10 +80,12 @@ def parse_forecast(file_path: str | Path) -> dict:
     rows: list[dict] = []
     source = path.name
 
+    # Only parse the 2026 forecast section (rows 4 until first blank date)
+    # The 2025 historical section has a different column layout
     for r in range(4, ws.max_row + 1):
         date_val = ws.cell(r, 1).value
         if not date_val:
-            continue  # skip totals/empty
+            break  # end of 2026 section (totals row or blank)
 
         # Parse date
         if isinstance(date_val, datetime):
