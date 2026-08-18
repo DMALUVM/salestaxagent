@@ -196,13 +196,17 @@ export default function InventoryPage() {
       seasMap.set(sw.week, sw.multiplier);
     }
 
-    // Forecast lookup: {sku: {YYYY-MM: weekly_units}}
-    // Aggregate forecast_weekly (correction_factor) by month for demand override
+    // Forecast lookup: {sku: {YYYY-MM: monthly_units}}
+    // Aggregate forecast_weekly (correction_factor) by month for demand override.
+    // Also map 2026-01 → 2027-01 since forecast xlsx uses 2026 dates for
+    // what is actually the following January's demand.
     const fcMonthly = new Map<string, Map<string, number>>();
     for (const f of forecasts) {
       if (f.scenario !== "correction_factor") continue;
-      const m = f.week_start?.slice(0, 7);
+      let m = f.week_start?.slice(0, 7);
       if (!m) continue;
+      // Re-key 2026-01 as 2027-01 (January following the holiday season)
+      if (m === "2026-01") m = "2027-01";
       if (!fcMonthly.has(f.sku)) fcMonthly.set(f.sku, new Map());
       const skuMap = fcMonthly.get(f.sku)!;
       skuMap.set(m, (skuMap.get(m) ?? 0) + Number(f.units));
