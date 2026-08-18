@@ -200,6 +200,24 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
     except Exception:
         pass
 
+    # C4: Failed job_runs in last 24h
+    try:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        job_rows = fetch_all("job_runs")
+        cutoff = (_dt.now(_tz.utc) - _td(hours=24)).isoformat()
+        failed_jobs = [
+            j for j in job_rows
+            if j.get("status") == "fail"
+            and (j.get("started_at") or "") > cutoff
+        ]
+        if failed_jobs:
+            parts.append("")
+            parts.append("<b>Failed Jobs (24h):</b>")
+            for j in failed_jobs[:5]:
+                parts.append(f"  ❌ {j['job_name']}: {(j.get('message') or 'unknown')[:80]}")
+    except Exception:
+        pass
+
     parts.append("")
     parts.append(f"<i>{ref.isoformat()} -- monitoring aid, not tax advice.</i>")
 

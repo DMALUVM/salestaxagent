@@ -264,7 +264,15 @@ export default function Pulse() {
       const reason = r.has_economic_nexus ? "economic crossed" : r.fba_present ? "T1 FBA + direct" : "home/3PL";
       items.push({ label: `${r.state_code} — register (${reason})`, href: "/registrations" });
     }
-    if (od.length > 0) items.push({ label: `${od.length} overdue filing${od.length > 1 ? "s" : ""}`, href: "/filings" });
+    if (od.length > 0) items.push({ label: `${od.length} overdue filing${od.length > 1 ? "s" : ""}`, href: "/liability" });
+    // Due-soon filings (next 14 days)
+    const dueSoon = validPending.filter((f) => {
+      const days = Math.ceil((new Date(f.due_date).getTime() - Date.now()) / 86400000);
+      return days >= 0 && days <= 14;
+    });
+    if (dueSoon.length > 0 && od.length === 0) {
+      items.push({ label: `${dueSoon.length} filing${dueSoon.length > 1 ? "s" : ""} due within 14d`, href: "/liability" });
+    }
     for (const r of recs.filter((r) => r.recommendation === "REVIEW").slice(0, 2))
       items.push({ label: `${r.state_code} — review with CPA`, href: "/registrations" });
 
@@ -437,7 +445,7 @@ export default function Pulse() {
         <Card className={actionCount > 0 ? "border-amber-500/40" : ""}>
           <CardContent className="p-4">
             <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Actions</p>
-            <Link href={overdue.length > 0 ? "/filings" : "/registrations"}>
+            <Link href={overdue.length > 0 ? "/liability" : "/registrations"}>
               <p className={`mt-1 text-2xl font-semibold tabular-nums ${actionCount > 0 ? "text-amber-500" : ""}`}>{actionCount}</p>
               <p className="text-xs text-muted-foreground">
                 {overdue.length > 0 ? `${overdue.length} overdue` : actionCount > 0 ? "Needs attention" : "All clear"}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type {
   NexusStatus,
@@ -301,10 +301,23 @@ export default function LiabilityPage() {
     "sales_by_state",
   );
   const [filingRow, setFilingRow] = useState<StateLiability | null>(null);
+  const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const { data: filings, loading: l4 } = useSupabaseQuery<FilingEntry>(
     "filing_calendar",
     { orderBy: "due_date", ascending: true },
   );
+
+  // C1: Filing history
+  const [filingEvents, setFilingEvents] = useState<Array<{
+    state_code: string; period_start: string; period_end: string;
+    filed_at: string; confirmation_number: string | null;
+    amount_reported: number | null; notes: string | null;
+  }>>([]);
+  useEffect(() => {
+    fetch("/api/filing-events-list").then((r) => r.json()).then((d) => {
+      if (Array.isArray(d)) setFilingEvents(d);
+    }).catch(() => {});
+  }, [filingRow]); // refetch after filing
 
   const ruleMap = useMemo(() => {
     const m: Record<string, StateRule> = {};
@@ -423,17 +436,16 @@ export default function LiabilityPage() {
             Amazon and Shop channel shown for reference only
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="shrink-0"
-          onClick={() => {
-            window.open("/api/export-csv?table=sales_by_state", "_blank");
-          }}
-        >
-          <Download className="mr-1.5 h-3.5 w-3.5" />
-          Export CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="shrink-0"
+            onClick={() => window.open("/api/export-csv?table=sales_by_state", "_blank")}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> Export CSV
+          </Button>
+          <Button variant="outline" size="sm" className="shrink-0"
+            onClick={() => window.open(`/api/cpa-packet?start=${new Date().getFullYear()}-01-01&end=${new Date().toISOString().slice(0, 10)}`, "_blank")}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> CPA Packet
+          </Button>
+        </div>
       </div>
 
       {/* Disclaimer */}
@@ -576,7 +588,8 @@ export default function LiabilityPage() {
                   </TableHeader>
                   <TableBody>
                     {liabilities.map((row) => (
-                      <TableRow key={row.state_code}>
+                      <React.Fragment key={row.state_code}>
+                      <TableRow>
                         <TableCell>
                           <div>
                             <span className="font-medium">
@@ -696,14 +709,48 @@ export default function LiabilityPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {row.has_filed_through && (
-                            <Button variant="outline" size="sm" className="text-xs h-7"
-                              onClick={() => setFilingRow(row)}>
-                              <CheckCircle className="mr-1 h-3 w-3" /> Filed
-                            </Button>
-                          )}
+                          <div className="flex gap-1">
+                            {row.has_filed_through && (
+                              <Button variant="outline" size="sm" className="text-xs h-7"
+                                onClick={() => setFilingRow(row)}>
+                                <CheckCircle className="mr-1 h-3 w-3" /> Filed
+                              </Button>
+                            )}
+                            {filingEvents.some((e) => e.state_code === row.state_code) && (
+                              <Button variant="ghost" size="sm" className="text-xs h-7 text-muted-foreground"
+                                onClick={() => setExpandedHistory(expandedHistory === row.state_code ? null : row.state_code)}>
+                                {expandedHistory === row.state_code ? "Hide" : "History"}
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
+                      {/* C1: Filing history accordion */}
+                      {expandedHistory === row.state_code && (
+                        <TableRow>
+                          <TableCell colSpan={10} className="bg-muted/30 p-3">
+                            <p className="text-xs font-medium mb-2">Filing History — {row.state_code}</p>
+                            <div className="space-y-1">
+                              {filingEvents
+                                .filter((e) => e.state_code === row.state_code)
+                                .map((e, i) => (
+                                  <div key={i} className="flex items-center gap-3 text-xs">
+                                    <span className="tabular-nums text-muted-foreground">{new Date(e.filed_at).toLocaleDateString()}</span>
+                                    <span>{e.period_start} to {e.period_end}</span>
+                                    <Badge variant="outline" className="text-[10px]">#{e.confirmation_number || "—"}</Badge>
+                                    {e.amount_reported != null && <span className="tabular-nums">${e.amount_reported.toFixed(2)}</span>}
+                                    {e.notes && <span className="text-muted-foreground truncate max-w-[150px]">{e.notes}</span>}
+                                  </div>
+                                ))
+                              }
+                              {!filingEvents.some((e) => e.state_code === row.state_code) && (
+                                <p className="text-xs text-muted-foreground">No filing events recorded.</p>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      </React.Fragment>
                     ))}
 
                     <TableRow className="border-t-2 font-semibold">
