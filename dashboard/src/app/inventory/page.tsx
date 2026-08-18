@@ -189,6 +189,48 @@ export default function InventoryPage() {
       ...awdSnapshots.map((a) => a.sku),
     ]);
 
+    // Seasonality lookup: {isoWeek: multiplier}
+    const seasMap = new Map<number, number>();
+    for (const sw of seasonality) {
+      seasMap.set(sw.week, sw.multiplier);
+    }
+
+    /**
+     * Walk week-by-week from today, applying seasonal multipliers to
+     * base daily velocity.  Returns the date when stock reaches 0.
+     * Much more accurate than flat stock/rate for seasonal products.
+     */
+    function seasonalStockoutDate(stock: number, baseDailyRate: number): string | null {
+      if (baseDailyRate <= 0.001) return stock > 0 ? null : null;
+      if (stock <= 0) return new Date().toISOString().slice(0, 10);
+
+      const now = new Date();
+      let remaining = stock;
+
+      // Walk up to 104 weeks (~2 years) forward
+      for (let wOffset = 0; wOffset < 104; wOffset++) {
+        const weekDate = new Date(now);
+        weekDate.setDate(weekDate.getDate() + wOffset * 7);
+        // ISO week number
+        const jan1 = new Date(weekDate.getFullYear(), 0, 1);
+        const isoWeek = Math.ceil(((weekDate.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
+        const clampedWeek = Math.max(1, Math.min(52, isoWeek));
+        const mult = seasMap.get(clampedWeek) ?? 1.0;
+        const weekDemand = baseDailyRate * 7 * mult;
+
+        if (remaining <= weekDemand) {
+          // Stock runs out during this week — interpolate the day
+          const fractionOfWeek = remaining / weekDemand;
+          const daysIn = Math.floor(fractionOfWeek * 7);
+          const outDate = new Date(weekDate);
+          outDate.setDate(outDate.getDate() + daysIn);
+          return outDate.toISOString().slice(0, 10);
+        }
+        remaining -= weekDemand;
+      }
+      return null; // > 2 years out
+    }
+
     const result: ComputedRow[] = [];
     const eps = 0.001;
 
@@ -241,12 +283,8 @@ export default function InventoryPage() {
         dos_amz_supply = dos;
         pipeline_dos = Math.round(dos);
         our_reorder = Math.max(Math.ceil((target + s.lead_time_days) * demand) - supply, 0);
-        if (demand > eps) {
-          const days = Math.floor(supply / demand);
-          const d = new Date(); d.setDate(d.getDate() + days);
-          stockout_date = d.toISOString().slice(0, 10);
-          network_oos_date = stockout_date; // same pool for shop-only
-        }
+        stockout_date = seasonalStockoutDate(supply, demand);
+        network_oos_date = stockout_date; // same pool for shop-only
         flag = dos < 30 && demand > eps ? "LOW" : our_reorder > 0 ? "RESTOCK" : "OK";
       } else {
         // Amazon: FBA rules with 60d floor
@@ -256,17 +294,11 @@ export default function InventoryPage() {
         const pipeline_supply = fba_on_hand + inbound + awd_on_hand;
         pipeline_dos = total_vel_30 > eps ? Math.round(pipeline_supply / total_vel_30) : (pipeline_supply > 0 ? 9999 : 0);
         our_reorder = Math.max(Math.ceil((target + s.lead_time_days) * total_vel_30) - on_hand, 0);
-        if (total_vel_30 > eps) {
-          // FBA-only stockout
-          const fba_days = Math.floor(fba_on_hand / total_vel_30);
-          const d1 = new Date(); d1.setDate(d1.getDate() + fba_days);
-          stockout_date = d1.toISOString().slice(0, 10);
-          // Network OOS: all owned stock (FBA + inbound + AWD + 3PL)
-          const network = fba_on_hand + inbound + awd_on_hand + tpl_available;
-          const net_days = Math.floor(network / total_vel_30);
-          const d2 = new Date(); d2.setDate(d2.getDate() + net_days);
-          network_oos_date = d2.toISOString().slice(0, 10);
-        }
+        // FBA-only stockout (seasonal walk-forward)
+        stockout_date = seasonalStockoutDate(fba_on_hand, total_vel_30);
+        // Network OOS: all owned stock (seasonal walk-forward)
+        const network = fba_on_hand + inbound + awd_on_hand + tpl_available;
+        network_oos_date = seasonalStockoutDate(network, total_vel_30);
         flag = dos < 60 && total_vel_30 > eps ? "CRITICAL" : our_reorder > 0 ? "RESTOCK" : "OK";
       }
 
@@ -678,8 +710,8 @@ export default function InventoryPage() {
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
                   { key: "our_reorder_qty", label: "Reorder", tip: "Units to transfer/produce to reach target cover" },
-                  { key: "stockout_date", label: "Out", tip: "FBA reaches 0 (Amazon) or warehouse reaches 0 (Shop) at current velocity" },
-                  { key: "network_oos_date", label: "OOS", tip: "All owned network stock (FBA+AWD+3PL+Inbound) reaches 0" },
+                  { key: "stockout_date", label: "Out", tip: "FBA reaches 0 (Amazon) or warehouse reaches 0 (Shop) — seasonality-adjusted" },
+                  { key: "network_oos_date", label: "OOS", tip: "All owned network stock (FBA+AWD+3PL+Inbound) reaches 0 — seasonality-adjusted" },
                   { key: "flag", label: "Status", tip: "OK ≥ target cover; CRITICAL/LOW below; RESTOCK approaching" },
                 ].map(({ key, label, tip }) => (
                   <TableHead
