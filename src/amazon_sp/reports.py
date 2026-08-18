@@ -25,6 +25,8 @@ ORDERS_REPORT = "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL"
 INVENTORY_LEDGER_REPORT = "GET_LEDGER_DETAIL_VIEW_DATA"
 FBA_SHIPMENTS_REPORT = "GET_AMAZON_FULFILLED_SHIPMENTS_DATA_GENERAL"
 FBA_RETURNS_REPORT = "GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA"
+SALES_TRAFFIC_REPORT = "GET_SALES_AND_TRAFFIC_REPORT"
+FBA_REIMBURSEMENTS_REPORT = "GET_FBA_REIMBURSEMENTS_DATA"
 
 SOURCE_LABEL = "amazon_spapi"
 
@@ -972,4 +974,170 @@ def fetch_fba_returns(
         rows_skipped=parsed["rows_skipped"],
     )
 
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Sales & Traffic (JSON report)
+# ---------------------------------------------------------------------------
+
+def parse_sales_traffic(content: str) -> dict:
+    """Parse GET_SALES_AND_TRAFFIC_REPORT JSON response."""
+    import json as _json
+    data = _json.loads(content)
+
+    daily_rows = []
+    for d in data.get("salesAndTrafficByDate", []):
+        s = d.get("salesByDate", {})
+        t = d.get("trafficByDate", {})
+        sales_amt = s.get("orderedProductSales", {})
+        daily_rows.append({
+            "date": d["date"],
+            "ordered_product_sales": float(sales_amt.get("amount", 0)) if isinstance(sales_amt, dict) else float(sales_amt or 0),
+            "units_ordered": int(s.get("unitsOrdered", 0)),
+            "total_order_items": int(s.get("totalOrderItems", 0)),
+            "sessions": int(t.get("sessions", 0)),
+            "page_views": int(t.get("pageViews", 0)),
+            "unit_session_pct": float(t.get("unitSessionPercentage", 0)),
+            "buy_box_pct": float(t.get("buyBoxPercentage", 0)),
+        })
+
+    asin_rows = []
+    for a in data.get("salesAndTrafficByAsin", []):
+        s = a.get("salesByAsin", {})
+        t = a.get("trafficByAsin", {})
+        sales_amt = s.get("orderedProductSales", {})
+        spec = data.get("reportSpecification", {})
+        asin_rows.append({
+            "parent_asin": a.get("parentAsin", ""),
+            "child_asin": a.get("childAsin") or None,
+            "units_ordered": int(s.get("unitsOrdered", 0)),
+            "ordered_product_sales": float(sales_amt.get("amount", 0)) if isinstance(sales_amt, dict) else float(sales_amt or 0),
+            "sessions": int(t.get("sessions", 0)),
+            "page_views": int(t.get("pageViews", 0)),
+            "unit_session_pct": float(t.get("unitSessionPercentage", 0)),
+            "buy_box_pct": float(t.get("buyBoxPercentage", 0)),
+            "period_start": spec.get("dataStartTime"),
+            "period_end": spec.get("dataEndTime"),
+        })
+
+    return {
+        "daily_rows": daily_rows,
+        "asin_rows": asin_rows,
+        "days": len(daily_rows),
+        "asins": len(asin_rows),
+    }
+
+
+def fetch_sales_traffic(
+    start: date, end: date,
+    dry_run: bool = False, on_poll: callable | None = None,
+) -> dict:
+    """Fetch Sales & Traffic report and upsert."""
+    content = request_and_download(SALES_TRAFFIC_REPORT, start, end, on_poll=on_poll)
+    parsed = parse_sales_traffic(content)
+
+    summary = {
+        "report_type": "sales_traffic",
+        "period": f"{start} to {end}",
+        "days": parsed["days"],
+        "asins": parsed["asins"],
+        "dry_run": dry_run,
+        "rows_inserted": 0,
+    }
+
+    if dry_run:
+        return summary
+
+    inserted = 0
+    if parsed["daily_rows"]:
+        inserted += upsert_rows("amazon_sales_traffic", parsed["daily_rows"],
+                                on_conflict="date")
+    if parsed["asin_rows"]:
+        inserted += upsert_rows("amazon_asin_traffic", parsed["asin_rows"],
+                                on_conflict="parent_asin")
+
+    summary["rows_inserted"] = inserted
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# FBA Reimbursements
+# ---------------------------------------------------------------------------
+
+def parse_reimbursements(content: str) -> dict:
+    """Parse GET_FBA_REIMBURSEMENTS_DATA TSV report."""
+    result: dict = {
+        "rows_total": 0, "rows_parsed": 0, "rows_skipped": 0,
+        "records": [], "total_amount": 0.0,
+    }
+
+    first_line = content.split("\n", 1)[0]
+    delimiter = _detect_delimiter(first_line)
+    reader = csv.DictReader(io.StringIO(content), delimiter=delimiter, quotechar='"')
+    if not reader.fieldnames:
+        return result
+
+    H = _build_header_lookup(reader.fieldnames)
+
+    for row in reader:
+        result["rows_total"] += 1
+        approval = _get(row, H, "approval-date")
+        reimb_id = _get(row, H, "reimbursement-id")
+        if not approval or not reimb_id:
+            result["rows_skipped"] += 1
+            continue
+
+        amt = _parse_money(_get(row, H, "amount-total"))
+        result["total_amount"] += amt
+
+        result["records"].append({
+            "approval_date": approval,
+            "reimbursement_id": reimb_id,
+            "case_id": _get(row, H, "case-id") or None,
+            "order_id": _get(row, H, "amazon-order-id") or None,
+            "reason": _get(row, H, "reason") or None,
+            "sku": _get(row, H, "sku") or None,
+            "fnsku": _get(row, H, "fnsku") or None,
+            "asin": _get(row, H, "asin") or None,
+            "product_name": _get(row, H, "product-name") or None,
+            "condition": _get(row, H, "condition") or None,
+            "currency": _get(row, H, "currency-unit") or "USD",
+            "amount_per_unit": _parse_money(_get(row, H, "amount-per-unit")),
+            "amount_total": amt,
+            "qty_cash": int(float(_get(row, H, "quantity-reimbursed-cash") or "0")),
+            "qty_inventory": int(float(_get(row, H, "quantity-reimbursed-inventory") or "0")),
+            "qty_total": int(float(_get(row, H, "quantity-reimbursed-total") or "0")),
+            "source_file": SOURCE_LABEL,
+        })
+        result["rows_parsed"] += 1
+
+    return result
+
+
+def fetch_reimbursements(
+    start: date, end: date,
+    dry_run: bool = False, on_poll: callable | None = None,
+) -> dict:
+    """Fetch FBA reimbursements report and upsert."""
+    content = request_and_download(FBA_REIMBURSEMENTS_REPORT, start, end, on_poll=on_poll)
+    parsed = parse_reimbursements(content)
+
+    summary = {
+        "report_type": "reimbursements",
+        "period": f"{start} to {end}",
+        "rows_parsed": parsed["rows_parsed"],
+        "total_amount": round(parsed["total_amount"], 2),
+        "dry_run": dry_run,
+        "rows_inserted": 0,
+    }
+
+    if dry_run or not parsed["records"]:
+        return summary
+
+    inserted = upsert_rows(
+        "fba_reimbursements", parsed["records"],
+        on_conflict="reimbursement_id,sku",
+    )
+    summary["rows_inserted"] = inserted
     return summary

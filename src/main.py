@@ -591,6 +591,42 @@ def spapi_returns_cmd(days, dry_run):
             click.echo(f"  {reason}: {count}")
 
 
+@cli.command("spapi-traffic")
+@click.option("--days", default=7, help="Days back to fetch")
+@click.option("--dry-run", is_flag=True)
+def spapi_traffic_cmd(days, dry_run):
+    """Fetch Amazon Sales & Traffic report via SP-API."""
+    from datetime import date as d, timedelta
+    from src.amazon_sp.reports import fetch_sales_traffic
+
+    end = d.today() - timedelta(days=1)
+    start = end - timedelta(days=days)
+    if dry_run:
+        click.echo("DRY RUN\n")
+
+    click.echo(f"Fetching Sales & Traffic: {start} to {end}")
+    result = fetch_sales_traffic(start, end, dry_run=dry_run)
+    click.echo(f"Days: {result['days']}, ASINs: {result['asins']}, Inserted: {result['rows_inserted']}")
+
+
+@cli.command("spapi-reimbursements")
+@click.option("--days", default=30, help="Days back to fetch")
+@click.option("--dry-run", is_flag=True)
+def spapi_reimbursements_cmd(days, dry_run):
+    """Fetch FBA reimbursements via SP-API."""
+    from datetime import date as d, timedelta
+    from src.amazon_sp.reports import fetch_reimbursements
+
+    end = d.today() - timedelta(days=1)
+    start = end - timedelta(days=days)
+    if dry_run:
+        click.echo("DRY RUN\n")
+
+    click.echo(f"Fetching reimbursements: {start} to {end}")
+    result = fetch_reimbursements(start, end, dry_run=dry_run)
+    click.echo(f"Parsed: {result['rows_parsed']}, Total: ${result['total_amount']:,.2f}, Inserted: {result['rows_inserted']}")
+
+
 @cli.command("spapi-refresh")
 @click.option("--days", default=30, help="Number of days back to fetch (default 30)")
 @click.option("--dry-run", is_flag=True)
@@ -2042,6 +2078,23 @@ def _run_spapi_refresh():
         print(f"[SP-API] {ts} Returns: {returns.get('rows_inserted', 0)} rows")
     except Exception as e:
         print(f"[SP-API] {ts} Returns error: {e}")
+
+    # Sales & Traffic (7d window)
+    try:
+        from src.amazon_sp.reports import fetch_sales_traffic
+        st = fetch_sales_traffic(start, end)
+        print(f"[SP-API] {ts} Sales&Traffic: {st.get('days', 0)} days, {st.get('asins', 0)} ASINs")
+    except Exception as e:
+        print(f"[SP-API] {ts} Sales&Traffic error: {e}")
+
+    # Reimbursements (30d window)
+    try:
+        from src.amazon_sp.reports import fetch_reimbursements
+        reimb_start = end - timedelta(days=30)
+        reimb = fetch_reimbursements(reimb_start, end)
+        print(f"[SP-API] {ts} Reimbursements: {reimb.get('rows_parsed', 0)} rows, ${reimb.get('total_amount', 0):,.2f}")
+    except Exception as e:
+        print(f"[SP-API] {ts} Reimbursements error: {e}")
 
     if errors:
         job_finish(run_id, "fail", "; ".join(errors[:3]))
