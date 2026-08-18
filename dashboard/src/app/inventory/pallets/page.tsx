@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useInventory } from "@/lib/hooks";
 import type { InventorySnapshot, SkuVelocity } from "@/lib/types";
 import { LoadingState } from "@/components/loading";
@@ -11,7 +11,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { isConfigured } from "@/lib/supabase";
-import { Shield, Package, AlertTriangle } from "lucide-react";
+import { Shield, Package, AlertTriangle, Download, FileText, Lock, Unlock } from "lucide-react";
 import Link from "next/link";
 
 const SKUS = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"];
@@ -30,6 +30,8 @@ const SKU_SHORT: Record<string, string> = {
 const PALLET_MAX = 19_000;
 const TARGET = "2026-10-31";
 const COVER_TARGET = 60;
+const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"];
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -38,6 +40,27 @@ function fmt(n: number) {
 function fmtWeek(iso: string) {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function monthLabel(m: string) {
+  const [y, mo] = m.split("-");
+  return `${MONTH_NAMES[parseInt(mo)]} ${y}`;
+}
+
+function daysInMonth(m: string) {
+  const [y, mo] = m.split("-");
+  return new Date(parseInt(y), parseInt(mo), 0).getDate();
+}
+
+function getMonthList(start: Date, n: number): string[] {
+  const months: string[] = [];
+  let y = start.getFullYear(), m = start.getMonth() + 1;
+  for (let i = 0; i < n; i++) {
+    months.push(`${y}-${String(m).padStart(2, "0")}`);
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return months;
 }
 
 function SetupPrompt() {
@@ -50,49 +73,163 @@ function SetupPrompt() {
 }
 
 interface SkuPlan {
-  sku: string;
-  label: string;
-  novDecDemand: number;
-  fba: number;
-  inbound: number;
-  awd: number;
-  tpl: number;
-  supply: number;
-  gap: number;
+  sku: string; label: string; novDecDemand: number;
+  fba: number; inbound: number; awd: number; tpl: number; supply: number; gap: number;
 }
-
-interface Pallet {
-  num: number;
-  mix: Record<string, number>;
-  total: number;
-}
-
+interface Pallet { num: number; mix: Record<string, number>; total: number; }
 interface CoverWeek {
-  week: string;
-  fba: number;
-  demand: number;
-  receipt: number;
-  dailyRate: number;
-  coverDays: number | null;
-  flagged: boolean;
+  week: string; fba: number; demand: number; receipt: number;
+  dailyRate: number; coverDays: number | null; flagged: boolean;
 }
-
 interface SkuProjection {
-  sku: string;
-  label: string;
-  fbaStart: number;
-  weeks: CoverWeek[];
-  flaggedCount: number;
+  sku: string; label: string; fbaStart: number;
+  weeks: CoverWeek[]; flaggedCount: number;
 }
+interface MfgMonthEntry {
+  month: string; label: string; status: "FIRM" | "INDICATIVE";
+  pallets: number; units: number; mix: Record<string, number>; shipBy: string;
+}
+interface MfgScenario { entries: MfgMonthEntry[]; totalUnits: number; totalPallets: number; }
 
 function getMonday(d: Date): Date {
   const day = d.getDay();
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
   return new Date(d.getFullYear(), d.getMonth(), diff);
 }
+function toIso(d: Date): string { return d.toISOString().slice(0, 10); }
 
-function toIso(d: Date): string {
-  return d.toISOString().slice(0, 10);
+// ── Monthly demand helper (forecast + velocity fallback) ──
+function buildMonthlyDemand(
+  forecasts: { sku: string; week_start: string; scenario: string; units: number }[],
+  velocityList: SkuVelocity[],
+  scenario: string,
+  months: string[],
+): Record<string, Record<string, number>> {
+  // Forecast monthly totals
+  const fcMonthly: Record<string, Record<string, number>> = {};
+  for (const sku of SKUS) fcMonthly[sku] = {};
+  for (const f of forecasts) {
+    if (f.scenario !== scenario) continue;
+    const m = f.week_start?.slice(0, 7);
+    if (!m) continue;
+    fcMonthly[f.sku] = fcMonthly[f.sku] ?? {};
+    fcMonthly[f.sku][m] = (fcMonthly[f.sku][m] ?? 0) + Number(f.units);
+  }
+  // Velocity fallback
+  const velDaily: Record<string, number> = {};
+  for (const v of velocityList) {
+    if (SKUS.includes(v.sku)) velDaily[v.sku] = v.total_u_30 / 30;
+  }
+  const result: Record<string, Record<string, number>> = {};
+  for (const sku of SKUS) {
+    result[sku] = {};
+    for (const m of months) {
+      const fc = fcMonthly[sku]?.[m];
+      result[sku][m] = fc && fc > 0 ? Math.round(fc) : Math.round((velDaily[sku] ?? 0) * daysInMonth(m));
+    }
+  }
+  return result;
+}
+
+function forwardDemand60d(month: string, skuDemand: Record<string, number>, allMonths: string[]): number {
+  const idx = allMonths.indexOf(month);
+  if (idx < 0) return 0;
+  let total = 0, days = 0;
+  for (let i = idx + 1; i < allMonths.length && days < 60; i++) {
+    const m = allMonths[i];
+    const dim = daysInMonth(m);
+    if (days + dim <= 60) {
+      total += skuDemand[m] ?? 0;
+      days += dim;
+    } else {
+      const remaining = 60 - days;
+      total += ((skuDemand[m] ?? 0) / dim) * remaining;
+      break;
+    }
+  }
+  return total;
+}
+
+// ── Downloads ──
+function downloadBlob(content: string, filename: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function buildMfgCsv(primary: MfgScenario, sensitivity: MfgScenario): string {
+  const lines = ["Month,Month_Label,Status,SKU,SKU_Label,Units,Pallets,Scenario"];
+  for (const [sc, label] of [[primary, "correction_factor"], [sensitivity, "actual_2025"]] as const) {
+    for (const e of sc.entries) {
+      if (Object.keys(e.mix).length === 0) {
+        lines.push(`${e.month},${e.label},${e.status},,,0,0,${label}`);
+      }
+      for (const [sku, qty] of Object.entries(e.mix)) {
+        lines.push(`${e.month},${e.label},${e.status},${sku},${SKU_LABELS[sku] ?? sku},${qty},${e.pallets},${label}`);
+      }
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
+function buildMfgSheet(primary: MfgScenario, sensitivity: MfgScenario, generated: string): string {
+  const L: string[] = [];
+  L.push("============================================================");
+  L.push("TALLOWBOURN");
+  L.push("MANUFACTURER PLANNING SHEET");
+  L.push("Lip Balm 3pk · Holiday Production Schedule");
+  L.push(`Generated: ${generated}`);
+  L.push("============================================================");
+  L.push("");
+  L.push("SKU REFERENCE:");
+  for (const [sku, label] of Object.entries(SKU_LABELS)) L.push(`  ${sku}  =  ${label}`);
+  L.push("");
+  L.push(`Pallet capacity: ${fmt(PALLET_MAX)} units`);
+  L.push(`FBA cover target: ${COVER_TARGET} days forward stock`);
+  L.push(`All units in Amazon FBA by: ${TARGET}`);
+  L.push("");
+  L.push("------------------------------------------------------------");
+  L.push("PRIMARY SCENARIO: correction_factor");
+  L.push("------------------------------------------------------------");
+  for (const e of primary.entries) {
+    L.push("");
+    L.push(`  ${e.label}  —  ${e.status}`);
+    if (e.units === 0) { L.push("    No production needed this month."); continue; }
+    L.push(`    Pallets: ${e.pallets}  (${fmt(e.units)} units)`);
+    for (const sku of SKUS) {
+      const q = e.mix[sku];
+      if (q && q > 0) L.push(`      ${SKU_LABELS[sku]}: ${fmt(q)}`);
+    }
+    L.push(`    Ship by: ${e.shipBy}`);
+  }
+  L.push("");
+  L.push(`  TOTAL: ${fmt(primary.totalUnits)} units across ${primary.totalPallets} pallet(s)`);
+  L.push("");
+  L.push("------------------------------------------------------------");
+  L.push("SENSITIVITY: actual_2025");
+  L.push("------------------------------------------------------------");
+  for (const e of sensitivity.entries) {
+    if (e.units > 0) {
+      const mix = Object.entries(e.mix).filter(([, q]) => q > 0)
+        .map(([s, q]) => `${SKU_SHORT[s] ?? s} ${fmt(q)}`).join(", ");
+      L.push(`  ${e.label}: ${fmt(e.units)} units (${e.pallets} pallet) — ${mix}`);
+    } else {
+      L.push(`  ${e.label}: no production needed`);
+    }
+  }
+  L.push(`  TOTAL: ${fmt(sensitivity.totalUnits)} units across ${sensitivity.totalPallets} pallet(s)`);
+  L.push("");
+  L.push("------------------------------------------------------------");
+  L.push("NOTES:");
+  L.push("  • FIRM months represent committed production volumes.");
+  L.push("    INDICATIVE months are forecasts and may change.");
+  L.push("  • Volumes are driven by forecast demand and a policy of");
+  L.push(`    maintaining ${COVER_TARGET}-day forward FBA cover.`);
+  L.push("  • This is a planning aid, not a purchase order.");
+  L.push("------------------------------------------------------------");
+  return L.join("\n") + "\n";
 }
 
 export default function PalletPlanPage() {
@@ -102,23 +239,36 @@ export default function PalletPlanPage() {
   const [includeAwd, setIncludeAwd] = useState(true);
   const [coverSku, setCoverSku] = useState(SKUS[0]);
 
+  // Committed months (persisted in localStorage)
+  const [committed, setCommitted] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("pallet_committed_months");
+      if (saved) setCommitted(new Set(JSON.parse(saved)));
+    } catch { /* ignore */ }
+  }, []);
+  const toggleCommit = useCallback((month: string) => {
+    setCommitted((prev) => {
+      const next = new Set(prev);
+      if (next.has(month)) next.delete(month); else next.add(month);
+      localStorage.setItem("pallet_committed_months", JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+
   const snapshots = (raw?.snapshots ?? []) as InventorySnapshot[];
   const forecasts = (raw?.forecast ?? []) as { sku: string; week_start: string; scenario: string; units: number }[];
   const awdList = (raw?.awd ?? []) as { sku: string; awd_on_hand: number }[];
   const tplList = (raw?.tpl ?? []) as { sku: string; available: number }[];
   const velocityList = (raw?.velocity ?? []) as SkuVelocity[];
 
-  // --- Pallet plan computation ---
+  // ── Pallet plan ──
   const { skuPlans, pallets, totalGap, totalDemand, totalSupply } = useMemo(() => {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
     const awdMap = new Map(awdList.map((a) => [a.sku, a]));
     const tplMap = new Map(tplList.map((t) => [t.sku, t]));
-
     const plans: SkuPlan[] = [];
-    let tGap = 0;
-    let tDemand = 0;
-    let tSupply = 0;
-
+    let tGap = 0, tDemand = 0, tSupply = 0;
     for (const sku of SKUS) {
       const snap = snapMap.get(sku);
       const fba = Number(snap?.fulfillable ?? 0) + Number(snap?.reserved ?? 0) +
@@ -128,32 +278,20 @@ export default function PalletPlanPage() {
       const awd = includeAwd ? Number(awdMap.get(sku)?.awd_on_hand ?? 0) : 0;
       const tpl = include3pl ? Number(tplMap.get(sku)?.available ?? 0) : 0;
       const supply = fba + inbound + awd + tpl;
-
       let novDecDemand = 0;
       for (const f of forecasts) {
         if (f.sku !== sku || f.scenario !== "correction_factor") continue;
         const m = f.week_start?.slice(0, 7);
-        if (m === "2026-11" || m === "2026-12") {
-          novDecDemand += Number(f.units);
-        }
+        if (m === "2026-11" || m === "2026-12") novDecDemand += Number(f.units);
       }
       novDecDemand = Math.round(novDecDemand);
-
       const gap = Math.max(novDecDemand - supply, 0);
-      tGap += gap;
-      tDemand += novDecDemand;
-      tSupply += supply;
-
-      plans.push({
-        sku, label: SKU_LABELS[sku] ?? sku,
-        novDecDemand, fba, inbound, awd, tpl, supply, gap,
-      });
+      tGap += gap; tDemand += novDecDemand; tSupply += supply;
+      plans.push({ sku, label: SKU_LABELS[sku] ?? sku, novDecDemand, fba, inbound, awd, tpl, supply, gap });
     }
-
     const numPallets = tGap > 0 ? Math.ceil(tGap / PALLET_MAX) : 0;
     const remaining = Object.fromEntries(plans.map((p) => [p.sku, p.gap]));
     const pals: Pallet[] = [];
-
     for (let i = 0; i < numPallets; i++) {
       const totalRem = Object.values(remaining).reduce((a, b) => a + b, 0);
       if (totalRem <= 0) break;
@@ -167,55 +305,37 @@ export default function PalletPlanPage() {
       }
       pals.push({ num: i + 1, mix, total: Object.values(mix).reduce((a, b) => a + b, 0) });
     }
-
     return { skuPlans: plans, pallets: pals, totalGap: tGap, totalDemand: tDemand, totalSupply: tSupply };
   }, [snapshots, forecasts, awdList, tplList, include3pl, includeAwd]);
 
-  // --- FBA Cover Projection ---
+  // ── FBA Cover Projection ──
   const { coverProjections, coverAlerts } = useMemo(() => {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
     const awdMap = new Map(awdList.map((a) => [a.sku, a]));
     const tplMap = new Map(tplList.map((t) => [t.sku, t]));
     const velMap = new Map(velocityList.map((v) => [v.sku, v]));
-
-    // Build forecast lookup: {sku: {isoDate: units}}
     const fcMap = new Map<string, Map<string, number>>();
     for (const f of forecasts) {
       if (f.scenario !== "correction_factor") continue;
       if (!fcMap.has(f.sku)) fcMap.set(f.sku, new Map());
       fcMap.get(f.sku)!.set(f.week_start?.slice(0, 10), Number(f.units));
     }
-
-    // Generate weeks: this Monday through Dec 28 2026
     const now = new Date();
     const monday = getMonday(now);
     const endDate = new Date(2026, 11, 28);
     const weeks: Date[] = [];
     const cur = new Date(monday);
-    while (cur <= endDate) {
-      weeks.push(new Date(cur));
-      cur.setDate(cur.getDate() + 7);
-    }
+    while (cur <= endDate) { weeks.push(new Date(cur)); cur.setDate(cur.getDate() + 7); }
 
-    // Helper: find weekly demand for a SKU at a given week
     function getWeekDemand(sku: string, weekDate: Date): number {
       const fc = fcMap.get(sku);
       if (fc) {
-        // Try exact and ±3 day offsets (forecast may start Saturday)
         for (let off = 0; off <= 3; off++) {
-          const d1 = new Date(weekDate);
-          d1.setDate(d1.getDate() + off);
-          const v = fc.get(toIso(d1));
-          if (v !== undefined) return v;
-          if (off > 0) {
-            const d2 = new Date(weekDate);
-            d2.setDate(d2.getDate() - off);
-            const v2 = fc.get(toIso(d2));
-            if (v2 !== undefined) return v2;
-          }
+          const d1 = new Date(weekDate); d1.setDate(d1.getDate() + off);
+          const v = fc.get(toIso(d1)); if (v !== undefined) return v;
+          if (off > 0) { const d2 = new Date(weekDate); d2.setDate(d2.getDate() - off); const v2 = fc.get(toIso(d2)); if (v2 !== undefined) return v2; }
         }
       }
-      // Fallback: velocity daily rate × 7
       const vel = velMap.get(sku);
       if (vel) return (vel.total_u_30 / 30) * 7;
       return 0;
@@ -223,85 +343,97 @@ export default function PalletPlanPage() {
 
     const projections: SkuProjection[] = [];
     const alerts: { sku: string; week: string; coverDays: number; fba: number }[] = [];
-
     for (const sku of SKUS) {
       const snap = snapMap.get(sku);
-      const fbaStart = Number(snap?.fulfillable ?? 0) + Number(snap?.reserved ?? 0) +
-        Number(snap?.researching ?? 0) + Number(snap?.unfulfillable ?? 0);
-      const inboundNow = Number(snap?.inbound_working ?? 0) + Number(snap?.inbound_shipped ?? 0) +
-        Number(snap?.inbound_receiving ?? 0);
+      const fbaStart = Number(snap?.fulfillable ?? 0) + Number(snap?.reserved ?? 0) + Number(snap?.researching ?? 0) + Number(snap?.unfulfillable ?? 0);
+      const inboundNow = Number(snap?.inbound_working ?? 0) + Number(snap?.inbound_shipped ?? 0) + Number(snap?.inbound_receiving ?? 0);
       const awdNow = includeAwd ? Number(awdMap.get(sku)?.awd_on_hand ?? 0) : 0;
       const tplNow = include3pl ? Number(tplMap.get(sku)?.available ?? 0) : 0;
-
-      // Schedule receipts by week index
       const receipts: Record<number, number> = {};
       if (inboundNow > 0) receipts[Math.min(1, weeks.length - 1)] = (receipts[Math.min(1, weeks.length - 1)] ?? 0) + inboundNow;
       if (awdNow > 0) receipts[Math.min(2, weeks.length - 1)] = (receipts[Math.min(2, weeks.length - 1)] ?? 0) + awdNow;
       if (tplNow > 0) receipts[Math.min(3, weeks.length - 1)] = (receipts[Math.min(3, weeks.length - 1)] ?? 0) + tplNow;
-
       let fba = fbaStart;
       const weekData: CoverWeek[] = [];
       let flaggedCount = 0;
-
       for (let wi = 0; wi < weeks.length; wi++) {
-        const wDate = weeks[wi];
-        const wIso = toIso(wDate);
-        const receipt = receipts[wi] ?? 0;
-        fba += receipt;
-
-        const demand = getWeekDemand(sku, wDate);
-        fba = Math.max(fba - demand, 0);
-
-        // Forward cover: average daily demand over next 9 weeks (~63 days)
-        let forwardUnits = 0;
-        let forwardWeeks = 0;
-        for (let fi = wi; fi < Math.min(wi + 9, weeks.length); fi++) {
-          forwardUnits += getWeekDemand(sku, weeks[fi]);
-          forwardWeeks++;
-        }
-
-        let dailyRate = 0;
-        let coverDays: number | null = null;
-        let flagged = false;
-
+        const wDate = weeks[wi]; const wIso = toIso(wDate);
+        const receipt = receipts[wi] ?? 0; fba += receipt;
+        const demand = getWeekDemand(sku, wDate); fba = Math.max(fba - demand, 0);
+        let forwardUnits = 0, forwardWeeks = 0;
+        for (let fi = wi; fi < Math.min(wi + 9, weeks.length); fi++) { forwardUnits += getWeekDemand(sku, weeks[fi]); forwardWeeks++; }
+        let dailyRate = 0, coverDays: number | null = null, flagged = false;
         if (forwardUnits > 0 && forwardWeeks > 0) {
           dailyRate = forwardUnits / (forwardWeeks * 7);
           coverDays = dailyRate > 0 ? Math.round(fba / dailyRate) : null;
           flagged = coverDays !== null && coverDays < COVER_TARGET;
         }
-
-        if (flagged) {
-          flaggedCount++;
-          alerts.push({ sku, week: wIso, coverDays: coverDays!, fba: Math.round(fba) });
-        }
-
-        weekData.push({
-          week: wIso,
-          fba: Math.round(fba),
-          demand: Math.round(demand),
-          receipt,
-          dailyRate: Math.round(dailyRate * 10) / 10,
-          coverDays,
-          flagged,
-        });
+        if (flagged) { flaggedCount++; alerts.push({ sku, week: wIso, coverDays: coverDays!, fba: Math.round(fba) }); }
+        weekData.push({ week: wIso, fba: Math.round(fba), demand: Math.round(demand), receipt, dailyRate: Math.round(dailyRate * 10) / 10, coverDays, flagged });
       }
-
-      projections.push({
-        sku,
-        label: SKU_LABELS[sku] ?? sku,
-        fbaStart,
-        weeks: weekData,
-        flaggedCount,
-      });
+      projections.push({ sku, label: SKU_LABELS[sku] ?? sku, fbaStart, weeks: weekData, flaggedCount });
     }
-
     return { coverProjections: projections, coverAlerts: alerts };
   }, [snapshots, forecasts, awdList, tplList, velocityList, include3pl, includeAwd]);
+
+  // ── Manufacturer Heads-Up (monthly stock-flow, 60d fwd cover) ──
+  const { mfgPrimary, mfgSensitivity } = useMemo(() => {
+    const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
+    const awdMap = new Map(awdList.map((a) => [a.sku, a]));
+    const tplMap = new Map(tplList.map((t) => [t.sku, t]));
+    const now = new Date();
+    const productionMonths = getMonthList(now, 3);
+    const allMonths = getMonthList(now, 8);
+
+    function buildScenario(scenario: string): MfgScenario {
+      const md = buildMonthlyDemand(forecasts, velocityList, scenario, allMonths);
+      const entries: MfgMonthEntry[] = [];
+      const skuProd: Record<string, Record<string, number>> = {};
+      for (const sku of SKUS) {
+        const snap = snapMap.get(sku);
+        const fba = Number(snap?.fulfillable ?? 0) + Number(snap?.reserved ?? 0) +
+          Number(snap?.researching ?? 0) + Number(snap?.unfulfillable ?? 0);
+        const inbound = Number(snap?.inbound_working ?? 0) + Number(snap?.inbound_shipped ?? 0) +
+          Number(snap?.inbound_receiving ?? 0);
+        const awdV = includeAwd ? Number(awdMap.get(sku)?.awd_on_hand ?? 0) : 0;
+        const tplV = include3pl ? Number(tplMap.get(sku)?.available ?? 0) : 0;
+        let stock = fba + inbound + awdV + tplV;
+        skuProd[sku] = {};
+        for (const m of allMonths) {
+          const demand = md[sku]?.[m] ?? 0;
+          stock -= demand;
+          const fwd = forwardDemand60d(m, md[sku] ?? {}, allMonths);
+          const deficit = Math.max(0, Math.round(fwd - stock));
+          if (productionMonths.includes(m)) skuProd[sku][m] = deficit;
+          stock += deficit;
+        }
+      }
+      for (const m of productionMonths) {
+        const mix: Record<string, number> = {};
+        for (const sku of SKUS) { const v = skuProd[sku]?.[m] ?? 0; if (v > 0) mix[sku] = v; }
+        const total = Object.values(mix).reduce((a, b) => a + b, 0);
+        entries.push({
+          month: m, label: monthLabel(m),
+          status: committed.has(m) ? "FIRM" : "INDICATIVE",
+          pallets: total > 0 ? Math.ceil(total / PALLET_MAX) : 0,
+          units: total, mix,
+          shipBy: `${m}-20`,
+        });
+      }
+      return {
+        entries,
+        totalUnits: entries.reduce((a, e) => a + e.units, 0),
+        totalPallets: entries.reduce((a, e) => a + e.pallets, 0),
+      };
+    }
+    return { mfgPrimary: buildScenario("correction_factor"), mfgSensitivity: buildScenario("actual_2025") };
+  }, [snapshots, forecasts, awdList, tplList, velocityList, include3pl, includeAwd, committed]);
 
   if (!configured) return <SetupPrompt />;
   if (loading) return <LoadingState />;
 
   const selectedProj = coverProjections.find((p) => p.sku === coverSku);
+  const generated = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="space-y-6">
@@ -360,6 +492,98 @@ export default function PalletPlanPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ══════ SHARE WITH MANUFACTURER ══════ */}
+      <Card className="border-primary/20">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-medium">Share with Manufacturer</CardTitle>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => {
+                downloadBlob(buildMfgCsv(mfgPrimary, mfgSensitivity),
+                  `mfg_headsup_${generated}.csv`, "text/csv");
+              }}>
+                <Download className="mr-1.5 h-3.5 w-3.5" /> CSV
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => {
+                downloadBlob(buildMfgSheet(mfgPrimary, mfgSensitivity, generated),
+                  `mfg_planning_sheet_${generated}.txt`, "text/plain");
+              }}>
+                <FileText className="mr-1.5 h-3.5 w-3.5" /> Planning Sheet
+              </Button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Rolling 3-month view · correction_factor primary · actual_2025 sensitivity · {COVER_TARGET}d FBA cover target
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {mfgPrimary.entries.map((entry, idx) => {
+              const sensEntry = mfgSensitivity.entries[idx];
+              const isFirm = entry.status === "FIRM";
+              return (
+                <div key={entry.month} className={`rounded-lg border p-4 ${isFirm ? "border-primary/40 bg-primary/5" : ""}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <p className="font-medium text-sm">{entry.label}</p>
+                      <Badge variant={isFirm ? "default" : "secondary"} className="text-[10px] mt-0.5">
+                        {entry.status}
+                      </Badge>
+                    </div>
+                    <button onClick={() => toggleCommit(entry.month)}
+                      className="p-1.5 rounded-md hover:bg-muted transition-colors"
+                      title={isFirm ? "Uncommit" : "Mark as committed"}>
+                      {isFirm ? <Lock className="h-3.5 w-3.5 text-primary" /> : <Unlock className="h-3.5 w-3.5 text-muted-foreground" />}
+                    </button>
+                  </div>
+
+                  {entry.units === 0 ? (
+                    <p className="text-xs text-muted-foreground py-2">No production needed</p>
+                  ) : (
+                    <>
+                      <div className="flex items-baseline gap-2 mb-2">
+                        <span className="text-2xl font-semibold tabular-nums">{entry.pallets}</span>
+                        <span className="text-xs text-muted-foreground">pallet{entry.pallets !== 1 ? "s" : ""}</span>
+                        <span className="text-xs text-muted-foreground ml-auto tabular-nums">{fmt(entry.units)} units</span>
+                      </div>
+                      <div className="space-y-1">
+                        {SKUS.map((sku) => {
+                          const qty = entry.mix[sku];
+                          if (!qty || qty <= 0) return null;
+                          return (
+                            <div key={sku} className="flex justify-between text-xs">
+                              <span className="text-muted-foreground">{SKU_SHORT[sku]}</span>
+                              <span className="tabular-nums font-medium">{fmt(qty)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-2">Ship by {entry.shipBy}</p>
+                    </>
+                  )}
+
+                  {/* Sensitivity row */}
+                  {sensEntry && (
+                    <div className="mt-3 pt-2 border-t text-[10px] text-muted-foreground">
+                      <span>actual_2025: </span>
+                      {sensEntry.units > 0 ? (
+                        <span className="tabular-nums">{fmt(sensEntry.units)} units ({sensEntry.pallets}p)</span>
+                      ) : (
+                        <span>none</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-3">
+            FIRM = committed volume. INDICATIVE = forecast-driven projection, may change.
+            Pallet max {fmt(PALLET_MAX)} units. Not a purchase order.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Per-SKU table */}
       <Card>
@@ -483,21 +707,14 @@ export default function PalletPlanPage() {
                 const proj = coverProjections.find((p) => p.sku === s);
                 const hasFlagged = proj && proj.flaggedCount > 0;
                 return (
-                  <button
-                    key={s}
-                    onClick={() => setCoverSku(s)}
+                  <button key={s} onClick={() => setCoverSku(s)}
                     className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
-                      coverSku === s
-                        ? "bg-primary text-primary-foreground"
-                        : hasFlagged
-                          ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                      coverSku === s ? "bg-primary text-primary-foreground"
+                        : hasFlagged ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
                           : "bg-muted text-muted-foreground hover:bg-muted/80"
-                    }`}
-                  >
+                    }`}>
                     {SKU_SHORT[s]}
-                    {hasFlagged && coverSku !== s && (
-                      <span className="ml-1 text-[10px]">!</span>
-                    )}
+                    {hasFlagged && coverSku !== s && <span className="ml-1 text-[10px]">!</span>}
                   </button>
                 );
               })}
@@ -528,26 +745,16 @@ export default function PalletPlanPage() {
                 </TableHeader>
                 <TableBody>
                   {selectedProj.weeks.map((w) => (
-                    <TableRow
-                      key={w.week}
-                      className={w.flagged ? "bg-red-500/5" : ""}
-                    >
-                      <TableCell className="font-medium text-xs">
-                        {fmtWeek(w.week)}
-                      </TableCell>
+                    <TableRow key={w.week} className={w.flagged ? "bg-red-500/5" : ""}>
+                      <TableCell className="font-medium text-xs">{fmtWeek(w.week)}</TableCell>
                       <TableCell className="text-right tabular-nums">{fmt(w.demand)}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {w.receipt > 0 ? fmt(w.receipt) : "—"}
-                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{w.receipt > 0 ? fmt(w.receipt) : "—"}</TableCell>
                       <TableCell className="text-right tabular-nums font-medium">{fmt(w.fba)}</TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">
-                        {w.dailyRate > 0 ? w.dailyRate.toFixed(1) : "—"}
-                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{w.dailyRate > 0 ? w.dailyRate.toFixed(1) : "—"}</TableCell>
                       <TableCell className={`text-right tabular-nums font-medium ${
                         w.coverDays === null ? "text-muted-foreground"
                           : w.flagged ? "text-red-500"
-                            : w.coverDays < 90 ? "text-amber-500"
-                              : "text-emerald-500"
+                            : w.coverDays < 90 ? "text-amber-500" : "text-emerald-500"
                       }`}>
                         {w.coverDays !== null ? `${w.coverDays}d` : "—"}
                       </TableCell>
@@ -565,17 +772,14 @@ export default function PalletPlanPage() {
         <Card className="border-red-500/30">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-red-500 flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4" />
-              Cover Shortfall Alerts
+              <AlertTriangle className="h-4 w-4" /> Cover Shortfall Alerts
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-1 text-sm">
               {coverAlerts.map((a, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <Badge variant="destructive" className="text-[10px] px-1.5">
-                    {a.coverDays}d
-                  </Badge>
+                  <Badge variant="destructive" className="text-[10px] px-1.5">{a.coverDays}d</Badge>
                   <span className="font-medium">{SKU_SHORT[a.sku] ?? a.sku}</span>
                   <span className="text-muted-foreground">wk of {fmtWeek(a.week)}</span>
                   <span className="text-muted-foreground">·</span>

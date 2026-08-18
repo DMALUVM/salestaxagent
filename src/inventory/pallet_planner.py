@@ -370,3 +370,308 @@ def build_fba_cover_projection(
         "alerts": alerts,
         "total_flagged_weeks": len(alerts),
     }
+
+
+# ---------------------------------------------------------------------------
+# Manufacturer Heads-Up — rolling 3-month production schedule
+# ---------------------------------------------------------------------------
+
+SKU_LABEL_MAP: dict[str, str] = {
+    "DDPE0001Shop": "Unscented 3pk",
+    "DDPE0002Shop": "Peppermint 3pk",
+    "DDPE0003Shop": "Sweet Orange 3pk",
+    "DDPE0004Shop": "Assorted 3pk",
+}
+
+
+def _next_month(d: date) -> date:
+    if d.month == 12:
+        return d.replace(year=d.year + 1, month=1)
+    return d.replace(month=d.month + 1)
+
+
+def _month_label(m: str) -> str:
+    """'2026-08' → 'August 2026'."""
+    y, mo = m.split("-")
+    import calendar
+    return f"{calendar.month_name[int(mo)]} {y}"
+
+
+def _days_in_month_str(m: str) -> int:
+    import calendar
+    y, mo = m.split("-")
+    return calendar.monthrange(int(y), int(mo))[1]
+
+
+def _month_list(start: date, n: int) -> list[str]:
+    months: list[str] = []
+    cursor = start.replace(day=1)
+    for _ in range(n):
+        months.append(cursor.strftime("%Y-%m"))
+        cursor = _next_month(cursor)
+    return months
+
+
+def _monthly_demand(
+    fc_rows: list[dict],
+    vel_rows: list[dict],
+    target_skus: list[str],
+    scenario: str,
+    months: list[str],
+) -> dict[str, dict[str, float]]:
+    """Monthly demand per SKU.  Forecast where available, velocity fallback."""
+    fc: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for r in fc_rows:
+        if r.get("scenario") != scenario:
+            continue
+        sku = r.get("sku")
+        if sku not in target_skus:
+            continue
+        ws = str(r.get("week_start", ""))[:7]
+        fc[sku][ws] += float(r.get("units", 0) or 0)
+
+    vel_daily: dict[str, float] = {}
+    for v in vel_rows:
+        sku = v.get("sku")
+        if sku in target_skus:
+            vel_daily[sku] = float(v.get("total_u_30", 0) or 0) / 30.0
+
+    result: dict[str, dict[str, float]] = {}
+    for sku in target_skus:
+        result[sku] = {}
+        for m in months:
+            fv = fc[sku].get(m, 0)
+            if fv > 0:
+                result[sku][m] = round(fv)
+            else:
+                result[sku][m] = round(vel_daily.get(sku, 0) * _days_in_month_str(m))
+    return result
+
+
+def _forward_demand_60d(
+    month: str, sku_demand: dict[str, float], all_months: list[str],
+) -> float:
+    """Sum ~60 days of demand starting from end of *month*."""
+    try:
+        idx = all_months.index(month)
+    except ValueError:
+        return 0
+    total = 0.0
+    days = 0
+    for i in range(idx + 1, len(all_months)):
+        m = all_months[i]
+        dim = _days_in_month_str(m)
+        if days + dim <= 60:
+            total += sku_demand.get(m, 0)
+            days += dim
+        else:
+            remaining = 60 - days
+            daily = sku_demand.get(m, 0) / dim if dim else 0
+            total += daily * remaining
+            break
+    return total
+
+
+def build_manufacturer_headsup(
+    pallet_max: int = 19_000,
+    cover_target_days: int = 60,
+    committed_months: list[str] | None = None,
+    include_3pl: bool = True,
+    include_awd: bool = True,
+    skus: list[str] | None = None,
+) -> dict:
+    """Build rolling 3-month manufacturer production schedule.
+
+    Uses monthly stock-flow model with 60-day forward cover target:
+      For each month, stock depletes by demand.  If projected stock at
+      month-end falls below 60 days of forward demand, production is
+      needed to fill the gap.
+
+    Returns primary (correction_factor) and sensitivity (actual_2025)
+    scenarios side-by-side, with firm/indicative status per month.
+    """
+    target_skus = skus or LIP_BALM_SKUS
+    today = date.today()
+    committed = set(committed_months or [])
+
+    # Load data once
+    snaps = {r["sku"]: r for r in fetch_all("inventory_snapshots")}
+    awds_data = {r["sku"]: r for r in fetch_all("inventory_awd")}
+    tpls_data: dict[str, dict] = {}
+    try:
+        tpls_data = {r["sku"]: r for r in fetch_all("inventory_3pl_snapshots")}
+    except Exception:
+        pass
+    fc_rows = fetch_all("forecast_weekly")
+    vel_rows: list[dict] = []
+    try:
+        vel_rows = fetch_all("sku_velocity")
+    except Exception:
+        pass
+
+    # 3-month production window + forward months for cover calc
+    production_months = _month_list(today, 3)
+    all_months = _month_list(today, 8)  # through ~Apr 2027 for 60d fwd
+
+    amazon_in_by = DEFAULTS["amazon_in_by"]
+
+    scenarios_out: dict[str, dict] = {}
+    for scenario in ["correction_factor", "actual_2025"]:
+        md = _monthly_demand(fc_rows, vel_rows, target_skus, scenario, all_months)
+
+        sku_month_prod: dict[str, dict[str, int]] = {}
+        for sku in target_skus:
+            s = snaps.get(sku, {})
+            fba = sum(int(s.get(k, 0) or 0) for k in
+                      ["fulfillable", "reserved", "researching", "unfulfillable"])
+            inbound = sum(int(s.get(k, 0) or 0) for k in
+                          ["inbound_working", "inbound_shipped", "inbound_receiving"])
+            awd_v = int(awds_data.get(sku, {}).get("awd_on_hand", 0) or 0) if include_awd else 0
+            tpl_v = int(tpls_data.get(sku, {}).get("available", 0) or 0) if include_3pl else 0
+            stock = fba + inbound + awd_v + tpl_v
+
+            sku_month_prod[sku] = {}
+            for m in all_months:
+                demand = md[sku].get(m, 0)
+                stock -= demand
+                fwd = _forward_demand_60d(m, md[sku], all_months)
+                deficit = max(0, round(fwd - stock))
+                if m in production_months:
+                    sku_month_prod[sku][m] = deficit
+                stock += deficit
+
+        entries: list[dict] = []
+        for m in production_months:
+            mix = {}
+            for sku in target_skus:
+                v = sku_month_prod[sku].get(m, 0)
+                if v > 0:
+                    mix[sku] = v
+            total = sum(mix.values())
+            n_pallets = math.ceil(total / pallet_max) if total > 0 else 0
+
+            # Ship-by: 15th of month (allow 2-week Amazon receiving)
+            ship_day = 20
+            y, mo = m.split("-")
+            ship_by = f"{y}-{mo}-{ship_day:02d}"
+
+            entries.append({
+                "month": m,
+                "month_label": _month_label(m),
+                "status": "FIRM" if m in committed else "INDICATIVE",
+                "pallets": n_pallets,
+                "units": total,
+                "mix": mix,
+                "ship_by": ship_by,
+            })
+
+        scenarios_out[scenario] = {
+            "entries": entries,
+            "total_units": sum(e["units"] for e in entries),
+            "total_pallets": sum(e["pallets"] for e in entries),
+        }
+
+    return {
+        "generated": today.isoformat(),
+        "amazon_in_by": amazon_in_by,
+        "pallet_max": pallet_max,
+        "cover_target_days": cover_target_days,
+        "months": production_months,
+        "primary": scenarios_out["correction_factor"],
+        "sensitivity": scenarios_out["actual_2025"],
+        "primary_scenario": "correction_factor",
+        "sensitivity_scenario": "actual_2025",
+        "skus": target_skus,
+    }
+
+
+def format_manufacturer_csv(headsup: dict) -> str:
+    """Format manufacturer heads-up as CSV."""
+    lines = ["Month,Month_Label,Status,SKU,SKU_Label,Units,Pallets,Scenario"]
+    for scenario_key, scenario_label in [
+        ("primary", headsup["primary_scenario"]),
+        ("sensitivity", headsup["sensitivity_scenario"]),
+    ]:
+        for entry in headsup[scenario_key]["entries"]:
+            if not entry["mix"]:
+                lines.append(
+                    f"{entry['month']},{entry['month_label']},{entry['status']},"
+                    f",,0,0,{scenario_label}"
+                )
+            for sku, qty in entry["mix"].items():
+                lines.append(
+                    f"{entry['month']},{entry['month_label']},{entry['status']},"
+                    f"{sku},{SKU_LABEL_MAP.get(sku, sku)},{qty},{entry['pallets']},"
+                    f"{scenario_label}"
+                )
+    return "\n".join(lines) + "\n"
+
+
+def format_manufacturer_sheet(headsup: dict) -> str:
+    """Format printable manufacturer planning sheet."""
+    lines: list[str] = []
+    a = lines.append
+    a("=" * 60)
+    a("TALLOWBOURN")
+    a("MANUFACTURER PLANNING SHEET")
+    a(f"Lip Balm 3pk · Holiday Production Schedule")
+    a(f"Generated: {headsup['generated']}")
+    a("=" * 60)
+    a("")
+    a("SKU REFERENCE:")
+    for sku, label in SKU_LABEL_MAP.items():
+        a(f"  {sku}  =  {label}")
+    a("")
+    a(f"Pallet capacity: {headsup['pallet_max']:,} units")
+    a(f"FBA cover target: {headsup['cover_target_days']} days forward stock")
+    a(f"All units in Amazon FBA by: {headsup['amazon_in_by']}")
+    a("")
+    a("-" * 60)
+    a(f"PRIMARY SCENARIO: {headsup['primary_scenario']}")
+    a("-" * 60)
+
+    for entry in headsup["primary"]["entries"]:
+        a("")
+        a(f"  {entry['month_label']}  —  {entry['status']}")
+        if entry["units"] == 0:
+            a("    No production needed this month.")
+        else:
+            a(f"    Pallets: {entry['pallets']}  ({entry['units']:,} units)")
+            for sku in headsup["skus"]:
+                qty = entry["mix"].get(sku, 0)
+                if qty > 0:
+                    a(f"      {SKU_LABEL_MAP.get(sku, sku)}: {qty:,}")
+            a(f"    Ship by: {entry['ship_by']}")
+
+    a("")
+    p = headsup["primary"]
+    a(f"  TOTAL: {p['total_units']:,} units across {p['total_pallets']} pallet(s)")
+
+    a("")
+    a("-" * 60)
+    a(f"SENSITIVITY: {headsup['sensitivity_scenario']}")
+    a("-" * 60)
+    for entry in headsup["sensitivity"]["entries"]:
+        if entry["units"] > 0:
+            mix_str = ", ".join(
+                f"{SKU_LABEL_MAP.get(s, s).split()[0]} {q:,}"
+                for s, q in entry["mix"].items()
+            )
+            a(f"  {entry['month_label']}: {entry['units']:,} units "
+              f"({entry['pallets']} pallet) — {mix_str}")
+        else:
+            a(f"  {entry['month_label']}: no production needed")
+    s = headsup["sensitivity"]
+    a(f"  TOTAL: {s['total_units']:,} units across {s['total_pallets']} pallet(s)")
+
+    a("")
+    a("-" * 60)
+    a("NOTES:")
+    a("  • FIRM months represent committed production volumes.")
+    a("    INDICATIVE months are forecasts and may change.")
+    a("  • Volumes are driven by forecast demand and a policy of")
+    a(f"    maintaining {headsup['cover_target_days']}-day forward FBA cover.")
+    a("  • This is a planning aid, not a purchase order.")
+    a("-" * 60)
+    a("")
+    return "\n".join(lines)
