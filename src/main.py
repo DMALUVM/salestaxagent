@@ -1249,36 +1249,37 @@ def fba_cover_cmd(target_days, scenario, no_3pl, no_awd):
 
 @cli.command("mfg-headsup")
 @click.option("--commit", "commit_months", multiple=True, help="Months to mark FIRM (e.g. 2026-08)")
-@click.option("--no-3pl", is_flag=True, help="Exclude 3PL from supply")
-@click.option("--no-awd", is_flag=True, help="Exclude AWD from supply")
+@click.option("--tpl-offsets", is_flag=True, help="Let 3PL reduce manufacture (aggressive low-produce view)")
+@click.option("--no-jan", is_flag=True, help="Exclude January from holiday demand")
+@click.option("--weights", default="25,35,40", help="Month weights pct (e.g. 25,35,40)")
 @click.option("--csv", "csv_out", type=click.Path(), help="Export CSV to file")
 @click.option("--sheet", "sheet_out", type=click.Path(), help="Export printable summary to file")
-def mfg_headsup_cmd(commit_months, no_3pl, no_awd, csv_out, sheet_out):
+def mfg_headsup_cmd(commit_months, tpl_offsets, no_jan, weights, csv_out, sheet_out):
     """Manufacturer Heads-Up — rolling 3-month production schedule."""
     from src.inventory.pallet_planner import (
         build_manufacturer_headsup, format_manufacturer_csv,
-        format_manufacturer_sheet, SKU_LABEL_MAP,
+        format_manufacturer_sheet,
     )
+
+    w = tuple(float(x) / 100 for x in weights.split(","))
 
     headsup = build_manufacturer_headsup(
+        month_weights=w,
+        include_jan=not no_jan,
+        tpl_offsets_production=tpl_offsets,
         committed_months=list(commit_months) if commit_months else None,
-        include_3pl=not no_3pl,
-        include_awd=not no_awd,
     )
 
-    # Print summary
     click.echo(format_manufacturer_sheet(headsup))
 
     if csv_out:
-        csv_text = format_manufacturer_csv(headsup)
         with open(csv_out, "w") as f:
-            f.write(csv_text)
+            f.write(format_manufacturer_csv(headsup))
         click.echo(f"CSV exported to {csv_out}")
 
     if sheet_out:
-        sheet_text = format_manufacturer_sheet(headsup)
         with open(sheet_out, "w") as f:
-            f.write(sheet_text)
+            f.write(format_manufacturer_sheet(headsup))
         click.echo(f"Planning sheet exported to {sheet_out}")
 
 
