@@ -26,74 +26,48 @@ export async function GET() {
       reimbursements = r.data ?? [];
     } catch { /* table may not exist */ }
 
-    // Resolve parent ASIN → product title from existing data sources.
-    // S&T report only gives parent ASINs; titles come from child ASIN data.
+    // Resolve parent ASIN → product title.
     if (asinTraffic.length > 0) {
-      // Build ASIN→title map from velocity (has child ASIN + product_name)
+      // Step 1: config/asin_titles.json manual overrides
+      let overrides: Record<string, string> = {};
+      try {
+        const fs = await import("fs");
+        const path = await import("path");
+        const p = path.join(process.cwd(), "config", "asin_titles.json");
+        if (fs.existsSync(p)) {
+          overrides = JSON.parse(fs.readFileSync(p, "utf-8"));
+        }
+      } catch { /* ok */ }
+
+      // Step 2: Build ASIN→title from all DB tables
       const titleMap = new Map<string, string>();
-      // Also build parent→group title (first child's product line)
-      const parentTitleMap = new Map<string, string>();
-
-      try {
-        const vel = await sb.from("sku_velocity").select("asin,product_name");
-        for (const v of vel.data ?? []) {
-          if (v.asin && v.product_name) {
-            titleMap.set(v.asin, v.product_name);
+      for (const table of ["sku_velocity", "fba_returns", "fba_reimbursements", "inventory_restock"]) {
+        try {
+          const r = await sb.from(table).select("asin,product_name").limit(300);
+          for (const row of r.data ?? []) {
+            if (row.asin && row.product_name && !titleMap.has(row.asin)) {
+              titleMap.set(row.asin, row.product_name);
+            }
           }
-        }
-      } catch { /* ok */ }
+        } catch { /* table may not exist */ }
+      }
 
-      // Also check fba_returns for additional ASIN→title mappings
-      try {
-        const ret = await sb.from("fba_returns").select("asin,product_name").limit(200);
-        for (const r of ret.data ?? []) {
-          if (r.asin && r.product_name && !titleMap.has(r.asin)) {
-            titleMap.set(r.asin, r.product_name);
-          }
-        }
-      } catch { /* ok */ }
-
-      // Check if amazon_asin_traffic itself has product_name
-      // Also try direct match (parent ASIN might be in our data)
       for (const row of asinTraffic) {
         const parentAsin = row.parent_asin as string;
-        if (row.product_name) continue; // already has title
+        if (row.product_name) continue;
 
-        // Direct match
-        if (titleMap.has(parentAsin)) {
-          row.product_name = titleMap.get(parentAsin);
-          continue;
-        }
-
-        // Parent ASIN prefix match: find child ASINs that share prefix
-        // Amazon parent ASINs often share first ~6 chars with children
+        // Override
+        if (overrides[parentAsin]) { row.product_name = overrides[parentAsin]; continue; }
+        // Direct DB match
+        if (titleMap.has(parentAsin)) { row.product_name = titleMap.get(parentAsin); continue; }
+        // Prefix match (parent shares first 6 chars with child)
         const prefix = parentAsin.slice(0, 6);
         for (const [childAsin, title] of titleMap) {
           if (childAsin.startsWith(prefix)) {
-            // Extract product line from title (before variant descriptor)
-            const shortTitle = title
-              .replace(/\s*-\s*(Unscented|Peppermint|Sweet Orange|Assorted|Vanilla|Lavender|Orange).*$/i, "")
-              .replace(/\s*3pk.*$/i, "")
-              .replace(/\s*3-Pack.*$/i, "")
-              .trim();
-            row.product_name = shortTitle || title.split(" - ")[0];
+            row.product_name = title.split(" - ")[0].trim();
             break;
           }
         }
-
-        // Step 3: Check inventory_restock for more ASIN→title mappings
-        if (!row.product_name) {
-          try {
-            const restock = await sb.from("inventory_restock").select("asin,product_name");
-            for (const r of restock.data ?? []) {
-              if (r.asin === parentAsin && r.product_name) {
-                row.product_name = r.product_name;
-                break;
-              }
-            }
-          } catch { /* ok */ }
-        }
-        // No fake titles — unresolved ASINs show raw code
       }
     }
 

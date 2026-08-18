@@ -1056,43 +1056,65 @@ def _resolve_asin_titles(asin_rows: list[dict]) -> None:
     """Resolve product titles for parent ASINs.  Best-effort, never blocks.
 
     Priority:
-      1. Direct match in sku_velocity / fba_returns (child ASIN = parent)
-      2. Prefix match (parent shares first 6 chars with a child)
-      3. Merchant Listings report (fetches from SP-API; has parent ASINs)
+      1. config/asin_titles.json (manual overrides)
+      2. Direct match in DB tables (velocity, returns, reimbursements, restock)
+      3. Prefix match (parent shares first 6 chars with a child ASIN)
+      4. Merchant Listings report (fetches parent ASINs from SP-API)
     """
     import logging
+    import json as _json
+    from pathlib import Path
     log = logging.getLogger(__name__)
 
     missing = [r for r in asin_rows if not r.get("product_name")]
     if not missing:
         return
 
-    # Step 1+2: local title sources
+    # Step 1: manual override from config/asin_titles.json
     try:
-        title_map: dict[str, str] = {}
-        for r in fetch_all("sku_velocity"):
-            if r.get("asin") and r.get("product_name"):
-                title_map[r["asin"]] = r["product_name"]
-        for r in fetch_all("fba_returns"):
-            if r.get("asin") and r.get("product_name") and r["asin"] not in title_map:
-                title_map[r["asin"]] = r["product_name"]
-
-        for row in asin_rows:
-            if row.get("product_name"):
-                continue
-            parent = row.get("parent_asin", "")
-            if parent in title_map:
-                row["product_name"] = title_map[parent]
-                continue
-            prefix = parent[:6]
-            for child_asin, title in title_map.items():
-                if child_asin.startswith(prefix):
-                    row["product_name"] = title.split(" - ")[0].strip()
-                    break
+        override_path = Path(__file__).resolve().parent.parent.parent / "config" / "asin_titles.json"
+        if override_path.exists():
+            overrides = _json.loads(override_path.read_text())
+            for row in asin_rows:
+                if not row.get("product_name"):
+                    title = overrides.get(row.get("parent_asin", ""))
+                    if title:
+                        row["product_name"] = title
     except Exception:
         pass
 
-    # Step 3: fetch merchant listings for still-missing ASINs
+    # Step 2+3: DB title sources (all tables with ASIN + product_name)
+    missing = [r for r in asin_rows if not r.get("product_name")]
+    if missing:
+        try:
+            title_map: dict[str, str] = {}
+            for table in ("sku_velocity", "fba_returns", "fba_reimbursements",
+                          "inventory_restock", "inventory_snapshots"):
+                try:
+                    for r in fetch_all(table):
+                        asin = r.get("asin") or ""
+                        name = r.get("product_name") or ""
+                        if asin and name and asin not in title_map:
+                            title_map[asin] = name
+                except Exception:
+                    pass
+
+            for row in missing:
+                parent = row.get("parent_asin", "")
+                # Direct match
+                if parent in title_map:
+                    row["product_name"] = title_map[parent]
+                    continue
+                # Prefix match
+                prefix = parent[:6]
+                for child_asin, title in title_map.items():
+                    if child_asin.startswith(prefix):
+                        row["product_name"] = title.split(" - ")[0].strip()
+                        break
+        except Exception:
+            pass
+
+    # Step 4: Merchant Listings report for still-missing
     still_missing = [r for r in asin_rows if not r.get("product_name")]
     if not still_missing:
         return
@@ -1121,7 +1143,7 @@ def _resolve_asin_titles(asin_rows: list[dict]) -> None:
                 resolved += 1
 
         if resolved:
-            log.info("Resolved %d ASIN titles from merchant listings report", resolved)
+            log.info("Resolved %d ASIN titles from merchant listings", resolved)
     except Exception as e:
         log.debug("Merchant listings title fetch failed (non-fatal): %s", e)
 
