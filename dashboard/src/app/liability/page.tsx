@@ -216,35 +216,22 @@ export default function LiabilityPage() {
       let amzAll = 0;
       let amzSince = 0;
 
-      // Cutoff: yesterday (never include the full current month when partial)
-      const yd = new Date();
-      yd.setDate(yd.getDate() - 1);
-      const cutoff = `${yd.getFullYear()}-${String(yd.getMonth() + 1).padStart(2, "0")}-${String(yd.getDate()).padStart(2, "0")}`;
+      // Use actual sales_by_state totals without proration.
+      // sales_by_state monthly aggregates are actual orders placed in
+      // that month (from Shopify API / SP-API sync), not a projection
+      // of the full month.  Prorating would double-discount partial months.
 
       for (const s of sales) {
         if (s.state_code !== sc) continue;
         const ch = normalizeChannel(s.channel);
-        const ps = s.period_start ?? "";
         const pe = s.period_end ?? "";
-        let amt = Number(s.gross_sales) || 0;
+        const amt = Number(s.gross_sales) || 0;
 
-        // Skip rows before open period or after cutoff
+        // Skip rows in periods before the open filing window
         if (filedThrough && pe <= filedThrough) continue;
-        if (ps > cutoff) continue;
-
-        // Prorate current month if it extends past cutoff
-        if (pe > cutoff && ps <= cutoff) {
-          const psD = new Date(ps + "T00:00:00");
-          const peD = new Date(pe + "T00:00:00");
-          const cutD = new Date(cutoff + "T00:00:00");
-          const total = Math.round((peD.getTime() - psD.getTime()) / 86400000) + 1;
-          const elapsed = Math.round((cutD.getTime() - psD.getTime()) / 86400000) + 1;
-          if (total > 0 && elapsed < total) amt = Math.round(amt * elapsed / total * 100) / 100;
-        }
 
         const afterFiling = !!filedThrough;
-        shopAll += ch === SHOPIFY ? amt : 0;
-        if (afterFiling && ch === SHOPIFY) shopSince += amt;
+        if (ch === SHOPIFY) { shopAll += amt; if (afterFiling) shopSince += amt; }
         if (ch === SHOPIFY_SHOP) { shopChannelAll += amt; if (afterFiling) shopChannelSince += amt; }
         if (ch === AMAZON) { amzAll += amt; if (afterFiling) amzSince += amt; }
       }
@@ -293,8 +280,8 @@ export default function LiabilityPage() {
             What Do I Owe?
           </h1>
           <p className="text-sm text-muted-foreground">
-            Shopify sales since last filing &times; state rate &middot; Amazon
-            shown for reference only
+            Seller-responsible Shopify sales since last filing &times; state rate &middot;
+            Amazon and Shop channel shown for reference only
           </p>
         </div>
         <Button
@@ -318,7 +305,8 @@ export default function LiabilityPage() {
           <p className="text-xs text-amber-700 dark:text-amber-400">
             Base state-level rates, no local surcharges. Amazon collects and
             remits on its orders &mdash; those are{" "}
-            <strong>not your liability</strong>. Consult your CPA for
+            <strong>not your liability</strong>. Excludes Shop channel orders
+            where Shopify collects and remits tax. Consult your CPA for
             filing-ready numbers.
           </p>
         </div>
@@ -378,7 +366,7 @@ export default function LiabilityPage() {
                   ${fmt(totals.shopify)}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Unfiled direct sales you owe tax on
+                  Seller-responsible sales (excl. Shop channel)
                 </p>
               </CardContent>
             </Card>
