@@ -4,4 +4,4 @@
 
 ALTER TABLE sales_by_state DROP CONSTRAINT IF EXISTS sales_by_state_channel_check;
 ALTER TABLE sales_by_state ADD CONSTRAINT sales_by_state_channel_check
-  CHECK (channel IN ('shopify', 'shopify_shop', 'amazon', 'other'));
+  CHECK (channel IN ('shopify', 'shopify_shop', 'shopify_sub', 'amazon', 'other'));

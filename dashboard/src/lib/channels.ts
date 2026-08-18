@@ -6,9 +6,10 @@
  */
 
 // Canonical channel names (match the DB CHECK constraint on sales_by_state)
-export const SHOPIFY = "shopify" as const;        // seller-responsible
+export const SHOPIFY = "shopify" as const;           // seller-responsible (Online Store)
 export const SHOPIFY_SHOP = "shopify_shop" as const; // Shopify remits (Shop channel)
-export const AMAZON = "amazon" as const;           // Amazon remits
+export const SHOPIFY_SUB = "shopify_sub" as const;   // subscription contract (sub platform)
+export const AMAZON = "amazon" as const;             // Amazon remits
 export const OTHER = "other" as const;
 
 const CHANNEL_MAP: Record<string, string> = {
@@ -18,6 +19,7 @@ const CHANNEL_MAP: Record<string, string> = {
   shopify_csv: SHOPIFY,
   shopify_shop: SHOPIFY_SHOP,
   shop_channel: SHOPIFY_SHOP,
+  shopify_sub: SHOPIFY_SUB,
   amazon: AMAZON,
   amazon_inventory: AMAZON,
   amazon_sales: AMAZON,
@@ -41,9 +43,11 @@ export function isMarketplace(channel: string): boolean {
   return c === AMAZON || c === SHOPIFY_SHOP;
 }
 
-/** True if the seller must remit tax for this channel. */
+/** True if the seller must remit tax for this channel.
+ * Only Online Store (web) orders. Matches Shopify jurisdiction report.
+ * Excludes: Amazon, Shop channel, subscription contracts, other. */
 export function isSellerResponsible(channel: string): boolean {
-  return !isMarketplace(channel) && normalizeChannel(channel) !== OTHER;
+  return normalizeChannel(channel) === SHOPIFY;
 }
 
 /** Human-readable label for a channel. */

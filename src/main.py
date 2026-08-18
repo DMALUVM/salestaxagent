@@ -1048,6 +1048,66 @@ def filing_packet_cmd(state, out, end_date):
 
     Path(out).mkdir(parents=True, exist_ok=True)
 
+    # Current month boundaries for partial-month detection
+    current_month_start = cutoff.replace(day=1).isoformat()
+
+    # Fetch Shopify orders for partial month (actual dated sales)
+    partial_month_orders = {}  # {state_code: {channel: {gross, tax, count}}}
+    try:
+        from src.config import settings
+        if settings.shopify_enabled:
+            from src.shopify_auth import auth_headers
+            from src.channels import classify_shopify_order
+            import httpx
+
+            headers = auth_headers()
+            base_url = f"https://{settings.shopify_shop_domain}/admin/api/2024-01/orders.json"
+            params = {
+                "status": "any", "limit": 250,
+                "fields": "id,created_at,subtotal_price,total_tax,shipping_address,source_name",
+                "created_at_min": current_month_start + "T00:00:00Z",
+                "created_at_max": (cutoff + timedelta(days=1)).isoformat() + "T00:00:00Z",
+            }
+            all_orders = []
+            url = base_url
+            while url:
+                resp = httpx.get(url, headers=headers,
+                                 params=params if url == base_url else None, timeout=30)
+                if resp.status_code != 200:
+                    break
+                all_orders.extend(resp.json().get("orders", []))
+                link_header = resp.headers.get("link", "")
+                url = None
+                if 'rel="next"' in link_header:
+                    for part in link_header.split(","):
+                        if 'rel="next"' in part:
+                            url = part.split("<")[1].split(">")[0]
+                            break
+
+            for order in all_orders:
+                addr = order.get("shipping_address") or {}
+                prov = (addr.get("province_code") or "").upper()
+                country = addr.get("country_code", "")
+                if country != "US" or not prov:
+                    continue
+                created = order.get("created_at", "")[:10]
+                if created > cutoff.isoformat():
+                    continue
+                source = order.get("source_name", "")
+                ch = classify_shopify_order(source, d.fromisoformat(created))
+                gross = float(order.get("subtotal_price", 0) or 0)
+                tax = float(order.get("total_tax", 0) or 0)
+
+                if prov not in partial_month_orders:
+                    partial_month_orders[prov] = {}
+                if ch not in partial_month_orders[prov]:
+                    partial_month_orders[prov][ch] = {"gross": 0, "tax": 0, "count": 0}
+                partial_month_orders[prov][ch]["gross"] += gross
+                partial_month_orders[prov][ch]["tax"] += tax
+                partial_month_orders[prov][ch]["count"] += 1
+    except Exception as e:
+        click.echo(f"  Warning: could not fetch partial-month orders: {e}")
+
     for n in registered:
         sc = n["state_code"]
         lft = n.get("last_filed_through") or ""
@@ -1061,48 +1121,43 @@ def filing_packet_cmd(state, out, end_date):
             pe = s.get("period_end", "")
             if not ps:
                 continue
-            # Skip rows entirely before open period
             if lft and pe <= lft:
                 continue
-            # Skip rows entirely after cutoff
             if ps > cutoff.isoformat():
                 continue
 
             ch = normalize_channel(s.get("channel", ""))
-            gross = float(s.get("gross_sales", 0) or 0)
-            tax = float(s.get("tax_collected", 0) or 0)
-            orders = int(s.get("order_count", 0) or 0)
 
-            # Determine actual period end (capped at cutoff)
-            actual_pe = min(pe, cutoff.isoformat())
-
-            # Prorate if this is a partial month (the monthly record extends
-            # past the cutoff — meaning we're mid-month)
+            # For the current partial month: use actual order data instead
             if pe > cutoff.isoformat() and ps <= cutoff.isoformat():
-                try:
-                    ps_date = d.fromisoformat(ps)
-                    pe_date = d.fromisoformat(pe)
-                    total_days = (pe_date - ps_date).days + 1
-                    elapsed_days = (cutoff - ps_date).days + 1
-                    if total_days > 0 and elapsed_days < total_days:
-                        ratio = elapsed_days / total_days
-                        gross = round(gross * ratio, 2)
-                        tax = round(tax * ratio, 2)
-                        orders = round(orders * ratio)
-                except (ValueError, TypeError):
-                    pass
+                continue  # skip the monthly aggregate; we'll add order-level below
 
             rows_out.append({
                 "state": sc,
                 "period_start": max(ps, period_start) if period_start else ps,
-                "period_end": actual_pe,
+                "period_end": pe,
                 "channel": ch,
                 "channel_label": display_label(ch),
                 "seller_responsible": is_seller_responsible(ch),
-                "gross_sales": gross,
-                "tax_collected": tax,
-                "order_count": orders,
+                "gross_sales": float(s.get("gross_sales", 0) or 0),
+                "tax_collected": float(s.get("tax_collected", 0) or 0),
+                "order_count": int(s.get("order_count", 0) or 0),
             })
+
+        # Add actual partial-month Shopify data from orders
+        if sc in partial_month_orders:
+            for ch, agg in partial_month_orders[sc].items():
+                rows_out.append({
+                    "state": sc,
+                    "period_start": max(current_month_start, period_start) if period_start else current_month_start,
+                    "period_end": cutoff.isoformat(),
+                    "channel": ch,
+                    "channel_label": display_label(ch),
+                    "seller_responsible": is_seller_responsible(ch),
+                    "gross_sales": round(agg["gross"], 2),
+                    "tax_collected": round(agg["tax"], 2),
+                    "order_count": agg["count"],
+                })
 
         if not rows_out:
             click.echo(f"  {sc}: no activity since {lft or 'never'}")

@@ -19,8 +19,9 @@ from __future__ import annotations
 from datetime import date
 
 # Canonical channel names
-SHOPIFY = "shopify"            # seller-responsible (Online Store)
+SHOPIFY = "shopify"            # seller-responsible (Online Store / web)
 SHOPIFY_SHOP = "shopify_shop"  # Shopify-remits (Shop channel, since 2025-01-01)
+SHOPIFY_SUB = "shopify_sub"    # subscription contract (tax handled by sub platform)
 AMAZON = "amazon"              # Amazon-remits
 OTHER = "other"
 
@@ -40,6 +41,8 @@ _CHANNEL_MAP: dict[str, str] = {
     # Shop channel (Shopify-remits)
     "shopify_shop": SHOPIFY_SHOP,
     "shop_channel": SHOPIFY_SHOP,
+    # Subscription contracts
+    "shopify_sub": SHOPIFY_SUB,
     # Amazon variants
     "amazon": AMAZON,
     "amazon_inventory": AMAZON,
@@ -82,7 +85,12 @@ def classify_shopify_order(source_name: str, order_date: date | None = None) -> 
         # Before 2025-01-01: seller-responsible even via Shop app
         return SHOPIFY
 
-    # Everything else (web, shopify_draft_order, subscription_*, etc.)
+    # Subscription contract orders: tax handled by subscription platform,
+    # not included in Shopify jurisdiction tax report totals
+    if sn.startswith("subscription_contract"):
+        return SHOPIFY_SUB
+
+    # Everything else (web, shopify_draft_order, etc.) = seller-responsible
     return SHOPIFY
 
 
@@ -91,14 +99,22 @@ def is_marketplace(channel: str) -> bool:
 
     Amazon remits in all 45 sales-tax states + DC.
     Shopify Shop channel remits since 2025-01-01.
+    Subscription contracts: tax handled by sub platform (not marketplace,
+    but also not in seller jurisdiction report totals).
     """
     c = normalize_channel(channel)
     return c in (AMAZON, SHOPIFY_SHOP)
 
 
 def is_seller_responsible(channel: str) -> bool:
-    """True if the SELLER must remit tax for this channel."""
-    return not is_marketplace(channel) and normalize_channel(channel) != OTHER
+    """True if the SELLER must remit tax for this channel.
+
+    Excludes: Amazon (marketplace), Shop channel (marketplace),
+    subscription contracts (tax handled by sub platform), and other.
+    Matches Shopify jurisdiction tax report totals.
+    """
+    c = normalize_channel(channel)
+    return c == SHOPIFY  # only Online Store / web orders
 
 
 def display_label(channel: str) -> str:
@@ -107,6 +123,7 @@ def display_label(channel: str) -> str:
     labels = {
         SHOPIFY: "Shopify (seller)",
         SHOPIFY_SHOP: "Shop Channel (Shopify remits)",
+        SHOPIFY_SUB: "Subscription (sub platform)",
         AMAZON: "Amazon FBA (Amazon remits)",
     }
     return labels.get(canon, channel.title())
