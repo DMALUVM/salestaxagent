@@ -151,6 +151,7 @@ interface StateLiability {
   state_name: string;
   rate: number;
   frequency: string | null;
+  account_number: string | null;
   next_due: string | null;
   next_due_days: number | null;
   filed_through: string | null;
@@ -244,6 +245,7 @@ export default function LiabilityPage() {
         next_due: nd?.due ?? null,
         next_due_days: nd?.days ?? null,
         filed_through: filedThrough,
+        account_number: n.account_number ?? null,
         has_filed_through: !!filedThrough,
         shopify_since_filing: shopSince,
         shop_channel_since_filing: shopChannelSince,
@@ -445,6 +447,11 @@ export default function LiabilityPage() {
                               {row.state_name}
                             </span>
                           </div>
+                          {row.account_number && (
+                            <p className="text-[10px] text-muted-foreground tabular-nums">
+                              Acct: {row.account_number}
+                            </p>
+                          )}
                         </TableCell>
                         <TableCell>
                           {row.frequency ? (

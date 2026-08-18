@@ -16,6 +16,7 @@ export interface NexusStatus {
   requires_action: boolean;
   action_notes: string | null;
   confidence: string | null;
+  account_number: string | null;
   updated_at: string;
 }
 

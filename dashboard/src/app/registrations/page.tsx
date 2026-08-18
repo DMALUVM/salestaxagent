@@ -50,6 +50,7 @@ interface EditState {
   assigned_frequency: string;
   typical_due_day: string;
   last_filed_through: string;
+  account_number: string;
   notes: string;
 }
 
@@ -64,6 +65,7 @@ function EditDialog({
     assigned_frequency: rec.assigned_frequency ?? rec.filing_frequency_default ?? "",
     typical_due_day: rec.typical_due_day?.toString() ?? "",
     last_filed_through: rec.last_filed_through ?? "",
+    account_number: rec.registration_number ?? "",
     notes: rec.notes ?? "",
   });
   const [saving, setSaving] = useState(false);
@@ -75,6 +77,7 @@ function EditDialog({
       assigned_frequency: rec.assigned_frequency ?? rec.filing_frequency_default ?? "",
       typical_due_day: rec.typical_due_day?.toString() ?? "",
       last_filed_through: rec.last_filed_through ?? "",
+      account_number: rec.registration_number ?? "",
       notes: rec.notes ?? "",
     });
     setError(null);
@@ -102,6 +105,7 @@ function EditDialog({
             ? rec.registration_date ?? new Date().toISOString().slice(0, 10)
             : null,
           last_filed_through: form.is_registered ? form.last_filed_through || null : null,
+          account_number: form.account_number || null,
         }),
       });
       const regResult = await regResp.json();
@@ -154,6 +158,18 @@ function EditDialog({
               <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg transition-transform ${form.is_registered ? "translate-x-5" : "translate-x-0"}`} />
             </button>
           </div>
+          <div>
+            <label className="text-sm font-medium">Account Number</label>
+            <Input
+              placeholder="e.g., NC sales tax account ID"
+              value={form.account_number}
+              onChange={(e) => setForm((f) => ({ ...f, account_number: e.target.value }))}
+              className="mt-1" />
+            <p className="mt-1 text-xs text-muted-foreground">
+              State tax account or registration number (no passwords)
+            </p>
+          </div>
+
           <div>
             <label className="text-sm font-medium">Filing Frequency</label>
             <Select value={form.assigned_frequency}
@@ -261,6 +277,7 @@ export default function NexusRegistrationsPage() {
               <TableHead className="w-24">Nexus</TableHead>
               <TableHead className="w-20">Econ %</TableHead>
               <TableHead className="w-28">Frequency</TableHead>
+              <TableHead className="w-24">Account #</TableHead>
               <TableHead>Reason</TableHead>
               <TableHead className="w-10" />
             </TableRow>
@@ -310,6 +327,11 @@ export default function NexusRegistrationsPage() {
                     <FrequencyBadge frequency={r.assigned_frequency} />
                   ) : r.filing_frequency_default ? (
                     <span className="text-xs text-muted-foreground capitalize">{r.filing_frequency_default}</span>
+                  ) : <span className="text-xs text-muted-foreground">—</span>}
+                </TableCell>
+                <TableCell>
+                  {r.registration_number ? (
+                    <span className="text-xs tabular-nums">{r.registration_number}</span>
                   ) : <span className="text-xs text-muted-foreground">—</span>}
                 </TableCell>
                 <TableCell>

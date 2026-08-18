@@ -31,8 +31,8 @@ export async function POST(request: NextRequest) {
   };
 
   // Optional fields -- only set when provided
-  if (body.registration_number !== undefined) {
-    updates.registration_number = body.registration_number || null;
+  if (body.account_number !== undefined) {
+    updates.account_number = body.account_number || null;
   }
   if (body.registration_date !== undefined) {
     updates.registration_date = body.registration_date || null;
@@ -57,10 +57,21 @@ export async function POST(request: NextRequest) {
   }
 
   const sb = getServerSupabase();
-  const { error } = await sb
+  let { error } = await sb
     .from("nexus_status")
     .update(updates)
     .eq("state_code", state_code);
+
+  // If account_number column doesn't exist yet (migration pending),
+  // retry without it so other fields still save.
+  if (error?.code === "42703" && updates.account_number !== undefined) {
+    const { account_number: _, ...fallback } = updates;
+    const retry = await sb
+      .from("nexus_status")
+      .update(fallback)
+      .eq("state_code", state_code);
+    error = retry.error;
+  }
 
   if (error) {
     return Response.json(

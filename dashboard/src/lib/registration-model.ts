@@ -167,7 +167,7 @@ export function buildRecommendations(
       shopify_sales: Math.round(sale.shopify * 100) / 100,
       has_franchise_flag: hasFranchise,
       registration_date: n?.registration_date ?? null,
-      registration_number: null, // not stored in nexus_status
+      registration_number: n?.account_number ?? null,
       registration_source: null,
       assigned_frequency: n?.assigned_frequency ?? null,
       last_filed_through: n?.last_filed_through ?? null,
