@@ -177,6 +177,33 @@ def build_pallet_plan(
 # FBA Cover Projection — 60-day forward cover policy
 # ---------------------------------------------------------------------------
 
+VEL_WEIGHTS = (0.50, 0.30, 0.20)  # V7 / V30 / V90
+
+
+def _blended_daily_velocity(
+    vel_row: dict,
+    weights: tuple[float, ...] = VEL_WEIGHTS,
+) -> float:
+    """Blended daily velocity from V7/V30/V90 with renormalization.
+
+    NOTE: sku_velocity fields (total_u_7, total_u_30, total_u_90) are
+    ALREADY units-per-day (computed by _units_per_day = total / window).
+    Do NOT divide by 7/30/90 again.
+
+    Returns 0 only when no velocity window has data.
+    """
+    windows = [
+        (float(vel_row.get("total_u_7", 0) or 0), weights[0]),
+        (float(vel_row.get("total_u_30", 0) or 0), weights[1]),
+        (float(vel_row.get("total_u_90", 0) or 0), weights[2]),
+    ]
+    valid = [(rate, w) for rate, w in windows if rate > 0]
+    if not valid:
+        return 0.0
+    w_sum = sum(w for _, w in valid)
+    return sum(rate * w / w_sum for rate, w in valid)
+
+
 def _build_weekly_demand(
     fc_rows: list[dict],
     vel_rows: list[dict],
@@ -186,8 +213,8 @@ def _build_weekly_demand(
 ) -> dict[str, dict[str, float]]:
     """Build per-SKU weekly demand lookup.
 
-    Uses forecast_weekly where available; falls back to velocity-based
-    daily rate × 7 for weeks not covered by the forecast.
+    Uses forecast_weekly where available; falls back to blended
+    velocity (50% V7 + 30% V30 + 20% V90) × 7 for non-forecast weeks.
     """
     # Forecast: {sku: {week_start_iso: units}}
     fc_map: dict[str, dict[str, float]] = defaultdict(dict)
@@ -200,13 +227,12 @@ def _build_weekly_demand(
         ws = str(r.get("week_start", ""))[:10]
         fc_map[sku][ws] = float(r.get("units", 0) or 0)
 
-    # Velocity fallback: daily rate from sku_velocity (total_u_30 / 30)
+    # Blended velocity fallback
     vel_daily: dict[str, float] = {}
     for v in vel_rows:
         sku = v.get("sku")
         if sku in target_skus:
-            u30 = float(v.get("total_u_30", 0) or 0)
-            vel_daily[sku] = u30 / 30.0
+            vel_daily[sku] = _blended_daily_velocity(v)
 
     # For each week, find demand: check forecast ±3 days, else velocity
     demand: dict[str, dict[str, float]] = defaultdict(dict)

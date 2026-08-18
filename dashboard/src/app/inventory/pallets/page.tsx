@@ -304,6 +304,20 @@ export default function PalletPlanPage() {
     const cur = new Date(monday);
     while (cur <= endDate) { weeks.push(new Date(cur)); cur.setDate(cur.getDate() + 7); }
 
+    // Blended daily velocity: 50% V7 + 30% V30 + 20% V90 (renormalized)
+    // NOTE: total_u_* are already units/day (computed by _units_per_day = total/window)
+    function blendedDailyVelocity(vel: SkuVelocity): number {
+      const windows: [number, number][] = [
+        [vel.total_u_7, 0.50],
+        [vel.total_u_30, 0.30],
+        [vel.total_u_90, 0.20],
+      ];
+      const valid = windows.filter(([rate]) => rate > 0);
+      if (!valid.length) return 0;
+      const wSum = valid.reduce((a, [, w]) => a + w, 0);
+      return valid.reduce((a, [rate, w]) => a + rate * w / wSum, 0);
+    }
+
     function getWeekDemand(sku: string, weekDate: Date): number {
       const fc = fcMap.get(sku);
       if (fc) {
@@ -314,7 +328,7 @@ export default function PalletPlanPage() {
         }
       }
       const vel = velMap.get(sku);
-      if (vel) return (vel.total_u_30 / 30) * 7;
+      if (vel) return blendedDailyVelocity(vel) * 7;
       return 0;
     }
 
