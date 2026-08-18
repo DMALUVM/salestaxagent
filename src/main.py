@@ -981,44 +981,148 @@ def inventory_3pl_sync_cmd(dry_run):
 @cli.command("plan-sku")
 @click.option("--sku", required=True)
 @click.option("--until", "until_date", default="2027-03-31")
-@click.option("--fba-min-days", default=60)
-def plan_sku_cmd(sku, until_date, fba_min_days):
-    """Forward sell-through plan for a single SKU."""
+@click.option("--scenario", default="correction_factor",
+              type=click.Choice(["correction_factor", "actual_2025", "optimistic"]))
+def plan_sku_cmd(sku, until_date, scenario):
+    """Forward sell-through plan for a single SKU.
+
+    Uses imported weekly forecast (forecast_weekly) when available.
+    Falls back to velocity × seasonality for weeks without forecast data.
+    """
     from datetime import date as d, timedelta
     from src.db import fetch_all
+
     end = d.fromisoformat(until_date) + timedelta(days=14)
     today = d.today()
+
     vels = {r["sku"]: r for r in fetch_all("sku_velocity")}
     snaps = {r["sku"]: r for r in fetch_all("inventory_snapshots")}
     awds = {r["sku"]: r for r in fetch_all("inventory_awd")}
+    tpls = {}
+    try:
+        tpls = {r["sku"]: r for r in fetch_all("inventory_3pl_snapshots")}
+    except Exception:
+        pass
+
     vel = vels.get(sku)
     snap = snaps.get(sku)
     if not vel:
         click.echo(f"SKU {sku} not found in sku_velocity")
         return
+
     base = float(vel.get("total_u_30", 0) or 0)
-    fba = sum(int(snap.get(k, 0) or 0) for k in ["fulfillable","reserved","researching","unfulfillable"]) if snap else 0
-    awd = int(awds.get(sku, {}).get("awd_on_hand", 0) or 0)
-    click.echo(f"SKU: {sku}  V30={base:.1f}  FBA={fba}  AWD={awd}  DOS={fba/base:.0f}d" if base > 0 else f"SKU: {sku}  V30=0")
-    # Simple forecast
-    season = {}
+    fba = sum(int(snap.get(k, 0) or 0) for k in
+              ["fulfillable", "reserved", "researching", "unfulfillable"]) if snap else 0
+    inbound = sum(int(snap.get(k, 0) or 0) for k in
+                  ["inbound_working", "inbound_shipped", "inbound_receiving"]) if snap else 0
+    awd_oh = int(awds.get(sku, {}).get("awd_on_hand", 0) or 0)
+    tpl_oh = int(tpls.get(sku, {}).get("available", 0) or 0)
+    owned = fba + inbound + awd_oh + tpl_oh
+
+    # Load forecast weekly series (range-based lookup: cursor within
+    # [week_start, week_start+6] matches that forecast week)
+    forecast_weeks: list[tuple[d, float]] = []
+    try:
+        fc_rows = fetch_all("forecast_weekly")
+        for r in fc_rows:
+            if r.get("sku") == sku and r.get("scenario") == scenario:
+                ws = d.fromisoformat(str(r["week_start"]))
+                forecast_weeks.append((ws, float(r.get("units", 0) or 0)))
+        forecast_weeks.sort()
+    except Exception:
+        pass
+
+    has_forecast = len(forecast_weeks) > 0
+
+    def _get_forecast(cursor_date: d, cursor_end: d) -> float | None:
+        """Find forecast that overlaps the plan week [cursor_date, cursor_end].
+        Uses the forecast whose week_start is closest to cursor_date."""
+        best = None
+        best_dist = 999
+        for ws, units in forecast_weeks:
+            we = ws + timedelta(days=6)
+            # Overlap: forecast [ws, we] intersects plan [cursor_date, cursor_end]
+            if ws <= cursor_end and we >= cursor_date:
+                dist = abs((ws - cursor_date).days)
+                if dist < best_dist:
+                    best = units
+                    best_dist = dist
+        return best
+
+    # For summary display
+    forecast_map = {ws.isoformat(): u for ws, u in forecast_weeks}
+
+    # Seasonality fallback
+    season: dict[int, float] = {}
     for r in fetch_all("seasonality_weekly"):
         if r.get("sku") == "_account_" and r.get("year") == 0:
             season[int(r["week"])] = float(r.get("multiplier", 1.0) or 1.0)
-    remaining, total_demand = fba, 0
+
+    # Header
+    click.echo(f"{'='*65}")
+    click.echo(f"  PLAN: {sku}")
+    click.echo(f"  {today} → {end}")
+    click.echo(f"  Demand source: {'forecast_weekly (' + scenario + ')' if has_forecast else 'velocity × seasonality'}")
+    click.echo(f"{'='*65}")
+    click.echo(f"  V30={base:.1f} u/day  FBA={fba:,}  inbound={inbound:,}  AWD={awd_oh:,}  3PL={tpl_oh:,}  owned={owned:,}")
+    if has_forecast:
+        fc_total = sum(forecast_map.values())
+        click.echo(f"  Forecast weeks: {len(forecast_map)}  total={fc_total:,.0f} units ({scenario})")
+    click.echo()
+
+    # Weekly walk
+    remaining = fba
+    total_demand = 0
+    forecast_demand = 0
+    velocity_demand = 0
+    stockout_week = None
+
+    click.echo(f"  {'Wk':<4} {'Dates':<24} {'Source':<6} {'Demand':>7} {'FBA':>7}")
+    click.echo(f"  {'-'*52}")
+
     cursor = today
     while cursor <= end:
         wk_end = min(cursor + timedelta(days=6), end)
         days = (wk_end - cursor).days + 1
-        mult = season.get(cursor.isocalendar()[1], 1.0)
-        demand = round(base * days * mult)
+        fc_units = _get_forecast(cursor, wk_end)
+
+        if fc_units is not None:
+            demand = round(fc_units)
+            source = "FC"
+            forecast_demand += demand
+        else:
+            mult = season.get(cursor.isocalendar()[1], 1.0)
+            demand = round(base * days * mult)
+            source = "V×S"
+            velocity_demand += demand
+
         total_demand += demand
         remaining -= demand
-        if remaining <= 0 and remaining + demand > 0:
-            click.echo(f"  FBA stockout: {cursor}")
+
+        note = ""
+        if remaining <= 0 and stockout_week is None:
+            stockout_week = cursor
+            note = " ← STOCKOUT"
+
+        iso_wk = cursor.isocalendar()[1]
+        click.echo(
+            f"  W{iso_wk:<3} {cursor} → {wk_end}  {source:<6} {demand:>7,} {max(remaining, 0):>7,}{note}"
+        )
+
         cursor = wk_end + timedelta(days=1)
-    click.echo(f"Demand through {end}: {total_demand:,} units")
-    click.echo(f"FBA gap: {max(total_demand - fba, 0):,}")
+
+    click.echo(f"  {'-'*52}")
+    click.echo(f"\n  Total demand:    {total_demand:>8,}")
+    if has_forecast:
+        click.echo(f"    from forecast:  {forecast_demand:>8,} ({len(forecast_map)} weeks)")
+        click.echo(f"    from velocity:  {velocity_demand:>8,} (remainder)")
+    click.echo(f"  FBA on-hand:     {fba:>8,}")
+    click.echo(f"  Owned total:     {owned:>8,}")
+    click.echo(f"  Gap (FBA):       {max(total_demand - fba, 0):>8,}")
+    click.echo(f"  Gap (owned):     {max(total_demand - owned, 0):>8,}")
+    if stockout_week:
+        click.echo(f"  FBA stockout:    {stockout_week}")
+    click.echo()
 
 
 @cli.command("import-forecast")

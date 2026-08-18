@@ -113,14 +113,38 @@ export default function PlanSkuPage() {
 
     // Holiday forecast: prefer imported weekly series when available
     const skuForecast = forecastRows.filter((f) => f.sku === selectedSku);
-    const forecastMap = new Map<string, number>(); // week_start → units
-    const scenarioKey = "correction_factor"; // default scenario
+    // Build sorted array of forecast weeks for range lookup
+    const scenarioKey = "correction_factor";
+    const forecastWeeks: { start: number; units: number }[] = [];
     for (const f of skuForecast) {
       if (f.scenario === scenarioKey) {
-        forecastMap.set(f.week_start, Number(f.units));
+        forecastWeeks.push({
+          start: new Date(f.week_start + "T00:00:00").getTime(),
+          units: Number(f.units),
+        });
       }
     }
-    const hasForecast = forecastMap.size > 0;
+    forecastWeeks.sort((a, b) => a.start - b.start);
+    const hasForecast = forecastWeeks.length > 0;
+
+    // Find forecast that overlaps the plan week [cursorMs, endMs].
+    // Uses the closest forecast week_start by overlap.
+    function getForecastDemand(cursorMs: number, endMs: number): number | null {
+      let best: number | null = null;
+      let bestDist = Infinity;
+      for (const fw of forecastWeeks) {
+        const fwEnd = fw.start + 6 * 86400000;
+        // Overlap: forecast [fw.start, fwEnd] intersects plan [cursorMs, endMs]
+        if (fw.start <= endMs && fwEnd >= cursorMs) {
+          const dist = Math.abs(fw.start - cursorMs);
+          if (dist < bestDist) {
+            best = fw.units;
+            bestDist = dist;
+          }
+        }
+      }
+      return best;
+    }
 
     const fba =
       Number(snap?.fulfillable ?? 0) +
@@ -172,8 +196,7 @@ export default function PlanSkuPage() {
       const mult = seasonMap.get(clampedWk) ?? 1.0;
 
       // Use imported forecast if available for this week, else velocity × seasonality
-      const weekKey = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
-      const forecastUnits = forecastMap.get(weekKey);
+      const forecastUnits = getForecastDemand(cursor.getTime(), weekEnd.getTime());
       const demand = forecastUnits != null
         ? Math.round(forecastUnits * stress)
         : Math.round(baseDaily * days * mult * stress);
