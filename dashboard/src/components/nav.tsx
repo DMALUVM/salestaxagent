@@ -41,6 +41,7 @@ const primaryLinks: NavItem[] = [
 ];
 
 const monitorLinks: NavItem[] = [
+  { href: "/inventory/3pl", label: "3PL Costs", icon: Package },
   { href: "/sales-map", label: "Sales Map", icon: MapPinned },
   { href: "/skus", label: "SKU Performance", icon: Package },
   { href: "/compliance", label: "Compliance Guides", icon: BookOpen },

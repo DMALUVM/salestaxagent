@@ -1331,6 +1331,25 @@ def import_forecast_cmd(file_path, dry_run):
             click.echo(f"  {r['sku']} {r['week_start']} {r['scenario']:<20} {r['units']:>8.0f}")
 
 
+@cli.command("import-3pl")
+@click.argument("file_path")
+@click.option("--dry-run", is_flag=True)
+def import_3pl_cmd(file_path, dry_run):
+    """Import 3PL invoice CSV into cost tracking tables."""
+    from src.parsers.tpl_invoice import import_tpl_invoice
+
+    if dry_run:
+        click.echo("DRY RUN\n")
+
+    result = import_tpl_invoice(file_path, dry_run=dry_run)
+    click.echo(f"File: {result['file']}")
+    click.echo(f"Months: {', '.join(result['months_covered'])}")
+    click.echo(f"Monthly rows: {result['monthly_count']}")
+    click.echo(f"Fee rows: {result['fee_count']}")
+    click.echo(f"Detail rows: {result['detail_count']}")
+    click.echo(f"Rows inserted: {result['rows_inserted']}")
+
+
 @cli.command("filing-packet")
 @click.option("--state", default=None, help="Single state or all registered")
 @click.option("--out", default="exports/filings", help="Output directory")
