@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
         body.state_code,
         body.frequency,
         body.due_day ?? 20,
+        body.registration_date ?? null,
       );
       if (entries.length > 0) {
         const { error } = await sb
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
     // All-states mode: generate for every registered state
     const { data: nexus, error: nErr } = await sb
       .from("nexus_status")
-      .select("state_code, assigned_frequency")
+      .select("state_code, assigned_frequency, registration_date")
       .eq("is_registered", true);
 
     if (nErr) {
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
       const freq =
         n.assigned_frequency ?? ruleMap[sc]?.freq ?? "quarterly";
       const day = ruleMap[sc]?.day ?? 20;
-      const entries = generateEntries(sc, freq, day);
+      const entries = generateEntries(sc, freq, day, n.registration_date ?? null);
 
       if (entries.length > 0) {
         const { error } = await sb
@@ -110,10 +111,11 @@ function generateEntries(
   stateCode: string,
   frequency: string,
   dueDay: number,
+  registrationDate: string | null,
 ): Array<Record<string, unknown>> {
   const now = new Date();
   const currentYear = now.getFullYear();
-  const entries: Array<Record<string, unknown>> = [];
+  const allEntries: Array<Record<string, unknown>> = [];
 
   for (const year of [currentYear, currentYear + 1]) {
     if (frequency === "monthly") {
@@ -122,7 +124,7 @@ function generateEntries(
         const pEnd = lastDay(year, month);
         const dueMonth = month === 12 ? 1 : month + 1;
         const dueYear = month === 12 ? year + 1 : year;
-        entries.push({
+        allEntries.push({
           state_code: stateCode,
           period_type: "monthly",
           period_label: `${year}-${String(month).padStart(2, "0")}`,
@@ -141,7 +143,7 @@ function generateEntries(
       ];
       for (const [label, sm, em, dm] of qs) {
         const dueYear = dm < sm ? year + 1 : year;
-        entries.push({
+        allEntries.push({
           state_code: stateCode,
           period_type: "quarterly",
           period_label: `${year}-${label}`,
@@ -157,7 +159,7 @@ function generateEntries(
         ["H2", 7, 12, 1],
       ] as [string, number, number, number][]) {
         const dueYear = dm < sm ? year + 1 : year;
-        entries.push({
+        allEntries.push({
           state_code: stateCode,
           period_type: "semi_annual",
           period_label: `${year}-${label}`,
@@ -168,7 +170,7 @@ function generateEntries(
         });
       }
     } else if (frequency === "annual") {
-      entries.push({
+      allEntries.push({
         state_code: stateCode,
         period_type: "annual",
         period_label: String(year),
@@ -180,7 +182,12 @@ function generateEntries(
     }
   }
 
-  return entries;
+  // Skip periods that end entirely before registration date.
+  // Only create filing obligations from registration forward.
+  if (registrationDate) {
+    return allEntries.filter((e) => (e.period_end as string) >= registrationDate);
+  }
+  return allEntries;
 }
 
 function isoDate(y: number, m: number, d: number): string {

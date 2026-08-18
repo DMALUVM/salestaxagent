@@ -230,12 +230,24 @@ export default function Pulse() {
   );
 
   const { overdue, actionCount, nextFiling, nextFilingDays, criticalItems } = useMemo(() => {
-    const od = (filings ?? []).filter(
-      (f) => (f.status === "pending" || f.status === "late") && f.due_date < todayStr,
+    // Registration date lookup — exclude pre-registration periods from overdue
+    const regDateMap = new Map<string, string>();
+    for (const n of (nexus ?? [])) {
+      if (n.registration_date) regDateMap.set(n.state_code, n.registration_date);
+    }
+    function isPostRegistration(f: { state_code: string; period_end?: string; due_date: string }) {
+      const regDate = regDateMap.get(f.state_code);
+      if (!regDate) return true;
+      return (f.period_end ?? f.due_date) >= regDate;
+    }
+
+    const validPending = (filings ?? []).filter(
+      (f) => (f.status === "pending" || f.status === "late") && isPostRegistration(f),
     );
+    const od = validPending.filter((f) => f.due_date < todayStr);
     const regNow = recs.filter((r) => r.recommendation === "REGISTER_NOW");
     const ac = od.length + regNow.length;
-    const nf = (filings ?? []).find((f) => f.status === "pending" && f.due_date >= todayStr);
+    const nf = validPending.find((f) => f.due_date >= todayStr);
     const nfDays = nf ? Math.ceil((new Date(nf.due_date).getTime() - Date.now()) / 86400000) : null;
 
     const items: { label: string; href: string }[] = [];

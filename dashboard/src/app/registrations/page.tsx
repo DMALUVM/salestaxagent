@@ -115,6 +115,9 @@ function EditDialog({
       if (rulesErr) { setError(rulesErr.message); setSaving(false); return; }
 
       if (form.is_registered && form.assigned_frequency) {
+        const regDate = form.is_registered
+          ? rec.registration_date ?? new Date().toISOString().slice(0, 10)
+          : null;
         await fetch("/api/generate-filings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -122,6 +125,7 @@ function EditDialog({
             state_code: rec.state_code,
             frequency: form.assigned_frequency,
             due_day: dueDay ?? 20,
+            registration_date: regDate,
           }),
         }).catch(() => {});
       }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
-import type { FilingEntry } from "@/lib/types";
+import type { FilingEntry, NexusStatus } from "@/lib/types";
 import { FilingStatusBadge, FrequencyBadge } from "@/components/status-badge";
 import { LoadingState } from "@/components/loading";
 import { EmptyState } from "@/components/empty-state";
@@ -464,16 +464,31 @@ export default function CalendarPage() {
     orderBy: "due_date",
     ascending: true,
   });
+  const { data: nexusData, loading: l2 } = useSupabaseQuery<NexusStatus>("nexus_status");
 
-  if (loading) return <LoadingState />;
+  if (loading || l2) return <LoadingState />;
+
+  // Build registration date lookup to filter pre-registration periods
+  const regDateMap = new Map<string, string>();
+  for (const n of nexusData) {
+    if (n.registration_date) regDateMap.set(n.state_code, n.registration_date);
+  }
+
+  // Filter out periods that end entirely before registration date
+  const validFilings = filings.filter((f) => {
+    const regDate = regDateMap.get(f.state_code);
+    if (!regDate) return true; // no registration date → keep (legacy)
+    const periodEnd = f.period_end ?? f.due_date;
+    return periodEnd >= regDate;
+  });
 
   const today = new Date().toISOString().slice(0, 10);
-  const pending = filings.filter(
+  const pending = validFilings.filter(
     (f) => f.status === "pending" || f.status === "late",
   );
   const overdue = pending.filter((f) => f.due_date < today);
   const upcoming = pending.filter((f) => f.due_date >= today);
-  const completed = filings.filter((f) => f.status === "filed");
+  const completed = validFilings.filter((f) => f.status === "filed");
 
   const defaultTab =
     overdue.length > 0
