@@ -591,6 +591,34 @@ def spapi_returns_cmd(days, dry_run):
             click.echo(f"  {reason}: {count}")
 
 
+@cli.command("spapi-sns")
+@click.option("--weeks", default=13, help="Weeks of history to fetch")
+@click.option("--dry-run", is_flag=True)
+def spapi_sns_cmd(weeks, dry_run):
+    """Fetch Subscribe & Save metrics via Replenishment API."""
+    from src.amazon_sp.replenishment import fetch_seller_metrics, fetch_offer_metrics
+
+    if dry_run:
+        click.echo("DRY RUN\n")
+
+    click.echo(f"Fetching seller-level SnS metrics ({weeks} weeks)...")
+    try:
+        seller = fetch_seller_metrics(weeks=weeks, dry_run=dry_run)
+        click.echo(f"  Weeks: {seller['weeks_fetched']}, Latest subs: {seller['latest_subs']:,}, Inserted: {seller['rows_inserted']}")
+    except PermissionError as e:
+        click.echo(f"  {e}")
+        return
+    except Exception as e:
+        click.echo(f"  Error: {e}")
+
+    click.echo("Fetching offer-level SnS metrics (latest week)...")
+    try:
+        offers = fetch_offer_metrics(dry_run=dry_run)
+        click.echo(f"  Offers: {offers['offers_fetched']}, Week: {offers['week']}, Inserted: {offers['rows_inserted']}")
+    except Exception as e:
+        click.echo(f"  Error: {e}")
+
+
 @cli.command("spapi-traffic")
 @click.option("--days", default=7, help="Days back to fetch")
 @click.option("--dry-run", is_flag=True)
@@ -2095,6 +2123,19 @@ def _run_spapi_refresh():
         print(f"[SP-API] {ts} Reimbursements: {reimb.get('rows_parsed', 0)} rows, ${reimb.get('total_amount', 0):,.2f}")
     except Exception as e:
         print(f"[SP-API] {ts} Reimbursements error: {e}")
+
+    # Subscribe & Save (Replenishment API)
+    try:
+        from src.amazon_sp.replenishment import fetch_seller_metrics, fetch_offer_metrics
+        seller = fetch_seller_metrics(weeks=4)
+        print(f"[SP-API] {ts} SnS seller: {seller.get('weeks_fetched', 0)} weeks, "
+              f"{seller.get('latest_subs', 0):,} subs")
+        offers = fetch_offer_metrics()
+        print(f"[SP-API] {ts} SnS offers: {offers.get('offers_fetched', 0)} ASINs")
+    except PermissionError as e:
+        print(f"[SP-API] {ts} SnS: {e}")
+    except Exception as e:
+        print(f"[SP-API] {ts} SnS error: {e}")
 
     if errors:
         job_finish(run_id, "fail", "; ".join(errors[:3]))

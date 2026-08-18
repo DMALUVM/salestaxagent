@@ -8,6 +8,8 @@ export async function GET() {
     let traffic: unknown[] = [];
     let asinTraffic: Record<string, unknown>[] = [];
     let reimbursements: unknown[] = [];
+    let snsSeller: unknown[] = [];
+    let snsOffers: unknown[] = [];
 
     try {
       const r = await sb.from("amazon_sales_traffic").select("*").order("date", { ascending: false }).limit(30);
@@ -95,8 +97,18 @@ export async function GET() {
       }
     }
 
-    return Response.json({ traffic, asinTraffic, reimbursements });
+    try {
+      const r = await sb.from("sns_seller_metrics").select("*").order("week_start", { ascending: false }).limit(13);
+      snsSeller = r.data ?? [];
+    } catch { /* table may not exist */ }
+
+    try {
+      const r = await sb.from("sns_offer_metrics").select("*").order("active_subscriptions", { ascending: false }).limit(20);
+      snsOffers = r.data ?? [];
+    } catch { /* table may not exist */ }
+
+    return Response.json({ traffic, asinTraffic, reimbursements, snsSeller, snsOffers });
   } catch (e) {
-    return Response.json({ traffic: [], asinTraffic: [], reimbursements: [] });
+    return Response.json({ traffic: [], asinTraffic: [], reimbursements: [], snsSeller: [], snsOffers: [] });
   }
 }

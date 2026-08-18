@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
 import { isConfigured } from "@/lib/supabase";
-import { Shield, TrendingUp, DollarSign, Eye, ShoppingCart } from "lucide-react";
+import { Shield, TrendingUp, DollarSign, Eye, ShoppingCart, AlertTriangle } from "lucide-react";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 function fmtD(n: number) { return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -30,7 +30,9 @@ interface Reimbursement {
 }
 
 export default function AmazonOpsPage() {
-  const [data, setData] = useState<{ traffic: TrafficDay[]; asinTraffic: AsinTraffic[]; reimbursements: Reimbursement[] } | null>(null);
+  interface SnsSeller { week_start: string; week_end: string; active_subscriptions: number; shipped_units: number; total_revenue: number; revenue_penetration: number; not_delivered_oos: number; lost_revenue_oos: number; }
+  interface SnsOffer { asin: string; sku: string | null; active_subscriptions: number; shipped_units: number; total_revenue: number; }
+  const [data, setData] = useState<{ traffic: TrafficDay[]; asinTraffic: AsinTraffic[]; reimbursements: Reimbursement[]; snsSeller: SnsSeller[]; snsOffers: SnsOffer[] } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -275,6 +277,82 @@ export default function AmazonOpsPage() {
               </Card>
             </>
           )}
+
+          {/* Subscribe & Save */}
+          {(data?.snsSeller?.length ?? 0) > 0 && (() => {
+            const sns = [...(data?.snsSeller ?? [])].sort((a, b) => b.week_start.localeCompare(a.week_start));
+            const latest = sns[0];
+            const prior = sns[1];
+            const snsOffers = data?.snsOffers ?? [];
+            const subChange = prior && prior.active_subscriptions > 0
+              ? Math.round(((latest.active_subscriptions / prior.active_subscriptions) - 1) * 100) : null;
+            return (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Subscribe & Save</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-4">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase">Active Subscriptions</p>
+                      <p className="text-2xl font-semibold tabular-nums">{fmt(latest.active_subscriptions)}</p>
+                      {subChange !== null && (
+                        <p className={`text-xs font-medium ${subChange >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                          {subChange >= 0 ? "+" : ""}{subChange}% WoW
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase">Shipped Units (wk)</p>
+                      <p className="text-2xl font-semibold tabular-nums">{fmt(latest.shipped_units)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase">Revenue (wk)</p>
+                      <p className="text-2xl font-semibold tabular-nums">${fmtD(latest.total_revenue)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground uppercase">Rev Penetration</p>
+                      <p className="text-2xl font-semibold tabular-nums">{latest.revenue_penetration.toFixed(1)}%</p>
+                    </div>
+                  </div>
+                  {latest.not_delivered_oos > 0 && (
+                    <div className="flex items-center gap-2 text-xs text-amber-600">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      {latest.not_delivered_oos} units not delivered due to OOS
+                      {latest.lost_revenue_oos > 0 && ` ($${fmtD(latest.lost_revenue_oos)} lost revenue)`}
+                    </div>
+                  )}
+                  {snsOffers.length > 0 && (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>ASIN</TableHead>
+                          <TableHead className="text-right">Subs</TableHead>
+                          <TableHead className="text-right">Shipped</TableHead>
+                          <TableHead className="text-right">Revenue</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {snsOffers.slice(0, 10).map((o) => (
+                          <TableRow key={o.asin}>
+                            <TableCell className="text-xs font-medium">
+                              {o.sku || o.asin}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{fmt(o.active_subscriptions)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{fmt(o.shipped_units)}</TableCell>
+                            <TableCell className="text-right tabular-nums">${fmtD(o.total_revenue)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                  <p className="text-[10px] text-muted-foreground">
+                    Week of {latest.week_start} to {latest.week_end}. Data from Amazon Replenishment API.
+                  </p>
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           <p className="text-xs text-muted-foreground">
             Sales & Traffic data from Brand Analytics (SP-API). These are aggregated marketplace metrics, not order-level CRM data.
