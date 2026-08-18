@@ -36,14 +36,11 @@ const primaryLinks: NavItem[] = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/liability", label: "What Do I Owe?", icon: DollarSign },
   { href: "/calendar", label: "Filing Calendar", icon: Calendar },
-  { href: "/registrations", label: "Registrations", icon: ClipboardCheck },
+  { href: "/registrations", label: "Nexus & Registrations", icon: ClipboardCheck },
   { href: "/inventory", label: "Inventory", icon: Warehouse },
 ];
 
 const monitorLinks: NavItem[] = [
-  { href: "/nexus", label: "Nexus Monitor", icon: MapPin },
-  { href: "/nexus/economic", label: "Economic Audit", icon: TrendingUp },
-  { href: "/triage", label: "Registration Triage", icon: ListChecks },
   { href: "/sales-map", label: "Sales Map", icon: MapPinned },
   { href: "/skus", label: "SKU Performance", icon: Package },
   { href: "/compliance", label: "Compliance Guides", icon: BookOpen },
