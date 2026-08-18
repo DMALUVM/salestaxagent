@@ -102,6 +102,7 @@ interface ComputedRow {
   amz_rec_qty: number;
   amz_rec_ship: string | null;
   stockout_date: string | null;
+  network_oos_date: string | null;
   flag: string;
 }
 
@@ -230,6 +231,8 @@ export default function InventoryPage() {
       let dos: number, dos_amz_supply: number, pipeline_dos: number;
       let our_reorder: number, stockout_date: string | null = null, flag: string;
 
+      let network_oos_date: string | null = null;
+
       if (shopifyOnly) {
         // Shopify-only: supply = 3PL, demand = Shopify velocity
         const demand = shopify_vel_30;
@@ -242,6 +245,7 @@ export default function InventoryPage() {
           const days = Math.floor(supply / demand);
           const d = new Date(); d.setDate(d.getDate() + days);
           stockout_date = d.toISOString().slice(0, 10);
+          network_oos_date = stockout_date; // same pool for shop-only
         }
         flag = dos < 30 && demand > eps ? "LOW" : our_reorder > 0 ? "RESTOCK" : "OK";
       } else {
@@ -253,9 +257,15 @@ export default function InventoryPage() {
         pipeline_dos = total_vel_30 > eps ? Math.round(pipeline_supply / total_vel_30) : (pipeline_supply > 0 ? 9999 : 0);
         our_reorder = Math.max(Math.ceil((target + s.lead_time_days) * total_vel_30) - on_hand, 0);
         if (total_vel_30 > eps) {
-          const days = Math.floor(fba_on_hand / total_vel_30);
-          const d = new Date(); d.setDate(d.getDate() + days);
-          stockout_date = d.toISOString().slice(0, 10);
+          // FBA-only stockout
+          const fba_days = Math.floor(fba_on_hand / total_vel_30);
+          const d1 = new Date(); d1.setDate(d1.getDate() + fba_days);
+          stockout_date = d1.toISOString().slice(0, 10);
+          // Network OOS: all owned stock (FBA + inbound + AWD + 3PL)
+          const network = fba_on_hand + inbound + awd_on_hand + tpl_available;
+          const net_days = Math.floor(network / total_vel_30);
+          const d2 = new Date(); d2.setDate(d2.getDate() + net_days);
+          network_oos_date = d2.toISOString().slice(0, 10);
         }
         flag = dos < 60 && total_vel_30 > eps ? "CRITICAL" : our_reorder > 0 ? "RESTOCK" : "OK";
       }
@@ -288,6 +298,7 @@ export default function InventoryPage() {
         amz_rec_qty: rec?.recommended_qty ?? 0,
         amz_rec_ship: rec?.recommended_ship_date ?? null,
         stockout_date,
+        network_oos_date,
         flag,
       });
     }
@@ -384,11 +395,11 @@ export default function InventoryPage() {
 
   function exportCSV() {
     const header =
-      "SKU,ASIN,Product,FBA_OnHand,AWD,3PL,Inbound,TotalV30,DOS,Pipeline_DOS,Reorder,Stockout,Flag\n";
+      "SKU,ASIN,Product,FBA_OnHand,AWD,3PL,Inbound,TotalV30,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
     const body = filtered
       .map(
         (r) =>
-          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_on_hand},${r.awd_on_hand},${r.tpl_available},${r.inbound},${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.flag}`,
+          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_on_hand},${r.awd_on_hand},${r.tpl_available},${r.inbound},${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
       )
       .join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
@@ -667,7 +678,8 @@ export default function InventoryPage() {
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
                   { key: "our_reorder_qty", label: "Reorder", tip: "Units to transfer/produce to reach target cover" },
-                  { key: "stockout_date", label: "Out", tip: "Date primary stock reaches 0 at current velocity" },
+                  { key: "stockout_date", label: "Out", tip: "FBA reaches 0 (Amazon) or warehouse reaches 0 (Shop) at current velocity" },
+                  { key: "network_oos_date", label: "OOS", tip: "All owned network stock (FBA+AWD+3PL+Inbound) reaches 0" },
                   { key: "flag", label: "Status", tip: "OK ≥ target cover; CRITICAL/LOW below; RESTOCK approaching" },
                 ].map(({ key, label, tip }) => (
                   <TableHead
@@ -769,8 +781,13 @@ export default function InventoryPage() {
                     >
                       {fmt(r.our_reorder_qty)}
                     </TableCell>
-                    <TableCell className="text-right text-xs">
+                    <TableCell className="text-right text-xs"
+                      title={r.channel === "shopify_only" ? "Warehouse reaches 0" : "FBA reaches 0"}>
                       {r.stockout_date?.slice(5) ?? "—"}
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground"
+                      title="All owned network stock reaches 0">
+                      {r.network_oos_date?.slice(5) ?? "—"}
                     </TableCell>
                     <TableCell>
                       <Badge
@@ -941,7 +958,12 @@ export default function InventoryPage() {
                 </p>
                 {selected.stockout_date && (
                   <p>
-                    {selected.channel === "shopify_only" ? "Warehouse" : "FBA"} stockout (if no receipts): {selected.stockout_date}
+                    {selected.channel === "shopify_only" ? "Warehouse" : "FBA"} stockout: {selected.stockout_date}
+                  </p>
+                )}
+                {selected.network_oos_date && selected.network_oos_date !== selected.stockout_date && (
+                  <p>
+                    Network OOS (all stock): {selected.network_oos_date}
                   </p>
                 )}
                 {selected.amz_rec_ship && (
