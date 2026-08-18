@@ -1191,6 +1191,62 @@ def pallet_plan_cmd(scenario, pallet_max, target, no_3pl, no_awd):
     click.echo()
 
 
+@cli.command("fba-cover")
+@click.option("--target-days", default=60, help="Cover target in days")
+@click.option("--scenario", default="correction_factor",
+              type=click.Choice(["correction_factor", "actual_2025", "optimistic"]))
+@click.option("--no-3pl", is_flag=True, help="Exclude 3PL transfers")
+@click.option("--no-awd", is_flag=True, help="Exclude AWD transfers")
+def fba_cover_cmd(target_days, scenario, no_3pl, no_awd):
+    """FBA Cover Projection — flag weeks below 60-day service target."""
+    from src.inventory.pallet_planner import build_fba_cover_projection, LIP_BALM_SKUS
+
+    SKU_SHORT = {
+        "DDPE0001Shop": "Unscnt",
+        "DDPE0002Shop": "Pepper",
+        "DDPE0003Shop": "Orange",
+        "DDPE0004Shop": "Assrtd",
+    }
+
+    proj = build_fba_cover_projection(
+        cover_target_days=target_days,
+        scenario=scenario,
+        include_3pl=not no_3pl,
+        include_awd=not no_awd,
+    )
+
+    click.echo(f"{'='*70}")
+    click.echo(f"  FBA COVER PROJECTION — {target_days}-day target · {scenario}")
+    click.echo(f"{'='*70}")
+
+    for sp in proj["sku_projections"]:
+        sku = sp["sku"]
+        label = SKU_SHORT.get(sku, sku)
+        click.echo(f"\n  {label} ({sku})  FBA now: {sp['fba_start']:,}  "
+                   f"Inbound: {sp['inbound']:,}  AWD: {sp['awd']:,}  3PL: {sp['tpl']:,}")
+        click.echo(f"  {'Week':<12} {'Demand':>7} {'Receipt':>8} {'FBA':>8} {'Rate/d':>7} {'Cover':>7}")
+        click.echo(f"  {'-'*52}")
+        for w in sp["weeks"]:
+            cover_str = f"{w['cover_days']}d" if w["cover_days"] is not None else "—"
+            flag = " <<<" if w["flagged"] else ""
+            click.echo(
+                f"  {w['week']:<12} {w['demand']:>7,} {w['receipt']:>8,} "
+                f"{w['fba']:>8,} {w['daily_rate']:>7} {cover_str:>7}{flag}"
+            )
+
+    if proj["alerts"]:
+        click.echo(f"\n  {'!'*50}")
+        click.echo(f"  {len(proj['alerts'])} WEEKS BELOW {target_days}-DAY COVER TARGET:")
+        for a in proj["alerts"]:
+            click.echo(f"    {SKU_SHORT.get(a['sku'], a['sku'])} {a['week']}: "
+                       f"{a['cover_days']}d cover ({a['fba']:,} units @ {a['daily_rate']}/day)")
+        click.echo(f"  {'!'*50}")
+    else:
+        click.echo(f"\n  All weeks maintain ≥{target_days}-day FBA cover.")
+
+    click.echo()
+
+
 @cli.command("import-forecast")
 @click.argument("file_path")
 @click.option("--dry-run", is_flag=True)

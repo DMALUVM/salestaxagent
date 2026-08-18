@@ -11,7 +11,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { isConfigured } from "@/lib/supabase";
-import { Shield, Package } from "lucide-react";
+import { Shield, Package, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 
 const SKUS = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"];
@@ -21,11 +21,23 @@ const SKU_LABELS: Record<string, string> = {
   DDPE0003Shop: "Sweet Orange 3pk",
   DDPE0004Shop: "Assorted 3pk",
 };
+const SKU_SHORT: Record<string, string> = {
+  DDPE0001Shop: "Unscented",
+  DDPE0002Shop: "Peppermint",
+  DDPE0003Shop: "Orange",
+  DDPE0004Shop: "Assorted",
+};
 const PALLET_MAX = 19_000;
 const TARGET = "2026-10-31";
+const COVER_TARGET = 60;
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function fmtWeek(iso: string) {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function SetupPrompt() {
@@ -55,18 +67,48 @@ interface Pallet {
   total: number;
 }
 
-export default function PalletPlanPage() {
-  if (!isConfigured()) return <SetupPrompt />;
+interface CoverWeek {
+  week: string;
+  fba: number;
+  demand: number;
+  receipt: number;
+  dailyRate: number;
+  coverDays: number | null;
+  flagged: boolean;
+}
 
+interface SkuProjection {
+  sku: string;
+  label: string;
+  fbaStart: number;
+  weeks: CoverWeek[];
+  flaggedCount: number;
+}
+
+function getMonday(d: Date): Date {
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  return new Date(d.getFullYear(), d.getMonth(), diff);
+}
+
+function toIso(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+export default function PalletPlanPage() {
+  const configured = isConfigured();
   const { data: raw, loading } = useInventory();
   const [include3pl, setInclude3pl] = useState(true);
   const [includeAwd, setIncludeAwd] = useState(true);
+  const [coverSku, setCoverSku] = useState(SKUS[0]);
 
   const snapshots = (raw?.snapshots ?? []) as InventorySnapshot[];
   const forecasts = (raw?.forecast ?? []) as { sku: string; week_start: string; scenario: string; units: number }[];
   const awdList = (raw?.awd ?? []) as { sku: string; awd_on_hand: number }[];
   const tplList = (raw?.tpl ?? []) as { sku: string; available: number }[];
+  const velocityList = (raw?.velocity ?? []) as SkuVelocity[];
 
+  // --- Pallet plan computation ---
   const { skuPlans, pallets, totalGap, totalDemand, totalSupply } = useMemo(() => {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
     const awdMap = new Map(awdList.map((a) => [a.sku, a]));
@@ -108,7 +150,6 @@ export default function PalletPlanPage() {
       });
     }
 
-    // Build pallets
     const numPallets = tGap > 0 ? Math.ceil(tGap / PALLET_MAX) : 0;
     const remaining = Object.fromEntries(plans.map((p) => [p.sku, p.gap]));
     const pals: Pallet[] = [];
@@ -130,7 +171,137 @@ export default function PalletPlanPage() {
     return { skuPlans: plans, pallets: pals, totalGap: tGap, totalDemand: tDemand, totalSupply: tSupply };
   }, [snapshots, forecasts, awdList, tplList, include3pl, includeAwd]);
 
+  // --- FBA Cover Projection ---
+  const { coverProjections, coverAlerts } = useMemo(() => {
+    const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
+    const awdMap = new Map(awdList.map((a) => [a.sku, a]));
+    const tplMap = new Map(tplList.map((t) => [t.sku, t]));
+    const velMap = new Map(velocityList.map((v) => [v.sku, v]));
+
+    // Build forecast lookup: {sku: {isoDate: units}}
+    const fcMap = new Map<string, Map<string, number>>();
+    for (const f of forecasts) {
+      if (f.scenario !== "correction_factor") continue;
+      if (!fcMap.has(f.sku)) fcMap.set(f.sku, new Map());
+      fcMap.get(f.sku)!.set(f.week_start?.slice(0, 10), Number(f.units));
+    }
+
+    // Generate weeks: this Monday through Dec 28 2026
+    const now = new Date();
+    const monday = getMonday(now);
+    const endDate = new Date(2026, 11, 28);
+    const weeks: Date[] = [];
+    const cur = new Date(monday);
+    while (cur <= endDate) {
+      weeks.push(new Date(cur));
+      cur.setDate(cur.getDate() + 7);
+    }
+
+    // Helper: find weekly demand for a SKU at a given week
+    function getWeekDemand(sku: string, weekDate: Date): number {
+      const fc = fcMap.get(sku);
+      if (fc) {
+        // Try exact and ±3 day offsets (forecast may start Saturday)
+        for (let off = 0; off <= 3; off++) {
+          const d1 = new Date(weekDate);
+          d1.setDate(d1.getDate() + off);
+          const v = fc.get(toIso(d1));
+          if (v !== undefined) return v;
+          if (off > 0) {
+            const d2 = new Date(weekDate);
+            d2.setDate(d2.getDate() - off);
+            const v2 = fc.get(toIso(d2));
+            if (v2 !== undefined) return v2;
+          }
+        }
+      }
+      // Fallback: velocity daily rate × 7
+      const vel = velMap.get(sku);
+      if (vel) return (vel.total_u_30 / 30) * 7;
+      return 0;
+    }
+
+    const projections: SkuProjection[] = [];
+    const alerts: { sku: string; week: string; coverDays: number; fba: number }[] = [];
+
+    for (const sku of SKUS) {
+      const snap = snapMap.get(sku);
+      const fbaStart = Number(snap?.fulfillable ?? 0) + Number(snap?.reserved ?? 0) +
+        Number(snap?.researching ?? 0) + Number(snap?.unfulfillable ?? 0);
+      const inboundNow = Number(snap?.inbound_working ?? 0) + Number(snap?.inbound_shipped ?? 0) +
+        Number(snap?.inbound_receiving ?? 0);
+      const awdNow = includeAwd ? Number(awdMap.get(sku)?.awd_on_hand ?? 0) : 0;
+      const tplNow = include3pl ? Number(tplMap.get(sku)?.available ?? 0) : 0;
+
+      // Schedule receipts by week index
+      const receipts: Record<number, number> = {};
+      if (inboundNow > 0) receipts[Math.min(1, weeks.length - 1)] = (receipts[Math.min(1, weeks.length - 1)] ?? 0) + inboundNow;
+      if (awdNow > 0) receipts[Math.min(2, weeks.length - 1)] = (receipts[Math.min(2, weeks.length - 1)] ?? 0) + awdNow;
+      if (tplNow > 0) receipts[Math.min(3, weeks.length - 1)] = (receipts[Math.min(3, weeks.length - 1)] ?? 0) + tplNow;
+
+      let fba = fbaStart;
+      const weekData: CoverWeek[] = [];
+      let flaggedCount = 0;
+
+      for (let wi = 0; wi < weeks.length; wi++) {
+        const wDate = weeks[wi];
+        const wIso = toIso(wDate);
+        const receipt = receipts[wi] ?? 0;
+        fba += receipt;
+
+        const demand = getWeekDemand(sku, wDate);
+        fba = Math.max(fba - demand, 0);
+
+        // Forward cover: average daily demand over next 9 weeks (~63 days)
+        let forwardUnits = 0;
+        let forwardWeeks = 0;
+        for (let fi = wi; fi < Math.min(wi + 9, weeks.length); fi++) {
+          forwardUnits += getWeekDemand(sku, weeks[fi]);
+          forwardWeeks++;
+        }
+
+        let dailyRate = 0;
+        let coverDays: number | null = null;
+        let flagged = false;
+
+        if (forwardUnits > 0 && forwardWeeks > 0) {
+          dailyRate = forwardUnits / (forwardWeeks * 7);
+          coverDays = dailyRate > 0 ? Math.round(fba / dailyRate) : null;
+          flagged = coverDays !== null && coverDays < COVER_TARGET;
+        }
+
+        if (flagged) {
+          flaggedCount++;
+          alerts.push({ sku, week: wIso, coverDays: coverDays!, fba: Math.round(fba) });
+        }
+
+        weekData.push({
+          week: wIso,
+          fba: Math.round(fba),
+          demand: Math.round(demand),
+          receipt,
+          dailyRate: Math.round(dailyRate * 10) / 10,
+          coverDays,
+          flagged,
+        });
+      }
+
+      projections.push({
+        sku,
+        label: SKU_LABELS[sku] ?? sku,
+        fbaStart,
+        weeks: weekData,
+        flaggedCount,
+      });
+    }
+
+    return { coverProjections: projections, coverAlerts: alerts };
+  }, [snapshots, forecasts, awdList, tplList, velocityList, include3pl, includeAwd]);
+
+  if (!configured) return <SetupPrompt />;
   if (loading) return <LoadingState />;
+
+  const selectedProj = coverProjections.find((p) => p.sku === coverSku);
 
   return (
     <div className="space-y-6">
@@ -179,11 +350,13 @@ export default function PalletPlanPage() {
             </p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className={coverAlerts.length > 0 ? "border-red-500/40" : "border-emerald-500/40"}>
           <CardContent className="p-4">
-            <p className="text-[10px] text-muted-foreground uppercase">Pallets Needed</p>
-            <p className="text-2xl font-semibold tabular-nums">{pallets.length}</p>
-            <p className="text-xs text-muted-foreground">@ {fmt(PALLET_MAX)} units each</p>
+            <p className="text-[10px] text-muted-foreground uppercase">FBA Cover Alerts</p>
+            <p className={`text-2xl font-semibold tabular-nums ${coverAlerts.length > 0 ? "text-red-500" : "text-emerald-500"}`}>
+              {coverAlerts.length > 0 ? coverAlerts.length : "OK"}
+            </p>
+            <p className="text-xs text-muted-foreground">weeks &lt; {COVER_TARGET}d</p>
           </CardContent>
         </Card>
       </div>
@@ -297,8 +470,127 @@ export default function PalletPlanPage() {
         </Card>
       )}
 
+      {/* ── FBA Cover Projection ── */}
+      <Card className={coverAlerts.length > 0 ? "border-red-500/40" : ""}>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              {coverAlerts.length > 0 && <AlertTriangle className="h-4 w-4 text-red-500" />}
+              FBA Cover Projection — {COVER_TARGET}-Day Target
+            </CardTitle>
+            <div className="flex gap-1">
+              {SKUS.map((s) => {
+                const proj = coverProjections.find((p) => p.sku === s);
+                const hasFlagged = proj && proj.flaggedCount > 0;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => setCoverSku(s)}
+                    className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                      coverSku === s
+                        ? "bg-primary text-primary-foreground"
+                        : hasFlagged
+                          ? "bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                          : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    }`}
+                  >
+                    {SKU_SHORT[s]}
+                    {hasFlagged && coverSku !== s && (
+                      <span className="ml-1 text-[10px]">!</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0 overflow-x-auto">
+          {selectedProj && (
+            <>
+              <div className="px-4 py-2 text-xs text-muted-foreground flex gap-4">
+                <span>FBA start: {fmt(selectedProj.fbaStart)}</span>
+                {selectedProj.flaggedCount > 0 && (
+                  <span className="text-red-500 font-medium">
+                    {selectedProj.flaggedCount} week{selectedProj.flaggedCount !== 1 ? "s" : ""} below {COVER_TARGET}d
+                  </span>
+                )}
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Week</TableHead>
+                    <TableHead className="text-right">Demand</TableHead>
+                    <TableHead className="text-right">Receipt</TableHead>
+                    <TableHead className="text-right">FBA On-Hand</TableHead>
+                    <TableHead className="text-right">Rate/Day</TableHead>
+                    <TableHead className="text-right">Cover</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedProj.weeks.map((w) => (
+                    <TableRow
+                      key={w.week}
+                      className={w.flagged ? "bg-red-500/5" : ""}
+                    >
+                      <TableCell className="font-medium text-xs">
+                        {fmtWeek(w.week)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(w.demand)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {w.receipt > 0 ? fmt(w.receipt) : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">{fmt(w.fba)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                        {w.dailyRate > 0 ? w.dailyRate.toFixed(1) : "—"}
+                      </TableCell>
+                      <TableCell className={`text-right tabular-nums font-medium ${
+                        w.coverDays === null ? "text-muted-foreground"
+                          : w.flagged ? "text-red-500"
+                            : w.coverDays < 90 ? "text-amber-500"
+                              : "text-emerald-500"
+                      }`}>
+                        {w.coverDays !== null ? `${w.coverDays}d` : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Cover alerts summary */}
+      {coverAlerts.length > 0 && (
+        <Card className="border-red-500/30">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-red-500 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              Cover Shortfall Alerts
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1 text-sm">
+              {coverAlerts.map((a, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Badge variant="destructive" className="text-[10px] px-1.5">
+                    {a.coverDays}d
+                  </Badge>
+                  <span className="font-medium">{SKU_SHORT[a.sku] ?? a.sku}</span>
+                  <span className="text-muted-foreground">wk of {fmtWeek(a.week)}</span>
+                  <span className="text-muted-foreground">·</span>
+                  <span className="tabular-nums text-muted-foreground">{fmt(a.fba)} FBA units</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <p className="text-xs text-muted-foreground">
-        Demand from forecast_weekly (correction_factor scenario). {include3pl ? "3PL transfer to FBA assumed complete by target date." : "3PL excluded."} Planning aid — not a purchase order.
+        Demand from forecast_weekly (correction_factor scenario), velocity fallback for non-forecast weeks.
+        {include3pl ? " 3PL transfer to FBA assumed complete by target date." : " 3PL excluded."}
+        {" "}Cover = FBA on-hand / avg daily demand (next {COVER_TARGET} days). Planning aid — not a purchase order.
       </p>
     </div>
   );

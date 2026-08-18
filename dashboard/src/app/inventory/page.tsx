@@ -448,6 +448,12 @@ export default function InventoryPage() {
               Plan SKU
             </Button>
           </Link>
+          <Link href="/inventory/pallets">
+            <Button variant="outline" size="sm">
+              <Package className="mr-1.5 h-3.5 w-3.5" />
+              Pallet Planner
+            </Button>
+          </Link>
           <Button variant="outline" size="sm" onClick={exportCSV}>
             <Download className="mr-1.5 h-3.5 w-3.5" />
             Export CSV
