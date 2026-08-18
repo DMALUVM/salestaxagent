@@ -1125,6 +1125,72 @@ def plan_sku_cmd(sku, until_date, scenario):
     click.echo()
 
 
+@cli.command("pallet-plan")
+@click.option("--scenario", default="correction_factor",
+              type=click.Choice(["correction_factor", "actual_2025", "optimistic"]))
+@click.option("--pallet-max", default=19000, help="Units per pallet")
+@click.option("--target", default="2026-10-31", help="In-Amazon-by date")
+@click.option("--no-3pl", is_flag=True, help="Exclude 3PL from supply")
+@click.option("--no-awd", is_flag=True, help="Exclude AWD from supply")
+def pallet_plan_cmd(scenario, pallet_max, target, no_3pl, no_awd):
+    """Lip Balm Monthly Pallet Planner — Nov+Dec holiday build."""
+    from src.inventory.pallet_planner import build_pallet_plan
+
+    plan = build_pallet_plan(
+        pallet_max=pallet_max,
+        amazon_in_by=target,
+        scenario=scenario,
+        include_3pl=not no_3pl,
+        include_awd=not no_awd,
+    )
+
+    click.echo(f"{'='*65}")
+    click.echo(f"  LIP BALM PALLET PLANNER — Holiday {plan['config']['scenario']}")
+    click.echo(f"  All units in Amazon by: {plan['config']['amazon_in_by']}")
+    click.echo(f"  Pallet max: {plan['config']['pallet_max_units']:,} units")
+    click.echo(f"  3PL transfer: {'ON' if plan['config']['include_3pl_transfer'] else 'OFF'}")
+    click.echo(f"  AWD in supply: {'ON' if plan['config']['include_awd'] else 'OFF'}")
+    click.echo(f"{'='*65}")
+
+    click.echo(f"\n  {'SKU':<16} {'NovDec':>8} {'FBA':>6} {'Inb':>5} {'AWD':>5} {'3PL':>6} {'Supply':>7} {'Gap':>7}")
+    click.echo(f"  {'-'*62}")
+    for p in plan["sku_plans"]:
+        click.echo(
+            f"  {p['sku']:<16} {p['nov_dec_demand']:>8,} {p['fba']:>6,} {p['inbound']:>5,} "
+            f"{p['awd']:>5,} {p['tpl']:>6,} {p['amazon_supply']:>7,} {p['gap']:>7,}"
+        )
+    click.echo(f"  {'-'*62}")
+    click.echo(f"  {'TOTAL':<16} {plan['total_nov_dec_demand']:>8,} "
+               f"{'':>6} {'':>5} {'':>5} {'':>6} {plan['total_amazon_supply']:>7,} {plan['total_gap']:>7,}")
+
+    click.echo(f"\n  Pallets needed: {plan['num_pallets']}")
+
+    if plan["pallets"]:
+        click.echo(f"\n  PALLET BREAKDOWN:")
+        for p in plan["pallets"]:
+            mix_str = " + ".join(f"{s} ×{q:,}" for s, q in p["mix"].items())
+            click.echo(f"    Pallet {p['pallet_num']}: {p['total_units']:,} units — {mix_str}")
+
+    if plan["monthly_schedule"]:
+        click.echo(f"\n  MONTHLY BUILD SCHEDULE:")
+        for month in plan["months"]:
+            pallets_in_month = plan["monthly_schedule"].get(month, [])
+            if pallets_in_month:
+                total = sum(p["total_units"] for p in pallets_in_month)
+                nums = ", ".join(f"P{p['pallet_num']}" for p in pallets_in_month)
+                click.echo(f"    {month}: {total:,} units ({nums})")
+
+    if plan["pallets"]:
+        next_p = plan["pallets"][0]
+        click.echo(f"\n  NEXT PALLET TO ORDER:")
+        for s, q in next_p["mix"].items():
+            click.echo(f"    {s}: {q:,} units")
+        click.echo(f"    Total: {next_p['total_units']:,} units")
+        click.echo(f"    Ship by: earliest possible (target receipt ≤ {plan['config']['amazon_in_by']})")
+
+    click.echo()
+
+
 @cli.command("import-forecast")
 @click.argument("file_path")
 @click.option("--dry-run", is_flag=True)
