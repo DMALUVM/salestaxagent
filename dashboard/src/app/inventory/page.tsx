@@ -265,7 +265,7 @@ export default function InventoryPage() {
       result.push({
         sku,
         asin: vel?.asin ?? rec?.asin ?? snap?.asin ?? "",
-        product_name: vel?.product_name ?? rec?.product_name ?? "",
+        product_name: vel?.product_name ?? rec?.product_name ?? snap?.product_name ?? tpl?.product_name ?? "",
         fulfillable,
         fba_on_hand,
         inbound,
@@ -714,7 +714,7 @@ export default function InventoryPage() {
                     }`}
                     onClick={() => setSelected(r)}
                   >
-                    <TableCell className="font-medium max-w-[180px] truncate sticky left-0 z-10 bg-card" title={displayTitle(r.product_name) || r.sku}>
+                    <TableCell className="font-medium max-w-[180px] truncate sticky left-0 z-10 bg-card" title={r.product_name ? displayTitle(r.product_name) : r.sku}>
                       <a href={`/inventory/plan?sku=${encodeURIComponent(r.sku)}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
                         {r.sku}
                       </a>

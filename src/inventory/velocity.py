@@ -249,13 +249,20 @@ def compute_velocity(
         forward_mults.append(m)
     avg_forward_mult = sum(forward_mults) / len(forward_mults) if forward_mults else 1.0
 
-    # Get product names from restock table
+    # Get product names: restock (Amazon) then 3PL (Ship Sidekick) as fallback
     name_map: dict[str, str] = {}
     asin_map: dict[str, str] = {}
     try:
+        for r in fetch_all("inventory_3pl_snapshots"):
+            if r.get("product_name"):
+                name_map[r["sku"]] = r["product_name"]
+    except Exception:
+        pass
+    try:
         restock = fetch_all("inventory_restock")
         for r in restock:
-            name_map[r["sku"]] = r.get("product_name") or ""
+            if r.get("product_name"):
+                name_map[r["sku"]] = r["product_name"]  # Amazon overrides 3PL
             if r.get("asin"):
                 asin_map[r["sku"]] = r["asin"]
     except Exception:

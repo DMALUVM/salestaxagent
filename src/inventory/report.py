@@ -179,6 +179,7 @@ def build_report() -> dict:
             vel.get("product_name")
             or rec.get("product_name")
             or snap.get("product_name")
+            or tpl.get("product_name")
             or ""
         )
         asin = vel.get("asin") or rec.get("asin") or snap.get("asin") or ""
