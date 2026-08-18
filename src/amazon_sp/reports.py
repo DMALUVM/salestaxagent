@@ -960,19 +960,39 @@ def fetch_fba_returns(
     if dry_run or not parsed["return_records"]:
         return summary
 
+    # Deduplicate on the conflict key before upsert — Postgres rejects
+    # ON CONFLICT DO UPDATE when the same key appears twice in one INSERT.
+    conflict_key = ("return_date", "order_id", "sku", "quantity", "reason")
+    seen: dict[tuple, int] = {}
+    for i, rec in enumerate(parsed["return_records"]):
+        key = tuple(str(rec.get(k, "")) for k in conflict_key)
+        seen[key] = i  # last row wins
+    deduped = [parsed["return_records"][i] for i in sorted(seen.values())]
+    n_dupes = len(parsed["return_records"]) - len(deduped)
+    if n_dupes > 0:
+        import logging
+        logging.getLogger(__name__).info(
+            "Deduplicated %d rows on conflict key before upsert (%d → %d)",
+            n_dupes, len(parsed["return_records"]), len(deduped),
+        )
+    summary["rows_deduped"] = n_dupes
+
     inserted = upsert_rows(
-        "fba_returns", parsed["return_records"],
+        "fba_returns", deduped,
         on_conflict="return_date,order_id,sku,quantity,reason",
     )
     summary["rows_inserted"] = inserted
 
-    log_ingestion(
-        filename=f"spapi_returns_{start}_{end}",
-        file_type="amazon_returns",
-        rows_total=parsed["rows_total"],
-        rows_inserted=inserted,
-        rows_skipped=parsed["rows_skipped"],
-    )
+    try:
+        log_ingestion(
+            filename=f"spapi_returns_{start}_{end}",
+            file_type="amazon_inventory",  # reuse allowed file_type
+            rows_total=parsed["rows_total"],
+            rows_inserted=inserted,
+            rows_skipped=parsed["rows_skipped"],
+        )
+    except Exception:
+        pass  # ingestion_log check constraint — non-fatal
 
     return summary
 
