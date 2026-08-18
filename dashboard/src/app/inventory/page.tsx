@@ -384,7 +384,7 @@ export default function InventoryPage() {
 
   function exportCSV() {
     const header =
-      "SKU,ASIN,Product,FBA_OnHand,AWD,3PL,Inbound,TotalV30,FBA_DOS,Pipeline_DOS,Reorder,FBA_Stockout,Flag\n";
+      "SKU,ASIN,Product,FBA_OnHand,AWD,3PL,Inbound,TotalV30,DOS,Pipeline_DOS,Reorder,Stockout,Flag\n";
     const body = filtered
       .map(
         (r) =>
@@ -663,12 +663,12 @@ export default function InventoryPage() {
                   { key: "inbound", label: "Inbnd", tip: "Amazon inbound — not yet sellable" },
                   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
                   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days" },
-                  { key: "dos", label: "FBA", tip: "Days of FBA-only cover at V30 rate" },
+                  { key: "dos", label: "DOS", tip: "Days of supply — FBA cover (Amazon) or warehouse cover (Shop)" },
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
-                  { key: "our_reorder_qty", label: "Reorder", tip: "Units to transfer/produce to reach 60d FBA policy cover" },
-                  { key: "stockout_date", label: "FBA Out", tip: "Date FBA reaches 0 at V30 if no receipts" },
-                  { key: "flag", label: "Status", tip: "OK ≥ 60d FBA; CRITICAL < 60d; RESTOCK approaching" },
+                  { key: "our_reorder_qty", label: "Reorder", tip: "Units to transfer/produce to reach target cover" },
+                  { key: "stockout_date", label: "Out", tip: "Date primary stock reaches 0 at current velocity" },
+                  { key: "flag", label: "Status", tip: "OK ≥ target cover; CRITICAL/LOW below; RESTOCK approaching" },
                 ].map(({ key, label, tip }) => (
                   <TableHead
                     key={key}
@@ -750,6 +750,7 @@ export default function InventoryPage() {
                             ? "text-amber-500"
                             : ""
                       }`}
+                      title={r.channel === "shopify_only" ? "Warehouse days of cover" : "FBA days of cover"}
                     >
                       {r.dos > 999 ? "999+" : fmt(r.dos)}
                     </TableCell>
@@ -891,7 +892,7 @@ export default function InventoryPage() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded-lg border p-3">
                   <p className="text-[10px] text-muted-foreground uppercase">
-                    FBA DOS (no receipts)
+                    {selected.channel === "shopify_only" ? "Warehouse DOS" : "FBA DOS (no receipts)"}
                   </p>
                   <p
                     className={`text-lg font-semibold ${
@@ -903,12 +904,14 @@ export default function InventoryPage() {
                 </div>
                 <div className="rounded-lg border p-3">
                   <p className="text-[10px] text-muted-foreground uppercase">
-                    +Pipeline (inb+AWD)
+                    {selected.channel === "shopify_only" ? "Total stock" : "+Pipeline (inb+AWD)"}
                   </p>
                   <p className="text-lg font-semibold text-muted-foreground">
-                    {selected.pipeline_dos > 999
-                      ? "999+"
-                      : selected.pipeline_dos}
+                    {selected.channel === "shopify_only"
+                      ? fmt(selected.tpl_available)
+                      : selected.pipeline_dos > 999
+                        ? "999+"
+                        : selected.pipeline_dos}
                   </p>
                 </div>
               </div>
@@ -938,7 +941,7 @@ export default function InventoryPage() {
                 </p>
                 {selected.stockout_date && (
                   <p>
-                    FBA stockout (if no receipts): {selected.stockout_date}
+                    {selected.channel === "shopify_only" ? "Warehouse" : "FBA"} stockout (if no receipts): {selected.stockout_date}
                   </p>
                 )}
                 {selected.amz_rec_ship && (
