@@ -631,7 +631,15 @@ def forecast_sku_cmd(sku, end_date, start_date, safety):
         click.echo(f"    {h}")
 
     click.echo(f"\n  Model: {result.get('model_version', 'default')}")
-    click.echo(f"  Weights: {result.get('weights', {})}")
+    click.echo(f"  Offpeak weights: {result.get('offpeak_weights', result.get('weights', {}))}")
+    if result.get("has_peak_weeks"):
+        click.echo(f"  Peak weights:    {result.get('peak_weights', {})}")
+        click.echo(f"  Peak protection: {'ACTIVE' if result.get('peak_protection') else 'no'}")
+        click.echo(f"  Effective safety: {result.get('effective_safety_pct', 0)*100:.0f}%")
+        # Show how expected compares to pure method B
+        m = result["methods"]
+        click.echo(f"  Expected vs pure B: {result['expected_units']:,} vs {m['B_seasonal_yoy']:,} "
+                   f"({result['expected_units']/max(m['B_seasonal_yoy'],1)*100:.0f}%)")
     click.echo(f"\n  {result['disclaimer']}")
     click.echo()
 
@@ -683,7 +691,9 @@ def forecast_reconcile_cmd(sku):
     r = result["reconciliation"]
     c = result["calibration"]
 
-    click.echo(f"Actuals: {a.get('rows_upserted', 0)} rows, {a.get('skus', 0)} SKUs")
+    click.echo(f"Actuals: {a.get('rows_upserted', 0)} rows, {a.get('skus', 0)} SKUs "
+               f"(orders: {a.get('orders_weeks', 0)} weeks, proxy: {a.get('proxy_weeks', 0)} weeks, "
+               f"{a.get('skus_with_orders', 0)} SKUs with real order data)")
     click.echo(f"Reconciliation: {r.get('runs_found', 0)} runs, "
                f"{r.get('weeks_scored', 0)} weeks scored, "
                f"{r.get('skus_scored', 0)} SKUs")

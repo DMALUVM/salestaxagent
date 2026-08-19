@@ -24,27 +24,106 @@ WEIGHT_FLOOR = 0.05
 # ── 1. Actuals ingestion ──
 
 def ingest_actuals(sku: str | None = None) -> dict:
-    """Build weekly actuals from velocity daily rates.
+    """Build weekly actuals from real Amazon order data (sales_by_sku).
 
-    V30 (already u/day) × 7 = weekly units.  This is the best available
-    proxy until per-SKU daily order units are stored separately.
+    Priority:
+      1. sales_by_sku (monthly units per SKU from SP-API orders) →
+         split into weekly via days-in-month. Source: 'amazon_orders'
+      2. velocity_v30 proxy only for SKUs with no order rows.
+         Source: 'velocity_proxy'
     """
-    vel_rows = fetch_all("sku_velocity")
-    if sku:
-        vel_rows = [v for v in vel_rows if v.get("sku") == sku]
-
     today = date.today()
-    rows: list[dict] = []
 
-    for v in vel_rows:
-        s = v.get("sku")
+    # Step 1: Real order data from sales_by_sku (monthly, convert to weekly)
+    try:
+        order_rows = fetch_all("sales_by_sku")
+    except Exception:
+        order_rows = []
+
+    # Build monthly totals per SKU (case-normalize)
+    from collections import defaultdict as _dd
+    sku_monthly: dict[str, dict[str, int]] = _dd(lambda: _dd(int))
+    sku_case_map: dict[str, str] = {}  # uppercase → original case
+
+    for r in order_rows:
+        s = r.get("sku", "")
         if not s:
+            continue
+        s_upper = s.upper()
+        if s_upper not in sku_case_map:
+            # Prefer the mixed-case version from velocity if available
+            sku_case_map[s_upper] = s
+        units = int(r.get("units", 0) or 0)
+        ps = r.get("period_start", "")
+        if ps and units > 0:
+            sku_monthly[s_upper][ps] += units
+
+    if sku:
+        target = {sku.upper()}
+        sku_monthly = {k: v for k, v in sku_monthly.items() if k in target}
+
+    # Map velocity SKUs for case normalization
+    vel_rows = fetch_all("sku_velocity")
+    for v in vel_rows:
+        s = v.get("sku", "")
+        if s:
+            sku_case_map[s.upper()] = s
+
+    rows: list[dict] = []
+    orders_weeks = 0
+    proxy_weeks = 0
+    skus_with_orders = set()
+
+    # Convert monthly order data to weekly actuals
+    import calendar
+    for s_upper, months in sku_monthly.items():
+        canonical_sku = sku_case_map.get(s_upper, s_upper)
+        skus_with_orders.add(canonical_sku)
+        for month_start, total_units in months.items():
+            try:
+                y, m = int(month_start[:4]), int(month_start[5:7])
+            except (ValueError, IndexError):
+                continue
+            dim = calendar.monthrange(y, m)[1]
+            daily = total_units / dim
+
+            # Generate Monday-aligned weeks within this month
+            d = date(y, m, 1)
+            month_end = date(y, m, dim)
+            # Snap to Monday
+            monday = d - timedelta(days=d.weekday())
+            while monday <= month_end:
+                if monday >= today:
+                    break
+                # Days of this week that fall in this month
+                week_end = monday + timedelta(days=6)
+                overlap_start = max(monday, date(y, m, 1))
+                overlap_end = min(week_end, date(y, m, dim))
+                if overlap_start > overlap_end:
+                    monday += timedelta(weeks=1)
+                    continue
+                overlap_days = (overlap_end - overlap_start).days + 1
+                week_units = round(daily * overlap_days)
+                if week_units > 0:
+                    rows.append({
+                        "sku": canonical_sku,
+                        "week_start": monday.isoformat(),
+                        "actual_units": week_units,
+                        "source": "amazon_orders",
+                    })
+                    orders_weeks += 1
+                monday += timedelta(weeks=1)
+
+    # Step 2: Velocity proxy for SKUs without order data
+    for v in vel_rows:
+        s = v.get("sku", "")
+        if not s or s in skus_with_orders:
+            continue
+        if sku and s != sku:
             continue
         v30 = float(v.get("total_u_30", 0) or 0)
         if v30 <= 0:
             continue
-
-        # Generate weekly actuals for the last 52 weeks
         for w in range(52):
             monday = today - timedelta(days=today.weekday()) - timedelta(weeks=w)
             if monday >= today:
@@ -53,15 +132,33 @@ def ingest_actuals(sku: str | None = None) -> dict:
                 "sku": s,
                 "week_start": monday.isoformat(),
                 "actual_units": round(v30 * 7),
-                "source": "velocity_v30",
+                "source": "velocity_proxy",
             })
+            proxy_weeks += 1
 
     if not rows:
-        return {"rows_upserted": 0, "skus": 0}
+        return {"rows_upserted": 0, "skus": 0, "orders_weeks": 0, "proxy_weeks": 0}
+
+    # Deduplicate: (sku, week_start) — prefer amazon_orders over proxy
+    seen: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        key = (r["sku"], r["week_start"])
+        existing = seen.get(key)
+        if not existing or (r["source"] == "amazon_orders" and existing["source"] != "amazon_orders"):
+            seen[key] = r
+        elif existing["source"] == r["source"]:
+            existing["actual_units"] += r["actual_units"]  # sum overlapping months
+    rows = list(seen.values())
 
     inserted = upsert_rows("forecast_actuals_weekly", rows,
                            on_conflict="sku,week_start")
-    return {"rows_upserted": inserted, "skus": len(set(r["sku"] for r in rows))}
+    return {
+        "rows_upserted": inserted,
+        "skus": len(set(r["sku"] for r in rows)),
+        "orders_weeks": orders_weeks,
+        "proxy_weeks": proxy_weeks,
+        "skus_with_orders": len(skus_with_orders),
+    }
 
 
 # ── 2. Reconciliation (week-level scoring) ──
@@ -112,8 +209,10 @@ def reconcile(sku: str | None = None) -> dict:
         .in_("sku", relevant_skus).execute()
 
     actuals_map: dict[str, dict[str, float]] = defaultdict(dict)
+    actuals_source: dict[str, dict[str, str]] = defaultdict(dict)
     for a in (actuals_resp.data or []):
         actuals_map[a["sku"]][a["week_start"]] = float(a["actual_units"])
+        actuals_source[a["sku"]][a["week_start"]] = a.get("source", "unknown")
 
     # Peak weeks (Nov 1 – Jan 31 ≈ ISO weeks 44-52 + 1-5)
     PEAK_WEEKS = frozenset(range(44, 53)) | frozenset(range(1, 6))
@@ -168,7 +267,29 @@ def reconcile(sku: str | None = None) -> dict:
         # Per-method errors, bucketed by season
         iw = _iso_week(ws)
         is_peak = iw in PEAK_WEEKS
-        bucket = sku_peak_errors if is_peak else sku_offpeak_errors
+
+        # Determine actuals source for this week
+        matched_ws = ws
+        src = actuals_source.get(s, {}).get(ws, "unknown")
+        if src == "unknown":
+            # Check fuzzy-matched date
+            try:
+                d = date.fromisoformat(ws)
+                for off in range(1, 4):
+                    for sign in [1, -1]:
+                        test = (d + timedelta(days=off * sign)).isoformat()
+                        if test in actuals_source.get(s, {}):
+                            src = actuals_source[s][test]
+                            break
+                    if src != "unknown":
+                        break
+            except (ValueError, TypeError):
+                pass
+
+        # Only real order data contributes to PEAK calibration.
+        # Proxy data would make naive look artificially accurate in peak.
+        use_for_peak = is_peak and src == "amazon_orders"
+        bucket = sku_peak_errors if use_for_peak else sku_offpeak_errors
 
         for method, col in [("a", "method_a"), ("b", "method_b"),
                             ("c", "method_c"), ("primary", "predicted_units")]:
