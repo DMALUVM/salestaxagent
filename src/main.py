@@ -648,10 +648,16 @@ def forecast_reconcile_cmd(sku):
     c = result["calibration"]
 
     click.echo(f"Actuals: {a.get('rows_upserted', 0)} rows, {a.get('skus', 0)} SKUs")
-    click.echo(f"Reconciliation: {r.get('runs_scored', 0)} runs scored, {r.get('skus_scored', 0)} SKUs")
+    click.echo(f"Reconciliation: {r.get('runs_found', 0)} runs found, "
+               f"{r.get('weeks_scored', 0)} weeks scored, "
+               f"{r.get('skus_scored', 0)} SKUs with errors")
+    if r.get("message"):
+        click.echo(f"  {r['message']}")
     click.echo(f"Calibration: {c.get('calibrated', 0)} SKUs calibrated")
     if c.get("message"):
         click.echo(f"  {c['message']}")
+    for ch in c.get("changes", []):
+        click.echo(f"  {ch}")
 
 
 @cli.command("spapi-sns")

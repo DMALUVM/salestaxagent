@@ -234,7 +234,7 @@ def forecast_sku(
             holidays.append(f"Week {w['iso_week']}: {w['multiplier']}x seasonal peak")
             break
 
-    return {
+    result = {
         "sku": sku,
         "asin": asin,
         "product_name": product_name,
@@ -280,11 +280,11 @@ def forecast_sku(
         "disclaimer": "Planning aid only — not a guarantee. Actual demand may differ materially.",
     }
 
-    # ── Log forecast run ──
+    # ── Log forecast run + week-level predictions ──
     try:
-        from src.db import upsert_rows as _upsert
         from src.db import get_client as _gc
-        _gc().table("forecast_runs").insert({
+        client = _gc()
+        run_resp = client.table("forecast_runs").insert({
             "sku": sku,
             "asin": asin,
             "start_date": start.isoformat(),
@@ -305,6 +305,21 @@ def forecast_sku(
             "model_version": model_version,
             "source": "cli",
         }).execute()
+
+        # Log week-level predictions for reconciliation
+        run_id = run_resp.data[0]["id"] if run_resp.data else None
+        if run_id and weeks:
+            week_rows = [{
+                "run_id": run_id,
+                "week_start": w["week_start"],
+                "predicted_units": w["seasonal"],
+                "method_a": w["naive"],
+                "method_b": w["seasonal"],
+                "method_c": w["sns_organic"],
+            } for w in weeks]
+            from src.db import upsert_rows as _upsert
+            _upsert("forecast_run_weeks", week_rows,
+                     on_conflict="run_id,week_start")
     except Exception:
         pass  # logging is best-effort
 

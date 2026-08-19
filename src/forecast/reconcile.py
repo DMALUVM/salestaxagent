@@ -1,8 +1,8 @@
 """Forecast reconciliation and calibration.
 
-1. Ingest actuals: weekly units per SKU from velocity/orders data
-2. Score past forecasts: MAPE/bias per method vs actuals
-3. Calibrate weights: inverse-MAPE weighting with safety bounds
+1. Ingest actuals: weekly units per SKU from velocity/orders
+2. Score COMPLETED WEEKS inside any forecast run (open or closed)
+3. Calibrate method weights from inverse-MAPE
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from src.db import fetch_all, upsert_rows, get_client
 log = logging.getLogger(__name__)
 
 MIN_CALIBRATION_WEEKS = 8
-MAX_WEIGHT_SHIFT = 0.20  # max change per calibration cycle
-WEIGHT_FLOOR = 0.05      # no method goes below 5%
+MAX_WEIGHT_SHIFT = 0.20
+WEIGHT_FLOOR = 0.05
 
 
 # ── 1. Actuals ingestion ──
@@ -26,13 +26,8 @@ WEIGHT_FLOOR = 0.05      # no method goes below 5%
 def ingest_actuals(sku: str | None = None) -> dict:
     """Build weekly actuals from velocity daily rates.
 
-    For each SKU in sku_velocity, derive weekly units from the V30 daily
-    rate (already units/day) × 7.  This is an approximation — true
-    per-SKU daily sales aren't stored, but V30 is recalculated daily
-    from actual SP-API orders.
-
-    For past weeks we use the V30 at compute time as the best available
-    proxy.  Future improvement: log daily per-SKU units during sales sync.
+    V30 (already u/day) × 7 = weekly units.  This is the best available
+    proxy until per-SKU daily order units are stored separately.
     """
     vel_rows = fetch_all("sku_velocity")
     if sku:
@@ -49,8 +44,8 @@ def ingest_actuals(sku: str | None = None) -> dict:
         if v30 <= 0:
             continue
 
-        # Generate weekly actuals for the last 13 weeks
-        for w in range(13):
+        # Generate weekly actuals for the last 52 weeks
+        for w in range(52):
             monday = today - timedelta(days=today.weekday()) - timedelta(weeks=w)
             if monday >= today:
                 continue
@@ -62,101 +57,133 @@ def ingest_actuals(sku: str | None = None) -> dict:
             })
 
     if not rows:
-        return {"rows_upserted": 0}
+        return {"rows_upserted": 0, "skus": 0}
 
     inserted = upsert_rows("forecast_actuals_weekly", rows,
                            on_conflict="sku,week_start")
     return {"rows_upserted": inserted, "skus": len(set(r["sku"] for r in rows))}
 
 
-# ── 2. Reconciliation ──
+# ── 2. Reconciliation (week-level scoring) ──
 
 def reconcile(sku: str | None = None) -> dict:
-    """Score completed forecast runs against actuals.
+    """Score completed weeks inside forecast runs against actuals.
 
-    For each run where end_date < today, sum actuals and compute
-    MAPE / bias for each method.
+    For each (run, week) pair where:
+      - forecast_run_weeks has a predicted row
+      - forecast_actuals_weekly has an actual row
+      - week_start is in the past (completed week)
+    Compute per-method absolute percentage error.
+
+    Aggregate per SKU into forecast_accuracy.
     """
     client = get_client()
+    today = date.today()
+    last_monday = today - timedelta(days=today.weekday())
 
-    # Get runs
-    q = client.table("forecast_runs").select("*").lt("end_date", date.today().isoformat())
+    # Get ALL runs (not just completed — we score individual weeks)
+    q = client.table("forecast_runs").select("id,sku")
     if sku:
         q = q.eq("sku", sku)
-    runs_resp = q.order("created_at", desc=True).limit(100).execute()
+    runs_resp = q.order("created_at", desc=True).limit(200).execute()
     runs = runs_resp.data or []
 
-    # Get actuals
-    actuals_resp = client.table("forecast_actuals_weekly").select("*").execute()
-    actuals_by_sku: dict[str, dict[str, float]] = defaultdict(dict)
+    if not runs:
+        return {"runs_found": 0, "weeks_scored": 0, "skus_scored": 0,
+                "accuracy_rows": 0, "message": "No forecast runs found"}
+
+    run_ids = [r["id"] for r in runs]
+    run_skus = {r["id"]: r["sku"] for r in runs}
+
+    # Get predicted weeks — only those before last Monday (completed)
+    week_rows_resp = client.table("forecast_run_weeks").select("*") \
+        .in_("run_id", run_ids) \
+        .lt("week_start", last_monday.isoformat()) \
+        .execute()
+    predicted_weeks = week_rows_resp.data or []
+
+    if not predicted_weeks:
+        return {"runs_found": len(runs), "weeks_scored": 0, "skus_scored": 0,
+                "accuracy_rows": 0, "message": "No completed predicted weeks found — run forecasts with past start dates to create scoreable weeks"}
+
+    # Get actuals for the relevant SKUs
+    relevant_skus = list(set(run_skus[pw["run_id"]] for pw in predicted_weeks if pw["run_id"] in run_skus))
+    actuals_resp = client.table("forecast_actuals_weekly").select("*") \
+        .in_("sku", relevant_skus).execute()
+
+    actuals_map: dict[str, dict[str, float]] = defaultdict(dict)
     for a in (actuals_resp.data or []):
-        actuals_by_sku[a["sku"]][a["week_start"]] = float(a["actual_units"])
+        actuals_map[a["sku"]][a["week_start"]] = float(a["actual_units"])
 
-    scored = 0
-    accuracy_rows: list[dict] = []
-
-    # Group runs by SKU to compute aggregate accuracy
-    sku_errors: dict[str, dict[str, list[float]]] = defaultdict(
+    # Score each predicted week against actuals.
+    # Predicted week_start may not be Monday-aligned (forecast starts from
+    # user's start_date). Match to the nearest Monday-aligned actual within ±3 days.
+    sku_week_errors: dict[str, dict[str, list[float]]] = defaultdict(
         lambda: {"a": [], "b": [], "c": [], "primary": []}
     )
+    weeks_scored = 0
 
-    for run in runs:
-        s = run["sku"]
-        actuals_map = actuals_by_sku.get(s, {})
-        if not actuals_map:
+    for pw in predicted_weeks:
+        rid = pw["run_id"]
+        s = run_skus.get(rid)
+        if not s:
             continue
 
-        start = date.fromisoformat(run["start_date"])
-        end = date.fromisoformat(run["end_date"])
+        ws = pw["week_start"]
+        sku_actuals = actuals_map.get(s, {})
 
-        # Sum actuals over the run period
-        total_actual = 0
-        weeks_counted = 0
-        cursor = start
-        while cursor <= end:
-            monday = cursor - timedelta(days=cursor.weekday())
-            ws = monday.isoformat()
-            if ws in actuals_map:
-                total_actual += actuals_map[ws]
-                weeks_counted += 1
-            cursor += timedelta(weeks=1)
+        # Fuzzy match: try exact, then ±1..3 days
+        actual = sku_actuals.get(ws)
+        if actual is None:
+            try:
+                d = date.fromisoformat(ws)
+                for offset in range(1, 4):
+                    for sign in [1, -1]:
+                        test = (d + timedelta(days=offset * sign)).isoformat()
+                        if test in sku_actuals:
+                            actual = sku_actuals[test]
+                            break
+                    if actual is not None:
+                        break
+            except (ValueError, TypeError):
+                pass
 
-        if weeks_counted < 2:
+        if actual is None or actual <= 0:
             continue
 
-        # Errors per method
-        for method_key, run_key in [("a", "method_a_units"), ("b", "method_b_units"),
-                                     ("c", "method_c_units"), ("primary", "expected_units")]:
-            pred = float(run.get(run_key, 0) or 0)
-            if pred > 0 and total_actual > 0:
-                pct_error = abs(pred - total_actual) / total_actual
-                sku_errors[s][method_key].append(pct_error)
+        # Per-method errors
+        for method, col in [("a", "method_a"), ("b", "method_b"),
+                            ("c", "method_c"), ("primary", "predicted_units")]:
+            pred = float(pw.get(col, 0) or 0)
+            if pred > 0:
+                ape = abs(pred - actual) / actual
+                sku_week_errors[s][method].append(ape)
 
-        scored += 1
+        weeks_scored += 1
 
-    # Build accuracy per SKU
-    for s, errors in sku_errors.items():
+    # Build accuracy rows
+    accuracy_rows: list[dict] = []
+    for s, errors in sku_week_errors.items():
+        n = len(errors.get("primary", []))
+        if n == 0:
+            continue
+
+        mape_by_method: dict[str, float] = {}
+        for mk in ["a", "b", "c"]:
+            errs = errors.get(mk, [])
+            if errs:
+                mape_by_method[mk] = sum(errs) / len(errs)
+
+        primary_errs = errors.get("primary", [])
+        mape = sum(primary_errs) / len(primary_errs) if primary_errs else None
+
+        # Bias: mean signed error (positive = over-forecast)
+        bias = 0.0  # would need signed errors; simplified for now
+
+        best = min(mape_by_method, key=lambda k: mape_by_method.get(k, 999)) if mape_by_method else "b"
+        weights = _compute_weights(mape_by_method)
+
         for window in [30, 90]:
-            # Use all available errors (window is nominal)
-            n = len(errors.get("primary", []))
-            if n == 0:
-                continue
-
-            mape_by_method: dict[str, float] = {}
-            for mk in ["a", "b", "c"]:
-                errs = errors.get(mk, [])
-                if errs:
-                    mape_by_method[mk] = sum(errs) / len(errs)
-
-            primary_errs = errors.get("primary", [])
-            mape = sum(primary_errs) / len(primary_errs) if primary_errs else None
-            bias = 0  # simplified
-
-            best = min(mape_by_method, key=lambda k: mape_by_method.get(k, 999)) if mape_by_method else "b"
-
-            # Compute weights from inverse MAPE
-            weights = _compute_weights(mape_by_method)
-
             accuracy_rows.append({
                 "sku": s,
                 "window_days": window,
@@ -171,66 +198,52 @@ def reconcile(sku: str | None = None) -> dict:
         upsert_rows("forecast_accuracy", accuracy_rows,
                      on_conflict="sku,window_days")
 
-    return {"runs_scored": scored, "skus_scored": len(sku_errors),
-            "accuracy_rows": len(accuracy_rows)}
+    return {
+        "runs_found": len(runs),
+        "weeks_scored": weeks_scored,
+        "skus_scored": len(sku_week_errors),
+        "accuracy_rows": len(accuracy_rows),
+    }
 
 
 def _compute_weights(mape_by_method: dict[str, float]) -> dict[str, float]:
-    """Inverse-MAPE weighting with floor and cap."""
+    """Inverse-MAPE weighting with floor."""
     if not mape_by_method:
         return {"a": 0.15, "b": 0.60, "c": 0.25}
 
-    # Inverse MAPE (lower error = higher weight)
-    inv = {}
-    for k, mape in mape_by_method.items():
-        inv[k] = 1.0 / max(mape, 0.01)
-
+    inv = {k: 1.0 / max(mape, 0.01) for k, mape in mape_by_method.items()}
     total = sum(inv.values())
-    weights = {k: v / total for k, v in inv.items()}
+    weights = {k: max(v / total, WEIGHT_FLOOR) for k, v in inv.items()}
 
-    # Apply floor
-    for k in weights:
-        weights[k] = max(weights[k], WEIGHT_FLOOR)
-
-    # Renormalize
+    # Renormalize after floor
     total = sum(weights.values())
-    weights = {k: round(v / total, 3) for k, v in weights.items()}
-
-    return weights
+    return {k: round(v / total, 3) for k, v in weights.items()}
 
 
 # ── 3. Calibration ──
 
 def calibrate(sku: str | None = None) -> dict:
-    """Update forecast_model_state with learned weights.
-
-    Reads forecast_accuracy, computes blended weights, stores on
-    model_state.  Respects MAX_WEIGHT_SHIFT to prevent wild swings.
-    """
+    """Update forecast_model_state with learned weights."""
     client = get_client()
 
-    # Get accuracy data
     q = client.table("forecast_accuracy").select("*")
     if sku:
         q = q.eq("sku", sku)
-    acc_resp = q.execute()
-    acc_rows = acc_resp.data or []
+    acc_rows = (q.execute()).data or []
 
     if not acc_rows:
-        return {"calibrated": 0, "message": "No accuracy data to calibrate from"}
+        return {"calibrated": 0, "message": "No accuracy data — run forecast-reconcile first"}
 
     # Get current model state
     state_resp = client.table("forecast_model_state").select("*").execute()
-    current_state: dict[str, dict] = {}
-    for s in (state_resp.data or []):
-        current_state[s["sku"]] = s
-
-    # Global defaults
+    current_state: dict[str, dict] = {s["sku"]: s for s in (state_resp.data or [])}
     defaults = current_state.get("*", {}).get("weights", {"a": 0.15, "b": 0.60, "c": 0.25})
     if isinstance(defaults, str):
         defaults = json.loads(defaults)
 
     calibrated = 0
+    changes: list[str] = []
+
     for row in acc_rows:
         s = row["sku"]
         n = row.get("n_weeks", 0) or 0
@@ -243,7 +256,6 @@ def calibrate(sku: str | None = None) -> dict:
         if not new_weights:
             continue
 
-        # Get existing weights for this SKU (or global)
         existing = current_state.get(s, current_state.get("*", {}))
         old_weights = existing.get("weights", defaults)
         if isinstance(old_weights, str):
@@ -254,38 +266,31 @@ def calibrate(sku: str | None = None) -> dict:
         for k in ["a", "b", "c"]:
             old = old_weights.get(k, 0.33)
             new = new_weights.get(k, old)
-            delta = new - old
-            capped_delta = max(-MAX_WEIGHT_SHIFT, min(MAX_WEIGHT_SHIFT, delta))
-            capped[k] = round(max(WEIGHT_FLOOR, old + capped_delta), 3)
+            delta = max(-MAX_WEIGHT_SHIFT, min(MAX_WEIGHT_SHIFT, new - old))
+            capped[k] = round(max(WEIGHT_FLOOR, old + delta), 3)
 
         # Renormalize
         total = sum(capped.values())
         capped = {k: round(v / total, 3) for k, v in capped.items()}
 
         version = f"cal-{date.today().isoformat()}"
-
         upsert_rows("forecast_model_state", [{
             "sku": s,
             "weights": json.dumps(capped),
             "model_version": version,
         }], on_conflict="sku")
 
+        changes.append(f"{s}: {capped} (from {n} weeks, MAPE={row.get('mape')}%)")
         calibrated += 1
-        log.info("Calibrated %s: weights=%s version=%s (from %d weeks)",
-                 s, capped, version, n)
 
-    return {"calibrated": calibrated}
+    return {"calibrated": calibrated, "changes": changes}
 
 
-# ── 4. Full reconcile pipeline ──
+# ── 4. Full pipeline ──
 
 def run_full_reconcile(sku: str | None = None) -> dict:
-    """Ingest actuals → reconcile → calibrate."""
+    """Ingest actuals → score weeks → calibrate."""
     actuals = ingest_actuals(sku)
     recon = reconcile(sku)
     cal = calibrate(sku)
-    return {
-        "actuals": actuals,
-        "reconciliation": recon,
-        "calibration": cal,
-    }
+    return {"actuals": actuals, "reconciliation": recon, "calibration": cal}
