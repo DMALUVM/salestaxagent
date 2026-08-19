@@ -630,8 +630,28 @@ def forecast_sku_cmd(sku, end_date, start_date, safety):
     for h in result.get("holidays", []):
         click.echo(f"    {h}")
 
+    click.echo(f"\n  Model: {result.get('model_version', 'default')}")
+    click.echo(f"  Weights: {result.get('weights', {})}")
     click.echo(f"\n  {result['disclaimer']}")
     click.echo()
+
+
+@cli.command("forecast-reconcile")
+@click.option("--sku", default=None, help="Single SKU or all")
+def forecast_reconcile_cmd(sku):
+    """Reconcile forecasts: ingest actuals → score → calibrate."""
+    from src.forecast.reconcile import run_full_reconcile
+
+    result = run_full_reconcile(sku)
+    a = result["actuals"]
+    r = result["reconciliation"]
+    c = result["calibration"]
+
+    click.echo(f"Actuals: {a.get('rows_upserted', 0)} rows, {a.get('skus', 0)} SKUs")
+    click.echo(f"Reconciliation: {r.get('runs_scored', 0)} runs scored, {r.get('skus_scored', 0)} SKUs")
+    click.echo(f"Calibration: {c.get('calibrated', 0)} SKUs calibrated")
+    if c.get("message"):
+        click.echo(f"  {c['message']}")
 
 
 @cli.command("spapi-sns")

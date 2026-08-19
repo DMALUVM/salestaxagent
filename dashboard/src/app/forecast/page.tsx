@@ -32,6 +32,9 @@ interface ForecastResult {
     velocity_windows: number; has_holiday_forecast: boolean; has_sns_data: boolean;
     seasonality_weeks: number;
   };
+  model_version: string;
+  weights: { a: number; b: number; c: number };
+  accuracy: { mape: number; n_weeks: number; best_method: string } | null;
   holidays: string[];
   weeks: Array<{
     week_start: string; week_end: string; iso_week: number; days: number;
@@ -194,6 +197,52 @@ export default function ForecastPage() {
                   Method spread {result.methods.spread_pct}% — holiday demand causes expected divergence from summer run-rate.
                 </p>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Model confidence */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Model & Accuracy</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-4 text-sm">
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase">Model</p>
+                  <p className="font-semibold">{result.model_version}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase">Weights (A/B/C)</p>
+                  <p className="font-mono text-xs">
+                    {(result.weights.a * 100).toFixed(0)}% / {(result.weights.b * 100).toFixed(0)}% / {(result.weights.c * 100).toFixed(0)}%
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase">MAPE</p>
+                  <p className="font-semibold">
+                    {result.accuracy ? `${result.accuracy.mape.toFixed(1)}%` : "—"}
+                  </p>
+                  {result.accuracy && (
+                    <p className="text-[10px] text-muted-foreground">{result.accuracy.n_weeks} weeks scored</p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase">Confidence</p>
+                  {result.accuracy ? (
+                    <Badge variant="outline" className={`text-[10px] ${
+                      result.accuracy.mape < 15 ? "bg-emerald-50 text-emerald-700" :
+                      result.accuracy.mape < 30 ? "bg-amber-50 text-amber-700" :
+                      "bg-red-50 text-red-700"
+                    }`}>
+                      {result.accuracy.mape < 15 ? "High" : result.accuracy.mape < 30 ? "Medium" : "Low"}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px]">
+                      {result.model_version === "default" ? "Not calibrated" : "Calibrating"}
+                    </Badge>
+                  )}
+                </div>
+              </div>
             </CardContent>
           </Card>
 

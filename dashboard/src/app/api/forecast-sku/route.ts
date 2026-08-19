@@ -190,13 +190,33 @@ export async function GET(request: NextRequest) {
     const totalSeasonal = weeks.reduce((s, w) => s + w.seasonal, 0);
     const totalSnsOrganic = weeks.reduce((s, w) => s + w.sns_organic, 0);
 
-    const methods = [totalNaive, totalSeasonal, totalSnsOrganic];
-    const avgMethods = methods.reduce((a, b) => a + b, 0) / 3;
+    const methodsArr = [totalNaive, totalSeasonal, totalSnsOrganic];
+    const avgMethods = methodsArr.reduce((a, b) => a + b, 0) / 3;
     const maxSpread = avgMethods > 0
-      ? Math.max(...methods.map((m) => Math.abs(m - avgMethods) / avgMethods)) * 100
+      ? Math.max(...methodsArr.map((m) => Math.abs(m - avgMethods) / avgMethods)) * 100
       : 0;
 
-    const expected = totalSeasonal;
+    // Load calibrated weights from forecast_model_state
+    let weights = { a: 0.15, b: 0.60, c: 0.25 };
+    let modelVersion = "default";
+    try {
+      const msRes = await sb.from("forecast_model_state").select("*")
+        .in("sku", [sku, "*"]).order("sku", { ascending: false }).limit(2);
+      const skuModel = (msRes.data ?? []).find((m: Record<string, unknown>) => m.sku === sku);
+      const globalModel = (msRes.data ?? []).find((m: Record<string, unknown>) => m.sku === "*");
+      const active = skuModel || globalModel;
+      if (active) {
+        const w = typeof active.weights === "string" ? JSON.parse(active.weights) : active.weights;
+        if (w && typeof w.a === "number") {
+          weights = w;
+          modelVersion = (active.model_version as string) || "calibrated";
+        }
+      }
+    } catch { /* table may not exist */ }
+
+    const expected = Math.round(
+      weights.a * totalNaive + weights.b * totalSeasonal + weights.c * totalSnsOrganic,
+    );
     const coverage = Math.ceil(expected * (1 + safetyPct));
     const low = Math.floor(expected * 0.80);
     const high = Math.ceil(expected * 1.20);
@@ -206,6 +226,14 @@ export async function GET(request: NextRequest) {
     if (weeks.some((w) => w.source === "forecast")) holidays.push("Holiday forecast (Nov-Jan) applied");
     const peakWeek = weeks.find((w) => w.multiplier > 2.0);
     if (peakWeek) holidays.push(`Week ${peakWeek.iso_week}: ${peakWeek.multiplier}x seasonal peak`);
+
+    // Read accuracy if available
+    let accuracy = null;
+    try {
+      const accRes = await sb.from("forecast_accuracy").select("mape,n_weeks,best_method")
+        .eq("sku", sku).eq("window_days", 90).limit(1);
+      if (accRes.data?.[0]) accuracy = accRes.data[0];
+    } catch { /* table may not exist */ }
 
     return Response.json({
       sku,
@@ -240,6 +268,9 @@ export async function GET(request: NextRequest) {
         has_sns_data: snsActiveSubs > 0,
         seasonality_weeks: Object.keys(seasonality).length,
       },
+      model_version: modelVersion,
+      weights,
+      accuracy,
       holidays,
       weeks,
       disclaimer: "Planning aid only — not a guarantee. Actual demand may differ materially.",

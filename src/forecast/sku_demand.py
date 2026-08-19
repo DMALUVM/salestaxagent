@@ -189,7 +189,30 @@ def forecast_sku(
     avg_methods = sum(methods) / len(methods) if methods else 0
     max_spread = max(abs(m - avg_methods) / max(avg_methods, 1) for m in methods) * 100 if avg_methods else 0
 
-    expected = total_seasonal  # primary method
+    # ── Load calibrated weights from model_state ──
+    model_version = "default"
+    weights = {"a": 0.15, "b": 0.60, "c": 0.25}
+    try:
+        model_rows = fetch_all("forecast_model_state")
+        sku_model = next((m for m in model_rows if m.get("sku") == sku), None)
+        global_model = next((m for m in model_rows if m.get("sku") == "*"), None)
+        active = sku_model or global_model
+        if active:
+            w = active.get("weights")
+            if isinstance(w, str):
+                w = json.loads(w)
+            if isinstance(w, dict) and "a" in w:
+                weights = w
+                model_version = active.get("model_version", "calibrated")
+    except Exception:
+        pass  # table may not exist yet
+
+    # Blended expected using calibrated weights
+    expected = round(
+        weights.get("a", 0.15) * total_naive
+        + weights.get("b", 0.60) * total_seasonal
+        + weights.get("c", 0.25) * total_sns_organic
+    )
     coverage = math.ceil(expected * (1 + safety_pct))
 
     # Bands
@@ -249,7 +272,40 @@ def forecast_sku(
             "seasonality_weeks": len(seasonality),
         },
 
+        "model_version": model_version,
+        "weights": weights,
+
         "holidays": holidays,
         "weeks": weeks,
         "disclaimer": "Planning aid only — not a guarantee. Actual demand may differ materially.",
     }
+
+    # ── Log forecast run ──
+    try:
+        from src.db import upsert_rows as _upsert
+        from src.db import get_client as _gc
+        _gc().table("forecast_runs").insert({
+            "sku": sku,
+            "asin": asin,
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "safety_pct": safety_pct,
+            "expected_units": expected,
+            "coverage_units": coverage,
+            "low_units": low,
+            "high_units": high,
+            "method_a_units": total_naive,
+            "method_b_units": total_seasonal,
+            "method_c_units": total_sns_organic,
+            "primary_method": "blended" if model_version != "default" else "B_seasonal",
+            "velocity_upd": round(blended_daily, 1),
+            "sns_subs": sns_active_subs,
+            "sns_shipped_wk": sns_weekly_shipped,
+            "return_rate": round(return_rate, 4),
+            "model_version": model_version,
+            "source": "cli",
+        }).execute()
+    except Exception:
+        pass  # logging is best-effort
+
+    return result
