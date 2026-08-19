@@ -764,12 +764,15 @@ def economics_sync_cmd(days):
     click.echo(f"Transactions: {result['transactions']}")
     click.echo(f"Days with data: {result['days']}")
     click.echo(f"Rows upserted: {result['inserted']}")
-    click.echo(f"Amazon payout: ${result.get('total_payout', 0):,.2f}  (charges - fees - refunds)")
-    click.echo(f"COGS:          ${result.get('total_cogs', 0):,.2f}")
+    click.echo(f"Sales:         ${result.get('total_sales', 0):,.2f}")
+    click.echo(f"Fees:          ${result.get('total_fees', 0):,.2f}")
     click.echo(f"Ad spend:      ${result.get('total_ad_spend', 0):,.2f}")
-    click.echo(f"Contribution:  ${result.get('total_contribution', 0):,.2f}  (payout - COGS - ads)")
-    click.echo(f"Status: reconciled (from Amazon Finances API)")
-    click.echo(f"Date basis: postedDate (settlement date, may lag order date 1-3 days)")
+    click.echo(f"COGS:          ${result.get('total_cogs', 0):,.2f}")
+    click.echo(f"Contribution:  ${result.get('total_contribution', 0):,.2f}"
+               f"  (sales - fees - ads - COGS)")
+    click.echo(f"Settled days:  {result.get('settled_days', 0)} of {result.get('days', 0)}")
+    click.echo(f"Amazon payout: ${result.get('total_payout', 0):,.2f}"
+               f"  — settlement reconciliation only, ~2x/month, postedDate basis")
 
 
 @cli.command("costs-import")
@@ -868,19 +871,34 @@ def pnl_validate_cmd(target_date):
 
 @cli.command("pnl-sync")
 @click.option("--days", default=30, help="Days to compute")
-def pnl_sync_cmd(days):
-    """Compute daily P&L: sales - fees - COGS - ad spend."""
+@click.option("--no-skus", is_flag=True,
+              help="Account grain only — skips the orders report (COGS falls back to estimates)")
+def pnl_sync_cmd(days, no_skus):
+    """Compute daily contribution: sales - referral - FBA - ad spend - COGS.
+
+    Use a large --days to backfill history, e.g. `pnl-sync --days 365`.
+    """
     from src.pnl import compute_pnl
 
     click.echo(f"Computing P&L for last {days} days...")
-    result = compute_pnl(days=days)
-    click.echo(f"Days: {result['days']}, Rows: {result['rows']}, Inserted: {result['inserted']}")
-    click.echo(f"Sales: ${result['total_sales']:,.2f}")
-    click.echo(f"Ad spend: ${result['total_ads']:,.2f}")
-    click.echo(f"Est. contribution: ${result['total_contribution']:,.2f}")
-    click.echo(f"COGS: {'loaded' if result['has_cogs'] else 'not configured (set sku_costs table)'}")
-    click.echo(f"Fees: referral {result['referral_pct']*100:.0f}%, FBA ${result['fba_per_unit']:.2f}/unit")
-    click.echo(f"Status: preliminary (estimates until Amazon economics settle)")
+    result = compute_pnl(days=days, with_skus=not no_skus)
+    if not result.get("rows"):
+        click.echo("No data in that window.")
+        return
+    click.echo(f"Days: {result['days']}, Rows: {result['rows']} account "
+               f"+ {result.get('sku_rows', 0)} SKU, Inserted: {result['inserted']}")
+    click.echo(f"  Sales        ${result['total_sales']:>12,.2f}")
+    click.echo(f"  - Fees       ${result['total_fees']:>12,.2f}")
+    click.echo(f"  - Ad spend   ${result['total_ads']:>12,.2f}")
+    click.echo(f"  - COGS       ${result['total_cogs']:>12,.2f}")
+    click.echo(f"  = Contribution ${result['total_contribution']:>10,.2f}")
+    click.echo(f"Fee basis: {result['settled_days']} settled day(s), "
+               f"{result['estimated_days']} estimated "
+               f"(referral {result['referral_pct']*100:.0f}%, FBA ${result['fba_per_unit']:.2f}/unit)")
+    click.echo(f"COGS: {'sku_costs x daily units' if result['has_cogs'] else 'not configured (set sku_costs table)'}")
+    if result.get("missing_cost_skus"):
+        click.echo(f"  ⚠ no sku_costs entry for {len(result['missing_cost_skus'])} SKU(s), "
+                   f"used average unit cost: {', '.join(result['missing_cost_skus'][:5])}")
 
 
 @cli.command("pulse-audit")
@@ -2434,6 +2452,21 @@ def run():
         else:
             click.echo("[Scheduler] Amazon Ads not configured — ads jobs not scheduled")
 
+        # Contribution P&L at 06:45 — deliberately after the 05:00 ads sync and
+        # the 06:00 SP-API refresh that writes sales_daily, so the day's sales,
+        # ad spend and settlement are all present before contribution is stored.
+        # Not gated on Ads: without ads data the formula still holds, ads = 0.
+        scheduler.add_job(
+            _run_pnl_sync,
+            "cron",
+            hour=6,
+            minute=45,
+            id="pnl_sync",
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
+        click.echo("[Scheduler] Contribution P&L daily at 06:45 (after sales + ads)")
+
         # Weekly GitHub backup (Sunday 09:00)
         scheduler.add_job(
             _run_github_backup,
@@ -2988,6 +3021,42 @@ def _run_ads_actions():
     job_finish(run_id, "success", msg,
                stats={"count": len(recs), "by_priority": by_priority,
                       "target_acos": 30.0, "days": 7})
+
+
+def _run_pnl_sync():
+    """06:45 — store daily contribution for every Amazon day.
+
+    contribution = gross_sales - referral - fba - ad_spend - cogs
+    Runs after the ads sync (05:00) and SP-API sales refresh (06:00) so the
+    inputs are current. Amazon settlement is fetched for fee detail and the
+    payout reconciliation figure, never as the daily grain.
+    """
+    from src.db import job_start, job_finish
+    from src.pnl import compute_pnl
+
+    run_id = job_start("pnl_sync")
+    try:
+        r = compute_pnl(days=35)
+    except Exception as e:
+        print(f"[P&L] Failed: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        _ads_alert("Contribution P&L sync failed", str(e))
+        return
+
+    if not r.get("rows"):
+        job_finish(run_id, "success", "no data in window")
+        return
+
+    msg = (f"{r['days']}d: sales ${r['total_sales']:,.0f} - fees ${r['total_fees']:,.0f} "
+           f"- ads ${r['total_ads']:,.0f} - COGS ${r['total_cogs']:,.0f} "
+           f"= ${r['total_contribution']:,.0f}")
+    print(f"[P&L] {msg} ({r['settled_days']} settled, {r['estimated_days']} estimated)")
+    job_finish(run_id, "success", msg, stats={
+        "days": r["days"], "sales": r["total_sales"], "fees": r["total_fees"],
+        "ads": r["total_ads"], "cogs": r["total_cogs"],
+        "contribution": r["total_contribution"],
+        "settled_days": r["settled_days"],
+    })
 
 
 def _run_github_backup():

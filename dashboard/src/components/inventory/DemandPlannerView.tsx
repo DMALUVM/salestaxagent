@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,6 @@ import { useInventorySkus } from "@/lib/use-inventory-skus";
 import { Shield, TrendingUp, AlertTriangle, Calculator } from "lucide-react";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
-function fmtD(n: number) { return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 interface ForecastResult {
   sku: string; asin: string; product_name: string;

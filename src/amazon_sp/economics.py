@@ -1,12 +1,19 @@
-"""Amazon Finances API — payout and contribution computation.
+"""Amazon Finances API — settlement data and fee detail.
 
 Uses SP-API Finances v2024-06-19 /transactions endpoint.
 
-Key distinction:
   amazon_payout = charges - Amazon fees - refunds - adjustments
-    (what Amazon pays the seller BEFORE seller COGS)
-  contribution = amazon_payout - COGS - ad_spend
-    (seller's true margin after all costs)
+    (the cash Amazon deposits, BEFORE seller COGS and ad spend)
+
+Payout is a RECONCILIATION CHECK, not a daily margin. Amazon settles roughly
+twice a month on a posted-date basis, so a deposit cannot express one day's
+operating result. Daily contribution lives in src.pnl and is always:
+
+  contribution = gross_sales - referral - fba - ad_spend - cogs
+
+What this module contributes to that: settled Amazon fees per posted date
+(better than the referral/FBA estimate) and the payout figure for cash
+reconciliation.
 
 Date basis: postedDate from the Finances API (settlement date,
 may lag 1-3 days behind order/shipment date).
@@ -115,93 +122,42 @@ def aggregate_daily(transactions: list[dict]) -> dict[str, dict]:
 
 
 def sync_economics(days: int = 30) -> dict:
-    """Fetch Amazon financial transactions and compute daily payout + contribution.
+    """Refresh the daily P&L, including Amazon settlement data.
 
-    Formula:
-      amazon_payout = sum(transaction totals) for Shipment + Refund + Adjustment + ServiceFee
-      contribution = amazon_payout - COGS - ad_spend
+    Settlement is a RECONCILIATION CHECK, not the daily grain: Amazon deposits
+    roughly twice a month on a posted-date basis, so a payout cannot express a
+    single day's operating margin. Daily contribution is owned by
+    src.pnl.compute_pnl and is always:
+
+        gross_sales - referral - fba - ad_spend - cogs
+
+    This entry point exists so `economics-sync` keeps working; it delegates the
+    write so pnl_daily has exactly one writer and no job can overwrite part of a
+    row with stale values. The payout it fetches lands in `amazon_net_proceeds`
+    for cash reconciliation.
     """
+    from src.pnl import compute_pnl
+
     end = date.today()
     start = end - timedelta(days=days)
-
     log.info("Fetching financial transactions %s to %s", start, end)
     txns = fetch_transactions(start, end)
     daily = aggregate_daily(txns)
 
-    if not daily:
-        return {"transactions": len(txns), "days": 0, "inserted": 0}
+    result = compute_pnl(days=days)
 
-    # Load ad spend
-    try:
-        pnl_rows = fetch_all("pnl_daily")
-        ad_by_date = {r["date"]: float(r.get("ad_spend", 0) or 0)
-                      for r in pnl_rows if r.get("grain") == "account"}
-    except Exception:
-        ad_by_date = {}
-
-    # Load ad spend from ads_campaigns_daily if pnl doesn't have it
-    if not ad_by_date:
-        try:
-            ads_rows = fetch_all("ads_campaigns_daily")
-            for r in ads_rows:
-                d = r.get("date", "")
-                ad_by_date[d] = ad_by_date.get(d, 0) + float(r.get("spend", 0) or 0)
-        except Exception:
-            pass
-
-    # Load COGS
-    try:
-        costs = {r["sku"]: float(r.get("cogs_per_unit", 0) or 0)
-                 for r in fetch_all("sku_costs")}
-        avg_cogs = sum(costs.values()) / len(costs) if costs else 0
-    except Exception:
-        avg_cogs = 0
-
-    rows = []
-    for day, agg in sorted(daily.items()):
-        payout = round(agg["payout"], 2)
-        ads = ad_by_date.get(day, 0)
-        units = agg["units"]
-        cogs = round(units * avg_cogs, 2)
-        gross = round(agg["product_charges"], 2)
-        fees = round(-agg["amazon_fees"], 2)  # make positive for display
-        refunds = round(agg["refund_charges"], 2)
-        contribution = round(payout - ads - cogs, 2)
-
-        rows.append({
-            "date": day,
-            "grain": "account",
-            "sku": "",
-            "channel": "amazon",
-            "gross_sales": gross,
-            "units": units,
-            "ad_spend": ads,
-            "est_referral_fees": fees,  # combined Amazon fees (referral + FBA)
-            "est_fba_fees": 0,          # included in est_referral_fees
-            "est_cogs": cogs,
-            "est_contribution": contribution,
-            "amazon_net_proceeds": payout,  # amazon_payout before COGS
-            "net_after_ads": contribution,  # payout - COGS - ads
-            "status": "reconciled",
-            "meta": f'{{"refunds":{refunds},"other":{round(agg["other_amounts"],2)}}}',
-        })
-
-    inserted = upsert_rows("pnl_daily", rows,
-                           on_conflict="date,grain,sku,channel")
-
-    total_payout = sum(r["amazon_net_proceeds"] for r in rows)
-    total_ads = sum(r["ad_spend"] for r in rows)
-    total_cogs = sum(r["est_cogs"] for r in rows)
-    total_contribution = sum(r["net_after_ads"] for r in rows)
-
+    total_payout = sum(a["payout"] for a in daily.values())
     return {
         "transactions": len(txns),
-        "days": len(rows),
-        "inserted": inserted,
+        "days": result.get("days", 0),
+        "inserted": result.get("inserted", 0),
         "total_payout": round(total_payout, 2),
-        "total_ad_spend": round(total_ads, 2),
-        "total_cogs": round(total_cogs, 2),
-        "total_contribution": round(total_contribution, 2),
+        "total_sales": result.get("total_sales", 0),
+        "total_fees": result.get("total_fees", 0),
+        "total_ad_spend": result.get("total_ads", 0),
+        "total_cogs": result.get("total_cogs", 0),
+        "total_contribution": result.get("total_contribution", 0),
+        "settled_days": result.get("settled_days", 0),
     }
 
 
