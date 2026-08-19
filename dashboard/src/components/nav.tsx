@@ -40,6 +40,7 @@ const primaryLinks: NavItem[] = [
   { href: "/registrations", label: "Nexus & Registrations", icon: ClipboardCheck },
   { href: "/inventory", label: "Inventory", icon: Warehouse },
   { href: "/forecast", label: "Demand Forecast", icon: TrendingUp },
+  { href: "/planner", label: "Inbound Planner", icon: Package },
 ];
 
 const monitorLinks: NavItem[] = [
