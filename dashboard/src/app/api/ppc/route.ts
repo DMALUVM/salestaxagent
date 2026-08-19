@@ -1,46 +1,174 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 
-/** GET /api/ppc — Ads campaigns, search terms, recommendations, TACOS. */
+interface DailySeries {
+  date: string;
+  spend: number;
+  ad_sales: number;
+  orders: number;
+  clicks: number;
+  impressions: number;
+}
+
+interface KPIs {
+  spend: number;
+  adSales: number;
+  orders: number;
+  clicks: number;
+  impressions: number;
+  acos: number;
+  roas: number;
+  cpc: number;
+  cvr: number;
+  totalSales: number;
+  tacos: number;
+}
+
+function aggregate(rows: DailySeries[], totalSales: number): KPIs {
+  const spend = rows.reduce((s, r) => s + r.spend, 0);
+  const adSales = rows.reduce((s, r) => s + r.ad_sales, 0);
+  const orders = rows.reduce((s, r) => s + r.orders, 0);
+  const clicks = rows.reduce((s, r) => s + r.clicks, 0);
+  const impressions = rows.reduce((s, r) => s + r.impressions, 0);
+  return {
+    spend, adSales, orders, clicks, impressions,
+    acos: adSales > 0 ? (spend / adSales) * 100 : 0,
+    roas: spend > 0 ? adSales / spend : 0,
+    cpc: clicks > 0 ? spend / clicks : 0,
+    cvr: clicks > 0 ? (orders / clicks) * 100 : 0,
+    totalSales,
+    tacos: totalSales > 0 ? (spend / totalSales) * 100 : 0,
+  };
+}
+
+/** GET /api/ppc — Server-side aggregated KPIs, daily series, search terms, recs. */
 export async function GET() {
   try {
     const sb = getServerSupabase();
-    let campaigns: unknown[] = [];
-    let searchTerms: unknown[] = [];
-    let recommendations: unknown[] = [];
-    let totalSales7d = 0;
-    let totalSales30d = 0;
 
+    // ── Fetch ALL campaign-daily rows (no limit — typically <5k rows for 30d) ──
+    let allCampaignRows: Array<Record<string, unknown>> = [];
     try {
-      const r = await sb.from("ads_campaigns_daily").select("*").order("date", { ascending: false }).limit(200);
-      campaigns = r.data ?? [];
+      let offset = 0;
+      const pageSize = 1000;
+      while (true) {
+        const r = await sb.from("ads_campaigns_daily").select("*")
+          .order("date", { ascending: true })
+          .range(offset, offset + pageSize - 1);
+        const page = r.data ?? [];
+        allCampaignRows = allCampaignRows.concat(page);
+        if (page.length < pageSize) break;
+        offset += pageSize;
+      }
     } catch { /* table may not exist */ }
 
+    // ── Build daily series from campaign rows ──
+    const dailyMap = new Map<string, DailySeries>();
+    for (const c of allCampaignRows) {
+      const d = String(c.date ?? "");
+      if (!d) continue;
+      const entry = dailyMap.get(d) ?? { date: d, spend: 0, ad_sales: 0, orders: 0, clicks: 0, impressions: 0 };
+      entry.spend += Number(c.spend ?? 0);
+      entry.ad_sales += Number(c.sales_14d ?? 0);
+      entry.orders += Number(c.orders_14d ?? 0);
+      entry.clicks += Number(c.clicks ?? 0);
+      entry.impressions += Number(c.impressions ?? 0);
+      dailyMap.set(d, entry);
+    }
+    const dailySeries = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+    // ── Date range info ──
+    const dateMin = dailySeries.length ? dailySeries[0].date : null;
+    const dateMax = dailySeries.length ? dailySeries[dailySeries.length - 1].date : null;
+    const daysInDb = dailySeries.length;
+
+    // ── Compute KPIs for 7D / 14D / 30D windows ──
+    const now = new Date();
+    function cutoff(days: number) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - days);
+      return d.toISOString().slice(0, 10);
+    }
+
+    // Total Amazon sales from sales_daily for TACOS
+    const salesByDate = new Map<string, number>();
+    try {
+      const r = await sb.from("sales_daily").select("sale_date,gross_sales").eq("channel", "amazon");
+      for (const row of r.data ?? []) {
+        const d = String(row.sale_date ?? "");
+        salesByDate.set(d, (salesByDate.get(d) ?? 0) + Number(row.gross_sales ?? 0));
+      }
+    } catch { /* */ }
+
+    function kpisForRange(days: number) {
+      const c = cutoff(days);
+      const filtered = dailySeries.filter(r => r.date >= c);
+      let totalSales = 0;
+      for (const [d, g] of salesByDate) {
+        if (d >= c) totalSales += g;
+      }
+      return { kpis: aggregate(filtered, totalSales), days: filtered.length };
+    }
+
+    const kpi7 = kpisForRange(7);
+    const kpi14 = kpisForRange(14);
+    const kpi30 = kpisForRange(30);
+
+    // ── Campaign-level aggregation for selected range (all available data) ──
+    const campaignAgg: Record<string, { spend: number; sales: number; orders: number; clicks: number; impressions: number }> = {};
+    for (const c of allCampaignRows) {
+      const name = String(c.campaign_name ?? "");
+      if (!campaignAgg[name]) campaignAgg[name] = { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 };
+      campaignAgg[name].spend += Number(c.spend ?? 0);
+      campaignAgg[name].sales += Number(c.sales_14d ?? 0);
+      campaignAgg[name].orders += Number(c.orders_14d ?? 0);
+      campaignAgg[name].clicks += Number(c.clicks ?? 0);
+      campaignAgg[name].impressions += Number(c.impressions ?? 0);
+    }
+    const campaigns = Object.entries(campaignAgg)
+      .map(([name, d]) => ({
+        campaign_name: name, ...d,
+        acos: d.sales > 0 ? (d.spend / d.sales) * 100 : 0,
+        roas: d.spend > 0 ? d.sales / d.spend : 0,
+        cvr: d.clicks > 0 ? (d.orders / d.clicks) * 100 : 0,
+      }))
+      .sort((a, b) => b.spend - a.spend);
+
+    // ── Search terms ──
+    let searchTerms: unknown[] = [];
     try {
       const r = await sb.from("ads_search_terms_daily").select("*").order("spend", { ascending: false }).limit(300);
       searchTerms = r.data ?? [];
     } catch { /* */ }
 
+    // ── Recommendations ──
+    let recommendations: unknown[] = [];
     try {
       const r = await sb.from("ads_recommendations").select("*").eq("status", "open").order("impact_estimate", { ascending: false }).limit(50);
       recommendations = r.data ?? [];
     } catch { /* */ }
 
-    // Total sales for TACOS from sales_daily (Amazon channel)
+    // ── Last sync time from job_runs ──
+    let lastSync: string | null = null;
     try {
-      const now = new Date();
-      const d7 = new Date(now); d7.setDate(d7.getDate() - 7);
-      const d30 = new Date(now); d30.setDate(d30.getDate() - 30);
-      const r = await sb.from("sales_daily").select("sale_date,gross_sales").eq("channel", "amazon");
-      for (const row of r.data ?? []) {
-        const g = Number(row.gross_sales ?? 0);
-        if (row.sale_date >= d7.toISOString().slice(0, 10)) totalSales7d += g;
-        if (row.sale_date >= d30.toISOString().slice(0, 10)) totalSales30d += g;
-      }
+      const r = await sb.from("job_runs").select("started_at").eq("job_name", "ads_sync").order("started_at", { ascending: false }).limit(1);
+      if (r.data?.[0]) lastSync = r.data[0].started_at;
     } catch { /* */ }
 
-    return Response.json({ campaigns, searchTerms, recommendations, totalSales7d, totalSales30d });
+    return Response.json({
+      kpi7: kpi7.kpis, kpi7Days: kpi7.days,
+      kpi14: kpi14.kpis, kpi14Days: kpi14.days,
+      kpi30: kpi30.kpis, kpi30Days: kpi30.days,
+      dailySeries,
+      dateMin, dateMax, daysInDb,
+      campaigns, searchTerms, recommendations,
+      lastSync,
+    });
   } catch (e) {
-    return Response.json({ campaigns: [], searchTerms: [], recommendations: [], totalSales7d: 0, totalSales30d: 0 });
+    return Response.json({
+      kpi7: null, kpi14: null, kpi30: null,
+      dailySeries: [], campaigns: [], searchTerms: [], recommendations: [],
+      dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,
+    });
   }
 }
 
@@ -121,7 +249,6 @@ export async function POST(request: Request) {
       // Clear old open recs, insert fresh
       await sb.from("ads_recommendations").delete().eq("status", "open");
       if (recs.length) {
-        // Batch insert (Supabase limit ~1000)
         for (let i = 0; i < recs.length; i += 500) {
           await sb.from("ads_recommendations").insert(recs.slice(i, i + 500));
         }

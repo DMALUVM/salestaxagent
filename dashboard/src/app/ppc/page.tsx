@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,15 +9,20 @@ import {
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
 import { isConfigured } from "@/lib/supabase";
-import { Shield, DollarSign, Target, AlertTriangle, TrendingUp, Search, CheckCircle, X } from "lucide-react";
+import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw } from "lucide-react";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 function fmtD(n: number) { return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
-interface Campaign {
-  date: string; campaign_id: string; campaign_name: string;
-  spend: number; sales_14d: number; orders_14d: number;
-  clicks: number; impressions: number; acos: number; roas: number; ctr: number; cvr: number;
+interface KPIs {
+  spend: number; adSales: number; orders: number; clicks: number;
+  impressions: number; acos: number; roas: number; cpc: number;
+  cvr: number; totalSales: number; tacos: number;
+}
+interface DailyPoint { date: string; spend: number; ad_sales: number; orders: number; clicks: number; impressions: number; }
+interface CampaignAgg {
+  campaign_name: string; spend: number; sales: number; orders: number;
+  clicks: number; impressions: number; acos: number; roas: number; cvr: number;
 }
 interface SearchTerm {
   search_term: string; campaign_name: string; keyword: string; match_type: string;
@@ -28,11 +33,20 @@ interface Rec {
   entity_name: string; campaign_name: string; suggested_action: string;
   evidence: string | Record<string, unknown>; status: string;
 }
+interface PPCData {
+  kpi7: KPIs | null; kpi7Days: number;
+  kpi14: KPIs | null; kpi14Days: number;
+  kpi30: KPIs | null; kpi30Days: number;
+  dailySeries: DailyPoint[];
+  dateMin: string | null; dateMax: string | null; daysInDb: number;
+  campaigns: CampaignAgg[]; searchTerms: SearchTerm[];
+  recommendations: Rec[]; lastSync: string | null;
+}
 
 const PRIORITY_COLORS: Record<string, string> = {
-  P0: "bg-red-50 text-red-700 border-red-200",
-  P1: "bg-amber-50 text-amber-700 border-amber-200",
-  P2: "bg-blue-50 text-blue-700 border-blue-200",
+  P0: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800",
+  P1: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800",
+  P2: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800",
 };
 const TYPE_LABELS: Record<string, string> = {
   NEGATE_SEARCH_TERM: "Negate",
@@ -43,27 +57,32 @@ const TYPE_LABELS: Record<string, string> = {
   WASTED_SPEND_ROLLUP: "Waste",
 };
 
+type Range = "7d" | "14d" | "30d";
+
 export default function PPCPage() {
-  const [data, setData] = useState<{
-    campaigns: Campaign[]; searchTerms: SearchTerm[];
-    recommendations: Rec[]; totalSales7d: number; totalSales30d: number;
-  } | null>(null);
+  const [data, setData] = useState<PPCData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"actions" | "search" | "campaigns">("actions");
+  const [range, setRange] = useState<Range>("7d");
+  const [generating, setGenerating] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      const d = await fetch("/api/ppc").then((r) => r.json());
+      setData(d);
+    } catch { /* */ }
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     if (!isConfigured()) { setLoading(false); return; }
-    fetch("/api/ppc").then((r) => r.json()).then((d) => {
-      setData(d); setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []);
-
-  const [generating, setGenerating] = useState(false);
+    loadData();
+  }, [loadData]);
 
   async function updateRec(id: string, status: string) {
     await fetch("/api/ppc", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, status }),
     });
     if (data) {
@@ -80,19 +99,25 @@ export default function PPCPage() {
     setGenerating(true);
     try {
       const resp = await fetch("/api/ppc", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "generate", target_acos: 30 }),
       });
       const result = await resp.json();
-      if (result.ok) {
-        // Reload all data
-        const fresh = await fetch("/api/ppc").then((r) => r.json());
-        setData(fresh);
-        setTab("actions");
-      }
-    } catch { /* ok */ }
+      if (result.ok) { await loadData(); setTab("actions"); }
+    } catch { /* */ }
     setGenerating(false);
+  }
+
+  async function syncAds(days: number) {
+    setSyncing(true);
+    try {
+      await fetch("/api/ppc/sync", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days }),
+      });
+      await loadData();
+    } catch { /* */ }
+    setSyncing(false);
   }
 
   if (!isConfigured()) return (
@@ -103,33 +128,41 @@ export default function PPCPage() {
   );
   if (loading) return <LoadingState />;
 
-  const campaigns = data?.campaigns ?? [];
+  const kpi = range === "7d" ? data?.kpi7 : range === "14d" ? data?.kpi14 : data?.kpi30;
+  const kpiDays = range === "7d" ? data?.kpi7Days : range === "14d" ? data?.kpi14Days : data?.kpi30Days;
+  const rangeDays = range === "7d" ? 7 : range === "14d" ? 14 : 30;
+  const series = data?.dailySeries ?? [];
   const searchTerms = data?.searchTerms ?? [];
   const recs = (data?.recommendations ?? []).filter((r) => r.status === "open");
-
-  // Aggregate 7d metrics
-  const now = new Date();
-  const d7 = new Date(now); d7.setDate(d7.getDate() - 7);
-  const d7iso = d7.toISOString().slice(0, 10);
-  const recent = campaigns.filter((c) => c.date >= d7iso);
-
-  const spend7d = recent.reduce((s, c) => s + Number(c.spend ?? 0), 0);
-  const adSales7d = recent.reduce((s, c) => s + Number(c.sales_14d ?? 0), 0);
-  const acos7d = adSales7d > 0 ? (spend7d / adSales7d) * 100 : 0;
-  const roas7d = spend7d > 0 ? adSales7d / spend7d : 0;
-  const tacos7d = (data?.totalSales7d ?? 0) > 0 ? (spend7d / data!.totalSales7d) * 100 : 0;
+  const campaigns = data?.campaigns ?? [];
+  const hasData = series.length > 0 || searchTerms.length > 0;
 
   const wastedTotal = searchTerms.filter((s) => s.orders_14d === 0).reduce((sum, s) => sum + Number(s.spend ?? 0), 0);
 
-  const hasData = campaigns.length > 0 || searchTerms.length > 0;
+  // Format last sync
+  const lastSyncLabel = data?.lastSync
+    ? new Date(data.lastSync).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    : "never";
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Amazon PPC</h1>
-        <p className="text-sm text-muted-foreground">
-          Advertising intelligence · Decision support · Phase 1: Read + Recommend
-        </p>
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Amazon PPC</h1>
+          <p className="text-sm text-muted-foreground">
+            Phase 1: Read + Recommend
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={generateRecs} disabled={generating || !hasData}>
+            {generating ? "Generating..." : "Generate Recs"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => syncAds(14)} disabled={syncing}>
+            <RefreshCw className={`mr-1 h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing..." : "Sync 14D"}
+          </Button>
+        </div>
       </div>
 
       {!hasData ? (
@@ -144,61 +177,94 @@ export default function PPCPage() {
         </Card>
       ) : (
         <>
+          {/* Data freshness + range toggle */}
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Data: {data?.dateMin ?? "?"} → {data?.dateMax ?? "?"} · {data?.daysInDb ?? 0} days in DB · last sync {lastSyncLabel}
+              {(kpiDays ?? 0) < rangeDays && (kpiDays ?? 0) > 0 && (
+                <span className="ml-2 text-amber-500">
+                  ({kpiDays}d of data in {range} window)
+                </span>
+              )}
+            </p>
+            <div className="flex gap-1 rounded-md border p-0.5">
+              {(["7d", "14d", "30d"] as const).map((r) => (
+                <button key={r} onClick={() => setRange(r)}
+                  className={`px-2.5 py-1 text-xs rounded transition-colors ${
+                    range === r ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                  }`}>
+                  {r.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* KPI strip */}
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-5">
             <Card>
               <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Spend (7d)</p>
-                <p className="text-2xl font-semibold tabular-nums">${fmtD(spend7d)}</p>
+                <p className="text-[10px] text-muted-foreground uppercase">Spend ({range})</p>
+                <p className="text-2xl font-semibold tabular-nums">${fmtD(kpi?.spend ?? 0)}</p>
+                {(kpi?.spend ?? 0) > 0 && (kpiDays ?? 0) > 0 && (
+                  <p className="text-[10px] text-muted-foreground">${fmtD((kpi!.spend) / kpiDays!)}/day avg</p>
+                )}
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Ad Sales (7d)</p>
-                <p className="text-2xl font-semibold tabular-nums">${fmt(Math.round(adSales7d))}</p>
+                <p className="text-[10px] text-muted-foreground uppercase">Ad Sales ({range})</p>
+                <p className="text-2xl font-semibold tabular-nums">${fmt(Math.round(kpi?.adSales ?? 0))}</p>
               </CardContent>
             </Card>
-            <Card className={acos7d > 35 ? "border-red-500/30" : acos7d > 25 ? "border-amber-500/30" : "border-emerald-500/30"}>
+            <Card className={(kpi?.acos ?? 0) > 35 ? "border-red-500/30" : (kpi?.acos ?? 0) > 25 ? "border-amber-500/30" : "border-emerald-500/30"}>
               <CardContent className="p-4">
                 <p className="text-[10px] text-muted-foreground uppercase">ACOS</p>
-                <p className="text-2xl font-semibold tabular-nums">{acos7d.toFixed(1)}%</p>
+                <p className="text-2xl font-semibold tabular-nums">{(kpi?.acos ?? 0).toFixed(1)}%</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4">
                 <p className="text-[10px] text-muted-foreground uppercase">ROAS</p>
-                <p className="text-2xl font-semibold tabular-nums">{roas7d.toFixed(1)}x</p>
+                <p className="text-2xl font-semibold tabular-nums">{(kpi?.roas ?? 0).toFixed(1)}x</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4">
                 <p className="text-[10px] text-muted-foreground uppercase">TACOS</p>
-                <p className="text-2xl font-semibold tabular-nums">{tacos7d.toFixed(1)}%</p>
-                <p className="text-[10px] text-muted-foreground">ad spend / total sales</p>
+                <p className="text-2xl font-semibold tabular-nums">{(kpi?.tacos ?? 0).toFixed(1)}%</p>
+                <p className="text-[10px] text-muted-foreground">ad spend / Amazon sales</p>
               </CardContent>
             </Card>
           </div>
 
-          {/* Wasted spend + generate actions */}
-          <div className="flex gap-3">
-            {wastedTotal > 5 && (
-              <Card className="border-red-500/30 flex-1 cursor-pointer" onClick={() => setTab("actions")}>
-                <CardContent className="p-4 flex items-center gap-3">
-                  <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
-                  <div>
-                    <p className="font-semibold text-red-600">${fmtD(wastedTotal)} wasted</p>
-                    <p className="text-xs text-muted-foreground">
-                      {searchTerms.filter((s) => s.orders_14d === 0 && s.spend >= 5).length} terms with $5+ spend, 0 orders → click for actions
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-            <Button variant="outline" onClick={generateRecs} disabled={generating}
-              className="shrink-0 self-center">
-              {generating ? "Generating..." : "Generate Recommendations"}
-            </Button>
-          </div>
+          {/* Trend chart */}
+          {series.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Daily Trends ({series.length} days)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TrendChart series={series} />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Wasted spend alert */}
+          {wastedTotal > 5 && (
+            <Card className="border-red-500/30 cursor-pointer" onClick={() => setTab("actions")}>
+              <CardContent className="p-4 flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
+                <div>
+                  <p className="font-semibold text-red-600">${fmtD(wastedTotal)} wasted</p>
+                  <p className="text-xs text-muted-foreground">
+                    {searchTerms.filter((s) => s.orders_14d === 0 && s.spend >= 5).length} terms with $5+ spend, 0 orders
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Tab bar */}
           <div className="flex gap-1">
@@ -288,7 +354,7 @@ export default function PPCPage() {
                   </TableHeader>
                   <TableBody>
                     {searchTerms.slice(0, 50).map((s, i) => (
-                      <TableRow key={i} className={s.orders_14d === 0 && s.spend > 5 ? "bg-red-50/50" : ""}>
+                      <TableRow key={i} className={s.orders_14d === 0 && s.spend > 5 ? "bg-red-50/50 dark:bg-red-950/20" : ""}>
                         <TableCell className="text-xs font-medium max-w-[200px] truncate">{s.search_term}</TableCell>
                         <TableCell className="text-xs text-muted-foreground truncate max-w-[150px]">{s.campaign_name}</TableCell>
                         <TableCell className="text-xs">{s.match_type}</TableCell>
@@ -323,35 +389,17 @@ export default function PPCPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(() => {
-                      // Aggregate by campaign
-                      const agg: Record<string, { spend: number; sales: number; orders: number; clicks: number; impressions: number }> = {};
-                      for (const c of recent) {
-                        const k = c.campaign_name;
-                        if (!agg[k]) agg[k] = { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 };
-                        agg[k].spend += Number(c.spend ?? 0);
-                        agg[k].sales += Number(c.sales_14d ?? 0);
-                        agg[k].orders += Number(c.orders_14d ?? 0);
-                        agg[k].clicks += Number(c.clicks ?? 0);
-                        agg[k].impressions += Number(c.impressions ?? 0);
-                      }
-                      return Object.entries(agg).sort((a, b) => b[1].spend - a[1].spend).map(([name, d]) => {
-                        const acos = d.sales > 0 ? (d.spend / d.sales) * 100 : 0;
-                        const roas = d.spend > 0 ? d.sales / d.spend : 0;
-                        const cvr = d.clicks > 0 ? (d.orders / d.clicks) * 100 : 0;
-                        return (
-                          <TableRow key={name}>
-                            <TableCell className="text-xs font-medium truncate max-w-[250px]">{name}</TableCell>
-                            <TableCell className="text-right tabular-nums">${fmtD(d.spend)}</TableCell>
-                            <TableCell className="text-right tabular-nums">${fmt(Math.round(d.sales))}</TableCell>
-                            <TableCell className={`text-right tabular-nums ${acos > 35 ? "text-red-500" : ""}`}>{acos.toFixed(0)}%</TableCell>
-                            <TableCell className="text-right tabular-nums">{roas.toFixed(1)}x</TableCell>
-                            <TableCell className="text-right tabular-nums">{fmt(d.clicks)}</TableCell>
-                            <TableCell className="text-right tabular-nums">{cvr.toFixed(1)}%</TableCell>
-                          </TableRow>
-                        );
-                      });
-                    })()}
+                    {campaigns.map((d) => (
+                      <TableRow key={d.campaign_name}>
+                        <TableCell className="text-xs font-medium truncate max-w-[250px]">{d.campaign_name}</TableCell>
+                        <TableCell className="text-right tabular-nums">${fmtD(d.spend)}</TableCell>
+                        <TableCell className="text-right tabular-nums">${fmt(Math.round(d.sales))}</TableCell>
+                        <TableCell className={`text-right tabular-nums ${d.acos > 35 ? "text-red-500" : ""}`}>{d.acos.toFixed(0)}%</TableCell>
+                        <TableCell className="text-right tabular-nums">{d.roas.toFixed(1)}x</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(d.clicks)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{d.cvr.toFixed(1)}%</TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -362,12 +410,71 @@ export default function PPCPage() {
           <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
             <span>
               Decision support only — user is responsible for all Ads Console changes.
-              TACOS = ad spend / total sales (not ad sales). ACOS uses 14-day attribution.
+              TACOS = ad spend / Amazon sales. ACOS uses 14-day attribution.
               Phase 1: no auto-bidding; recommendations must be manually applied in Seller Central.
             </span>
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+
+/* ── Trend Chart ─────────────────────────────────────────────── */
+
+function TrendChart({ series }: { series: DailyPoint[] }) {
+  const maxSpend = Math.max(...series.map((d) => d.spend), 1);
+  const maxSales = Math.max(...series.map((d) => d.ad_sales), 1);
+  const chartH = 140;
+
+  return (
+    <div>
+      {/* Spend + Ad Sales bars */}
+      <div className="flex gap-px items-end" style={{ height: `${chartH}px` }}>
+        {series.map((day) => {
+          const spendH = (day.spend / maxSpend) * chartH;
+          const salesH = (day.ad_sales / maxSales) * chartH;
+          const acos = day.ad_sales > 0 ? (day.spend / day.ad_sales) * 100 : 0;
+          return (
+            <div key={day.date} className="flex-1 flex gap-px min-w-0"
+              title={`${day.date}\nSpend: $${day.spend.toFixed(2)}\nAd Sales: $${day.ad_sales.toFixed(2)}\nACOS: ${acos.toFixed(1)}%\nOrders: ${day.orders}\nClicks: ${day.clicks}`}>
+              <div className="flex-1 flex flex-col justify-end">
+                {spendH > 0 && <div className="w-full rounded-t-sm bg-red-400 dark:bg-red-500" style={{ height: `${spendH}px` }} />}
+                {spendH === 0 && <div className="w-full bg-muted" style={{ height: "1px" }} />}
+              </div>
+              <div className="flex-1 flex flex-col justify-end">
+                {salesH > 0 && <div className="w-full rounded-t-sm bg-emerald-400 dark:bg-emerald-500" style={{ height: `${salesH}px` }} />}
+                {salesH === 0 && <div className="w-full bg-muted" style={{ height: "1px" }} />}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {/* Labels */}
+      <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+        <span>{series[0]?.date.slice(5)}</span>
+        <span className="flex items-center gap-3">
+          <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-red-400 dark:bg-red-500" /> Spend</span>
+          <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-emerald-400 dark:bg-emerald-500" /> Ad Sales</span>
+        </span>
+        <span>{series[series.length - 1]?.date.slice(5)}</span>
+      </div>
+
+      {/* ACOS line (text row) */}
+      <div className="flex gap-px mt-2">
+        {series.map((day) => {
+          const acos = day.ad_sales > 0 ? (day.spend / day.ad_sales) * 100 : 0;
+          return (
+            <div key={day.date} className="flex-1 text-center">
+              <span className={`text-[9px] tabular-nums ${acos > 35 ? "text-red-500" : acos > 25 ? "text-amber-500" : "text-emerald-500"}`}>
+                {acos > 0 ? `${acos.toFixed(0)}%` : ""}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-center text-[9px] text-muted-foreground mt-0.5">ACOS by day</p>
     </div>
   );
 }
