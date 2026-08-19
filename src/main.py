@@ -591,6 +591,49 @@ def spapi_returns_cmd(days, dry_run):
             click.echo(f"  {reason}: {count}")
 
 
+@cli.command("forecast-sku")
+@click.option("--sku", required=True, help="SKU code")
+@click.option("--end", "end_date", required=True, help="End date YYYY-MM-DD")
+@click.option("--start", "start_date", default=None, help="Start date (default: today)")
+@click.option("--safety", default=0.15, help="Safety stock %% (default 0.15)")
+def forecast_sku_cmd(sku, end_date, start_date, safety):
+    """Forecast demand and coverage for a single SKU."""
+    from src.forecast.sku_demand import forecast_sku
+
+    result = forecast_sku(sku, end_date, start_date, safety)
+    if result.get("error"):
+        click.echo(f"Error: {result['error']}")
+        return
+
+    click.echo(f"{'='*60}")
+    click.echo(f"  SKU DEMAND FORECAST — {result['product_name']}")
+    click.echo(f"  {result['start_date']} → {result['end_date']} ({result['num_weeks']} weeks)")
+    click.echo(f"{'='*60}")
+
+    click.echo(f"\n  Expected:  {result['expected_units']:>8,} units")
+    click.echo(f"  Coverage:  {result['coverage_units']:>8,} units ({safety*100:.0f}% safety)")
+    click.echo(f"  Low/High:  {result['low_band']:>8,} / {result['high_band']:>8,}")
+
+    m = result["methods"]
+    click.echo(f"\n  TRIPLE-CHECK:")
+    click.echo(f"    A) Naive run-rate:     {m['A_naive_runrate']:>8,}")
+    click.echo(f"    B) Seasonal+Holiday:   {m['B_seasonal_yoy']:>8,}")
+    click.echo(f"    C) SnS+organic:        {m['C_sns_plus_organic']:>8,}")
+    click.echo(f"    Spread: {m['spread_pct']}%{' ⚠️ WIDE' if m['spread_warning'] else ''}")
+
+    b = result["breakdown"]
+    click.echo(f"\n  BREAKDOWN:")
+    click.echo(f"    Velocity: {b['blended_daily_velocity']} u/day")
+    click.echo(f"    SnS: {b['sns_active_subs']} subs, {b['sns_weekly_shipped']} shipped/wk")
+    click.echo(f"    Return rate: {b['return_rate_pct']}%")
+
+    for h in result.get("holidays", []):
+        click.echo(f"    {h}")
+
+    click.echo(f"\n  {result['disclaimer']}")
+    click.echo()
+
+
 @cli.command("spapi-sns")
 @click.option("--weeks", default=None, type=int, help="Weeks of history (default 13)")
 @click.option("--start", "start_date", default=None, help="Start date YYYY-MM-DD (overrides --weeks)")

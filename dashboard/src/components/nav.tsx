@@ -39,6 +39,7 @@ const primaryLinks: NavItem[] = [
   { href: "/calendar", label: "Filing Calendar", icon: Calendar },
   { href: "/registrations", label: "Nexus & Registrations", icon: ClipboardCheck },
   { href: "/inventory", label: "Inventory", icon: Warehouse },
+  { href: "/forecast", label: "Demand Forecast", icon: TrendingUp },
 ];
 
 const monitorLinks: NavItem[] = [
