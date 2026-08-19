@@ -761,6 +761,61 @@ def pnl_sync_cmd(days):
     click.echo(f"Status: preliminary (estimates until Amazon economics settle)")
 
 
+@cli.command("pulse-audit")
+@click.option("--date", "target_date", required=True, help="PST date to audit YYYY-MM-DD")
+def pulse_audit_cmd(target_date):
+    """Audit daily sales for a specific PST date — compare all-statuses vs shipped-only."""
+    from src.amazon_sp.client import request_and_download
+    from src.amazon_sp.reports import _detect_delimiter, _build_header_lookup, _get
+    from src.sales_daily import _to_tz_date, LA
+    from datetime import date, timedelta
+    from collections import defaultdict, Counter
+    import csv, io
+
+    d = date.fromisoformat(target_date)
+    click.echo(f"Auditing Amazon sales for {target_date} (PST/PDT)...")
+
+    content = request_and_download(
+        "GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL",
+        d - timedelta(days=1), d + timedelta(days=1))
+
+    delimiter = _detect_delimiter(content.split("\n", 1)[0])
+    reader = csv.DictReader(io.StringIO(content), delimiter=delimiter, quotechar='"')
+    H = _build_header_lookup(reader.fieldnames)
+
+    by_status: dict[str, dict] = defaultdict(lambda: {"count": 0, "price": 0.0})
+    for row in reader:
+        status = _get(row, H, "order-status").lower()
+        pd_str = _get(row, H, "purchase-date")
+        sale_date = _to_tz_date(pd_str, LA)
+        if not sale_date or sale_date.isoformat() != target_date:
+            continue
+        price_str = _get(row, H, "item-price")
+        try:
+            price = float(price_str.replace(",", "")) if price_str else 0
+        except (ValueError, TypeError):
+            price = 0
+        by_status[status]["count"] += 1
+        by_status[status]["price"] += price
+
+    total_all = sum(s["price"] for s in by_status.values())
+    total_shipped = by_status.get("shipped", {}).get("price", 0)
+    total_items = sum(s["count"] for s in by_status.values())
+
+    click.echo(f"{'='*55}")
+    click.echo(f"  Date: {target_date} (America/Los_Angeles)")
+    click.echo(f"  Source: SP-API orders report (item-price)")
+    click.echo(f"{'='*55}")
+    for st, data in sorted(by_status.items()):
+        click.echo(f"  {st:>20}: {data['count']:>4} items  ${data['price']:>10,.2f}")
+    click.echo(f"  {'─'*50}")
+    click.echo(f"  {'ALL STATUSES':>20}: {total_items:>4} items  ${total_all:>10,.2f}")
+    click.echo(f"  {'SHIPPED ONLY':>20}:               ${total_shipped:>10,.2f}")
+    click.echo(f"{'='*55}")
+    click.echo(f"  Pulse should show: ${total_all:,.2f} (all statuses)")
+    click.echo(f"  Gap if shipped-only: ${total_all - total_shipped:,.2f}")
+
+
 @cli.command("spapi-probe")
 def spapi_probe_cmd():
     """Probe which SP-API report types are authorized with current credentials."""
