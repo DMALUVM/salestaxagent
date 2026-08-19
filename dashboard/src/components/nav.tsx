@@ -45,6 +45,7 @@ const primaryLinks: NavItem[] = [
 
 const monitorLinks: NavItem[] = [
   { href: "/amazon", label: "Amazon Ops", icon: TrendingUp },
+  { href: "/ppc", label: "Amazon PPC", icon: TrendingUp },
   { href: "/inventory/returns", label: "FBA Returns", icon: RotateCcw },
   { href: "/inventory/3pl", label: "3PL Costs", icon: Package },
   { href: "/sales-map", label: "Sales Map", icon: MapPinned },

@@ -528,6 +528,85 @@ def sync_daily_cmd(days):
         click.echo(f"  Shopify error: {e}")
 
 
+@cli.command("ads-test")
+def ads_test_cmd():
+    """Test Amazon Ads API connection and list profiles."""
+    from src.config import settings
+    if not settings.amazon_ads_enabled:
+        click.echo("Amazon Ads not configured. Set AMAZON_ADS_* in .env")
+        return
+    try:
+        from src.amazon_ads.client import get_profiles
+        profiles = get_profiles()
+        click.echo(f"Connected! {len(profiles)} profile(s):")
+        for p in profiles:
+            click.echo(f"  ID={p.get('profileId')}  Name={p.get('accountInfo',{}).get('name','')}  "
+                       f"Type={p.get('accountInfo',{}).get('type','')}  Marketplace={p.get('accountInfo',{}).get('marketplaceStringId','')}")
+    except Exception as e:
+        click.echo(f"Error: {e}")
+
+
+@cli.command("ads-sync")
+@click.option("--days", default=14, help="Days of history to sync")
+def ads_sync_cmd(days):
+    """Sync Amazon Ads campaigns + search terms."""
+    from src.config import settings
+    if not settings.amazon_ads_enabled:
+        click.echo("Amazon Ads not configured.")
+        return
+    from src.amazon_ads.reports import sync_ads
+    click.echo(f"Syncing last {days} days of Ads data...")
+    result = sync_ads(days=days)
+    for key, val in result.items():
+        if isinstance(val, dict) and "error" in val:
+            click.echo(f"  {key}: ERROR — {val['error'][:80]}")
+        elif isinstance(val, dict):
+            click.echo(f"  {key}: {val.get('rows', 0)} rows, {val.get('inserted', 0)} inserted")
+
+
+@cli.command("ads-actions")
+@click.option("--target-acos", default=30.0, help="Target ACOS %")
+def ads_actions_cmd(target_acos):
+    """Generate PPC action recommendations."""
+    from src.amazon_ads.actions_engine import generate_recommendations
+    recs = generate_recommendations(target_acos=target_acos)
+    if not recs:
+        click.echo("No recommendations (no ads data or all within target)")
+        return
+    click.echo(f"{len(recs)} recommendations:")
+    for r in recs[:15]:
+        evidence = r.get("evidence", {})
+        if isinstance(evidence, str):
+            import json
+            evidence = json.loads(evidence)
+        click.echo(f"  [{r['priority']}] {r['type']}: {r.get('entity_name','')[:40]}")
+        click.echo(f"       Impact: ${r['impact_estimate']:.2f}  {r['suggested_action'][:60]}")
+
+
+@cli.command("ads-waste")
+@click.option("--days", default=14, help="Lookback days")
+def ads_waste_cmd(days):
+    """Show top wasted ad spend."""
+    from src.db import fetch_all
+    try:
+        search_terms = fetch_all("ads_search_terms_daily")
+    except Exception:
+        click.echo("No search term data. Run ads-sync first.")
+        return
+    # Group zero-order spend by search term
+    waste = {}
+    for st in search_terms:
+        orders = int(st.get("orders_14d", 0) or 0)
+        if orders == 0:
+            term = st.get("search_term", "?")
+            waste[term] = waste.get(term, 0) + float(st.get("spend", 0) or 0)
+    sorted_waste = sorted(waste.items(), key=lambda x: -x[1])
+    total = sum(v for _, v in sorted_waste)
+    click.echo(f"Total wasted spend (0 orders): ${total:,.2f} across {len(sorted_waste)} terms")
+    for term, amount in sorted_waste[:20]:
+        click.echo(f"  ${amount:>8.2f}  {term[:50]}")
+
+
 @cli.command("spapi-probe")
 def spapi_probe_cmd():
     """Probe which SP-API report types are authorized with current credentials."""

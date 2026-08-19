@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     shipsidekick_org_slug: str = "tallowbourn"
     shipsidekick_base_url: str = "https://www.shipsidekick.com"
 
+    amazon_ads_client_id: str = ""
+    amazon_ads_client_secret: str = ""
+    amazon_ads_refresh_token: str = ""
+    amazon_ads_profile_id: str = ""
+    amazon_ads_region: str = "NA"
+
     github_backup_enabled: bool = False
 
     telegram_bot_token: str = ""
@@ -71,6 +77,15 @@ class Settings(BaseSettings):
             self.shopify_shop_domain
             and (self.shopify_access_token
                  or (self.shopify_client_id and self.shopify_client_secret))
+        )
+
+    @property
+    def amazon_ads_enabled(self) -> bool:
+        return bool(
+            self.amazon_ads_client_id
+            and self.amazon_ads_client_secret
+            and self.amazon_ads_refresh_token
+            and self.amazon_ads_profile_id
         )
 
     @property
