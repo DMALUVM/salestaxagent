@@ -18,8 +18,8 @@ from src.config import settings
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://advertising-api.amazon.com"
-POLL_INTERVAL = 15  # seconds
-MAX_TIMEOUT = 600   # 10 minutes
+POLL_INTERVAL = 30  # seconds (Ads reports are slow)
+MAX_TIMEOUT = 900   # 15 minutes
 
 
 def create_report(config: dict) -> str:

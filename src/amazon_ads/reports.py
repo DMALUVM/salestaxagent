@@ -146,20 +146,42 @@ def fetch_search_terms(start: date, end: date) -> dict:
 # ── Full sync ──
 
 def sync_ads(days: int = 14) -> dict:
-    """Full ads sync: campaigns + search terms."""
+    """Full ads sync: campaigns + search terms.
+
+    Chunks search terms into ≤30-day windows (API limit).
+    Uses sequential report creation since Ads API reports take
+    2-15 minutes to generate — not parallelizable within one profile.
+    """
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=days - 1)
 
     results = {}
+
+    # Campaigns (can handle wider ranges)
     try:
         results["campaigns"] = fetch_campaigns_daily(start, end)
     except Exception as e:
         results["campaigns"] = {"error": str(e)[:200]}
 
-    # Search terms: chunk to 31 days max
-    try:
-        results["search_terms"] = fetch_search_terms(start, end)
-    except Exception as e:
-        results["search_terms"] = {"error": str(e)[:200]}
+    # Search terms: chunk to 30 days max
+    st_total_rows = 0
+    st_total_inserted = 0
+    st_errors = []
+    cursor = start
+    while cursor < end:
+        chunk_end = min(cursor + timedelta(days=29), end)
+        try:
+            r = fetch_search_terms(cursor, chunk_end)
+            st_total_rows += r.get("rows", 0)
+            st_total_inserted += r.get("inserted", 0)
+        except Exception as e:
+            st_errors.append(f"{cursor}: {str(e)[:80]}")
+        cursor = chunk_end + timedelta(days=1)
+
+    if st_errors:
+        results["search_terms"] = {"rows": st_total_rows, "inserted": st_total_inserted,
+                                   "errors": st_errors}
+    else:
+        results["search_terms"] = {"rows": st_total_rows, "inserted": st_total_inserted}
 
     return results
