@@ -58,6 +58,8 @@ export default function PPCPage() {
     }).catch(() => setLoading(false));
   }, []);
 
+  const [generating, setGenerating] = useState(false);
+
   async function updateRec(id: string, status: string) {
     await fetch("/api/ppc", {
       method: "POST",
@@ -72,6 +74,25 @@ export default function PPCPage() {
         ),
       });
     }
+  }
+
+  async function generateRecs() {
+    setGenerating(true);
+    try {
+      const resp = await fetch("/api/ppc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate", target_acos: 30 }),
+      });
+      const result = await resp.json();
+      if (result.ok) {
+        // Reload all data
+        const fresh = await fetch("/api/ppc").then((r) => r.json());
+        setData(fresh);
+        setTab("actions");
+      }
+    } catch { /* ok */ }
+    setGenerating(false);
   }
 
   if (!isConfigured()) return (
@@ -158,20 +179,26 @@ export default function PPCPage() {
             </Card>
           </div>
 
-          {/* Wasted spend card */}
-          {wastedTotal > 10 && (
-            <Card className="border-red-500/30">
-              <CardContent className="p-4 flex items-center gap-3">
-                <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
-                <div>
-                  <p className="font-semibold text-red-600">${fmtD(wastedTotal)} wasted</p>
-                  <p className="text-xs text-muted-foreground">
-                    Spend on search terms with 0 orders ({searchTerms.filter((s) => s.orders_14d === 0).length} terms)
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          {/* Wasted spend + generate actions */}
+          <div className="flex gap-3">
+            {wastedTotal > 5 && (
+              <Card className="border-red-500/30 flex-1 cursor-pointer" onClick={() => setTab("actions")}>
+                <CardContent className="p-4 flex items-center gap-3">
+                  <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
+                  <div>
+                    <p className="font-semibold text-red-600">${fmtD(wastedTotal)} wasted</p>
+                    <p className="text-xs text-muted-foreground">
+                      {searchTerms.filter((s) => s.orders_14d === 0 && s.spend >= 5).length} terms with $5+ spend, 0 orders → click for actions
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            <Button variant="outline" onClick={generateRecs} disabled={generating}
+              className="shrink-0 self-center">
+              {generating ? "Generating..." : "Generate Recommendations"}
+            </Button>
+          </div>
 
           {/* Tab bar */}
           <div className="flex gap-1">
@@ -190,7 +217,12 @@ export default function PPCPage() {
             <Card>
               <CardContent className="p-0 overflow-x-auto">
                 {recs.length === 0 ? (
-                  <p className="p-4 text-sm text-muted-foreground">No open recommendations.</p>
+                  <div className="p-4 text-center">
+                    <p className="text-sm text-muted-foreground">No open recommendations.</p>
+                    <Button variant="outline" size="sm" className="mt-2" onClick={generateRecs} disabled={generating}>
+                      {generating ? "Generating..." : "Generate Recommendations"}
+                    </Button>
+                  </div>
                 ) : (
                   <Table>
                     <TableHeader>

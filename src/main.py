@@ -2517,6 +2517,13 @@ def _run_spapi_refresh():
             camps = ads_result.get("campaigns", {})
             print(f"[Ads] {ts} Campaigns: {camps.get('rows', 0)} rows, "
                   f"${camps.get('total_spend', 0):,.0f} spend")
+            # Generate action recommendations after sync
+            try:
+                from src.amazon_ads.actions_engine import generate_recommendations
+                recs = generate_recommendations(target_acos=30)
+                print(f"[Ads] {ts} Actions: {len(recs)} recommendations generated")
+            except Exception as e2:
+                print(f"[Ads] {ts} Actions error: {e2}")
         else:
             print(f"[Ads] {ts} Not configured (skip)")
     except Exception as e:
