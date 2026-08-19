@@ -34,6 +34,11 @@ interface ForecastResult {
   };
   model_version: string;
   weights: { a: number; b: number; c: number };
+  peak_weights?: { a: number; b: number; c: number };
+  offpeak_weights?: { a: number; b: number; c: number };
+  effective_safety_pct?: number;
+  peak_protection?: boolean;
+  has_peak_weeks?: boolean;
   accuracy: { mape: number; n_weeks: number; best_method: string } | null;
   holidays: string[];
   weeks: Array<{
@@ -212,10 +217,20 @@ export default function ForecastPage() {
                   <p className="font-semibold">{result.model_version}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase">Weights (A/B/C)</p>
+                  <p className="text-[10px] text-muted-foreground uppercase">
+                    Weights {result.has_peak_weeks ? "(offpeak / peak)" : "(A/B/C)"}
+                  </p>
                   <p className="font-mono text-xs">
                     {(result.weights.a * 100).toFixed(0)}% / {(result.weights.b * 100).toFixed(0)}% / {(result.weights.c * 100).toFixed(0)}%
                   </p>
+                  {result.has_peak_weeks && result.peak_weights && (
+                    <p className="font-mono text-xs text-amber-600">
+                      Peak: {(result.peak_weights.a * 100).toFixed(0)}% / {(result.peak_weights.b * 100).toFixed(0)}% / {(result.peak_weights.c * 100).toFixed(0)}%
+                    </p>
+                  )}
+                  {result.peak_protection && (
+                    <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 mt-0.5">Peak protection</Badge>
+                  )}
                 </div>
                 <div>
                   <p className="text-[10px] text-muted-foreground uppercase">MAPE</p>
@@ -238,7 +253,7 @@ export default function ForecastPage() {
                     </Badge>
                   ) : (
                     <Badge variant="outline" className="text-[10px]">
-                      {result.model_version === "default" ? "Not calibrated" : "Calibrating"}
+                      {result.model_version === "default" ? "Global defaults" : "Calibrating"}
                     </Badge>
                   )}
                 </div>

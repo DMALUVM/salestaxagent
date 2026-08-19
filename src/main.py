@@ -636,6 +636,42 @@ def forecast_sku_cmd(sku, end_date, start_date, safety):
     click.echo()
 
 
+@cli.command("forecast-backfill")
+@click.option("--start", "start_date", required=True, help="Start date YYYY-MM-DD")
+@click.option("--end", "end_date", required=True, help="End date YYYY-MM-DD")
+@click.option("--min-velocity", default=0.5, help="Min V30 to include SKU")
+def forecast_backfill_cmd(start_date, end_date, min_velocity):
+    """Backfill forecasts for all active SKUs (creates scoreable run_weeks)."""
+    from src.forecast.sku_demand import forecast_sku
+    from src.db import fetch_all
+
+    vel_rows = fetch_all("sku_velocity")
+    active_skus = sorted(set(
+        v["sku"] for v in vel_rows
+        if v.get("sku") and float(v.get("total_u_30", 0) or 0) > min_velocity
+    ))
+
+    click.echo(f"Backfilling {len(active_skus)} SKUs: {start_date} → {end_date}")
+    click.echo(f"{'='*60}")
+
+    ok = 0
+    fail = 0
+    for sku in active_skus:
+        try:
+            result = forecast_sku(sku, end_date, start_date)
+            if result.get("error"):
+                click.echo(f"  {sku:<18} SKIP  {result['error']}")
+                fail += 1
+            else:
+                click.echo(f"  {sku:<18} OK    {result['num_weeks']}wk  expected={result['expected_units']:,}")
+                ok += 1
+        except Exception as e:
+            click.echo(f"  {sku:<18} FAIL  {str(e)[:60]}")
+            fail += 1
+
+    click.echo(f"\nDone: {ok} OK, {fail} failed/skipped out of {len(active_skus)}")
+
+
 @cli.command("forecast-reconcile")
 @click.option("--sku", default=None, help="Single SKU or all")
 def forecast_reconcile_cmd(sku):
@@ -648,11 +684,21 @@ def forecast_reconcile_cmd(sku):
     c = result["calibration"]
 
     click.echo(f"Actuals: {a.get('rows_upserted', 0)} rows, {a.get('skus', 0)} SKUs")
-    click.echo(f"Reconciliation: {r.get('runs_found', 0)} runs found, "
+    click.echo(f"Reconciliation: {r.get('runs_found', 0)} runs, "
                f"{r.get('weeks_scored', 0)} weeks scored, "
-               f"{r.get('skus_scored', 0)} SKUs with errors")
+               f"{r.get('skus_scored', 0)} SKUs")
     if r.get("message"):
         click.echo(f"  {r['message']}")
+
+    # Show per-SKU season detail
+    sw = r.get("season_weights", {})
+    if sw:
+        for s, info in sorted(sw.items()):
+            op_n = info.get("offpeak_weeks", 0)
+            pk_n = info.get("peak_weeks", 0)
+            status = "calibrated" if (op_n >= 8 or pk_n >= 8) else "insufficient"
+            click.echo(f"  {s:<18} offpeak={op_n}wk peak={pk_n}wk → {status}")
+
     click.echo(f"Calibration: {c.get('calibrated', 0)} SKUs calibrated")
     if c.get("message"):
         click.echo(f"  {c['message']}")

@@ -304,8 +304,9 @@ export default function PlannerPage() {
                       <TableCell className="text-right tabular-nums">{p.pallets > 0 ? p.pallets : "—"}</TableCell>
                       <TableCell className="text-xs">{p.orderBy || "—"}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={`text-[9px] ${p.modelVersion !== "default" ? "bg-emerald-50 text-emerald-700" : ""}`}>
-                          {p.modelVersion}
+                        <Badge variant="outline" className={`text-[9px] ${p.modelVersion !== "default" ? "bg-emerald-50 text-emerald-700" : ""}`}
+                          title={p.modelVersion === "default" ? "Using global defaults — run forecast-backfill + reconcile for per-SKU weights" : `Per-SKU calibrated: ${p.modelVersion}`}>
+                          {p.modelVersion === "default" ? "global" : p.modelVersion}
                         </Badge>
                       </TableCell>
                     </TableRow>
