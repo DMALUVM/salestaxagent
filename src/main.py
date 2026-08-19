@@ -649,17 +649,23 @@ def forecast_sku_cmd(sku, end_date, start_date, safety):
 @click.option("--end", "end_date", required=True, help="End date YYYY-MM-DD")
 @click.option("--min-velocity", default=0.5, help="Min V30 to include SKU")
 def forecast_backfill_cmd(start_date, end_date, min_velocity):
-    """Backfill forecasts for all active SKUs (creates scoreable run_weeks)."""
+    """Backfill forecasts for all active physical/inventory SKUs."""
     from src.forecast.sku_demand import forecast_sku
+    from src.forecast.inventory_filter import filter_inventory_skus
     from src.db import fetch_all
 
     vel_rows = fetch_all("sku_velocity")
-    active_skus = sorted(set(
+    all_active = sorted(set(
         v["sku"] for v in vel_rows
         if v.get("sku") and float(v.get("total_u_30", 0) or 0) > min_velocity
     ))
 
-    click.echo(f"Backfilling {len(active_skus)} SKUs: {start_date} → {end_date}")
+    active_skus, skipped = filter_inventory_skus(all_active)
+    active_skus.sort()
+
+    click.echo(f"Backfilling {len(active_skus)} physical SKUs: {start_date} → {end_date}")
+    if skipped:
+        click.echo(f"Skipped {len(skipped)} non-inventory: {', '.join(skipped)}")
     click.echo(f"{'='*60}")
 
     ok = 0
@@ -696,7 +702,8 @@ def forecast_reconcile_cmd(sku):
                f"{a.get('skus_with_orders', 0)} SKUs with real order data)")
     click.echo(f"Reconciliation: {r.get('runs_found', 0)} runs, "
                f"{r.get('weeks_scored', 0)} weeks scored, "
-               f"{r.get('skus_scored', 0)} SKUs")
+               f"{r.get('skus_scored', 0)} SKUs"
+               + (f" ({r.get('skus_non_inventory_skipped', 0)} non-inventory skipped)" if r.get('skus_non_inventory_skipped') else ""))
     if r.get("message"):
         click.echo(f"  {r['message']}")
 

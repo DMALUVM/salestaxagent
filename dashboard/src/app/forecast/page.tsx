@@ -59,13 +59,15 @@ export default function ForecastPage() {
   const [skuList, setSkuList] = useState<string[]>([]);
 
   // Load available SKUs
+  // Load only physical/inventory SKUs (present in snapshots, AWD, or 3PL)
   useEffect(() => {
     if (!isConfigured()) return;
     fetch("/api/inventory").then((r) => r.json()).then((d) => {
-      const skus = new Set<string>();
-      for (const s of d.velocity ?? []) if (s.sku) skus.add(s.sku);
-      for (const s of d.snapshots ?? []) if (s.sku) skus.add(s.sku);
-      setSkuList([...skus].sort());
+      const invSkus = new Set<string>();
+      for (const s of d.snapshots ?? []) if (s.sku) invSkus.add(s.sku);
+      for (const s of d.awd ?? []) if (s.sku) invSkus.add(s.sku);
+      for (const s of d.tpl ?? []) if (s.sku) invSkus.add(s.sku);
+      setSkuList([...invSkus].sort());
     }).catch(() => {});
   }, []);
 

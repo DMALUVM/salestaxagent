@@ -301,13 +301,20 @@ def reconcile(sku: str | None = None) -> dict:
 
         weeks_scored += 1
 
-    # Build accuracy rows + season-split weights
+    # Build accuracy rows + season-split weights (inventory SKUs only)
+    from src.forecast.inventory_filter import is_inventory_sku
     accuracy_rows: list[dict] = []
     season_weights: dict[str, dict] = {}  # sku → {peak_weights, offpeak_weights}
+    skipped_non_inv = 0
 
     for s, errors in sku_week_errors.items():
         n = len(errors.get("primary", []))
         if n == 0:
+            continue
+
+        # Skip non-inventory SKUs for calibration
+        if not is_inventory_sku(s):
+            skipped_non_inv += 1
             continue
 
         mape_by_method: dict[str, float] = {}
@@ -359,6 +366,7 @@ def reconcile(sku: str | None = None) -> dict:
         "runs_found": len(runs),
         "weeks_scored": weeks_scored,
         "skus_scored": len(sku_week_errors),
+        "skus_non_inventory_skipped": skipped_non_inv,
         "accuracy_rows": len(accuracy_rows),
         "season_weights": season_weights,
     }
