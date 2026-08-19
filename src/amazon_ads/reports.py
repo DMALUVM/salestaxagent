@@ -1,6 +1,7 @@
 """Amazon Ads report definitions, fetchers, and Supabase upsert.
 
 Uses Reporting v3 API with GZIP_JSON format.
+All requests chunked to ≤30 days (API max is 31).
 """
 from __future__ import annotations
 
@@ -11,6 +12,8 @@ from src.amazon_ads.client import fetch_report
 from src.db import upsert_rows
 
 log = logging.getLogger(__name__)
+
+MAX_CHUNK_DAYS = 30  # Amazon Ads API max range
 
 
 def _safe(v, default=0):
@@ -41,12 +44,22 @@ def _metrics(r: dict) -> dict:
     }
 
 
-# ── Campaign daily ──
+def _date_chunks(start: date, end: date) -> list[tuple[date, date]]:
+    """Split a date range into ≤MAX_CHUNK_DAYS chunks."""
+    chunks = []
+    cursor = start
+    while cursor <= end:
+        chunk_end = min(cursor + timedelta(days=MAX_CHUNK_DAYS - 1), end)
+        chunks.append((cursor, chunk_end))
+        cursor = chunk_end + timedelta(days=1)
+    return chunks
 
-def fetch_campaigns_daily(start: date, end: date) -> dict:
-    """Fetch SP campaign daily metrics."""
+
+# ── Campaign daily (single chunk) ──
+
+def _fetch_campaigns_chunk(start: date, end: date) -> list[dict]:
+    """Fetch SP campaign daily metrics for a ≤30-day range."""
     config = {
-        "reportDate": None,
         "startDate": start.isoformat(),
         "endDate": end.isoformat(),
         "configuration": {
@@ -63,34 +76,11 @@ def fetch_campaigns_daily(start: date, end: date) -> dict:
             "format": "GZIP_JSON",
         },
     }
-
-    rows = fetch_report(config)
-    parsed = []
-    for r in rows:
-        m = _metrics(r)
-        parsed.append({
-            "date": r.get("date", start.isoformat()),
-            "campaign_id": str(r.get("campaignId", "")),
-            "campaign_name": r.get("campaignName", ""),
-            "campaign_type": "SP",
-            "campaign_status": r.get("campaignStatus", ""),
-            "budget": _safe(r.get("campaignBudgetAmount")),
-            **m,
-        })
-
-    if parsed:
-        inserted = upsert_rows("ads_campaigns_daily", parsed,
-                               on_conflict="date,campaign_id")
-    else:
-        inserted = 0
-
-    return {"rows": len(parsed), "inserted": inserted}
+    return fetch_report(config)
 
 
-# ── Search terms daily ──
-
-def fetch_search_terms(start: date, end: date) -> dict:
-    """Fetch SP search term report. Max 31 days per call."""
+def _fetch_search_terms_chunk(start: date, end: date) -> list[dict]:
+    """Fetch SP search term report for a ≤30-day range."""
     config = {
         "startDate": start.isoformat(),
         "endDate": end.isoformat(),
@@ -110,78 +100,120 @@ def fetch_search_terms(start: date, end: date) -> dict:
             "format": "GZIP_JSON",
         },
     }
+    return fetch_report(config)
 
-    rows = fetch_report(config)
-    parsed = []
-    for r in rows:
-        m = _metrics(r)
-        parsed.append({
-            "date": start.isoformat(),
-            "search_term": r.get("searchTerm", ""),
-            "campaign_id": str(r.get("campaignId", "")),
-            "campaign_name": r.get("campaignName", ""),
-            "ad_group_id": str(r.get("adGroupId", "")),
-            "ad_group_name": r.get("adGroupName", ""),
-            "keyword": r.get("keyword", ""),
-            "keyword_id": str(r.get("keywordId", "")),
-            "match_type": r.get("matchType", ""),
-            **m,
-        })
 
-    if parsed:
+# ── Chunked fetchers ──
+
+def fetch_campaigns_daily(start: date, end: date) -> dict:
+    """Fetch SP campaign daily metrics, auto-chunked to ≤30 days."""
+    chunks = _date_chunks(start, end)
+    all_parsed: list[dict] = []
+    errors: list[str] = []
+
+    for i, (cs, ce) in enumerate(chunks, 1):
+        log.info("Campaigns chunk %d/%d: %s → %s", i, len(chunks), cs, ce)
+        try:
+            rows = _fetch_campaigns_chunk(cs, ce)
+            for r in rows:
+                m = _metrics(r)
+                all_parsed.append({
+                    "date": r.get("date", cs.isoformat()),
+                    "campaign_id": str(r.get("campaignId", "")),
+                    "campaign_name": r.get("campaignName", ""),
+                    "campaign_type": "SP",
+                    "campaign_status": r.get("campaignStatus", ""),
+                    "budget": _safe(r.get("campaignBudgetAmount")),
+                    **m,
+                })
+        except Exception as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:120]}"
+            log.warning("Campaign %s", msg)
+            errors.append(msg)
+
+    inserted = 0
+    if all_parsed:
+        inserted = upsert_rows("ads_campaigns_daily", all_parsed,
+                               on_conflict="date,campaign_id")
+
+    total_spend = sum(r["spend"] for r in all_parsed)
+    return {
+        "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
+        "errors": errors, "total_spend": round(total_spend, 2),
+        "date_min": all_parsed[0]["date"] if all_parsed else None,
+        "date_max": all_parsed[-1]["date"] if all_parsed else None,
+    }
+
+
+def fetch_search_terms(start: date, end: date) -> dict:
+    """Fetch SP search term report, auto-chunked to ≤30 days."""
+    chunks = _date_chunks(start, end)
+    all_parsed: list[dict] = []
+    errors: list[str] = []
+
+    for i, (cs, ce) in enumerate(chunks, 1):
+        log.info("Search terms chunk %d/%d: %s → %s", i, len(chunks), cs, ce)
+        try:
+            rows = _fetch_search_terms_chunk(cs, ce)
+            for r in rows:
+                m = _metrics(r)
+                all_parsed.append({
+                    "date": cs.isoformat(),
+                    "search_term": r.get("searchTerm", ""),
+                    "campaign_id": str(r.get("campaignId", "")),
+                    "campaign_name": r.get("campaignName", ""),
+                    "ad_group_id": str(r.get("adGroupId", "")),
+                    "ad_group_name": r.get("adGroupName", ""),
+                    "keyword": r.get("keyword", ""),
+                    "keyword_id": str(r.get("keywordId", "")),
+                    "match_type": r.get("matchType", ""),
+                    **m,
+                })
+        except Exception as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:120]}"
+            log.warning("Search terms %s", msg)
+            errors.append(msg)
+
+    inserted = 0
+    if all_parsed:
         # Deduplicate on key
-        seen = {}
-        for p in parsed:
+        seen: dict[tuple, dict] = {}
+        for p in all_parsed:
             key = (p["date"], p["search_term"], p["campaign_id"], p["ad_group_id"])
             seen[key] = p
-        parsed = list(seen.values())
-        inserted = upsert_rows("ads_search_terms_daily", parsed,
+        deduped = list(seen.values())
+        inserted = upsert_rows("ads_search_terms_daily", deduped,
                                on_conflict="date,search_term,campaign_id,ad_group_id")
-    else:
-        inserted = 0
 
-    return {"rows": len(parsed), "inserted": inserted}
+    return {
+        "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
+        "errors": errors,
+    }
 
 
 # ── Full sync ──
 
 def sync_ads(days: int = 14) -> dict:
-    """Full ads sync: campaigns + search terms.
+    """Full ads sync: campaigns + search terms, auto-chunked.
 
-    Chunks search terms into ≤30-day windows (API limit).
-    Uses sequential report creation since Ads API reports take
-    2-15 minutes to generate — not parallelizable within one profile.
+    All ranges chunked to ≤30 days per API call.
+    Safe to call with --days 90 or higher.
     """
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=days - 1)
 
-    results = {}
+    results: dict = {"start": start.isoformat(), "end": end.isoformat()}
 
-    # Campaigns (can handle wider ranges)
+    log.info("Ads sync: %s → %s (%d days)", start, end, days)
+
     try:
         results["campaigns"] = fetch_campaigns_daily(start, end)
     except Exception as e:
         results["campaigns"] = {"error": str(e)[:200]}
 
-    # Search terms: chunk to 30 days max
-    st_total_rows = 0
-    st_total_inserted = 0
-    st_errors = []
-    cursor = start
-    while cursor < end:
-        chunk_end = min(cursor + timedelta(days=29), end)
-        try:
-            r = fetch_search_terms(cursor, chunk_end)
-            st_total_rows += r.get("rows", 0)
-            st_total_inserted += r.get("inserted", 0)
-        except Exception as e:
-            st_errors.append(f"{cursor}: {str(e)[:80]}")
-        cursor = chunk_end + timedelta(days=1)
-
-    if st_errors:
-        results["search_terms"] = {"rows": st_total_rows, "inserted": st_total_inserted,
-                                   "errors": st_errors}
-    else:
-        results["search_terms"] = {"rows": st_total_rows, "inserted": st_total_inserted}
+    try:
+        results["search_terms"] = fetch_search_terms(start, end)
+    except Exception as e:
+        results["search_terms"] = {"error": str(e)[:200]}
 
     return results

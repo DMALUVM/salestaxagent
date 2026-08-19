@@ -549,19 +549,43 @@ def ads_test_cmd():
 @cli.command("ads-sync")
 @click.option("--days", default=14, help="Days of history to sync")
 def ads_sync_cmd(days):
-    """Sync Amazon Ads campaigns + search terms."""
+    """Sync Amazon Ads campaigns + search terms (auto-chunked ≤30d)."""
     from src.config import settings
     if not settings.amazon_ads_enabled:
-        click.echo("Amazon Ads not configured.")
+        click.echo("Amazon Ads not configured. Set AMAZON_ADS_* in .env")
         return
     from src.amazon_ads.reports import sync_ads
-    click.echo(f"Syncing last {days} days of Ads data...")
+    from src.db import job_start, job_finish
+
+    run_id = job_start("ads_sync")
+    click.echo(f"Syncing last {days} days of Ads data (chunked ≤30d per API call)...")
     result = sync_ads(days=days)
-    for key, val in result.items():
-        if isinstance(val, dict) and "error" in val:
-            click.echo(f"  {key}: ERROR — {val['error'][:80]}")
-        elif isinstance(val, dict):
-            click.echo(f"  {key}: {val.get('rows', 0)} rows, {val.get('inserted', 0)} inserted")
+    errors = []
+
+    for key in ["campaigns", "search_terms"]:
+        val = result.get(key, {})
+        if isinstance(val, dict):
+            if val.get("errors"):
+                click.echo(f"  {key}: {val.get('rows', 0)} rows, {val.get('inserted', 0)} inserted "
+                           f"({val.get('chunks', 0)} chunks, {len(val['errors'])} errors)")
+                for err in val["errors"][:3]:
+                    click.echo(f"    ⚠ {err}")
+                errors.extend(val["errors"])
+            elif "error" in val:
+                click.echo(f"  {key}: ERROR — {val['error'][:80]}")
+                errors.append(val["error"])
+            else:
+                click.echo(f"  {key}: {val.get('rows', 0)} rows, {val.get('inserted', 0)} inserted "
+                           f"({val.get('chunks', 0)} chunks)")
+                if val.get("total_spend"):
+                    click.echo(f"    Spend: ${val['total_spend']:,.2f}  "
+                               f"Dates: {val.get('date_min', '?')} → {val.get('date_max', '?')}")
+
+    click.echo(f"  Range: {result.get('start', '?')} → {result.get('end', '?')}")
+    if errors:
+        job_finish(run_id, "fail", f"{len(errors)} chunk errors")
+    else:
+        job_finish(run_id, "success", f"{days}d synced")
 
 
 @cli.command("ads-actions")
@@ -2483,6 +2507,28 @@ def _run_spapi_refresh():
         print(f"[SP-API] {ts} SnS: {e}")
     except Exception as e:
         print(f"[SP-API] {ts} SnS error: {e}")
+
+    # Ads sync (daily, 14d window)
+    try:
+        from src.config import settings as _s
+        if _s.amazon_ads_enabled:
+            from src.amazon_ads.reports import sync_ads
+            ads_result = sync_ads(days=14)
+            camps = ads_result.get("campaigns", {})
+            print(f"[Ads] {ts} Campaigns: {camps.get('rows', 0)} rows, "
+                  f"${camps.get('total_spend', 0):,.0f} spend")
+        else:
+            print(f"[Ads] {ts} Not configured (skip)")
+    except Exception as e:
+        print(f"[Ads] {ts} Error: {e}")
+
+    # P&L recompute (picks up fresh ad spend + COGS)
+    try:
+        from src.pnl import compute_pnl
+        pnl = compute_pnl(days=14)
+        print(f"[PnL] {ts} {pnl.get('days', 0)} days, contribution=${pnl.get('total_contribution', 0):,.0f}")
+    except Exception as e:
+        print(f"[PnL] {ts} Error: {e}")
 
     if errors:
         job_finish(run_id, "fail", "; ".join(errors[:3]))
