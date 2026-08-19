@@ -626,6 +626,76 @@ def economics_sync_cmd(days):
     click.echo(f"Date basis: postedDate (settlement date, may lag order date 1-3 days)")
 
 
+@cli.command("costs-import")
+@click.argument("file_path")
+def costs_import_cmd(file_path):
+    """Import COGS from xlsx or csv into sku_costs."""
+    from pathlib import Path
+    from src.db import upsert_rows
+
+    path = Path(file_path)
+    if not path.exists():
+        click.echo(f"File not found: {path}")
+        return
+
+    rows: list[dict] = []
+
+    if path.suffix.lower() in (".xlsx", ".xls"):
+        import openpyxl
+        wb = openpyxl.load_workbook(str(path), data_only=True)
+        ws = wb.active
+        headers = [str(c.value or "").strip().lower() for c in next(ws.iter_rows(min_row=1, max_row=1))]
+
+        sku_col = next((i for i, h in enumerate(headers) if "sku" in h), 0)
+        name_col = next((i for i, h in enumerate(headers) if "name" in h or "product" in h), 1)
+        cost_col = next((i for i, h in enumerate(headers) if "cost" in h or "cogs" in h), 2)
+
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            sku = str(row[sku_col] or "").strip()
+            name = str(row[name_col] or "").strip() if name_col < len(row) else ""
+            cost = float(row[cost_col] or 0) if cost_col < len(row) else 0
+            if sku and cost >= 0:
+                rows.append({"sku": sku, "product_name": name or None,
+                            "cogs_per_unit": round(cost, 4), "source": path.name})
+    else:
+        import csv
+        with open(path) as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                sku = (r.get("SKU") or r.get("sku") or "").strip()
+                name = (r.get("Product Name") or r.get("product_name") or "").strip()
+                cost = float(r.get("Cost Per Unit") or r.get("cogs_per_unit") or 0)
+                if sku:
+                    rows.append({"sku": sku, "product_name": name or None,
+                                "cogs_per_unit": round(cost, 4), "source": path.name})
+
+    # Handle known typo: DDPE00019Shop ↔ DDPE0019Shop
+    extra: list[dict] = []
+    for r in rows:
+        if r["sku"] == "DDPE00019Shop":
+            extra.append({**r, "sku": "DDPE0019Shop"})
+        elif r["sku"] == "DDPE0019Shop":
+            extra.append({**r, "sku": "DDPE00019Shop"})
+    rows.extend(extra)
+
+    if not rows:
+        click.echo("No rows found.")
+        return
+
+    try:
+        inserted = upsert_rows("sku_costs", rows, on_conflict="sku")
+    except Exception:
+        # product_name column may not exist — retry without it
+        for r in rows:
+            r.pop("product_name", None)
+        inserted = upsert_rows("sku_costs", rows, on_conflict="sku")
+    click.echo(f"Imported {len(rows)} SKU costs ({inserted} upserted) from {path.name}")
+    for r in sorted(rows, key=lambda x: x["sku"])[:5]:
+        click.echo(f"  {r['sku']:<18} ${r['cogs_per_unit']:>6.2f}  {(r.get('product_name') or '')[:40]}")
+    if len(rows) > 5:
+        click.echo(f"  ... and {len(rows)-5} more")
+
+
 @cli.command("pnl-validate")
 @click.option("--date", "target_date", required=True, help="Date to validate YYYY-MM-DD")
 def pnl_validate_cmd(target_date):

@@ -44,7 +44,8 @@ const primaryLinks: NavItem[] = [
 ];
 
 const monitorLinks: NavItem[] = [
-  { href: "/profit", label: "Net Proceeds", icon: DollarSign },
+  { href: "/profit", label: "Contribution P&L", icon: DollarSign },
+  { href: "/costs", label: "COGS", icon: DollarSign },
   { href: "/amazon", label: "Amazon Ops", icon: TrendingUp },
   { href: "/ppc", label: "Amazon PPC", icon: TrendingUp },
   { href: "/inventory/returns", label: "FBA Returns", icon: RotateCcw },
