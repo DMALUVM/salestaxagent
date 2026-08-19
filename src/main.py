@@ -607,6 +607,23 @@ def ads_waste_cmd(days):
         click.echo(f"  ${amount:>8.2f}  {term[:50]}")
 
 
+@cli.command("economics-sync")
+@click.option("--days", default=30, help="Days to fetch")
+def economics_sync_cmd(days):
+    """Fetch Amazon financial transactions → reconciled net proceeds."""
+    from src.amazon_sp.economics import sync_economics
+
+    click.echo(f"Fetching Amazon financial transactions ({days}d)...")
+    result = sync_economics(days=days)
+    click.echo(f"Transactions: {result['transactions']}")
+    click.echo(f"Days with data: {result['days']}")
+    click.echo(f"Rows upserted: {result['inserted']}")
+    click.echo(f"Net proceeds: ${result.get('total_net_proceeds', 0):,.2f}")
+    click.echo(f"Ad spend: ${result.get('total_ad_spend', 0):,.2f}")
+    click.echo(f"Net after ads: ${result.get('net_after_ads', 0):,.2f}")
+    click.echo(f"Status: reconciled (from Amazon Finances API)")
+
+
 @cli.command("pnl-sync")
 @click.option("--days", default=30, help="Days to compute")
 def pnl_sync_cmd(days):

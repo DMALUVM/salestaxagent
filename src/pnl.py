@@ -86,14 +86,26 @@ def compute_pnl(days: int = 30) -> dict:
     if costs:
         avg_cogs = sum(costs.values()) / len(costs)
 
-    # Build daily P&L rows
+    # Load existing reconciled dates — don't overwrite with estimates
+    reconciled_dates: set[str] = set()
+    try:
+        existing = fetch_all("pnl_daily")
+        reconciled_dates = {r["date"] for r in existing
+                           if r.get("grain") == "account" and r.get("status") == "reconciled"}
+    except Exception:
+        pass
+
+    # Build daily P&L rows (preliminary only — skip reconciled)
     pnl_rows: list[dict] = []
     all_dates = sorted(set(list(daily_sales.keys()) + list(daily_ads.keys())))
 
     has_cogs = bool(costs)
-    unknown_cogs_count = 0
+    skipped_reconciled = 0
 
     for d in all_dates:
+        if d in reconciled_dates:
+            skipped_reconciled += 1
+            continue
         sales = daily_sales.get(d, 0)
         ads = daily_ads.get(d, 0)
         orders = daily_orders.get(d, 0)
