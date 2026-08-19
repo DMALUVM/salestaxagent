@@ -1,12 +1,22 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 
-interface DailySeries {
+/** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
+interface DailyBase {
   date: string;
   spend: number;
   ad_sales: number;
   orders: number;
   clicks: number;
   impressions: number;
+}
+
+/** DailyBase + Amazon sales for that day and the derived ratios. */
+interface DailyPoint extends DailyBase {
+  amazon_sales: number;
+  /** null when the denominator is 0 — the chart draws a gap, never a fake 0. */
+  acos: number | null;
+  roas: number | null;
+  tacos: number | null;
 }
 
 interface KPIs {
@@ -23,7 +33,7 @@ interface KPIs {
   tacos: number;
 }
 
-function aggregate(rows: DailySeries[], totalSales: number): KPIs {
+function aggregate(rows: DailyBase[], totalSales: number): KPIs {
   const spend = rows.reduce((s, r) => s + r.spend, 0);
   const adSales = rows.reduce((s, r) => s + r.ad_sales, 0);
   const orders = rows.reduce((s, r) => s + r.orders, 0);
@@ -45,13 +55,25 @@ export async function GET() {
   try {
     const sb = getServerSupabase();
 
-    // ── Fetch ALL campaign-daily rows (no limit — typically <5k rows for 30d) ──
+    // ── Window cutoffs (shared by KPIs and the trend chart so both agree) ──
+    const now = new Date();
+    function cutoff(days: number) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - days);
+      return d.toISOString().slice(0, 10);
+    }
+    const cutoffs = { "7d": cutoff(7), "14d": cutoff(14), "30d": cutoff(30), "90d": cutoff(90) };
+
+    // ── Fetch ALL campaign-daily rows (paginated — ~150 campaigns/day, so 90d
+    //    is ~13k rows and blows past PostgREST's 1,000-row default). Narrow
+    //    select: the client never sees these rows, only the rollups below. ──
+    const CAMPAIGN_COLS = "date,campaign_name,spend,sales_14d,orders_14d,clicks,impressions";
     let allCampaignRows: Array<Record<string, unknown>> = [];
     try {
       let offset = 0;
       const pageSize = 1000;
       while (true) {
-        const r = await sb.from("ads_campaigns_daily").select("*")
+        const r = await sb.from("ads_campaigns_daily").select(CAMPAIGN_COLS)
           .order("date", { ascending: true })
           .range(offset, offset + pageSize - 1);
         const page = r.data ?? [];
@@ -61,8 +83,31 @@ export async function GET() {
       }
     } catch { /* table may not exist */ }
 
-    // ── Build daily series from campaign rows ──
-    const dailyMap = new Map<string, DailySeries>();
+    // ── Amazon sales per day from sales_daily (drives TACOS, KPI + daily) ──
+    //    Bounded to the widest window (90d) and paginated. This is a date
+    //    filter, not a row cap — every day inside any window is still summed.
+    const salesByDate = new Map<string, number>();
+    try {
+      let offset = 0;
+      const pageSize = 1000;
+      while (true) {
+        const r = await sb.from("sales_daily").select("sale_date,gross_sales")
+          .eq("channel", "amazon")
+          .gte("sale_date", cutoffs["90d"])
+          .order("sale_date", { ascending: true })
+          .range(offset, offset + pageSize - 1);
+        const page = r.data ?? [];
+        for (const row of page) {
+          const d = String(row.sale_date ?? "");
+          salesByDate.set(d, (salesByDate.get(d) ?? 0) + Number(row.gross_sales ?? 0));
+        }
+        if (page.length < pageSize) break;
+        offset += pageSize;
+      }
+    } catch { /* */ }
+
+    // ── Build daily series from campaign rows (server-side rollup) ──
+    const dailyMap = new Map<string, DailyBase>();
     for (const c of allCampaignRows) {
       const d = String(c.date ?? "");
       if (!d) continue;
@@ -74,34 +119,32 @@ export async function GET() {
       entry.impressions += Number(c.impressions ?? 0);
       dailyMap.set(d, entry);
     }
-    const dailySeries = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+    const dailyBase = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+    // Attach Amazon sales + the derived per-day ratios. Ratios are null (not 0)
+    // when the denominator is 0 so the chart can break the line instead of
+    // drawing a fake trough. TACOS = ad spend / Amazon sales — same definition
+    // as the KPI card, just scoped to a single day.
+    const dailySeries: DailyPoint[] = dailyBase.map(d => {
+      const amazonSales = salesByDate.get(d.date) ?? 0;
+      return {
+        ...d,
+        amazon_sales: amazonSales,
+        acos: d.ad_sales > 0 ? (d.spend / d.ad_sales) * 100 : null,
+        roas: d.spend > 0 ? d.ad_sales / d.spend : null,
+        tacos: amazonSales > 0 ? (d.spend / amazonSales) * 100 : null,
+      };
+    });
 
     // ── Date range info ──
     const dateMin = dailySeries.length ? dailySeries[0].date : null;
     const dateMax = dailySeries.length ? dailySeries[dailySeries.length - 1].date : null;
     const daysInDb = dailySeries.length;
 
-    // ── Compute KPIs for 7D / 14D / 30D windows ──
-    const now = new Date();
-    function cutoff(days: number) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - days);
-      return d.toISOString().slice(0, 10);
-    }
-
-    // Total Amazon sales from sales_daily for TACOS
-    const salesByDate = new Map<string, number>();
-    try {
-      const r = await sb.from("sales_daily").select("sale_date,gross_sales").eq("channel", "amazon");
-      for (const row of r.data ?? []) {
-        const d = String(row.sale_date ?? "");
-        salesByDate.set(d, (salesByDate.get(d) ?? 0) + Number(row.gross_sales ?? 0));
-      }
-    } catch { /* */ }
-
-    function kpisForRange(days: number) {
-      const c = cutoff(days);
-      const filtered = dailySeries.filter(r => r.date >= c);
+    // ── Compute KPIs for 7D / 14D / 30D / 90D windows ──
+    function kpisForRange(days: 7 | 14 | 30 | 90) {
+      const c = cutoffs[`${days}d` as keyof typeof cutoffs];
+      const filtered = dailyBase.filter(r => r.date >= c);
       let totalSales = 0;
       for (const [d, g] of salesByDate) {
         if (d >= c) totalSales += g;
@@ -112,6 +155,7 @@ export async function GET() {
     const kpi7 = kpisForRange(7);
     const kpi14 = kpisForRange(14);
     const kpi30 = kpisForRange(30);
+    const kpi90 = kpisForRange(90);
 
     // ── Campaign-level aggregation for selected range (all available data) ──
     const campaignAgg: Record<string, { spend: number; sales: number; orders: number; clicks: number; impressions: number }> = {};
@@ -158,15 +202,16 @@ export async function GET() {
       kpi7: kpi7.kpis, kpi7Days: kpi7.days,
       kpi14: kpi14.kpis, kpi14Days: kpi14.days,
       kpi30: kpi30.kpis, kpi30Days: kpi30.days,
-      dailySeries,
+      kpi90: kpi90.kpis, kpi90Days: kpi90.days,
+      dailySeries, cutoffs,
       dateMin, dateMax, daysInDb,
       campaigns, searchTerms, recommendations,
       lastSync,
     });
-  } catch (e) {
+  } catch {
     return Response.json({
-      kpi7: null, kpi14: null, kpi30: null,
-      dailySeries: [], campaigns: [], searchTerms: [], recommendations: [],
+      kpi7: null, kpi14: null, kpi30: null, kpi90: null,
+      dailySeries: [], cutoffs: null, campaigns: [], searchTerms: [], recommendations: [],
       dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,
     });
   }
