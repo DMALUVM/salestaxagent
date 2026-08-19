@@ -33,6 +33,13 @@ export async function GET() {
         sb.from("forecast_weekly").select("*").order("week_start").then((r) => r.data ?? []),
       ]);
 
+    // Forecast model state (calibrated weights) — best-effort
+    let modelState: unknown[] = [];
+    try {
+      const ms = await sb.from("forecast_model_state").select("*");
+      modelState = ms.data ?? [];
+    } catch { /* table may not exist */ }
+
     return Response.json({
       snapshots,
       velocity,
@@ -44,6 +51,7 @@ export async function GET() {
       awd,
       capacity,
       forecast,
+      modelState,
     });
   } catch (e) {
     return Response.json(

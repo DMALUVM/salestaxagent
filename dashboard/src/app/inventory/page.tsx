@@ -168,6 +168,7 @@ export default function InventoryPage() {
   const seasonality = (raw?.seasonality ?? []) as SeasonalityWeekly[];
   const forecasts = (raw?.forecast ?? []) as { sku: string; week_start: string; scenario: string; units: number }[];
   const awdSnapshots = (raw?.awd ?? []) as { sku: string; awd_on_hand: number; awd_inbound: number }[];
+  const modelStateRows = (raw?.modelState ?? []) as Array<{ sku: string; weights: unknown; seasonal_factors: unknown; model_version: string }>;
   const capacityLimits = (raw?.capacity ?? []) as { month: string; limit_ft3: number; used_ft3: number; source: string }[];
 
   const [localSettings, setLocalSettings] = useState<InventorySettings | null>(
@@ -220,11 +221,44 @@ export default function InventoryPage() {
       return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
     }
 
+    // Peak weeks (Nov-Jan): ISO weeks 44-52 + 1-5
+    const PEAK_WEEKS = new Set<number>();
+    for (let w = 44; w <= 52; w++) PEAK_WEEKS.add(w);
+    for (let w = 1; w <= 5; w++) PEAK_WEEKS.add(w);
+    const PEAK_FLOOR = 0.85;
+
+    // Load calibrated model weights per SKU
+    type Weights = { a: number; b: number; c: number };
+    const DEFAULT_OFFPEAK: Weights = { a: 0.15, b: 0.60, c: 0.25 };
+    const DEFAULT_PEAK: Weights = { a: 0.10, b: 0.70, c: 0.20 };
+
+    const skuModelWeights = new Map<string, { offpeak: Weights; peak: Weights }>();
+    let globalOffpeak = DEFAULT_OFFPEAK;
+    let globalPeak = DEFAULT_PEAK;
+    for (const ms of modelStateRows) {
+      let offpeak = DEFAULT_OFFPEAK;
+      let peak = DEFAULT_PEAK;
+      const w = typeof ms.weights === "string" ? JSON.parse(ms.weights) : ms.weights;
+      if (w && typeof w.a === "number") offpeak = w as Weights;
+      let sf = ms.seasonal_factors;
+      if (typeof sf === "string") sf = JSON.parse(sf);
+      if (sf && (sf as Record<string, unknown>).peak_weights) {
+        const pw = (sf as Record<string, unknown>).peak_weights;
+        if (pw && typeof (pw as Weights).a === "number") peak = pw as Weights;
+      }
+      if (ms.sku === "*") { globalOffpeak = offpeak; globalPeak = peak; }
+      else { skuModelWeights.set(ms.sku, { offpeak, peak }); }
+    }
+
+    function getWeights(sku: string): { offpeak: Weights; peak: Weights } {
+      return skuModelWeights.get(sku) ?? { offpeak: globalOffpeak, peak: globalPeak };
+    }
+
     /**
-     * Walk week-by-week from today using the best available demand:
-     *   1. forecast_weekly (correction_factor) when the week falls in a
-     *      month with forecast data — converted to weekly via month days
-     *   2. velocity × seasonality multiplier otherwise
+     * Walk week-by-week using calibrated demand model:
+     *   1. Three methods per week: naive, seasonal/forecast, SnS+organic
+     *   2. Blend using peak or offpeak weights from forecast_model_state
+     *   3. Holiday floor: peak weeks >= method_B × 85%
      * Returns the date when stock reaches 0.
      */
     function seasonalStockoutDate(
@@ -235,29 +269,43 @@ export default function InventoryPage() {
 
       const now = new Date();
       const skuFc = fcMonthly.get(sku);
+      const { offpeak, peak } = getWeights(sku);
       let remaining = stock;
 
       for (let wOffset = 0; wOffset < 104; wOffset++) {
         const weekDate = new Date(now);
         weekDate.setDate(weekDate.getDate() + wOffset * 7);
 
-        // Check if this week falls in a month with forecast data
+        const jan1 = new Date(weekDate.getFullYear(), 0, 1);
+        const isoWeek = Math.max(1, Math.min(52, Math.ceil(
+          ((weekDate.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7,
+        )));
+        const isPeak = PEAK_WEEKS.has(isoWeek);
+        const wt = isPeak ? peak : offpeak;
+        const mult = seasMap.get(isoWeek) ?? 1.0;
+
+        // Method A: naive (flat velocity × 7)
+        const naive = baseDailyRate * 7;
+
+        // Method B: seasonal or forecast
         const ym = toYM(weekDate);
         const fcMonthUnits = skuFc?.get(ym);
-        let weekDemand: number;
-
+        let seasonal: number;
         if (fcMonthUnits != null && fcMonthUnits > 0) {
-          // Forecast: monthly units / weeks-in-month (~4.3)
-          const dim = daysInMonthD(weekDate);
-          weekDemand = (fcMonthUnits / dim) * 7;
+          seasonal = (fcMonthUnits / daysInMonthD(weekDate)) * 7;
         } else {
-          // Velocity × seasonality
-          const jan1 = new Date(weekDate.getFullYear(), 0, 1);
-          const isoWeek = Math.ceil(
-            ((weekDate.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7,
-          );
-          const mult = seasMap.get(Math.max(1, Math.min(52, isoWeek))) ?? 1.0;
-          weekDemand = baseDailyRate * 7 * mult;
+          seasonal = baseDailyRate * 7 * mult;
+        }
+
+        // Method C: SnS floor + organic (simplified — use seasonal as proxy)
+        const methodC = seasonal; // no per-SKU SnS in this context
+
+        // Blend with calibrated weights
+        let weekDemand = wt.a * naive + wt.b * seasonal + wt.c * methodC;
+
+        // Holiday floor: peak weeks >= method_B × 85%
+        if (isPeak && seasonal > 0) {
+          weekDemand = Math.max(weekDemand, seasonal * PEAK_FLOOR);
         }
 
         if (weekDemand <= 0) continue;
@@ -378,7 +426,7 @@ export default function InventoryPage() {
     }
 
     return result;
-  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, s]);
+  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, s]);
 
   // Filter + sort
   const filtered = useMemo(() => {
