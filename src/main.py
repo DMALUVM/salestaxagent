@@ -607,6 +607,23 @@ def ads_waste_cmd(days):
         click.echo(f"  ${amount:>8.2f}  {term[:50]}")
 
 
+@cli.command("pnl-sync")
+@click.option("--days", default=30, help="Days to compute")
+def pnl_sync_cmd(days):
+    """Compute daily P&L: sales - fees - COGS - ad spend."""
+    from src.pnl import compute_pnl
+
+    click.echo(f"Computing P&L for last {days} days...")
+    result = compute_pnl(days=days)
+    click.echo(f"Days: {result['days']}, Rows: {result['rows']}, Inserted: {result['inserted']}")
+    click.echo(f"Sales: ${result['total_sales']:,.2f}")
+    click.echo(f"Ad spend: ${result['total_ads']:,.2f}")
+    click.echo(f"Est. contribution: ${result['total_contribution']:,.2f}")
+    click.echo(f"COGS: {'loaded' if result['has_cogs'] else 'not configured (set sku_costs table)'}")
+    click.echo(f"Fees: referral {result['referral_pct']*100:.0f}%, FBA ${result['fba_per_unit']:.2f}/unit")
+    click.echo(f"Status: preliminary (estimates until Amazon economics settle)")
+
+
 @cli.command("spapi-probe")
 def spapi_probe_cmd():
     """Probe which SP-API report types are authorized with current credentials."""
