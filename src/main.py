@@ -592,19 +592,25 @@ def spapi_returns_cmd(days, dry_run):
 
 
 @cli.command("spapi-sns")
-@click.option("--weeks", default=13, help="Weeks of history to fetch")
+@click.option("--weeks", default=None, type=int, help="Weeks of history (default 13)")
+@click.option("--start", "start_date", default=None, help="Start date YYYY-MM-DD (overrides --weeks)")
 @click.option("--dry-run", is_flag=True)
-def spapi_sns_cmd(weeks, dry_run):
+def spapi_sns_cmd(weeks, start_date, dry_run):
     """Fetch Subscribe & Save metrics via Replenishment API."""
     from src.amazon_sp.replenishment import fetch_seller_metrics, fetch_offer_metrics
 
     if dry_run:
         click.echo("DRY RUN\n")
 
-    click.echo(f"Fetching seller-level SnS metrics ({weeks} weeks)...")
+    label = f"from {start_date}" if start_date else f"{weeks or 13} weeks"
+    click.echo(f"Fetching seller-level SnS metrics ({label})...")
     try:
-        seller = fetch_seller_metrics(weeks=weeks, dry_run=dry_run)
-        click.echo(f"  Weeks: {seller['weeks_fetched']}, Latest subs: {seller['latest_subs']:,}, Inserted: {seller['rows_inserted']}")
+        seller = fetch_seller_metrics(weeks=weeks, start_date=start_date, dry_run=dry_run)
+        click.echo(f"  Weeks: {seller['weeks_fetched']} ({seller['complete_weeks']} complete)")
+        click.echo(f"  Latest complete: wk {seller['latest_week']} — "
+                   f"{seller['latest_subs']:,} subs, {seller['latest_shipped']} shipped, "
+                   f"${seller['latest_revenue']:,.2f} rev")
+        click.echo(f"  Inserted: {seller['rows_inserted']}")
     except PermissionError as e:
         click.echo(f"  {e}")
         return

@@ -72,7 +72,7 @@ export async function GET() {
     }
 
     try {
-      const r = await sb.from("sns_seller_metrics").select("*").order("week_start", { ascending: false }).limit(13);
+      const r = await sb.from("sns_seller_metrics").select("*").order("week_start").limit(200);
       snsSeller = r.data ?? [];
     } catch { /* table may not exist */ }
 

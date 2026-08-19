@@ -2,16 +2,12 @@
 
 Uses SP-API v2022-11-07 Replenishment endpoints:
   - POST /sellingPartners/metrics/search — seller-level weekly aggregates
-  - POST /offers/metrics/search — per-ASIN weekly metrics
-
-Metrics: activeSubscriptions, shippedSubscriptionUnits,
-totalSubscriptionsRevenue, revenuePenetration, notDeliveredDueToOOS,
-lostRevenueDueToOOS, shareOfCouponSubscriptions.
+  - POST /offers/metrics/search — per-ASIN weekly metrics (single week)
 """
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta, timezone
 
 import httpx
 
@@ -23,6 +19,7 @@ log = logging.getLogger(__name__)
 BASE_URL = "https://sellingpartnerapi-na.amazon.com"
 REPLENISHMENT_PATH = "/replenishment/2022-11-07"
 MARKETPLACE_ID = "ATVPDKIKX0DER"
+MAX_WEEKS_PER_CALL = 52  # API seems to accept ~2 years but chunk to be safe
 
 
 def _headers() -> dict[str, str]:
@@ -33,95 +30,137 @@ def _headers() -> dict[str, str]:
     }
 
 
-def _week_boundaries(ref: date) -> list[tuple[str, str]]:
-    """Generate Sun→Sat week boundaries for the 13 weeks ending before ref."""
-    # Find the most recent Saturday before ref
+def _last_complete_saturday(ref: date) -> date:
+    """Find the Saturday ending the most recent complete week before ref."""
+    # weekday(): Mon=0 ... Sun=6.  Saturday=5.
     days_since_sat = (ref.weekday() + 2) % 7
     if days_since_sat == 0:
-        days_since_sat = 7  # if ref is Saturday, go to prior week
-    last_sat = ref - timedelta(days=days_since_sat)
-
-    weeks: list[tuple[str, str]] = []
-    for i in range(13):
-        end_sat = last_sat - timedelta(weeks=i)
-        start_sun = end_sat - timedelta(days=6)
-        weeks.append((start_sun.isoformat(), end_sat.isoformat()))
-    return list(reversed(weeks))
+        days_since_sat = 7  # if today is Saturday, prior week
+    return ref - timedelta(days=days_since_sat)
 
 
-def fetch_seller_metrics(weeks: int = 13, dry_run: bool = False) -> dict:
-    """Fetch seller-level SnS metrics for the last N weeks."""
-    today = date.today()
-    start = today - timedelta(weeks=weeks)
+def _is_partial_week(week_start: str, week_end: str) -> bool:
+    """True if the week span is less than 7 days (partial/current week)."""
+    try:
+        s = date.fromisoformat(week_start[:10])
+        e = date.fromisoformat(week_end[:10])
+        return (e - s).days < 6
+    except (ValueError, TypeError):
+        return False
 
-    body = {
-        "timePeriodType": "PERFORMANCE",
-        "timeInterval": {
-            "startDate": start.isoformat(),
-            "endDate": today.isoformat(),
-        },
-        "marketplaceId": MARKETPLACE_ID,
-        "programTypes": ["SUBSCRIBE_AND_SAVE"],
-        "aggregationFrequency": "WEEK",
+
+def _parse_seller_row(m: dict) -> dict | None:
+    """Parse one seller metrics row from API response."""
+    ti = m.get("timeInterval", {})
+    if not ti.get("startDate"):
+        return None
+    if "activeSubscriptions" not in m:
+        return None  # lifetime-value row, skip
+
+    ws = ti["startDate"][:10]
+    we = ti["endDate"][:10]
+
+    return {
+        "week_start": ws,
+        "week_end": we,
+        "active_subscriptions": int(m.get("activeSubscriptions", 0)),
+        "shipped_units": int(m.get("shippedSubscriptionUnits", 0)),
+        "total_revenue": float(m.get("totalSubscriptionsRevenue", 0)),
+        "revenue_penetration": float(m.get("revenuePenetration", 0)),
+        "not_delivered_oos": int(m.get("notDeliveredDueToOOS", 0)),
+        "lost_revenue_oos": float(m.get("lostRevenueDueToOOS", 0)),
+        "coupon_share": float(m.get("shareOfCouponSubscriptions", 0)),
+        "currency": m.get("currencyCode", "USD"),
     }
 
-    resp = httpx.post(
-        f"{BASE_URL}{REPLENISHMENT_PATH}/sellingPartners/metrics/search",
-        headers=_headers(), json=body, timeout=20,
-    )
 
-    if resp.status_code == 403:
-        raise PermissionError(
-            "Replenishment API role required. In Seller Central → "
-            "Apps → Manage apps → authorize the Replenishment role."
+def fetch_seller_metrics(
+    weeks: int | None = None,
+    start_date: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Fetch seller-level SnS metrics.
+
+    Args:
+        weeks: number of weeks back (default 13)
+        start_date: ISO date to start from (overrides weeks)
+        dry_run: don't write to DB
+    """
+    today = date.today()
+
+    if start_date:
+        start = date.fromisoformat(start_date)
+    else:
+        start = today - timedelta(weeks=weeks or 13)
+
+    all_rows: list[dict] = []
+
+    # Chunk into ≤52-week segments to avoid API limits
+    cursor = start
+    while cursor < today:
+        chunk_end = min(cursor + timedelta(weeks=MAX_WEEKS_PER_CALL), today)
+
+        body = {
+            "timePeriodType": "PERFORMANCE",
+            "timeInterval": {
+                "startDate": cursor.isoformat(),
+                "endDate": chunk_end.isoformat(),
+            },
+            "marketplaceId": MARKETPLACE_ID,
+            "programTypes": ["SUBSCRIBE_AND_SAVE"],
+            "aggregationFrequency": "WEEK",
+        }
+
+        resp = httpx.post(
+            f"{BASE_URL}{REPLENISHMENT_PATH}/sellingPartners/metrics/search",
+            headers=_headers(), json=body, timeout=30,
         )
-    resp.raise_for_status()
-    data = resp.json()
+        if resp.status_code == 403:
+            raise PermissionError(
+                "Replenishment API role required. In Seller Central → "
+                "Apps → Manage apps → authorize the Replenishment role."
+            )
+        resp.raise_for_status()
 
-    rows: list[dict] = []
-    for m in data.get("metrics", []):
-        ti = m.get("timeInterval", {})
-        if not ti.get("startDate"):
-            continue
-        # Skip lifetime-value rows (no activeSubscriptions)
-        if "activeSubscriptions" not in m:
-            continue
-        rows.append({
-            "week_start": ti["startDate"][:10],
-            "week_end": ti["endDate"][:10],
-            "active_subscriptions": int(m.get("activeSubscriptions", 0)),
-            "shipped_units": int(m.get("shippedSubscriptionUnits", 0)),
-            "total_revenue": float(m.get("totalSubscriptionsRevenue", 0)),
-            "revenue_penetration": float(m.get("revenuePenetration", 0)),
-            "not_delivered_oos": int(m.get("notDeliveredDueToOOS", 0)),
-            "lost_revenue_oos": float(m.get("lostRevenueDueToOOS", 0)),
-            "coupon_share": float(m.get("shareOfCouponSubscriptions", 0)),
-            "currency": m.get("currencyCode", "USD"),
-        })
+        for m in resp.json().get("metrics", []):
+            row = _parse_seller_row(m)
+            if row:
+                all_rows.append(row)
+
+        cursor = chunk_end
+
+    # Deduplicate on week_start (API chunks may overlap)
+    seen: dict[str, dict] = {}
+    for r in all_rows:
+        seen[r["week_start"]] = r
+    all_rows = sorted(seen.values(), key=lambda r: r["week_start"])
+
+    # Find latest COMPLETE week (not partial) for the summary
+    complete = [r for r in all_rows if not _is_partial_week(r["week_start"], r["week_end"])]
+    latest = complete[-1] if complete else (all_rows[-1] if all_rows else None)
 
     summary = {
-        "weeks_fetched": len(rows),
-        "latest_subs": rows[-1]["active_subscriptions"] if rows else 0,
+        "weeks_fetched": len(all_rows),
+        "complete_weeks": len(complete),
+        "latest_subs": latest["active_subscriptions"] if latest else 0,
+        "latest_shipped": latest["shipped_units"] if latest else 0,
+        "latest_revenue": latest["total_revenue"] if latest else 0,
+        "latest_week": latest["week_start"] if latest else None,
         "dry_run": dry_run,
         "rows_inserted": 0,
     }
 
-    if dry_run or not rows:
-        summary["rows"] = rows
+    if dry_run or not all_rows:
         return summary
 
-    inserted = upsert_rows("sns_seller_metrics", rows, on_conflict="week_start")
+    inserted = upsert_rows("sns_seller_metrics", all_rows, on_conflict="week_start")
     summary["rows_inserted"] = inserted
     return summary
 
 
 def fetch_offer_metrics(dry_run: bool = False) -> dict:
     """Fetch per-ASIN SnS metrics for the most recent complete week."""
-    today = date.today()
-    days_since_sat = (today.weekday() + 2) % 7
-    if days_since_sat == 0:
-        days_since_sat = 7
-    last_sat = today - timedelta(days=days_since_sat)
+    last_sat = _last_complete_saturday(date.today())
     last_sun = last_sat - timedelta(days=6)
 
     body = {
@@ -143,7 +182,6 @@ def fetch_offer_metrics(dry_run: bool = False) -> dict:
         f"{BASE_URL}{REPLENISHMENT_PATH}/offers/metrics/search",
         headers=_headers(), json=body, timeout=20,
     )
-
     if resp.status_code == 403:
         raise PermissionError("Replenishment API role required.")
     resp.raise_for_status()
@@ -175,7 +213,6 @@ def fetch_offer_metrics(dry_run: bool = False) -> dict:
     }
 
     if dry_run or not rows:
-        summary["rows"] = rows
         return summary
 
     inserted = upsert_rows("sns_offer_metrics", rows, on_conflict="asin,week_start")

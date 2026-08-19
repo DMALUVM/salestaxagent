@@ -280,53 +280,104 @@ export default function AmazonOpsPage() {
 
           {/* Subscribe & Save */}
           {(data?.snsSeller?.length ?? 0) > 0 && (() => {
-            const sns = [...(data?.snsSeller ?? [])].sort((a, b) => b.week_start.localeCompare(a.week_start));
-            const latest = sns[0];
-            const prior = sns[1];
+            // Sort ascending for chart, filter out partial weeks (< 7 days span)
+            const allWeeks = [...(data?.snsSeller ?? [])]
+              .filter((w) => {
+                const s = new Date(w.week_start + "T00:00:00");
+                const e = new Date(w.week_end + "T00:00:00");
+                return (e.getTime() - s.getTime()) >= 6 * 86400000;
+              })
+              .sort((a, b) => a.week_start.localeCompare(b.week_start));
+            const latest = allWeeks[allWeeks.length - 1];
+            const prior = allWeeks.length > 1 ? allWeeks[allWeeks.length - 2] : null;
             const snsOffers = data?.snsOffers ?? [];
-            const subChange = prior && prior.active_subscriptions > 0
-              ? Math.round(((latest.active_subscriptions / prior.active_subscriptions) - 1) * 100) : null;
+
+            if (!latest) return null;
+
+            const wow = (cur: number, prev: number | undefined) =>
+              prev && prev > 0 ? Math.round(((cur / prev) - 1) * 100) : null;
+            const subWow = wow(latest.active_subscriptions, prior?.active_subscriptions);
+            const shipWow = wow(latest.shipped_units, prior?.shipped_units);
+            const revWow = wow(latest.total_revenue, prior?.total_revenue);
+
+            const chartMax = Math.max(...allWeeks.map((w) => w.active_subscriptions), 1);
+            const revMax = Math.max(...allWeeks.map((w) => w.total_revenue), 1);
+
+            function WowBadge({ val, invert }: { val: number | null; invert?: boolean }) {
+              if (val === null) return null;
+              const good = invert ? val <= 0 : val >= 0;
+              return (
+                <span className={`text-xs font-medium ${good ? "text-emerald-500" : "text-red-500"}`}>
+                  {val >= 0 ? "+" : ""}{val}%
+                </span>
+              );
+            }
+
             return (
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium">Subscribe & Save</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* Summary cards */}
                   <div className="grid gap-3 sm:grid-cols-4">
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase">Active Subscriptions</p>
                       <p className="text-2xl font-semibold tabular-nums">{fmt(latest.active_subscriptions)}</p>
-                      {subChange !== null && (
-                        <p className={`text-xs font-medium ${subChange >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                          {subChange >= 0 ? "+" : ""}{subChange}% WoW
-                        </p>
-                      )}
+                      <WowBadge val={subWow} />
                     </div>
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase">Shipped Units (wk)</p>
                       <p className="text-2xl font-semibold tabular-nums">{fmt(latest.shipped_units)}</p>
+                      <WowBadge val={shipWow} />
                     </div>
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase">Revenue (wk)</p>
                       <p className="text-2xl font-semibold tabular-nums">${fmtD(latest.total_revenue)}</p>
+                      <WowBadge val={revWow} />
                     </div>
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase">Rev Penetration</p>
                       <p className="text-2xl font-semibold tabular-nums">{latest.revenue_penetration.toFixed(1)}%</p>
                     </div>
                   </div>
+
                   {latest.not_delivered_oos > 0 && (
                     <div className="flex items-center gap-2 text-xs text-amber-600">
                       <AlertTriangle className="h-3.5 w-3.5" />
                       {latest.not_delivered_oos} units not delivered due to OOS
-                      {latest.lost_revenue_oos > 0 && ` ($${fmtD(latest.lost_revenue_oos)} lost revenue)`}
+                      {latest.lost_revenue_oos > 0 && ` ($${fmtD(latest.lost_revenue_oos)} lost)`}
                     </div>
                   )}
+
+                  {/* Weekly trend chart */}
+                  {allWeeks.length > 3 && (
+                    <div>
+                      <p className="text-xs font-medium mb-1">Subscription Growth</p>
+                      <div className="flex items-end gap-px" style={{ height: "80px" }}>
+                        {allWeeks.map((w) => {
+                          const h = chartMax > 0 ? (w.active_subscriptions / chartMax) * 80 : 0;
+                          return (
+                            <div key={w.week_start} className="flex-1 flex flex-col justify-end min-w-0"
+                              title={`Wk ending ${w.week_end}\nSubs: ${fmt(w.active_subscriptions)}\nShipped: ${fmt(w.shipped_units)}\nRev: $${fmtD(w.total_revenue)}`}>
+                              <div className="w-full rounded-t-sm bg-violet-500" style={{ height: `${h}px` }} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex justify-between text-[9px] text-muted-foreground mt-1">
+                        <span>{allWeeks[0].week_end}</span>
+                        <span>{allWeeks[allWeeks.length - 1].week_end}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Per-offer table */}
                   {snsOffers.length > 0 && (
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>ASIN</TableHead>
+                          <TableHead>Product</TableHead>
                           <TableHead className="text-right">Subs</TableHead>
                           <TableHead className="text-right">Shipped</TableHead>
                           <TableHead className="text-right">Revenue</TableHead>
@@ -335,8 +386,9 @@ export default function AmazonOpsPage() {
                       <TableBody>
                         {snsOffers.slice(0, 10).map((o) => (
                           <TableRow key={o.asin}>
-                            <TableCell className="text-xs font-medium">
-                              {o.sku || o.asin}
+                            <TableCell>
+                              <span className="text-sm font-medium">{o.sku || o.asin}</span>
+                              <span className="ml-1.5 text-[10px] text-muted-foreground">{o.asin}</span>
                             </TableCell>
                             <TableCell className="text-right tabular-nums">{fmt(o.active_subscriptions)}</TableCell>
                             <TableCell className="text-right tabular-nums">{fmt(o.shipped_units)}</TableCell>
@@ -346,8 +398,9 @@ export default function AmazonOpsPage() {
                       </TableBody>
                     </Table>
                   )}
+
                   <p className="text-[10px] text-muted-foreground">
-                    Week of {latest.week_start} to {latest.week_end}. Data from Amazon Replenishment API.
+                    Week ending {latest.week_end} · {allWeeks.length} weeks stored · Amazon Replenishment API
                   </p>
                 </CardContent>
               </Card>
