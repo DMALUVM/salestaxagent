@@ -1,4 +1,5 @@
 import { getServerSupabase } from "@/lib/supabase-server";
+import { amazonAsOf, amazonToday } from "@/lib/as-of";
 
 interface PnlRow {
   date: string;
@@ -64,16 +65,34 @@ export async function GET() {
       };
     });
 
+    // ── Closed-day boundary ──
+    // Every window ends at yesterday-in-LA. Today is always partial: sales are
+    // still landing and the ads sync only covers through yesterday, so including
+    // it would show a day with real COGS and no ad spend.
+    const asOf = amazonAsOf();
+    const today = amazonToday();
+    // Newest day that is actually closed: has a P&L row and ad spend coverage.
+    const latestClosed = rows.find(
+      (r) => r.date <= asOf && (!adsDateMax || r.date <= adsDateMax)
+    )?.date ?? null;
+
     return Response.json({
       daily: rows,
       salesDateMax: rows.length ? rows[0].date : null,
       adsDateMax,
+      asOf,
+      today,
+      latestClosed,
+      /** True when ad spend has not caught up to as-of yet. */
+      adsLagging: Boolean(adsDateMax && adsDateMax < asOf),
+      timezone: "America/Los_Angeles",
       formula: "gross_sales - referral - fba - ad_spend - cogs",
       adsSource: "ads_campaigns_daily.spend",
     });
   } catch {
     return Response.json({
       daily: [], salesDateMax: null, adsDateMax: null,
+      asOf: null, today: null, latestClosed: null, adsLagging: false,
       formula: "gross_sales - referral - fba - ad_spend - cogs",
     });
   }

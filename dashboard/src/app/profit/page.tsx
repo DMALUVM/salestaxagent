@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Fragment } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
 import { isConfigured } from "@/lib/supabase";
-import { Shield, DollarSign, TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
+import { Shield, DollarSign, AlertTriangle, ChevronRight } from "lucide-react";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 function fmtD(n: number) { return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -25,7 +25,11 @@ interface PnlRow {
 export default function ProfitPage() {
   const [data, setData] = useState<PnlRow[]>([]);
   const [adsDateMax, setAdsDateMax] = useState<string | null>(null);
-  const [salesDateMax, setSalesDateMax] = useState<string | null>(null);
+  const [asOf, setAsOf] = useState<string | null>(null);
+  const [todayLA, setTodayLA] = useState<string | null>(null);
+  const [latestClosed, setLatestClosed] = useState<string | null>(null);
+  const [adsLagging, setAdsLagging] = useState(false);
+  const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,20 +37,15 @@ export default function ProfitPage() {
     fetch("/api/pnl").then((r) => r.json()).then((d) => {
       setData(d.daily ?? []);
       setAdsDateMax(d.adsDateMax ?? null);
-      setSalesDateMax(d.salesDateMax ?? null);
+      setAsOf(d.asOf ?? null);
+      setTodayLA(d.today ?? null);
+      setLatestClosed(d.latestClosed ?? null);
+      setAdsLagging(Boolean(d.adsLagging));
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
-  const { today, last7, last30, mtd } = useMemo(() => {
-    const now = new Date();
-    const iso = (d: Date) => d.toISOString().slice(0, 10);
-    const minus = (n: number) => { const d = new Date(now); d.setDate(d.getDate() - n); return iso(d); };
-    const d7iso = minus(7);
-    const d30iso = minus(30);
-    // Month to date, on the same calendar the daily rows are keyed by.
-    const mtdStart = `${iso(now).slice(0, 7)}-01`;
-
+  const { latestDay, last7, last30, mtd } = useMemo(() => {
     const sum = (rows: PnlRow[], key: keyof PnlRow) =>
       rows.reduce((s, r) => s + Number(r[key] ?? 0), 0);
 
@@ -65,13 +64,28 @@ export default function ProfitPage() {
       days: rows.length,
     });
 
-    return {
-      today: win(data.slice(0, 1)),
-      last7: win(data.filter((r) => r.date >= d7iso)),
-      last30: win(data.filter((r) => r.date >= d30iso)),
-      mtd: win(data.filter((r) => r.date >= mtdStart)),
+    if (!asOf) {
+      const empty = win([]);
+      return { latestDay: empty, last7: empty, last30: empty, mtd: empty };
+    }
+
+    // Every window is [start .. asOf] inclusive and ends at yesterday-in-LA.
+    // Today is never included: it is still accruing sales and has no ad spend.
+    const shift = (iso: string, n: number) => {
+      const d = new Date(`${iso}T12:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + n);
+      return d.toISOString().slice(0, 10);
     };
-  }, [data]);
+    const closed = (from: string) =>
+      data.filter((r) => r.date >= from && r.date <= asOf);
+
+    return {
+      latestDay: win(data.filter((r) => r.date === (latestClosed ?? asOf))),
+      last7: win(closed(shift(asOf, -6))),    // 7 closed days ending as-of
+      last30: win(closed(shift(asOf, -29))),  // 30 closed days ending as-of
+      mtd: win(closed(`${asOf.slice(0, 7)}-01`)),
+    };
+  }, [data, asOf, latestClosed]);
 
   if (!isConfigured()) return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -84,9 +98,10 @@ export default function ProfitPage() {
   const hasData = data.length > 0;
   const margin7 = last7.sales > 0 ? (last7.net / last7.sales) * 100 : 0;
   const margin30 = last30.sales > 0 ? (last30.net / last30.sales) * 100 : 0;
-  // Ads sync runs through yesterday while sales land same-day, so the newest
-  // day(s) can carry sales with no ad spend yet — contribution reads high there.
-  const adsBehind = Boolean(adsDateMax && salesDateMax && adsDateMax < salesDateMax);
+  // Today is excluded from every KPI, so a partial today is no longer a
+  // warning. The only thing still worth flagging is ad spend lagging behind
+  // as-of, which would understate cost inside the closed windows.
+  const latestClosedDate = latestClosed ?? asOf;
 
   return (
     <div className="space-y-6">
@@ -109,22 +124,23 @@ export default function ProfitPage() {
         </Card>
       ) : (
         <>
-          {adsBehind && (
-            <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-              <AlertTriangle className="mt-px h-4 w-4 shrink-0" />
-              <span>
-                Partial ad data: sales run through {salesDateMax} but ad spend only through {adsDateMax}.
-                Days after {adsDateMax} count $0 ad spend, so their contribution reads high until the next Ads sync.
+          <p className="text-xs text-muted-foreground">
+            As of <span className="font-medium text-foreground">{asOf}</span> — yesterday in
+            America/Los_Angeles, the Amazon reporting day. Today ({todayLA}) is still accruing and is
+            excluded from every figure below.
+            {adsLagging && (
+              <span className="ml-1 text-amber-600 dark:text-amber-400">
+                Ad spend is only synced through {adsDateMax}, so days after that count $0 ads.
               </span>
-            </div>
-          )}
+            )}
+          </p>
 
           {/* Net profit by window — all four from the same stored formula */}
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
             {[
-              { label: "Net (latest day)", w: today, sub: data[0]?.date ?? "" },
-              { label: "Net (7d)", w: last7, sub: `${margin7.toFixed(1)}% margin` },
-              { label: "Net (30d)", w: last30, sub: `${margin30.toFixed(1)}% margin` },
+              { label: "Net (latest closed day)", w: latestDay, sub: latestClosedDate ?? "" },
+              { label: "Net (7d)", w: last7, sub: `${last7.days}d · ${margin7.toFixed(1)}% margin` },
+              { label: "Net (30d)", w: last30, sub: `${last30.days}d · ${margin30.toFixed(1)}% margin` },
               { label: "Net (MTD)", w: mtd, sub: `${mtd.days} day${mtd.days === 1 ? "" : "s"}` },
             ].map((c) => (
               <Card key={c.label} className={c.w.net >= 0 ? "border-emerald-500/30" : "border-red-500/30"}>
@@ -230,23 +246,50 @@ export default function ProfitPage() {
                   {data.slice(0, 35).map((r) => {
                     // Fees only — COGS is its own column now, not folded in here.
                     const fees = Number(r.est_referral_fees ?? 0) + Number(r.est_fba_fees ?? 0);
+                    // Anything after as-of is still open; shown for visibility
+                    // but excluded from every aggregate above.
+                    const open = Boolean(asOf && r.date > asOf);
+                    const isOpenRow = expandedDate === r.date;
                     return (
-                      <TableRow key={r.date}>
-                        <TableCell className="text-xs tabular-nums">{r.date}</TableCell>
-                        <TableCell className="text-right tabular-nums">${fmtD(r.gross_sales)}</TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">{fmt(r.units)}</TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">${fmtD(fees)}</TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">${fmtD(r.ad_spend)}</TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">${fmtD(r.est_cogs)}</TableCell>
-                        <TableCell className={`text-right tabular-nums font-medium ${r.net_after_ads >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                          ${fmtD(r.net_after_ads)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={`text-[9px] ${r.fees_basis === "settled" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-                            {r.fees_basis ?? "estimated"}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
+                      <Fragment key={r.date}>
+                        <TableRow
+                          className={`cursor-pointer ${open ? "opacity-60" : ""}`}
+                          onClick={() => setExpandedDate(isOpenRow ? null : r.date)}
+                        >
+                          <TableCell className="text-xs tabular-nums">
+                            <span className="flex items-center gap-1.5">
+                              <ChevronRight className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${isOpenRow ? "rotate-90" : ""}`} />
+                              {r.date}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">${fmtD(r.gross_sales)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{fmt(r.units)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">${fmtD(fees)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">${fmtD(r.ad_spend)}</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">${fmtD(r.est_cogs)}</TableCell>
+                          <TableCell className={`text-right tabular-nums font-medium ${r.net_after_ads >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                            ${fmtD(r.net_after_ads)}
+                          </TableCell>
+                          <TableCell>
+                            {open ? (
+                              <Badge variant="outline" className="text-[9px] bg-muted text-muted-foreground">
+                                preliminary · excluded
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className={`text-[9px] ${r.fees_basis === "settled" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                                {r.fees_basis ?? "estimated"}
+                              </Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                        {isOpenRow && (
+                          <TableRow className="bg-muted/40 hover:bg-muted/40">
+                            <TableCell colSpan={8} className="py-3">
+                              <DayDetail date={r.date} row={r} />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </TableBody>
@@ -269,6 +312,140 @@ export default function ProfitPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+
+/* ── Day drill-down ──────────────────────────────────────────────
+ * Read-only view of one Amazon day: the same waterfall the row shows, the
+ * SKU rows behind it, and the campaigns that made up the ad spend. Every
+ * figure is read from pnl_daily / ads_campaigns_daily — nothing is
+ * recomputed, so the panel cannot disagree with the row above it.
+ * ---------------------------------------------------------------- */
+
+interface SkuLine {
+  sku: string; gross_sales: number; units: number; ad_spend: number;
+  est_referral_fees: number; est_fba_fees: number; est_cogs: number;
+  est_contribution: number;
+}
+interface CampaignLine { campaign_name: string; spend: number; sales: number }
+interface DayData {
+  date: string;
+  skus: SkuLine[];
+  campaigns: CampaignLine[];
+  adSpendTotal: number;
+  feesBasis: string;
+  cogsBasis: string | null;
+  settledPayout: number | null;
+}
+
+function DayDetail({ date, row }: { date: string; row: PnlRow }) {
+  const [day, setDay] = useState<DayData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/pnl/day?date=${date}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (d.error) setError(String(d.error));
+        else setDay(d);
+      })
+      .catch((e) => { if (!cancelled) setError(String(e)); });
+    return () => { cancelled = true; };
+  }, [date]);
+
+  const fees = Number(row.est_referral_fees ?? 0) + Number(row.est_fba_fees ?? 0);
+  const skus = (day?.skus ?? []).filter((s) => s.sku !== "__unallocated__");
+  const topSkus = [...skus].sort((a, b) => b.est_contribution - a.est_contribution).slice(0, 8);
+
+  return (
+    <div className="grid gap-6 whitespace-normal lg:grid-cols-3">
+      {/* Waterfall — must reconcile to the row's contribution */}
+      <div>
+        <p className="mb-2 text-xs font-medium">Day waterfall</p>
+        <div className="space-y-1 text-xs">
+          {[
+            { label: "Gross sales", value: Number(row.gross_sales ?? 0), color: "" },
+            { label: "− Referral fees", value: -Number(row.est_referral_fees ?? 0), color: "text-red-500" },
+            { label: "− FBA fees", value: -Number(row.est_fba_fees ?? 0), color: "text-red-500" },
+            { label: "− Ad spend", value: -Number(row.ad_spend ?? 0), color: "text-red-500" },
+            { label: "− COGS", value: -Number(row.est_cogs ?? 0), color: "text-red-500" },
+            { label: "= Contribution", value: Number(row.net_after_ads ?? 0), color: Number(row.net_after_ads ?? 0) >= 0 ? "font-semibold text-emerald-600" : "font-semibold text-red-600" },
+          ].map((l) => (
+            <div key={l.label} className="flex justify-between gap-4">
+              <span className="text-muted-foreground">{l.label}</span>
+              <span className={`tabular-nums ${l.color}`}>${fmtD(Math.abs(l.value))}</span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-[10px] text-muted-foreground">
+          {fees > 0 && `Fees ${day?.feesBasis ?? row.fees_basis ?? "estimated"}. `}
+          {day?.cogsBasis === "sku_units_x_sku_costs"
+            ? "COGS = daily units × sku_costs."
+            : "COGS estimated from order-count units."}
+          {day?.settledPayout != null && ` Settlement posted this day: $${fmtD(day.settledPayout)} (cash, not margin).`}
+        </p>
+      </div>
+
+      {/* Top SKUs for the day */}
+      <div>
+        <p className="mb-2 text-xs font-medium">
+          Top SKUs by contribution
+          {skus.length > 0 && <span className="ml-1 font-normal text-muted-foreground">({skus.length} with sales)</span>}
+        </p>
+        {error && <p className="text-xs text-red-500">{error}</p>}
+        {!error && !day && <p className="text-xs text-muted-foreground">Loading…</p>}
+        {day && topSkus.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No SKU-grain rows for this day — run <code>pnl-sync</code> to store them.
+          </p>
+        )}
+        {topSkus.length > 0 && (
+          <div className="space-y-1 text-xs">
+            {topSkus.map((s) => (
+              <div key={s.sku} className="flex justify-between gap-3">
+                <span className="truncate text-muted-foreground" title={s.sku}>{s.sku}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  {fmt(s.units)}u · ${fmtD(s.est_cogs)} COGS
+                </span>
+                <span className={`shrink-0 tabular-nums font-medium ${s.est_contribution >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                  ${fmtD(s.est_contribution)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Ad spend behind the day */}
+      <div>
+        <p className="mb-2 text-xs font-medium">Ad spend</p>
+        <p className="text-xs text-muted-foreground">
+          Account total <span className="tabular-nums font-medium text-foreground">${fmtD(row.ad_spend)}</span>
+          {" "}— campaign-level, so it is not attributed to a SKU above.
+        </p>
+        {day && day.campaigns.length > 0 && (
+          <div className="mt-2 space-y-1 text-xs">
+            {day.campaigns.slice(0, 6).map((c) => (
+              <div key={c.campaign_name} className="flex justify-between gap-3">
+                <span className="truncate text-muted-foreground" title={c.campaign_name}>{c.campaign_name}</span>
+                <span className="shrink-0 tabular-nums">${fmtD(c.spend)}</span>
+              </div>
+            ))}
+            {day.campaigns.length > 6 && (
+              <p className="text-[10px] text-muted-foreground">
+                +{day.campaigns.length - 6} more campaigns
+              </p>
+            )}
+          </div>
+        )}
+        {day && day.campaigns.length === 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">No campaign rows for this date.</p>
+        )}
+      </div>
     </div>
   );
 }
