@@ -196,8 +196,16 @@ export async function GET(request: NextRequest) {
       ? Math.max(...methodsArr.map((m) => Math.abs(m - avgMethods) / avgMethods)) * 100
       : 0;
 
-    // Load calibrated weights from forecast_model_state
-    let weights = { a: 0.15, b: 0.60, c: 0.25 };
+    // Load calibrated weights from forecast_model_state (season-aware)
+    const PEAK_WEEKS = new Set([...Array(9)].map((_, i) => i < 5 ? i + 1 : i + 39)); // 1-5, 44-52
+    for (let w = 44; w <= 52; w++) PEAK_WEEKS.add(w);
+    const DEFAULT_OFFPEAK = { a: 0.15, b: 0.60, c: 0.25 };
+    const DEFAULT_PEAK = { a: 0.10, b: 0.70, c: 0.20 };
+    const PEAK_FLOOR = 0.85;
+    const PEAK_SAFETY = 0.25;
+
+    let offpeakWeights = { ...DEFAULT_OFFPEAK };
+    let peakWeights = { ...DEFAULT_PEAK };
     let modelVersion = "default";
     try {
       const msRes = await sb.from("forecast_model_state").select("*")
@@ -206,26 +214,46 @@ export async function GET(request: NextRequest) {
       const globalModel = (msRes.data ?? []).find((m: Record<string, unknown>) => m.sku === "*");
       const active = skuModel || globalModel;
       if (active) {
-        const w = typeof active.weights === "string" ? JSON.parse(active.weights) : active.weights;
-        if (w && typeof w.a === "number") {
-          weights = w;
-          modelVersion = (active.model_version as string) || "calibrated";
+        modelVersion = (active.model_version as string) || "calibrated";
+        const w = typeof active.weights === "string" ? JSON.parse(active.weights as string) : active.weights;
+        if (w && typeof w.a === "number") offpeakWeights = w;
+        let sf = active.seasonal_factors;
+        if (typeof sf === "string") sf = JSON.parse(sf);
+        if (sf && (sf as Record<string, unknown>).peak_weights) {
+          const pw = (sf as Record<string, unknown>).peak_weights as Record<string, number>;
+          if (typeof pw.a === "number") peakWeights = pw as typeof peakWeights;
         }
       }
     } catch { /* table may not exist */ }
 
-    const expected = Math.round(
-      weights.a * totalNaive + weights.b * totalSeasonal + weights.c * totalSnsOrganic,
-    );
-    const coverage = Math.ceil(expected * (1 + safetyPct));
+    // Per-week blended expected with peak protection
+    const hasPeak = weeks.some((w) => PEAK_WEEKS.has(w.iso_week));
+    let peakProtection = false;
+    let expected = 0;
+    for (const w of weeks) {
+      const isPeak = PEAK_WEEKS.has(w.iso_week);
+      const wt = isPeak ? peakWeights : offpeakWeights;
+      let blended = wt.a * w.naive + wt.b * w.seasonal + wt.c * w.sns_organic;
+      // Holiday floor
+      if (isPeak && w.seasonal > 0) {
+        const floor = w.seasonal * PEAK_FLOOR;
+        if (blended < floor) { blended = floor; peakProtection = true; }
+      }
+      expected += blended;
+    }
+    expected = Math.round(expected);
+
+    const effectiveSafety = hasPeak ? Math.max(safetyPct, PEAK_SAFETY) : safetyPct;
+    const coverage = Math.ceil(expected * (1 + effectiveSafety));
     const low = Math.floor(expected * 0.80);
     const high = Math.ceil(expected * 1.20);
 
     const velWindows = [v7, v30, v90].filter((v) => v > 0).length;
     const holidays: string[] = [];
     if (weeks.some((w) => w.source === "forecast")) holidays.push("Holiday forecast (Nov-Jan) applied");
-    const peakWeek = weeks.find((w) => w.multiplier > 2.0);
-    if (peakWeek) holidays.push(`Week ${peakWeek.iso_week}: ${peakWeek.multiplier}x seasonal peak`);
+    const peakWeekEntry = weeks.find((w) => w.multiplier > 2.0);
+    if (peakWeekEntry) holidays.push(`Week ${peakWeekEntry.iso_week}: ${peakWeekEntry.multiplier}x seasonal peak`);
+    if (peakProtection) holidays.push("Peak protection floor applied");
 
     // Read accuracy if available
     let accuracy = null;
@@ -269,7 +297,12 @@ export async function GET(request: NextRequest) {
         seasonality_weeks: Object.keys(seasonality).length,
       },
       model_version: modelVersion,
-      weights,
+      weights: offpeakWeights,
+      peak_weights: peakWeights,
+      offpeak_weights: offpeakWeights,
+      effective_safety_pct: effectiveSafety,
+      peak_protection: peakProtection,
+      has_peak_weeks: hasPeak,
       accuracy,
       holidays,
       weeks,

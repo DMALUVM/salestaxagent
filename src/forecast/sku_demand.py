@@ -40,6 +40,16 @@ def _iso_week(d: date) -> int:
     return max(1, min(52, d.isocalendar()[1]))
 
 
+# Peak = Nov 1 – Jan 31 (weeks ~44-52, 1-5 roughly)
+PEAK_WEEKS = frozenset(range(44, 53)) | frozenset(range(1, 6))
+PEAK_FLOOR_PCT = 0.85     # predicted >= method_B * 85% during peak
+PEAK_SAFETY_DEFAULT = 0.25
+
+
+def _is_peak_week(iso_week: int) -> bool:
+    return iso_week in PEAK_WEEKS
+
+
 def forecast_sku(
     sku: str,
     end_date: str,
@@ -190,30 +200,57 @@ def forecast_sku(
     max_spread = max(abs(m - avg_methods) / max(avg_methods, 1) for m in methods) * 100 if avg_methods else 0
 
     # ── Load calibrated weights from model_state ──
+    DEFAULT_OFFPEAK = {"a": 0.15, "b": 0.60, "c": 0.25}
+    DEFAULT_PEAK = {"a": 0.10, "b": 0.70, "c": 0.20}  # peak favors seasonal
     model_version = "default"
-    weights = {"a": 0.15, "b": 0.60, "c": 0.25}
+    offpeak_weights = dict(DEFAULT_OFFPEAK)
+    peak_weights = dict(DEFAULT_PEAK)
     try:
         model_rows = fetch_all("forecast_model_state")
         sku_model = next((m for m in model_rows if m.get("sku") == sku), None)
         global_model = next((m for m in model_rows if m.get("sku") == "*"), None)
         active = sku_model or global_model
         if active:
+            model_version = active.get("model_version", "calibrated")
+            # Load offpeak weights (legacy "weights" field)
             w = active.get("weights")
             if isinstance(w, str):
                 w = json.loads(w)
             if isinstance(w, dict) and "a" in w:
-                weights = w
-                model_version = active.get("model_version", "calibrated")
+                offpeak_weights = w
+            # Load peak weights if stored; else default peak
+            pw = active.get("seasonal_factors")
+            if isinstance(pw, str):
+                pw = json.loads(pw)
+            if isinstance(pw, dict) and pw.get("peak_weights"):
+                peak_weights = pw["peak_weights"]
     except Exception:
-        pass  # table may not exist yet
+        pass
 
-    # Blended expected using calibrated weights
-    expected = round(
-        weights.get("a", 0.15) * total_naive
-        + weights.get("b", 0.60) * total_seasonal
-        + weights.get("c", 0.25) * total_sns_organic
-    )
-    coverage = math.ceil(expected * (1 + safety_pct))
+    # ── Per-week blended expected with peak protection ──
+    has_peak = any(_is_peak_week(w["iso_week"]) for w in weeks)
+    peak_protection = False
+    expected = 0
+    for w in weeks:
+        is_peak = _is_peak_week(w["iso_week"])
+        wt = peak_weights if is_peak else offpeak_weights
+        blended = (
+            wt.get("a", 0.15) * w["naive"]
+            + wt.get("b", 0.60) * w["seasonal"]
+            + wt.get("c", 0.25) * w["sns_organic"]
+        )
+        # Holiday floor: peak weeks never go below method_B * PEAK_FLOOR_PCT
+        if is_peak and w["seasonal"] > 0:
+            floor = w["seasonal"] * PEAK_FLOOR_PCT
+            if blended < floor:
+                blended = floor
+                peak_protection = True
+        expected += blended
+    expected = round(expected)
+
+    # Asymmetric safety: higher for horizons touching peak
+    effective_safety = max(safety_pct, PEAK_SAFETY_DEFAULT) if has_peak else safety_pct
+    coverage = math.ceil(expected * (1 + effective_safety))
 
     # Bands
     band_pct = 0.20
@@ -273,7 +310,12 @@ def forecast_sku(
         },
 
         "model_version": model_version,
-        "weights": weights,
+        "weights": offpeak_weights,
+        "peak_weights": peak_weights,
+        "offpeak_weights": offpeak_weights,
+        "effective_safety_pct": effective_safety,
+        "peak_protection": peak_protection,
+        "has_peak_weeks": has_peak,
 
         "holidays": holidays,
         "weeks": weeks,

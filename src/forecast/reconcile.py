@@ -115,10 +115,24 @@ def reconcile(sku: str | None = None) -> dict:
     for a in (actuals_resp.data or []):
         actuals_map[a["sku"]][a["week_start"]] = float(a["actual_units"])
 
-    # Score each predicted week against actuals.
-    # Predicted week_start may not be Monday-aligned (forecast starts from
-    # user's start_date). Match to the nearest Monday-aligned actual within ±3 days.
+    # Peak weeks (Nov 1 – Jan 31 ≈ ISO weeks 44-52 + 1-5)
+    PEAK_WEEKS = frozenset(range(44, 53)) | frozenset(range(1, 6))
+
+    def _iso_week(ds: str) -> int:
+        try:
+            d = date.fromisoformat(ds)
+            return max(1, min(52, d.isocalendar()[1]))
+        except (ValueError, TypeError):
+            return 26  # mid-year fallback
+
+    # Score each predicted week, split into peak vs offpeak buckets
     sku_week_errors: dict[str, dict[str, list[float]]] = defaultdict(
+        lambda: {"a": [], "b": [], "c": [], "primary": []}
+    )
+    sku_peak_errors: dict[str, dict[str, list[float]]] = defaultdict(
+        lambda: {"a": [], "b": [], "c": [], "primary": []}
+    )
+    sku_offpeak_errors: dict[str, dict[str, list[float]]] = defaultdict(
         lambda: {"a": [], "b": [], "c": [], "primary": []}
     )
     weeks_scored = 0
@@ -151,18 +165,25 @@ def reconcile(sku: str | None = None) -> dict:
         if actual is None or actual <= 0:
             continue
 
-        # Per-method errors
+        # Per-method errors, bucketed by season
+        iw = _iso_week(ws)
+        is_peak = iw in PEAK_WEEKS
+        bucket = sku_peak_errors if is_peak else sku_offpeak_errors
+
         for method, col in [("a", "method_a"), ("b", "method_b"),
                             ("c", "method_c"), ("primary", "predicted_units")]:
             pred = float(pw.get(col, 0) or 0)
             if pred > 0:
                 ape = abs(pred - actual) / actual
                 sku_week_errors[s][method].append(ape)
+                bucket[s][method].append(ape)
 
         weeks_scored += 1
 
-    # Build accuracy rows
+    # Build accuracy rows + season-split weights
     accuracy_rows: list[dict] = []
+    season_weights: dict[str, dict] = {}  # sku → {peak_weights, offpeak_weights}
+
     for s, errors in sku_week_errors.items():
         n = len(errors.get("primary", []))
         if n == 0:
@@ -177,21 +198,36 @@ def reconcile(sku: str | None = None) -> dict:
         primary_errs = errors.get("primary", [])
         mape = sum(primary_errs) / len(primary_errs) if primary_errs else None
 
-        # Bias: mean signed error (positive = over-forecast)
-        bias = 0.0  # would need signed errors; simplified for now
-
         best = min(mape_by_method, key=lambda k: mape_by_method.get(k, 999)) if mape_by_method else "b"
-        weights = _compute_weights(mape_by_method)
+
+        # Compute season-split weights
+        offpeak_errs = sku_offpeak_errors.get(s, {})
+        peak_errs = sku_peak_errors.get(s, {})
+
+        offpeak_mape = {mk: sum(e)/len(e) for mk, e in offpeak_errs.items() if e and mk in ("a","b","c")}
+        peak_mape = {mk: sum(e)/len(e) for mk, e in peak_errs.items() if e and mk in ("a","b","c")}
+
+        offpeak_w = _compute_weights(offpeak_mape) if offpeak_mape else {"a": 0.15, "b": 0.60, "c": 0.25}
+        peak_w = _compute_weights(peak_mape) if peak_mape else {"a": 0.10, "b": 0.70, "c": 0.20}
+
+        # Store combined for accuracy + model_state
+        combined_weights = _compute_weights(mape_by_method) if mape_by_method else offpeak_w
+        season_weights[s] = {
+            "offpeak_weights": offpeak_w,
+            "peak_weights": peak_w,
+            "offpeak_weeks": len(offpeak_errs.get("primary", [])),
+            "peak_weeks": len(peak_errs.get("primary", [])),
+        }
 
         for window in [30, 90]:
             accuracy_rows.append({
                 "sku": s,
                 "window_days": window,
                 "mape": round(mape * 100, 1) if mape is not None else None,
-                "bias": round(bias * 100, 1),
+                "bias": 0,
                 "n_weeks": n,
                 "best_method": best,
-                "method_weights": json.dumps(weights),
+                "method_weights": json.dumps(combined_weights),
             })
 
     if accuracy_rows:
@@ -203,6 +239,7 @@ def reconcile(sku: str | None = None) -> dict:
         "weeks_scored": weeks_scored,
         "skus_scored": len(sku_week_errors),
         "accuracy_rows": len(accuracy_rows),
+        "season_weights": season_weights,
     }
 
 
@@ -222,8 +259,25 @@ def _compute_weights(mape_by_method: dict[str, float]) -> dict[str, float]:
 
 # ── 3. Calibration ──
 
-def calibrate(sku: str | None = None) -> dict:
-    """Update forecast_model_state with learned weights."""
+def _cap_weights(old: dict, new: dict, default: dict) -> dict:
+    """Apply max shift cap and floor to new weights vs old."""
+    capped = {}
+    for k in ["a", "b", "c"]:
+        o = old.get(k, default.get(k, 0.33))
+        n = new.get(k, o)
+        delta = max(-MAX_WEIGHT_SHIFT, min(MAX_WEIGHT_SHIFT, n - o))
+        capped[k] = round(max(WEIGHT_FLOOR, o + delta), 3)
+    total = sum(capped.values())
+    return {k: round(v / total, 3) for k, v in capped.items()}
+
+
+def calibrate(sku: str | None = None,
+              season_weights: dict[str, dict] | None = None) -> dict:
+    """Update forecast_model_state with season-aware learned weights.
+
+    Stores offpeak weights in 'weights' field (legacy compat) and
+    peak weights in 'seasonal_factors.peak_weights'.
+    """
     client = get_client()
 
     q = client.table("forecast_accuracy").select("*")
@@ -234,12 +288,11 @@ def calibrate(sku: str | None = None) -> dict:
     if not acc_rows:
         return {"calibrated": 0, "message": "No accuracy data — run forecast-reconcile first"}
 
-    # Get current model state
     state_resp = client.table("forecast_model_state").select("*").execute()
     current_state: dict[str, dict] = {s["sku"]: s for s in (state_resp.data or [])}
-    defaults = current_state.get("*", {}).get("weights", {"a": 0.15, "b": 0.60, "c": 0.25})
-    if isinstance(defaults, str):
-        defaults = json.loads(defaults)
+
+    DEFAULT_OFFPEAK = {"a": 0.15, "b": 0.60, "c": 0.25}
+    DEFAULT_PEAK = {"a": 0.10, "b": 0.70, "c": 0.20}
 
     calibrated = 0
     changes: list[str] = []
@@ -250,37 +303,51 @@ def calibrate(sku: str | None = None) -> dict:
         if n < MIN_CALIBRATION_WEEKS:
             continue
 
-        new_weights = row.get("method_weights")
-        if isinstance(new_weights, str):
-            new_weights = json.loads(new_weights)
-        if not new_weights:
-            continue
-
         existing = current_state.get(s, current_state.get("*", {}))
-        old_weights = existing.get("weights", defaults)
-        if isinstance(old_weights, str):
-            old_weights = json.loads(old_weights)
+        old_offpeak = existing.get("weights", DEFAULT_OFFPEAK)
+        if isinstance(old_offpeak, str):
+            old_offpeak = json.loads(old_offpeak)
 
-        # Cap weight changes
-        capped = {}
-        for k in ["a", "b", "c"]:
-            old = old_weights.get(k, 0.33)
-            new = new_weights.get(k, old)
-            delta = max(-MAX_WEIGHT_SHIFT, min(MAX_WEIGHT_SHIFT, new - old))
-            capped[k] = round(max(WEIGHT_FLOOR, old + delta), 3)
+        old_sf = existing.get("seasonal_factors")
+        if isinstance(old_sf, str):
+            old_sf = json.loads(old_sf)
+        old_peak = (old_sf or {}).get("peak_weights", DEFAULT_PEAK)
 
-        # Renormalize
-        total = sum(capped.values())
-        capped = {k: round(v / total, 3) for k, v in capped.items()}
+        # Get season-split data from reconcile output
+        sw = (season_weights or {}).get(s, {})
+        new_offpeak = sw.get("offpeak_weights", old_offpeak)
+        new_peak = sw.get("peak_weights", old_peak)
+        offpeak_n = sw.get("offpeak_weeks", 0)
+        peak_n = sw.get("peak_weeks", 0)
+
+        # Calibrate offpeak only from offpeak weeks
+        if offpeak_n >= MIN_CALIBRATION_WEEKS:
+            capped_offpeak = _cap_weights(old_offpeak, new_offpeak, DEFAULT_OFFPEAK)
+        else:
+            capped_offpeak = old_offpeak
+
+        # Calibrate peak only from peak weeks
+        if peak_n >= MIN_CALIBRATION_WEEKS:
+            capped_peak = _cap_weights(old_peak, new_peak, DEFAULT_PEAK)
+        else:
+            capped_peak = old_peak  # keep default peak-friendly weights
 
         version = f"cal-{date.today().isoformat()}"
         upsert_rows("forecast_model_state", [{
             "sku": s,
-            "weights": json.dumps(capped),
+            "weights": json.dumps(capped_offpeak),
+            "seasonal_factors": json.dumps({
+                "peak_weights": capped_peak,
+                "offpeak_weeks_scored": offpeak_n,
+                "peak_weeks_scored": peak_n,
+            }),
             "model_version": version,
         }], on_conflict="sku")
 
-        changes.append(f"{s}: {capped} (from {n} weeks, MAPE={row.get('mape')}%)")
+        changes.append(
+            f"{s}: offpeak={capped_offpeak} ({offpeak_n}wk) "
+            f"peak={capped_peak} ({peak_n}wk) MAPE={row.get('mape')}%"
+        )
         calibrated += 1
 
     return {"calibrated": calibrated, "changes": changes}
@@ -289,8 +356,8 @@ def calibrate(sku: str | None = None) -> dict:
 # ── 4. Full pipeline ──
 
 def run_full_reconcile(sku: str | None = None) -> dict:
-    """Ingest actuals → score weeks → calibrate."""
+    """Ingest actuals → score weeks → calibrate with season split."""
     actuals = ingest_actuals(sku)
     recon = reconcile(sku)
-    cal = calibrate(sku)
+    cal = calibrate(sku, season_weights=recon.get("season_weights"))
     return {"actuals": actuals, "reconciliation": recon, "calibration": cal}
