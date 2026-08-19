@@ -139,3 +139,165 @@ Press Ctrl+C to stop.
 
 Agent is running. Watching for files and running scheduled tasks.
 
+Starting Sales Tax Compliance Agent...
+Press Ctrl+C to stop.
+
+[Watcher] Watching /Users/maloney_assistant/sales-tax-agent/incoming for new files...
+[Scheduler] Shopify polling every 2h
+[Scheduler] Daily analysis at 08:00
+[Scheduler] Deadline check at 09:00
+[Scheduler] SP-API refresh daily at 06:00
+[Scheduler] Source monitoring every Monday at 07:00
+[Scheduler] CPA exports daily at 06:30
+[Scheduler] Daily digest at 08:05
+[Scheduler] Inventory sync daily at 06:30
+[Scheduler] 3PL sync daily at 06:35
+[Scheduler] GitHub backup weekly Sunday 09:00
+[Scheduler] Job worker every 45s
+
+── Schedule ─────────────────────────────────────
+  shopify_poll          trigger: interval[2:00:00]
+  daily_analysis        trigger: cron[hour='8', minute='0']
+  deadline_check        trigger: cron[hour='9', minute='0']
+  spapi_refresh         trigger: cron[hour='6', minute='0']
+  source_monitoring     trigger: cron[day_of_week='mon', hour='7', minute='0']
+  cpa_exports           trigger: cron[hour='6', minute='30']
+  daily_digest          trigger: cron[hour='8', minute='5']
+  inventory_sync        trigger: cron[hour='6', minute='30']
+  3pl_sync              trigger: cron[hour='6', minute='35']
+  github_backup         trigger: cron[day_of_week='sun', hour='9', minute='0']
+  job_worker            trigger: interval[0:00:45]
+─────────────────────────────────────────────────
+
+Agent is running. Watching for files and running scheduled tasks.
+
+
+Shutting down...
+Agent stopped.
+Starting Sales Tax Compliance Agent...
+Press Ctrl+C to stop.
+
+[Watcher] Watching /Users/maloney_assistant/sales-tax-agent/incoming for new files...
+[Scheduler] Shopify polling every 2h
+[Scheduler] Daily analysis at 08:00
+[Scheduler] Deadline check at 09:00
+[Scheduler] SP-API refresh daily at 06:00
+[Scheduler] Source monitoring every Monday at 07:00
+[Scheduler] CPA exports daily at 06:30
+[Scheduler] Daily digest at 08:05
+[Scheduler] Inventory sync daily at 06:30
+[Scheduler] 3PL sync daily at 06:35
+[Scheduler] GitHub backup weekly Sunday 09:00
+[Scheduler] Job worker every 45s
+
+── Schedule ─────────────────────────────────────
+  shopify_poll          trigger: interval[2:00:00]
+  daily_analysis        trigger: cron[hour='8', minute='0']
+  deadline_check        trigger: cron[hour='9', minute='0']
+  spapi_refresh         trigger: cron[hour='6', minute='0']
+  source_monitoring     trigger: cron[day_of_week='mon', hour='7', minute='0']
+  cpa_exports           trigger: cron[hour='6', minute='30']
+  daily_digest          trigger: cron[hour='8', minute='5']
+  inventory_sync        trigger: cron[hour='6', minute='30']
+  3pl_sync              trigger: cron[hour='6', minute='35']
+  github_backup         trigger: cron[day_of_week='sun', hour='9', minute='0']
+  job_worker            trigger: interval[0:00:45]
+─────────────────────────────────────────────────
+
+Agent is running. Watching for files and running scheduled tasks.
+
+[Shopify Poll] 2026-08-18T01:36:11Z OK — 13891 orders, 1686 rows
+[Shopify Poll] 2026-08-18T03:36:11Z OK — 13891 orders, 1686 rows
+[Shopify Poll] 2026-08-18T05:36:11Z OK — 13892 orders, 1686 rows
+[Shopify Poll] 2026-08-18T07:36:11Z OK — 13892 orders, 1686 rows
+[Shopify Poll] 2026-08-18T09:36:11Z OK — 13892 orders, 1686 rows
+[SP-API] 2026-08-18T10:00:00Z Orders: 50 rows, $21,976 sales
+[SP-API] 2026-08-18T10:00:00Z Orders error: {'message': 'new row for relation "ingestion_log" violates check constraint "ingestion_log_file_type_check"', 'code': '23514', 'hint': None, 'details': 'Failing row contains (0601ec21-6561-407e-992e-d0c86a501d5b, spapi_orders_2026-08-18T10:00:00Z, amazon_spapi, null, 1734, 50, 0, null, success, null, 2026-08-18 10:00:48.175743+00).'}
+[Inventory] fba_summaries: 17 rows
+[Inventory] awd: 7 rows
+[Inventory] restock: 17 rows
+[Inventory] planning: 17 rows
+[Velocity] Error: cannot import name '_to_tz_date' from 'src.sales_daily' (/Users/maloney_assistant/sales-tax-agent/src/sales_daily.py)
+[CPA Export] Inventory presence: 4/4 files uploaded
+[CPA Export] Registration triage: 3 files uploaded
+[CPA Export] Economic nexus audit: 4/4 files, 0 exceeded
+[3PL] 30 SKUs, 30 upserted
+[Shopify Poll] 2026-08-18T11:36:11Z OK — 13892 orders, 1686 rows
+[Daily Analysis] Physical: 32 states, Economic exceeded: 10, Newly crossed: [], Overdue: 12
+[Digest] Sent
+[Deadline Check] 12 overdue, 14 total (included in daily summary)
+[Shopify Poll] 2026-08-18T13:36:11Z OK — 13892 orders, 1686 rows
+[Shopify Poll] 2026-08-18T15:36:11Z OK — 13894 orders, 1686 rows
+[Watcher] Unknown folder '3pl' for file 3be46ebe-1a65-42af-b895-1e91340706d8.csv. Place in incoming/amazon/, incoming/shopify/, or incoming/rulings/
+[Shopify Poll] 2026-08-18T17:36:11Z OK — 13895 orders, 1686 rows
+[Shopify Poll] 2026-08-18T19:36:11Z OK — 13896 orders, 1686 rows
+[Shopify Poll] 2026-08-18T21:36:11Z OK — 13899 orders, 1686 rows
+[Shopify Poll] 2026-08-18T23:36:11Z OK — 13899 orders, 1686 rows
+[Shopify Poll] 2026-08-19T01:36:11Z OK — 13900 orders, 1686 rows
+[Shopify Poll] 2026-08-19T03:36:11Z OK — 13900 orders, 1686 rows
+[Shopify Poll] 2026-08-19T05:36:11Z OK — 13901 orders, 1686 rows
+[Shopify Poll] 2026-08-19T07:36:11Z OK — 13901 orders, 1686 rows
+[Shopify Poll] 2026-08-19T09:36:11Z OK — 13901 orders, 1686 rows
+[SP-API] 2026-08-19T10:00:00Z Orders: 50 rows, $21,476 sales
+[SP-API] 2026-08-19T10:00:00Z Orders error: {'message': 'new row for relation "ingestion_log" violates check constraint "ingestion_log_file_type_check"', 'code': '23514', 'hint': None, 'details': 'Failing row contains (b803f2c0-ce22-40de-a1c9-563fdb6cd587, spapi_orders_2026-08-19T10:00:00Z, amazon_spapi, null, 1702, 50, 0, null, success, null, 2026-08-19 10:00:48.213641+00).'}
+[Inventory] fba_summaries: 17 rows
+[Inventory] awd: 7 rows
+[Inventory] restock: 17 rows
+[Inventory] planning: 17 rows
+[Velocity] Error: cannot import name '_to_tz_date' from 'src.sales_daily' (/Users/maloney_assistant/sales-tax-agent/src/sales_daily.py)
+[CPA Export] Inventory presence: 4/4 files uploaded
+[CPA Export] Registration triage: 3 files uploaded
+[CPA Export] Economic nexus audit: 4/4 files, 0 exceeded
+[3PL] 29 SKUs, 29 upserted
+[Shopify Poll] 2026-08-19T11:36:11Z OK — 13901 orders, 1686 rows
+[Daily Analysis] Physical: 32 states, Economic exceeded: 10, Newly crossed: [], Overdue: 0
+[Digest] Sent
+[Deadline Check] 0 overdue, 0 total (included in daily summary)
+[Shopify Poll] 2026-08-19T13:36:11Z OK — 13902 orders, 1686 rows
+[Shopify Poll] 2026-08-19T15:36:11Z OK — 13903 orders, 1687 rows
+[Shopify Poll] 2026-08-19T17:36:11Z OK — 13906 orders, 1687 rows
+[Shopify Poll] 2026-08-19T19:36:11Z OK — 13906 orders, 1687 rows
+
+Shutting down...
+Agent stopped.
+Starting Sales Tax Compliance Agent...
+Press Ctrl+C to stop.
+
+[Watcher] Watching /Users/maloney_assistant/sales-tax-agent/incoming for new files...
+[Scheduler] Timezone: America/New_York
+[Scheduler] Shopify polling every 2h
+[Scheduler] Daily analysis at 08:00
+[Scheduler] Deadline check at 09:00
+[Scheduler] SP-API refresh daily at 06:00
+[Scheduler] Source monitoring every Monday at 07:00
+[Scheduler] CPA exports daily at 06:30
+[Scheduler] Daily digest at 08:05
+[Scheduler] Inventory sync daily at 06:30
+[Scheduler] 3PL sync daily at 06:35
+[Scheduler] Ads campaigns sync daily at 05:00 (30d, ≤30d chunks)
+[Scheduler] Ads search terms sync daily at 05:30 (7d, 7d chunks)
+[Scheduler] Ads actions daily at 06:00 (7d, target ACOS 30%)
+[Scheduler] Ads campaigns backfill weekly Sunday 03:00 (90d)
+[Scheduler] GitHub backup weekly Sunday 09:00
+[Scheduler] Job worker every 45s
+
+── Schedule ─────────────────────────────────────
+  shopify_poll          trigger: interval[2:00:00]
+  daily_analysis        trigger: cron[hour='8', minute='0']
+  deadline_check        trigger: cron[hour='9', minute='0']
+  spapi_refresh         trigger: cron[hour='6', minute='0']
+  source_monitoring     trigger: cron[day_of_week='mon', hour='7', minute='0']
+  cpa_exports           trigger: cron[hour='6', minute='30']
+  daily_digest          trigger: cron[hour='8', minute='5']
+  inventory_sync        trigger: cron[hour='6', minute='30']
+  3pl_sync              trigger: cron[hour='6', minute='35']
+  ads_campaigns_sync    trigger: cron[hour='5', minute='0']
+  ads_search_terms_sync  trigger: cron[hour='5', minute='30']
+  ads_actions           trigger: cron[hour='6', minute='0']
+  ads_campaigns_backfill  trigger: cron[day_of_week='sun', hour='3', minute='0']
+  github_backup         trigger: cron[day_of_week='sun', hour='9', minute='0']
+  job_worker            trigger: interval[0:00:45]
+─────────────────────────────────────────────────
+
+Agent is running. Watching for files and running scheduled tasks.
+

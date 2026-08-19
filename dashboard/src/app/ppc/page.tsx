@@ -54,8 +54,19 @@ interface PPCData {
   cutoffs: Record<Range, string> | null;
   dateMin: string | null; dateMax: string | null; daysInDb: number;
   campaigns: CampaignAgg[]; searchTerms: SearchTerm[];
-  recommendations: Rec[]; lastSync: string | null;
+  recommendations: Rec[];
+  /** Newest finished ads sync of any kind, plus which job and how it ended. */
+  lastSync: string | null; lastSyncJob: string | null; lastSyncStatus: string | null;
+  /** Last successful scheduled actions run — the queue refreshes on its own. */
+  lastActions: string | null;
 }
+
+const SYNC_JOB_LABELS: Record<string, string> = {
+  ads_sync: "manual sync",
+  ads_campaigns_sync: "campaigns",
+  ads_search_terms_sync: "search terms",
+  ads_campaigns_backfill: "90d backfill",
+};
 
 const PRIORITY_COLORS: Record<string, string> = {
   P0: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800",
@@ -215,9 +226,13 @@ export default function PPCPage() {
   const wastedTotal = searchTerms.filter((s) => s.orders_14d === 0).reduce((sum, s) => sum + Number(s.spend ?? 0), 0);
 
   // Format last sync
-  const lastSyncLabel = data?.lastSync
-    ? new Date(data.lastSync).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-    : "never";
+  const stamp = (iso: string) =>
+    new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const lastSyncLabel = data?.lastSync ? stamp(data.lastSync) : "never";
+  const lastSyncJobLabel = data?.lastSyncJob
+    ? SYNC_JOB_LABELS[data.lastSyncJob] ?? data.lastSyncJob
+    : null;
+  const lastActionsLabel = data?.lastActions ? stamp(data.lastActions) : null;
 
   /** Everything the exported plan needs — same numbers the KPI cards show. */
   function planContext() {
@@ -305,6 +320,14 @@ export default function PPCPage() {
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
               Data: {data?.dateMin ?? "?"} → {data?.dateMax ?? "?"} · {data?.daysInDb ?? 0} days in DB · last sync {lastSyncLabel}
+              {lastSyncJobLabel && ` (${lastSyncJobLabel}`}
+              {lastSyncJobLabel && data?.lastSyncStatus && data.lastSyncStatus !== "success" && (
+                <span className={data.lastSyncStatus === "fail" ? "text-red-500" : "text-amber-500"}>
+                  {", "}{data.lastSyncStatus}
+                </span>
+              )}
+              {lastSyncJobLabel && ")"}
+              {lastActionsLabel && ` · actions rebuilt ${lastActionsLabel}`}
               {(kpiDays ?? 0) < rangeDays && (kpiDays ?? 0) > 0 && (
                 <span className="ml-2 text-amber-500">
                   ({kpiDays}d of data in {range} window)

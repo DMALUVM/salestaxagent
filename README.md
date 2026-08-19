@@ -241,9 +241,31 @@ python -m src.main analyze
 python -m src.main run
 
 # Or use the provided launchd plist for auto-start on boot (macOS):
-cp scripts/com.salestax.agent.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.salestax.agent.plist
+cp deploy/launchd/com.tallowbourn.salestax.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.tallowbourn.salestax.plist
 ```
+
+**Daily automation (no terminal needed).** Once that launchd job is loaded the
+agent starts at login, restarts itself if it exits, and runs every sync on its
+own — so the `/ppc` KPIs, trend chart and Actions queue are already current each
+morning. All cron times are **America/New_York**, set explicitly on the
+scheduler from `config/business_rules.json` → `agent.timezone`, so changing the
+Mac's clock cannot move them (Amazon *day boundaries* stay America/Los_Angeles —
+a separate rule). The Ads schedule is 05:00 campaigns (30 days, ≤30-day chunks),
+05:30 search terms (7 days, 7-day chunks, 90-minute cap with one retry), 06:00
+action-queue rebuild (7 days, 30% target ACOS), plus a Sunday 03:00 90-day
+campaign backfill for long trends; SP-API orders and `sales_daily` refresh at
+06:00 to keep the TACOS denominator current. The three Ads jobs are separate on
+purpose — a slow search-term report can never delay or cancel the campaign
+refresh, so a bad night degrades to "current KPIs, yesterday's Actions" and is
+recorded as `partial`, not `fail`. Check what actually ran with
+`python -m src.main jobs` (add `--failures` to see only problems, or
+`--job ads_campaigns_sync` for one job); every run writes a `job_runs` row with
+status and timestamps, which is what the dashboard's "last sync" label reads.
+After changing code, restart the agent with
+`launchctl kickstart -k gui/$(id -u)/com.tallowbourn.salestax` — the scheduler
+builds its job list once at startup. See `deploy/launchd/README.md` for the full
+job table.
 
 ---
 
@@ -276,6 +298,30 @@ python -m src.main export-csv --table sales_by_sku --start 2026-01-01
 
 # SP-API: pull Amazon orders + inventory
 python -m src.main spapi-refresh --days 30
+
+# Amazon Ads: sync campaigns + search terms
+#   campaigns  chunk at <=30 days; search terms chunk at 7 days (much heavier)
+python -m src.main ads-sync --days 14
+
+# Just the fast half — campaign dailies for the KPI cards and trend chart.
+# Returns in ~30s and never waits on a search-term report.
+python -m src.main ads-sync --days 30 --campaigns-only
+
+# Just the slow half — search terms for the Actions queue (90-min cap, 1 retry)
+python -m src.main ads-sync --days 7 --search-terms-only
+python -m src.main ads-sync --days 14 --search-terms-only --search-term-chunk-days 7
+
+# 90-day PPC backfill — fills ads_campaigns_daily so the /ppc trends chart and
+# its 90D range have real history. Issues 3 chunked campaign report requests
+# (30 + 30 + 30 days). Runs automatically every Sunday at 03:00.
+python -m src.main ads-sync --days 90 --campaigns-only
+
+# Rebuild the PPC action queue (also runs automatically at 06:00 daily)
+python -m src.main ads-actions --target-acos 30 --days 7
+
+# What the scheduled agent has actually done
+python -m src.main jobs
+python -m src.main jobs --failures
 
 # Start the background agent (folder watcher + scheduler + API polling)
 python -m src.main run

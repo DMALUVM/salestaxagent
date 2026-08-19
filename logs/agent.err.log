@@ -2186,3 +2186,63 @@ shipsidekick_org_slug
 shipsidekick_base_url
   Extra inputs are not permitted [type=extra_forbidden, input_value='https://www.shipsidekick.com', input_type=str]
     For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden
+Job "_run_spapi_refresh (trigger: cron[hour='6', minute='0'], next run at: 2026-08-19 06:00:00 EDT)" raised an exception
+Traceback (most recent call last):
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1484, in _run_spapi_refresh
+    click.echo(f"  OK: {len(sku_rows)} rows, all uppercase")
+  File "/Users/maloney_assistant/sales-tax-agent/src/db.py", line 150, in log_ingestion
+    insert_rows("ingestion_log", [row])
+  File "/Users/maloney_assistant/sales-tax-agent/src/db.py", line 62, in insert_rows
+    result = client.table(table).insert(cleaned).execute()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/postgrest/_sync/request_builder.py", line 96, in execute
+    raise APIError(dict(json_obj))
+postgrest.exceptions.APIError: {'message': 'new row for relation "ingestion_log" violates check constraint "ingestion_log_file_type_check"', 'code': '23514', 'hint': None, 'details': 'Failing row contains (0601ec21-6561-407e-992e-d0c86a501d5b, spapi_orders_2026-08-18T10:00:00Z, amazon_spapi, null, 1734, 50, 0, null, success, null, 2026-08-18 10:00:48.175743+00).'}
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/apscheduler/executors/base.py", line 131, in run_job
+    retval = job.func(*job.args, **job.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1494, in _run_spapi_refresh
+    if dupes:
+        ^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/db.py", line 150, in log_ingestion
+    insert_rows("ingestion_log", [row])
+  File "/Users/maloney_assistant/sales-tax-agent/src/db.py", line 62, in insert_rows
+    result = client.table(table).insert(cleaned).execute()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/postgrest/_sync/request_builder.py", line 96, in execute
+    raise APIError(dict(json_obj))
+postgrest.exceptions.APIError: {'message': 'new row for relation "ingestion_log" violates check constraint "ingestion_log_file_type_check"', 'code': '23514', 'hint': None, 'details': 'Failing row contains (8943bd23-65e8-47b4-82d5-b292031afc78, spapi_orders_2026-08-18T10:00:00Z, amazon_spapi, null, 0, 0, 0, null, failed, {\'message\': \'new row for relation "ingestion_log" violates check..., 2026-08-18 10:00:48.261085+00).'}
+Job "_run_spapi_refresh (trigger: cron[hour='6', minute='0'], next run at: 2026-08-20 06:00:00 EDT)" raised an exception
+Traceback (most recent call last):
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1484, in _run_spapi_refresh
+    SKU_SHORT = {
+        ^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/db.py", line 150, in log_ingestion
+    insert_rows("ingestion_log", [row])
+  File "/Users/maloney_assistant/sales-tax-agent/src/db.py", line 62, in insert_rows
+    result = client.table(table).insert(cleaned).execute()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/postgrest/_sync/request_builder.py", line 96, in execute
+    raise APIError(dict(json_obj))
+postgrest.exceptions.APIError: {'message': 'new row for relation "ingestion_log" violates check constraint "ingestion_log_file_type_check"', 'code': '23514', 'hint': None, 'details': 'Failing row contains (b803f2c0-ce22-40de-a1c9-563fdb6cd587, spapi_orders_2026-08-19T10:00:00Z, amazon_spapi, null, 1702, 50, 0, null, success, null, 2026-08-19 10:00:48.213641+00).'}
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/apscheduler/executors/base.py", line 131, in run_job
+    retval = job.func(*job.args, **job.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/src/main.py", line 1494, in _run_spapi_refresh
+    include_3pl=not no_3pl,
+  File "/Users/maloney_assistant/sales-tax-agent/src/db.py", line 150, in log_ingestion
+    insert_rows("ingestion_log", [row])
+  File "/Users/maloney_assistant/sales-tax-agent/src/db.py", line 62, in insert_rows
+    result = client.table(table).insert(cleaned).execute()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/maloney_assistant/sales-tax-agent/.venv/lib/python3.12/site-packages/postgrest/_sync/request_builder.py", line 96, in execute
+    raise APIError(dict(json_obj))
+postgrest.exceptions.APIError: {'message': 'new row for relation "ingestion_log" violates check constraint "ingestion_log_file_type_check"', 'code': '23514', 'hint': None, 'details': 'Failing row contains (c998a0ba-c175-48b2-be4b-197878a45041, spapi_orders_2026-08-19T10:00:00Z, amazon_spapi, null, 0, 0, 0, null, failed, {\'message\': \'new row for relation "ingestion_log" violates check..., 2026-08-19 10:00:48.325938+00).'}

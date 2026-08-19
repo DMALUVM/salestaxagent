@@ -1,16 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mac Mini agent: folder watcher + APScheduler cron jobs.
+
+  Label matches the job already installed at
+  ~/Library/LaunchAgents/com.tallowbourn.salestax.plist — keep them identical so
+  `launchctl` manages one job, not two.
+
+  RunAtLoad + KeepAlive means the agent starts at login and is restarted if it
+  ever exits, so the daily syncs survive a reboot with no terminal.
+-->
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.tallowbourn.salestaxagent</string>
+    <string>com.tallowbourn.salestax</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>/Users/maloney_assistant/sales-tax-agent/.venv/bin/python</string>
+        <!-- -u: unbuffered, so logs/agent.out.log is readable live instead of
+             appearing in 4KB bursts hours later. -->
+        <string>-u</string>
         <string>-m</string>
         <string>src.main</string>
-        <string>scheduler</string>
+        <string>run</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -20,6 +33,8 @@
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
     </dict>
 
     <key>RunAtLoad</key>

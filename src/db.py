@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime
 from typing import Any
 
@@ -8,6 +9,7 @@ from supabase import create_client, Client
 
 from src.config import settings
 
+log = logging.getLogger(__name__)
 
 _client: Client | None = None
 
@@ -147,7 +149,16 @@ def log_ingestion(filename: str, file_type: str, file_hash: str | None = None,
         "status": status,
         "error_message": error_message,
     }
-    insert_rows("ingestion_log", [row])
+    try:
+        insert_rows("ingestion_log", [row])
+    except Exception as e:
+        # Best-effort audit trail, like job_finish(). This row failing must not
+        # abort the sync that was writing real data: ingestion_log.file_type
+        # carries a CHECK constraint, and a value outside it used to raise
+        # straight out of the scheduled SP-API job, skipping the sales_daily
+        # refresh that TACOS depends on.
+        log.warning("ingestion_log insert failed for %s (%s): %s",
+                    filename, file_type, str(e)[:200])
 
 
 # ── Supabase Storage helpers ───────────────────────────────

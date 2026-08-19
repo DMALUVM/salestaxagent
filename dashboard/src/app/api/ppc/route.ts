@@ -202,11 +202,38 @@ export async function GET() {
       }
     } catch { /* */ }
 
-    // ── Last sync time from job_runs ──
+    // ── Last sync from job_runs ──
+    // The scheduler writes one row per ads job (campaigns / search terms /
+    // backfill), and the CLI still writes ads_sync, so all of them count.
+    // Only finished runs qualify: a row stuck in "running" would otherwise
+    // report a sync that never landed as the freshest one.
+    const ADS_JOBS = ["ads_sync", "ads_campaigns_sync", "ads_search_terms_sync",
+                      "ads_campaigns_backfill"];
     let lastSync: string | null = null;
+    let lastSyncJob: string | null = null;
+    let lastSyncStatus: string | null = null;
     try {
-      const r = await sb.from("job_runs").select("started_at").eq("job_name", "ads_sync").order("started_at", { ascending: false }).limit(1);
-      if (r.data?.[0]) lastSync = r.data[0].started_at;
+      const r = await sb.from("job_runs")
+        .select("job_name,status,started_at,finished_at")
+        .in("job_name", ADS_JOBS)
+        .in("status", ["success", "partial", "fail"])
+        .order("started_at", { ascending: false })
+        .limit(1);
+      if (r.data?.[0]) {
+        lastSync = r.data[0].started_at;
+        lastSyncJob = r.data[0].job_name;
+        lastSyncStatus = r.data[0].status;
+      }
+    } catch { /* */ }
+
+    // Last successful actions run — the queue refreshes on a schedule, so the
+    // page can say when, instead of implying a manual Generate is required.
+    let lastActions: string | null = null;
+    try {
+      const r = await sb.from("job_runs").select("started_at")
+        .eq("job_name", "ads_actions").eq("status", "success")
+        .order("started_at", { ascending: false }).limit(1);
+      if (r.data?.[0]) lastActions = r.data[0].started_at;
     } catch { /* */ }
 
     return Response.json({
@@ -217,12 +244,13 @@ export async function GET() {
       dailySeries, cutoffs,
       dateMin, dateMax, daysInDb,
       campaigns, searchTerms, recommendations,
-      lastSync,
+      lastSync, lastSyncJob, lastSyncStatus, lastActions,
     });
   } catch {
     return Response.json({
       kpi7: null, kpi14: null, kpi30: null, kpi90: null,
       dailySeries: [], cutoffs: null, campaigns: [], searchTerms: [], recommendations: [],
+      lastSyncJob: null, lastSyncStatus: null, lastActions: null,
       dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,
     });
   }

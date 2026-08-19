@@ -548,22 +548,45 @@ def ads_test_cmd():
 
 @cli.command("ads-sync")
 @click.option("--days", default=14, help="Days of history to sync")
-def ads_sync_cmd(days):
-    """Sync Amazon Ads campaigns + search terms (auto-chunked ≤30d)."""
+@click.option("--campaigns-only", is_flag=True,
+              help="Sync campaigns only — returns without waiting on search terms")
+@click.option("--search-terms-only", is_flag=True,
+              help="Sync search terms only")
+@click.option("--search-term-chunk-days", default=None, type=int,
+              help="Chunk size for search-term reports (default 7)")
+def ads_sync_cmd(days, campaigns_only, search_terms_only, search_term_chunk_days):
+    """Sync Amazon Ads campaigns + search terms (auto-chunked).
+
+    Campaigns chunk at ≤30 days; search terms at 7 by default because those
+    reports are far heavier and a wide window times out.
+    """
     from src.config import settings
     if not settings.amazon_ads_enabled:
         click.echo("Amazon Ads not configured. Set AMAZON_ADS_* in .env")
         return
-    from src.amazon_ads.reports import sync_ads
+    if campaigns_only and search_terms_only:
+        raise click.UsageError("--campaigns-only and --search-terms-only are mutually exclusive")
+    from src.amazon_ads.reports import sync_ads, SEARCH_TERM_CHUNK_DAYS
     from src.db import job_start, job_finish
 
-    run_id = job_start("ads_sync")
-    click.echo(f"Syncing last {days} days of Ads data (chunked ≤30d per API call)...")
-    result = sync_ads(days=days)
+    job_name = ("ads_campaigns_sync" if campaigns_only else
+                "ads_search_terms_sync" if search_terms_only else "ads_sync")
+    st_chunk = search_term_chunk_days or SEARCH_TERM_CHUNK_DAYS
+
+    run_id = job_start(job_name)
+    scope = ("campaigns only" if campaigns_only else
+             "search terms only" if search_terms_only else "campaigns + search terms")
+    click.echo(f"Syncing last {days} days of Ads data ({scope}; "
+               f"campaigns ≤30d chunks, search terms {st_chunk}d chunks)...")
+    result = sync_ads(days=days, campaigns_only=campaigns_only,
+                      search_terms_only=search_terms_only,
+                      search_term_chunk_days=search_term_chunk_days)
     errors = []
 
     for key in ["campaigns", "search_terms"]:
-        val = result.get(key, {})
+        val = result.get(key)
+        if val is None:
+            continue  # this half was skipped — don't report it as "0 rows"
         if isinstance(val, dict):
             if val.get("errors"):
                 click.echo(f"  {key}: {val.get('rows', 0)} rows, {val.get('inserted', 0)} inserted "
@@ -583,34 +606,127 @@ def ads_sync_cmd(days):
 
     click.echo(f"  Range: {result.get('start', '?')} → {result.get('end', '?')}")
 
-    # Determine job outcome: partial success if campaigns loaded but search terms failed
-    campaigns_ok = isinstance(result.get("campaigns"), dict) and "error" not in result.get("campaigns", {})
-    st_ok = isinstance(result.get("search_terms"), dict) and not result.get("search_terms", {}).get("errors") and "error" not in result.get("search_terms", {})
-    if campaigns_ok and st_ok:
-        job_finish(run_id, "success", f"{days}d synced")
-    elif campaigns_ok and not st_ok:
-        job_finish(run_id, "success", f"{days}d synced (campaigns OK, search_terms partial: {len(errors)} errors)")
-    else:
-        job_finish(run_id, "fail", f"{len(errors)} chunk errors")
+    status, message = _ads_sync_outcome(result, days)
+    job_finish(run_id, status, message)
+    click.echo(f"  Job {job_name}: {status} — {message}")
+
+
+def _ads_sync_outcome(result: dict, days: int) -> tuple[str, str]:
+    """Classify an ads sync as success / partial / fail.
+
+    Only the halves that actually ran are judged, so `--campaigns-only` is not
+    marked partial for the search terms it deliberately skipped. Campaigns
+    landing while search terms time out is a *partial*, not a failure — the
+    /ppc KPIs and trends are current either way.
+    """
+    def half(name: str) -> str | None:
+        val = result.get(name)
+        if not isinstance(val, dict):
+            return None                       # did not run
+        if "error" in val:
+            return "fail"
+        return "partial" if val.get("errors") else "ok"
+
+    campaigns, search_terms = half("campaigns"), half("search_terms")
+    ran = [s for s in (campaigns, search_terms) if s is not None]
+    if not ran:
+        return "fail", "nothing ran"
+
+    scope = "+".join(result.get("ran", []))
+    detail = []
+    if campaigns:
+        detail.append(f"campaigns {campaigns}")
+    if search_terms:
+        detail.append(f"search_terms {search_terms}")
+    summary = f"{days}d {scope}: " + ", ".join(detail)
+
+    if all(s == "ok" for s in ran):
+        return "success", summary
+    if all(s == "fail" for s in ran):
+        return "fail", summary
+    return "partial", summary
 
 
 @cli.command("ads-actions")
 @click.option("--target-acos", default=30.0, help="Target ACOS %")
-def ads_actions_cmd(target_acos):
-    """Generate PPC action recommendations."""
+@click.option("--days", default=7, help="Lookback window for search terms")
+def ads_actions_cmd(target_acos, days):
+    """Generate PPC action recommendations (replaces the open queue)."""
     from src.amazon_ads.actions_engine import generate_recommendations
-    recs = generate_recommendations(target_acos=target_acos)
+    from src.db import job_start, job_finish
+
+    run_id = job_start("ads_actions")
+    try:
+        recs = generate_recommendations(target_acos=target_acos, lookback_days=days)
+    except Exception as e:
+        job_finish(run_id, "fail", str(e)[:400])
+        raise click.ClickException(f"Recommendation generation failed: {e}")
+
     if not recs:
-        click.echo("No recommendations (no ads data or all within target)")
+        msg = (f"No recommendations — no search term data in the last {days} days, "
+               f"or everything is within the {target_acos:.0f}% target")
+        click.echo(msg)
+        job_finish(run_id, "success", msg)
         return
-    click.echo(f"{len(recs)} recommendations:")
+
+    click.echo(f"{len(recs)} recommendations ({days}d window, target ACOS {target_acos:.0f}%):")
     for r in recs[:15]:
-        evidence = r.get("evidence", {})
-        if isinstance(evidence, str):
-            import json
-            evidence = json.loads(evidence)
         click.echo(f"  [{r['priority']}] {r['type']}: {r.get('entity_name','')[:40]}")
-        click.echo(f"       Impact: ${r['impact_estimate']:.2f}  {r['suggested_action'][:60]}")
+        click.echo(f"       Impact: ${r['impact_estimate']:.2f}  {r['suggested_action'][:80]}")
+    job_finish(run_id, "success",
+               f"{len(recs)} recs ({days}d, target {target_acos:.0f}%)",
+               stats={"count": len(recs), "target_acos": target_acos, "days": days})
+
+
+@cli.command("jobs")
+@click.option("--limit", default=20, help="How many runs to show")
+@click.option("--job", default=None, help="Filter to one job_name")
+@click.option("--failures", is_flag=True, help="Show only fail/partial runs")
+def jobs_cmd(limit, job, failures):
+    """Show recent scheduled-job runs from job_runs (what the agent has done)."""
+    from src.db import get_client
+    from datetime import datetime, timezone
+
+    q = get_client().table("job_runs").select("*").order("started_at", desc=True)
+    if job:
+        q = q.eq("job_name", job)
+    if failures:
+        q = q.in_("status", ["fail", "partial"])
+    rows = (q.limit(limit).execute().data) or []
+
+    if not rows:
+        click.echo("No job runs recorded yet.")
+        return
+
+    now = datetime.now(timezone.utc)
+    click.echo(f"{'STARTED (local)':<20s} {'JOB':<24s} {'STATUS':<9s} {'TOOK':>7s}  MESSAGE")
+    click.echo("─" * 110)
+    for r in rows:
+        started_raw = str(r.get("started_at") or "")
+        try:
+            started = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
+            started_local = started.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            started, started_local = None, started_raw[:19]
+
+        took = "—"
+        if started:
+            finished_raw = r.get("finished_at")
+            if finished_raw:
+                try:
+                    finished = datetime.fromisoformat(str(finished_raw).replace("Z", "+00:00"))
+                    took = f"{(finished - started).total_seconds():.0f}s"
+                except Exception:
+                    pass
+            elif r.get("status") == "running":
+                took = f"{(now - started).total_seconds() / 60:.0f}m…"
+
+        status = str(r.get("status") or "?")
+        colour = {"success": "green", "partial": "yellow",
+                  "fail": "red", "running": "cyan"}.get(status)
+        click.echo(f"{started_local:<20s} {str(r.get('job_name'))[:24]:<24s} "
+                   f"{click.style(f'{status:<9s}', fg=colour)} {took:>7s}  "
+                   f"{str(r.get('message') or '')[:50]}")
 
 
 @cli.command("ads-waste")
@@ -2163,7 +2279,14 @@ def run():
 
     try:
         from apscheduler.schedulers.blocking import BlockingScheduler
-        scheduler = BlockingScheduler()
+        from src.rules import AGENT_TZ, AGENT_TZ_NAME
+
+        # Every cron below fires on AGENT_TZ (config/business_rules.json →
+        # agent.timezone), not on whatever the machine's clock is set to, so a
+        # laptop that travels or a changed system setting cannot silently move
+        # the sync window. Amazon day boundaries stay on America/Los_Angeles.
+        scheduler = BlockingScheduler(timezone=AGENT_TZ)
+        click.echo(f"[Scheduler] Timezone: {AGENT_TZ_NAME}")
 
         from src.config import settings
 
@@ -2255,6 +2378,61 @@ def run():
             id="3pl_sync",
         )
         click.echo("[Scheduler] 3PL sync daily at 06:35")
+
+        # ── Amazon Ads: three independent jobs, deliberately not one ──
+        # Campaigns are fast and feed the /ppc KPIs + trends; search terms are
+        # slow (up to 90 min) and feed the Actions queue. Splitting them means a
+        # search-term timeout can never delay or cancel the campaign refresh.
+        # misfire_grace_time keeps a job that was asleep at its slot from being
+        # skipped outright; coalesce collapses a backlog into one run.
+        if settings.amazon_ads_enabled:
+            scheduler.add_job(
+                _run_ads_campaigns_sync,
+                "cron",
+                hour=5,
+                minute=0,
+                id="ads_campaigns_sync",
+                misfire_grace_time=3600,
+                coalesce=True,
+            )
+            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (30d, ≤30d chunks)")
+
+            scheduler.add_job(
+                _run_ads_search_terms_sync,
+                "cron",
+                hour=5,
+                minute=30,
+                id="ads_search_terms_sync",
+                misfire_grace_time=3600,
+                coalesce=True,
+                max_instances=1,   # a 90-min run must never overlap itself
+            )
+            click.echo("[Scheduler] Ads search terms sync daily at 05:30 (7d, 7d chunks)")
+
+            scheduler.add_job(
+                _run_ads_actions,
+                "cron",
+                hour=6,
+                minute=0,
+                id="ads_actions",
+                misfire_grace_time=3600,
+                coalesce=True,
+            )
+            click.echo("[Scheduler] Ads actions daily at 06:00 (7d, target ACOS 30%)")
+
+            scheduler.add_job(
+                _run_ads_campaigns_backfill,
+                "cron",
+                day_of_week="sun",
+                hour=3,
+                minute=0,
+                id="ads_campaigns_backfill",
+                misfire_grace_time=7200,
+                coalesce=True,
+            )
+            click.echo("[Scheduler] Ads campaigns backfill weekly Sunday 03:00 (90d)")
+        else:
+            click.echo("[Scheduler] Amazon Ads not configured — ads jobs not scheduled")
 
         # Weekly GitHub backup (Sunday 09:00)
         scheduler.add_job(
@@ -2701,6 +2879,115 @@ def _run_3pl_sync():
     except Exception as e:
         print(f"[3PL] Error: {e}")
         job_finish(run_id, "fail", str(e)[:500])
+
+
+# ── Amazon Ads scheduled jobs ────────────────────────────────
+#
+# Each runs in its own APScheduler job and swallows its own exceptions, so one
+# failing never prevents the others from firing. Each writes its own job_runs
+# row; the /ppc "last sync" label reads the newest of them.
+
+
+def _ads_alert(subject: str, detail: str) -> None:
+    """Telegram on hard failure only — partials are normal and stay in the log."""
+    try:
+        from src.config import settings
+        if not settings.telegram_enabled:
+            return
+        from src.alerts.telegram import send_telegram
+        send_telegram(f"⚠️ {subject}\n\n{detail[:600]}")
+    except Exception as e:  # never let alerting break the job
+        print(f"[Ads] Telegram alert failed: {e}")
+
+
+def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
+                      search_terms_only: bool = False, label: str) -> None:
+    """Shared body for the ads sync jobs."""
+    from src.db import job_start, job_finish
+    from src.amazon_ads.reports import sync_ads
+
+    run_id = job_start(job_name)
+    try:
+        result = sync_ads(days=days, campaigns_only=campaigns_only,
+                          search_terms_only=search_terms_only)
+    except Exception as e:
+        print(f"[Ads {label}] Failed: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        _ads_alert(f"Ads {label} sync failed", str(e))
+        return
+
+    status, message = _ads_sync_outcome(result, days)
+    for key in ("campaigns", "search_terms"):
+        val = result.get(key)
+        if isinstance(val, dict):
+            if "error" in val:
+                print(f"[Ads {label}] {key}: ERROR — {val['error'][:120]}")
+            else:
+                print(f"[Ads {label}] {key}: {val.get('rows', 0)} rows, "
+                      f"{val.get('inserted', 0)} inserted, "
+                      f"{val.get('chunks', 0)} chunks, {len(val.get('errors', []))} chunk errors")
+    print(f"[Ads {label}] {status}: {message}")
+
+    job_finish(run_id, status, message, stats=result.get("campaigns") or result.get("search_terms"))
+    # Partial = some chunks landed; only a total failure is worth a push alert.
+    if status == "fail":
+        _ads_alert(f"Ads {label} sync failed", message)
+
+
+def _run_ads_campaigns_sync():
+    """05:00 — campaign dailies for the KPI cards and trend chart.
+
+    Returns without ever calling the search-term endpoint, so the numbers on
+    /ppc are current by ~05:05 regardless of what search terms do at 05:30.
+    """
+    _run_ads_sync_job("ads_campaigns_sync", days=30, campaigns_only=True,
+                      label="campaigns")
+
+
+def _run_ads_search_terms_sync():
+    """05:30 — 7 days of search terms in 7-day chunks (one chunk, 90-min cap)."""
+    _run_ads_sync_job("ads_search_terms_sync", days=7, search_terms_only=True,
+                      label="search terms")
+
+
+def _run_ads_campaigns_backfill():
+    """Sunday 03:00 — 90 days of campaigns (3 × 30-day chunks) for long trends."""
+    _run_ads_sync_job("ads_campaigns_backfill", days=90, campaigns_only=True,
+                      label="campaigns 90d")
+
+
+def _run_ads_actions():
+    """06:00 — regenerate the Actions queue from the freshest search terms.
+
+    This is what makes the dashboard's "Generate Recommendations" button
+    optional: the queue is already rebuilt before the user looks at it.
+    """
+    from src.db import job_start, job_finish
+    from src.amazon_ads.actions_engine import generate_recommendations
+
+    run_id = job_start("ads_actions")
+    try:
+        recs = generate_recommendations(target_acos=30.0, lookback_days=7)
+    except Exception as e:
+        print(f"[Ads actions] Failed: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        _ads_alert("PPC action generation failed", str(e))
+        return
+
+    if not recs:
+        msg = "No recommendations — no search term data in the last 7 days"
+        print(f"[Ads actions] {msg}")
+        job_finish(run_id, "success", msg)
+        return
+
+    by_priority: dict[str, int] = {}
+    for r in recs:
+        by_priority[r["priority"]] = by_priority.get(r["priority"], 0) + 1
+    msg = f"{len(recs)} recs (" + ", ".join(f"{k} {v}" for k, v in sorted(by_priority.items())) + ")"
+    print(f"[Ads actions] {msg}")
+    job_finish(run_id, "success", msg,
+               stats={"count": len(recs), "by_priority": by_priority,
+                      "target_acos": 30.0, "days": 7})
 
 
 def _run_github_backup():

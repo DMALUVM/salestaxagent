@@ -10,11 +10,12 @@ from datetime import date, timedelta
 
 from src.amazon_ads.client import fetch_report, SEARCH_TERM_TIMEOUT
 from src.db import upsert_rows
-from src.rules import ADS_MAX_CHUNK_DAYS
+from src.rules import ADS_MAX_CHUNK_DAYS, ADS_SEARCH_TERM_CHUNK_DAYS
 
 log = logging.getLogger(__name__)
 
 MAX_CHUNK_DAYS = ADS_MAX_CHUNK_DAYS
+SEARCH_TERM_CHUNK_DAYS = ADS_SEARCH_TERM_CHUNK_DAYS
 
 
 def _safe(v, default=0):
@@ -45,12 +46,19 @@ def _metrics(r: dict) -> dict:
     }
 
 
-def _date_chunks(start: date, end: date) -> list[tuple[date, date]]:
-    """Split a date range into ≤MAX_CHUNK_DAYS chunks."""
+def _date_chunks(start: date, end: date,
+                 chunk_days: int | None = None) -> list[tuple[date, date]]:
+    """Split a date range into chunks of at most `chunk_days` days.
+
+    Defaults to MAX_CHUNK_DAYS (30). Search-term reports pass a smaller size —
+    they are an order of magnitude heavier and a wide window times out.
+    Anything above MAX_CHUNK_DAYS is clamped: the API limit is not negotiable.
+    """
+    size = MAX_CHUNK_DAYS if chunk_days is None else max(1, min(chunk_days, MAX_CHUNK_DAYS))
     chunks = []
     cursor = start
     while cursor <= end:
-        chunk_end = min(cursor + timedelta(days=MAX_CHUNK_DAYS - 1), end)
+        chunk_end = min(cursor + timedelta(days=size - 1), end)
         chunks.append((cursor, chunk_end))
         cursor = chunk_end + timedelta(days=1)
     return chunks
@@ -142,20 +150,29 @@ def fetch_campaigns_daily(start: date, end: date) -> dict:
                                on_conflict="date,campaign_id")
 
     total_spend = sum(r["spend"] for r in all_parsed)
+    # min/max, not first/last — rows come back in API order, not date order.
+    dates = [r["date"] for r in all_parsed if r.get("date")]
     return {
         "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
         "errors": errors, "total_spend": round(total_spend, 2),
-        "date_min": all_parsed[0]["date"] if all_parsed else None,
-        "date_max": all_parsed[-1]["date"] if all_parsed else None,
+        "date_min": min(dates) if dates else None,
+        "date_max": max(dates) if dates else None,
     }
 
 
-def fetch_search_terms(start: date, end: date) -> dict:
-    """Fetch SP search term report, auto-chunked to ≤30 days.
+def fetch_search_terms(start: date, end: date,
+                       chunk_days: int | None = None) -> dict:
+    """Fetch SP search term report, chunked to `chunk_days` (default 7).
 
-    Retries each failed chunk once before recording the error.
+    Retries each failed chunk once before recording the error. Chunks that
+    exhaust their retry are skipped, not fatal — a partial window still
+    produces usable recommendations.
+
+    Note: the report is requested with timeUnit=SUMMARY, so each chunk returns
+    one aggregate row per term stamped with the chunk's START date. Smaller
+    chunks therefore mean finer date resolution as well as shorter reports.
     """
-    chunks = _date_chunks(start, end)
+    chunks = _date_chunks(start, end, chunk_days or SEARCH_TERM_CHUNK_DAYS)
     all_parsed: list[dict] = []
     errors: list[str] = []
 
@@ -207,33 +224,58 @@ def fetch_search_terms(start: date, end: date) -> dict:
 
     return {
         "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
-        "errors": errors,
+        "chunk_days": chunk_days or SEARCH_TERM_CHUNK_DAYS,
+        "chunks_ok": len(chunks) - len(errors), "errors": errors,
     }
 
 
 # ── Full sync ──
 
-def sync_ads(days: int = 14) -> dict:
-    """Full ads sync: campaigns + search terms, auto-chunked.
+def sync_ads(days: int = 14, campaigns_only: bool = False,
+             search_terms_only: bool = False,
+             search_term_chunk_days: int | None = None) -> dict:
+    """Ads sync: campaigns and/or search terms, auto-chunked.
 
-    All ranges chunked to ≤30 days per API call.
-    Safe to call with --days 90 or higher.
+    Campaign ranges are chunked to ≤30 days; search-term ranges to
+    `search_term_chunk_days` (default 7) because those reports are far heavier.
+    Safe to call with days=90 or higher.
+
+    The two halves are independent on purpose: `campaigns_only` returns without
+    ever touching the search-term endpoint, so the fast daily refresh that
+    feeds the /ppc KPIs and trends never waits on a 90-minute report. A failure
+    in one half is recorded but never aborts the other.
     """
+    if campaigns_only and search_terms_only:
+        raise ValueError("campaigns_only and search_terms_only are mutually exclusive")
+
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=days - 1)
 
-    results: dict = {"start": start.isoformat(), "end": end.isoformat()}
+    do_campaigns = not search_terms_only
+    do_search_terms = not campaigns_only
 
-    log.info("Ads sync: %s → %s (%d days)", start, end, days)
+    results: dict = {
+        "start": start.isoformat(), "end": end.isoformat(), "days": days,
+        "ran": [k for k, on in (("campaigns", do_campaigns),
+                                ("search_terms", do_search_terms)) if on],
+    }
 
-    try:
-        results["campaigns"] = fetch_campaigns_daily(start, end)
-    except Exception as e:
-        results["campaigns"] = {"error": str(e)[:200]}
+    log.info("Ads sync: %s → %s (%d days) — %s", start, end, days,
+             ", ".join(results["ran"]))
 
-    try:
-        results["search_terms"] = fetch_search_terms(start, end)
-    except Exception as e:
-        results["search_terms"] = {"error": str(e)[:200]}
+    if do_campaigns:
+        try:
+            results["campaigns"] = fetch_campaigns_daily(start, end)
+        except Exception as e:
+            log.exception("Campaign sync failed")
+            results["campaigns"] = {"error": str(e)[:200]}
+
+    if do_search_terms:
+        try:
+            results["search_terms"] = fetch_search_terms(
+                start, end, chunk_days=search_term_chunk_days)
+        except Exception as e:
+            log.exception("Search term sync failed")
+            results["search_terms"] = {"error": str(e)[:200]}
 
     return results

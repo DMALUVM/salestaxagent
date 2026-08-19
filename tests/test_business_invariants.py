@@ -205,6 +205,167 @@ class TestAdsChunking:
         assert len(chunks) >= 3, "90 days should need at least 3 chunks of ≤30"
 
 
+# ── 4b. Search-term chunking is smaller than campaign chunking ────
+
+
+class TestSearchTermChunking:
+    """Search-term reports are far heavier than campaign reports; a wide
+    window times out. They chunk at 7 days by default."""
+
+    def test_search_term_chunk_is_seven_days(self):
+        from src.rules import ADS_SEARCH_TERM_CHUNK_DAYS
+        assert ADS_SEARCH_TERM_CHUNK_DAYS == 7
+
+    def test_search_term_chunk_not_larger_than_campaign_chunk(self):
+        from src.rules import ADS_SEARCH_TERM_CHUNK_DAYS, ADS_MAX_CHUNK_DAYS
+        assert ADS_SEARCH_TERM_CHUNK_DAYS <= ADS_MAX_CHUNK_DAYS
+
+    def test_search_term_chunks_respect_requested_size(self):
+        from src.amazon_ads.reports import _date_chunks
+
+        start = date(2026, 1, 1)
+        end = start + timedelta(days=27)  # 28 days
+        chunks = _date_chunks(start, end, 7)
+
+        assert len(chunks) == 4
+        for cs, ce in chunks:
+            assert (ce - cs).days + 1 <= 7
+
+    def test_chunk_size_clamped_to_api_limit(self):
+        """A caller asking for more than the API allows must not get it."""
+        from src.rules import ADS_MAX_CHUNK_DAYS
+        from src.amazon_ads.reports import _date_chunks
+
+        start = date(2026, 1, 1)
+        end = start + timedelta(days=99)
+        chunks = _date_chunks(start, end, 90)
+
+        for cs, ce in chunks:
+            assert (ce - cs).days + 1 <= ADS_MAX_CHUNK_DAYS
+
+    def test_search_term_chunks_cover_range_without_gaps(self):
+        from src.amazon_ads.reports import _date_chunks
+
+        start = date(2026, 2, 1)
+        end = date(2026, 3, 15)
+        chunks = _date_chunks(start, end, 7)
+
+        assert chunks[0][0] == start
+        assert chunks[-1][1] == end
+        for i in range(1, len(chunks)):
+            assert chunks[i][0] == chunks[i - 1][1] + timedelta(days=1)
+
+
+# ── 4c. Scheduled ads sync stays independent ──────────────────
+
+
+class TestAdsSyncSplit:
+    """campaigns_only must never touch the search-term endpoint: the daily
+    KPI refresh cannot be allowed to block on a 90-minute report."""
+
+    def test_campaigns_only_skips_search_terms(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+
+        called = []
+        monkeypatch.setattr(reports, "fetch_campaigns_daily",
+                            lambda s, e: called.append("campaigns") or {"rows": 1})
+        monkeypatch.setattr(reports, "fetch_search_terms",
+                            lambda s, e, chunk_days=None: called.append("search_terms") or {"rows": 1})
+
+        result = reports.sync_ads(days=30, campaigns_only=True)
+
+        assert called == ["campaigns"]
+        assert "search_terms" not in result
+        assert result["ran"] == ["campaigns"]
+
+    def test_search_terms_only_skips_campaigns(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+
+        called = []
+        monkeypatch.setattr(reports, "fetch_campaigns_daily",
+                            lambda s, e: called.append("campaigns") or {"rows": 1})
+        monkeypatch.setattr(reports, "fetch_search_terms",
+                            lambda s, e, chunk_days=None: called.append("search_terms") or {"rows": 1})
+
+        result = reports.sync_ads(days=7, search_terms_only=True)
+
+        assert called == ["search_terms"]
+        assert "campaigns" not in result
+
+    def test_search_term_failure_does_not_lose_campaigns(self, monkeypatch):
+        """A search-term blowup must still return the campaign results."""
+        import src.amazon_ads.reports as reports
+
+        def boom(*a, **kw):
+            raise TimeoutError("report timed out after 5400s")
+
+        monkeypatch.setattr(reports, "fetch_campaigns_daily",
+                            lambda s, e: {"rows": 42, "inserted": 42, "errors": []})
+        monkeypatch.setattr(reports, "fetch_search_terms", boom)
+
+        result = reports.sync_ads(days=7)
+
+        assert result["campaigns"]["rows"] == 42
+        assert "error" in result["search_terms"]
+
+    def test_both_only_flags_is_rejected(self):
+        import pytest
+        from src.amazon_ads.reports import sync_ads
+        with pytest.raises(ValueError):
+            sync_ads(days=7, campaigns_only=True, search_terms_only=True)
+
+
+# ── 4d. Ads sync outcome classification ───────────────────────
+
+
+class TestAdsSyncOutcome:
+    """Campaigns landing while search terms fail is a partial, not a failure —
+    the KPIs and trends are current either way."""
+
+    def test_all_ok_is_success(self):
+        from src.main import _ads_sync_outcome
+        status, _ = _ads_sync_outcome(
+            {"ran": ["campaigns", "search_terms"],
+             "campaigns": {"errors": []}, "search_terms": {"errors": []}}, 7)
+        assert status == "success"
+
+    def test_campaigns_ok_search_terms_failed_is_partial(self):
+        from src.main import _ads_sync_outcome
+        status, _ = _ads_sync_outcome(
+            {"ran": ["campaigns", "search_terms"],
+             "campaigns": {"errors": []}, "search_terms": {"error": "timeout"}}, 7)
+        assert status == "partial"
+
+    def test_campaigns_only_success_is_not_partial(self):
+        """The half that never ran must not drag the result down."""
+        from src.main import _ads_sync_outcome
+        status, _ = _ads_sync_outcome(
+            {"ran": ["campaigns"], "campaigns": {"errors": []}}, 30)
+        assert status == "success"
+
+    def test_everything_failed_is_fail(self):
+        from src.main import _ads_sync_outcome
+        status, _ = _ads_sync_outcome(
+            {"ran": ["campaigns", "search_terms"],
+             "campaigns": {"error": "auth"}, "search_terms": {"error": "auth"}}, 7)
+        assert status == "fail"
+
+
+# ── 4e. Scheduler timezone is explicit ────────────────────────
+
+
+class TestAgentTimezone:
+    def test_agent_timezone_is_configured(self):
+        from src.rules import AGENT_TZ_NAME
+        assert AGENT_TZ_NAME == "America/New_York"
+
+    def test_agent_tz_is_separate_from_amazon_tz(self):
+        """Scheduling zone and Amazon's day-boundary zone are different rules."""
+        from src.rules import AGENT_TZ_NAME, AMAZON_TZ_NAME
+        assert AMAZON_TZ_NAME == "America/Los_Angeles"
+        assert AGENT_TZ_NAME != AMAZON_TZ_NAME
+
+
 # ── 5. SP-API chunking produces valid chunks ─────────────────
 
 

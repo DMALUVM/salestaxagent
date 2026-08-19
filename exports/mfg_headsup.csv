@@ -1,0 +1,7 @@
+Month,Month_Label,Status,SKU,SKU_Label,Units,Pallets,Scenario
+2026-08,August 2026,FIRM,,,0,0,correction_factor
+2026-09,September 2026,INDICATIVE,,,0,0,correction_factor
+2026-10,October 2026,INDICATIVE,DDPE0004Shop,Assorted 3pk,3183,1,correction_factor
+2026-08,August 2026,FIRM,,,0,0,actual_2025
+2026-09,September 2026,INDICATIVE,,,0,0,actual_2025
+2026-10,October 2026,INDICATIVE,,,0,0,actual_2025

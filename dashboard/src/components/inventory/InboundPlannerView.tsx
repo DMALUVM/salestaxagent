@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
 import { isConfigured } from "@/lib/supabase";
-import { Shield, Package, Calculator, AlertTriangle, Download } from "lucide-react";
+import { Shield, Calculator, AlertTriangle, Download } from "lucide-react";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 
@@ -55,7 +55,8 @@ interface InvRow {
   inbound_working?: number; inbound_shipped?: number; inbound_receiving?: number;
 }
 
-export default function PlannerPage() {
+/** Inbound tab of /planning. Was app/planner/page.tsx — logic unchanged. */
+export function InboundPlannerView() {
   const [skuInput, setSkuInput] = useState("DDPE0001Shop,DDPE0002Shop,DDPE0003Shop,DDPE0004Shop");
   const [endDate, setEndDate] = useState("2027-03-31");
   const [safety, setSafety] = useState("15");
@@ -63,18 +64,10 @@ export default function PlannerPage() {
   const [loading, setLoading] = useState(false);
   const [plans, setPlans] = useState<SkuPlan[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [skuList, setSkuList] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (!isConfigured()) return;
-    fetch("/api/inventory").then((r) => r.json()).then((d) => {
-      const invSkus = new Set<string>();
-      for (const s of d.snapshots ?? []) if (s.sku) invSkus.add(s.sku);
-      for (const s of d.awd ?? []) if (s.sku) invSkus.add(s.sku);
-      for (const s of d.tpl ?? []) if (s.sku) invSkus.add(s.sku);
-      setSkuList([...invSkus].sort());
-    }).catch(() => {});
-  }, []);
+  // NOTE: this view previously loaded the inventory SKU list into state and
+  // never rendered it — it takes SKUs from the free-text field below. The
+  // loader now lives in @/lib/use-inventory-skus and is used by the Demand
+  // view; this view no longer makes that unused request.
 
   async function runPlanner() {
     setLoading(true); setError(null); setPlans([]);
@@ -185,12 +178,11 @@ export default function PlannerPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Inbound Planner</h1>
-        <p className="text-sm text-muted-foreground">
-          Forecast-driven production/ship plan using calibrated demand model
-        </p>
-      </div>
+      {/* The hub's <h1> and the active tab already name this view; the
+          descriptive line is kept verbatim. */}
+      <p className="text-sm text-muted-foreground">
+        Forecast-driven production/ship plan using calibrated demand model
+      </p>
 
       {/* Inputs */}
       <Card>

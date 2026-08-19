@@ -16,7 +16,12 @@
   "ads": {
     "max_report_days": 31,
     "max_chunk_days": 30,
+    "search_term_chunk_days": 7,
+    "search_term_timeout_seconds": 5400,
     "mandatory_chunking": true
+  },
+  "agent": {
+    "timezone": "America/New_York"
   },
   "pnl": {
     "cogs_source": "sku_costs",

@@ -11,7 +11,8 @@ import {
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
 import { isConfigured } from "@/lib/supabase";
-import { Shield, TrendingUp, AlertTriangle, Package, Calculator } from "lucide-react";
+import { useInventorySkus } from "@/lib/use-inventory-skus";
+import { Shield, TrendingUp, AlertTriangle, Calculator } from "lucide-react";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 function fmtD(n: number) { return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -49,27 +50,16 @@ interface ForecastResult {
   error?: string;
 }
 
-export default function ForecastPage() {
+/** Demand tab of /planning. Was app/forecast/page.tsx — logic unchanged. */
+export function DemandPlannerView() {
   const [sku, setSku] = useState("DDPE0004Shop");
   const [endDate, setEndDate] = useState("2027-03-31");
   const [safety, setSafety] = useState("15");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ForecastResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [skuList, setSkuList] = useState<string[]>([]);
-
-  // Load available SKUs
   // Load only physical/inventory SKUs (present in snapshots, AWD, or 3PL)
-  useEffect(() => {
-    if (!isConfigured()) return;
-    fetch("/api/inventory").then((r) => r.json()).then((d) => {
-      const invSkus = new Set<string>();
-      for (const s of d.snapshots ?? []) if (s.sku) invSkus.add(s.sku);
-      for (const s of d.awd ?? []) if (s.sku) invSkus.add(s.sku);
-      for (const s of d.tpl ?? []) if (s.sku) invSkus.add(s.sku);
-      setSkuList([...invSkus].sort());
-    }).catch(() => {});
-  }, []);
+  const skuList = useInventorySkus();
 
   async function runForecast() {
     setLoading(true); setError(null); setResult(null);
@@ -94,12 +84,11 @@ export default function ForecastPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">SKU Demand Forecast</h1>
-        <p className="text-sm text-muted-foreground">
-          How many units do I need through a target date?
-        </p>
-      </div>
+      {/* The hub's <h1> and the active tab already name this view; the
+          descriptive line is kept verbatim. */}
+      <p className="text-sm text-muted-foreground">
+        SKU demand forecast — how many units do I need through a target date?
+      </p>
 
       {/* Input form */}
       <Card>

@@ -17,10 +17,14 @@ from src.config import settings
 
 log = logging.getLogger(__name__)
 
+from src.rules import ADS_SEARCH_TERM_TIMEOUT_SECONDS
+
 BASE_URL = "https://advertising-api.amazon.com"
 POLL_INTERVAL = 30  # seconds (Ads reports take 5-20 minutes)
 DEFAULT_TIMEOUT = 1800    # 30 minutes — sufficient for campaigns
-SEARCH_TERM_TIMEOUT = 5400  # 90 minutes — search term reports are much larger
+# 90 minutes — search term reports are much larger. Canonical value lives in
+# config/business_rules.json (ads.search_term_timeout_seconds).
+SEARCH_TERM_TIMEOUT = ADS_SEARCH_TERM_TIMEOUT_SECONDS
 
 
 def create_report(config: dict) -> str:

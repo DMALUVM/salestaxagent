@@ -1,0 +1,5 @@
+state,period_start,period_end,channel,channel_label,seller_responsible,gross_sales,tax_collected,order_count
+NJ,2026-07-01,2026-07-31,amazon,Amazon FBA (Amazon remits),False,3020.1,194.75,202
+NJ,2026-07-01,2026-07-31,shopify,Shopify (seller),True,273.59,18.73,4
+NJ,2026-08-01,2026-08-16,shopify,Shopify (seller),True,149.91,10.53,3
+NJ,2026-08-01,2026-08-16,shopify_shop,Shop Channel (Shopify remits),False,9.99,0.96,1
