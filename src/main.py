@@ -618,10 +618,36 @@ def economics_sync_cmd(days):
     click.echo(f"Transactions: {result['transactions']}")
     click.echo(f"Days with data: {result['days']}")
     click.echo(f"Rows upserted: {result['inserted']}")
-    click.echo(f"Net proceeds: ${result.get('total_net_proceeds', 0):,.2f}")
-    click.echo(f"Ad spend: ${result.get('total_ad_spend', 0):,.2f}")
-    click.echo(f"Net after ads: ${result.get('net_after_ads', 0):,.2f}")
+    click.echo(f"Amazon payout: ${result.get('total_payout', 0):,.2f}  (charges - fees - refunds)")
+    click.echo(f"COGS:          ${result.get('total_cogs', 0):,.2f}")
+    click.echo(f"Ad spend:      ${result.get('total_ad_spend', 0):,.2f}")
+    click.echo(f"Contribution:  ${result.get('total_contribution', 0):,.2f}  (payout - COGS - ads)")
     click.echo(f"Status: reconciled (from Amazon Finances API)")
+    click.echo(f"Date basis: postedDate (settlement date, may lag order date 1-3 days)")
+
+
+@cli.command("pnl-validate")
+@click.option("--date", "target_date", required=True, help="Date to validate YYYY-MM-DD")
+def pnl_validate_cmd(target_date):
+    """Print detailed P&L breakdown for a single day (for Seller Central comparison)."""
+    from src.amazon_sp.economics import validate_day
+
+    click.echo(f"Validating P&L for {target_date}...")
+    v = validate_day(target_date)
+    click.echo(f"{'='*55}")
+    click.echo(f"  Date: {v['date']} ({v['date_basis']})")
+    click.echo(f"  Transactions: {v['transaction_types']}")
+    click.echo(f"  Units shipped: {v['units_shipped']}")
+    click.echo(f"{'='*55}")
+    click.echo(f"  Product charges:    ${v['product_charges']:>10,.2f}")
+    click.echo(f"  Refund charges:     ${v['refund_charges']:>10,.2f}")
+    click.echo(f"  Amazon fees:        ${v['amazon_fees_display']:>10,.2f}  (referral + FBA)")
+    click.echo(f"  Other adjustments:  ${v['other_adjustments']:>10,.2f}")
+    click.echo(f"  {'─'*40}")
+    click.echo(f"  Amazon payout:      ${v['amazon_payout']:>10,.2f}")
+    click.echo(f"{'='*55}")
+    click.echo(f"  Formula: {v['formula']}")
+    click.echo(f"  Compare to: {v['compare_to']}")
 
 
 @cli.command("pnl-sync")

@@ -84,9 +84,9 @@ export default function ProfitPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Net Proceeds</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Contribution P&L</h1>
         <p className="text-sm text-muted-foreground">
-          Contribution after Amazon fees, COGS, and ad spend
+          Amazon payout minus COGS minus ad spend = your margin
         </p>
       </div>
 
@@ -106,7 +106,7 @@ export default function ProfitPage() {
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
             <Card className={last7.net > 0 ? "border-emerald-500/30" : "border-red-500/30"}>
               <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Net After Ads (7d)</p>
+                <p className="text-[10px] text-muted-foreground uppercase">Contribution (7d)</p>
                 <p className={`text-2xl font-semibold tabular-nums ${last7.net >= 0 ? "text-emerald-600" : "text-red-500"}`}>
                   ${fmtD(last7.net)}
                 </p>
@@ -127,7 +127,7 @@ export default function ProfitPage() {
             </Card>
             <Card>
               <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Net After Ads (30d)</p>
+                <p className="text-[10px] text-muted-foreground uppercase">Contribution (30d)</p>
                 <p className={`text-2xl font-semibold tabular-nums ${last30.net >= 0 ? "text-emerald-600" : "text-red-500"}`}>
                   ${fmtD(last30.net)}
                 </p>
@@ -145,11 +145,11 @@ export default function ProfitPage() {
               <div className="space-y-2 text-sm">
                 {[
                   { label: "Gross Sales", value: last30.sales, color: "" },
-                  { label: "− Referral Fees (est)", value: -last30.referral, color: "text-red-500" },
-                  { label: "− FBA Fees (est)", value: -last30.fba, color: "text-red-500" },
+                  { label: "− Amazon Fees (referral + FBA)", value: -last30.referral - last30.fba, color: "text-red-500" },
+                  { label: "= Amazon Payout", value: last30.sales - last30.referral - last30.fba, color: "font-medium" },
                   { label: "− COGS", value: -last30.cogs, color: "text-red-500" },
                   { label: "− Ad Spend", value: -last30.ads, color: "text-red-500" },
-                  { label: "= Net After Ads", value: last30.net, color: last30.net >= 0 ? "text-emerald-600 font-semibold" : "text-red-600 font-semibold" },
+                  { label: "= Contribution", value: last30.net, color: last30.net >= 0 ? "text-emerald-600 font-semibold" : "text-red-600 font-semibold" },
                 ].map((item) => (
                   <div key={item.label} className="flex justify-between">
                     <span className="text-muted-foreground">{item.label}</span>
@@ -179,7 +179,7 @@ export default function ProfitPage() {
                     <TableHead className="text-right">Sales</TableHead>
                     <TableHead className="text-right">Ads</TableHead>
                     <TableHead className="text-right">Fees</TableHead>
-                    <TableHead className="text-right font-semibold">Net</TableHead>
+                    <TableHead className="text-right font-semibold">Contribution</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -211,9 +211,10 @@ export default function ProfitPage() {
           {/* Disclaimer */}
           <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
             <span>
-              Preliminary estimates until Amazon economics settle (typically 2-3 day lag).
-              Referral fees estimated at category default (15%). FBA fees estimated per unit.
-              Not accounting or tax advice. Set COGS in sku_costs table for full contribution accuracy.
+              Amazon Payout = charges − fees − refunds (from Finances API, posted-date basis, may lag 1-3 days).
+              Contribution = Payout − COGS − Ad Spend. Preliminary rows use estimated fees.
+              Reconciled rows use actual Amazon data. Set COGS in sku_costs table.
+              Compare to Seller Central → Payments → Date Range Report. Not accounting advice.
             </span>
           </div>
         </>
