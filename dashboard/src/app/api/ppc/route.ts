@@ -184,11 +184,22 @@ export async function GET() {
       searchTerms = r.data ?? [];
     } catch { /* */ }
 
-    // ── Recommendations ──
+    // ── Recommendations (paginated — a limit here would under-count the
+    //    "Actions (N)" badge, which must match what is actually open) ──
     let recommendations: unknown[] = [];
     try {
-      const r = await sb.from("ads_recommendations").select("*").eq("status", "open").order("impact_estimate", { ascending: false }).limit(50);
-      recommendations = r.data ?? [];
+      let offset = 0;
+      const pageSize = 1000;
+      while (true) {
+        const r = await sb.from("ads_recommendations").select("*")
+          .eq("status", "open")
+          .order("impact_estimate", { ascending: false })
+          .range(offset, offset + pageSize - 1);
+        const page = r.data ?? [];
+        recommendations = recommendations.concat(page);
+        if (page.length < pageSize) break;
+        offset += pageSize;
+      }
     } catch { /* */ }
 
     // ── Last sync time from job_runs ──
@@ -224,91 +235,280 @@ export async function POST(request: Request) {
 
     // Generate recommendations action
     if (body.action === "generate") {
-      const targetAcos = body.target_acos ?? 30;
-      const sb = getServerSupabase();
-
-      // Load search terms
-      const { data: searchTerms } = await sb.from("ads_search_terms_daily")
-        .select("*").order("spend", { ascending: false });
-      const terms = searchTerms ?? [];
-
-      if (!terms.length) {
-        return Response.json({ ok: true, count: 0, message: "No search term data — run ads-sync first" });
+      const targetAcos = Number(body.target_acos);
+      if (!Number.isFinite(targetAcos) || targetAcos <= 0 || targetAcos > 200) {
+        return Response.json({ ok: false, error: "target_acos must be a number between 1 and 200" }, { status: 400 });
+      }
+      const rangeDays = Number(body.range_days);
+      if (![7, 14, 30, 90].includes(rangeDays)) {
+        return Response.json({ ok: false, error: "range_days must be one of 7, 14, 30, 90" }, { status: 400 });
       }
 
-      // Generate recs server-side (same logic as Python action engine)
-      const recs: Array<Record<string, unknown>> = [];
+      const sb = getServerSupabase();
+      const from = new Date();
+      from.setDate(from.getDate() - rangeDays);
+      const cutoff = from.toISOString().slice(0, 10);
 
+      // Load search terms inside the window, paginated — the PostgREST
+      // 1,000-row default would silently truncate the input set and generate
+      // recommendations from partial spend.
+      const TERM_COLS = "date,search_term,campaign_id,campaign_name,ad_group_id,ad_group_name,keyword,match_type,spend,sales_14d,orders_14d,clicks";
+      const terms: Array<Record<string, unknown>> = [];
+      let offset = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data, error } = await sb.from("ads_search_terms_daily")
+          .select(TERM_COLS)
+          .gte("date", cutoff)
+          .order("date", { ascending: true })
+          .range(offset, offset + pageSize - 1);
+        if (error) {
+          return Response.json({ ok: false, error: `Could not read search terms: ${error.message}` }, { status: 500 });
+        }
+        const page = data ?? [];
+        terms.push(...page);
+        if (page.length < pageSize) break;
+        offset += pageSize;
+      }
+
+      if (!terms.length) {
+        // Distinguish "nothing synced" from "nothing inside this window" —
+        // and do NOT clear the existing recommendations on the way out.
+        let available: string | null = null;
+        try {
+          const [lo, hi] = await Promise.all([
+            sb.from("ads_search_terms_daily").select("date").order("date", { ascending: true }).limit(1),
+            sb.from("ads_search_terms_daily").select("date").order("date", { ascending: false }).limit(1),
+          ]);
+          const min = lo.data?.[0]?.date, max = hi.data?.[0]?.date;
+          if (min && max) available = min === max ? String(min) : `${min} → ${max}`;
+        } catch { /* */ }
+        return Response.json({
+          ok: true, count: 0, window: { days: rangeDays, from: cutoff },
+          message: available
+            ? `No search term data in the ${rangeDays}D window (available: ${available}) — run Ads sync or pick a wider range`
+            : "No search term data — run Ads sync first",
+        });
+      }
+
+      // Roll the window up per search term before applying thresholds. Rules
+      // are stated in whole-window dollars ("$5 spend, 0 orders"), so scoring
+      // each daily row on its own both under-fires (a term bleeding $0.50/day
+      // for 30 days never trips $5) and duplicates a rec per day.
+      //
+      // The key is (search_term, campaign_id) — exactly the grain of the
+      // table's UNIQUE (type, entity_name, campaign_id). Keying any finer (ad
+      // group, match type) lets one campaign emit two recs for the same term,
+      // which the insert would reject outright.
+      interface Agg {
+        search_term: string; campaign_id: string; campaign_name: string;
+        ad_group_ids: Set<string>; ad_group_names: Set<string>;
+        keyword: string; match_types: Set<string>;
+        spend: number; sales: number; orders: number; clicks: number;
+      }
+      const byTerm = new Map<string, Agg>();
       for (const st of terms) {
-        const spend = Number(st.spend ?? 0);
-        const orders = Number(st.orders_14d ?? 0);
-        const clicks = Number(st.clicks ?? 0);
-        const acos = Number(st.acos ?? 0);
-        const sales = Number(st.sales_14d ?? 0);
-        const matchType = (st.match_type ?? "").toLowerCase();
+        const searchTerm = String(st.search_term ?? "");
+        const campaignId = String(st.campaign_id ?? "");
+        const key = searchTerm + "\u241F" + campaignId;
+        const e = byTerm.get(key) ?? {
+          search_term: searchTerm, campaign_id: campaignId,
+          campaign_name: String(st.campaign_name ?? ""),
+          ad_group_ids: new Set<string>(), ad_group_names: new Set<string>(),
+          keyword: String(st.keyword ?? ""), match_types: new Set<string>(),
+          spend: 0, sales: 0, orders: 0, clicks: 0,
+        };
+        e.spend += Number(st.spend ?? 0);
+        e.sales += Number(st.sales_14d ?? 0);
+        e.orders += Number(st.orders_14d ?? 0);
+        e.clicks += Number(st.clicks ?? 0);
+        if (st.ad_group_id) e.ad_group_ids.add(String(st.ad_group_id));
+        if (st.ad_group_name) e.ad_group_names.add(String(st.ad_group_name));
+        if (st.match_type) e.match_types.add(String(st.match_type).toLowerCase());
+        if (!e.keyword && st.keyword) e.keyword = String(st.keyword);
+        byTerm.set(key, e);
+      }
+
+      /** Names the ad group in an instruction, honestly when there are several. */
+      function adGroupPhrase(t: Agg): string {
+        const names = [...t.ad_group_names].filter(Boolean);
+        if (names.length === 1) return `ad group "${names[0]}"`;
+        if (names.length > 1) return `each of the ${names.length} ad groups that served it`;
+        return "the ad group that served it";
+      }
+
+      // Generate recs server-side (same rules as src/amazon_ads/actions_engine.py).
+      // Each rec carries a literal Seller Central instruction in
+      // suggested_action and its structured basis in evidence, so the table,
+      // the drawer and the exported plan all read from one place.
+      const win = { days: rangeDays, from: cutoff };
+      const recs: Array<Record<string, unknown>> = [];
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      const usd = (n: number) => "$" + n.toFixed(2);
+      const windowSuffix = " over the last " + rangeDays + " days";
+
+      for (const t of byTerm.values()) {
+        // ACOS is recomputed from the window totals — the stored per-row acos
+        // column is rounded to 1dp and cannot be summed across days.
+        const acos = t.sales > 0 ? (t.spend / t.sales) * 100 : 0;
+        const cpc = t.clicks > 0 ? t.spend / t.clicks : 0;
+        const matchTypes = [...t.match_types].filter(Boolean);
+        const adGroupId = [...t.ad_group_ids][0] ?? "";
+        const adGroups = [...t.ad_group_names].filter(Boolean);
+        const camp = '"' + t.campaign_name + '"';
+        const term = '"' + t.search_term + '"';
 
         // P0: NEGATE — spend >= $5, 0 orders
-        if (spend >= 5 && orders === 0) {
+        if (t.spend >= 5 && t.orders === 0) {
           recs.push({
             type: "NEGATE_SEARCH_TERM", priority: "P0",
-            impact_estimate: spend,
-            entity_type: "search_term", entity_name: st.search_term,
-            campaign_name: st.campaign_name, campaign_id: st.campaign_id,
-            ad_group_id: st.ad_group_id || "",
-            evidence: JSON.stringify({ spend, orders: 0, clicks }),
-            suggested_action: `Add negative exact: "${st.search_term}"`,
+            impact_estimate: round2(t.spend),
+            entity_type: "search_term", entity_name: t.search_term,
+            campaign_name: t.campaign_name, campaign_id: t.campaign_id,
+            ad_group_id: adGroupId,
+            evidence: {
+              action_type: "negate_exact",
+              why: "Spent " + usd(t.spend) + " on " + t.clicks + " clicks with 0 orders" + windowSuffix + ".",
+              spend: round2(t.spend), orders: 0, clicks: t.clicks, sales: 0, acos: null,
+              cpc: round2(cpc), match_types: matchTypes, ad_groups: adGroups, window: win,
+            },
+            suggested_action:
+              "In Campaign Manager, open campaign " + camp + " → " + adGroupPhrase(t) +
+              " → Negative keywords, and add " + term + " as a Negative exact keyword. " +
+              "It has spent " + usd(t.spend) + " with 0 orders" + windowSuffix + ".",
             status: "open",
           });
         }
 
-        // P1: HARVEST — converting, good ACOS
-        if (orders >= 1 && acos > 0 && acos <= targetAcos && spend >= 3 && matchType !== "exact") {
+        // P1: HARVEST — converting, good ACOS. Skipped when the term already
+        // runs as an exact keyword, since there is nothing left to harvest.
+        if (t.orders >= 1 && acos > 0 && acos <= targetAcos && t.spend >= 3 && !t.match_types.has("exact")) {
+          const startBid = round2(Math.max(cpc, 0.02));
           recs.push({
             type: "HARVEST_SEARCH_TERM", priority: "P1",
-            impact_estimate: sales,
-            entity_type: "search_term", entity_name: st.search_term,
-            campaign_name: st.campaign_name, campaign_id: st.campaign_id,
-            ad_group_id: st.ad_group_id || "",
-            evidence: JSON.stringify({ spend, orders, acos, sales_14d: sales, match_type: matchType }),
-            suggested_action: `Add exact keyword: "${st.search_term}" (ACOS ${acos.toFixed(0)}%, ${orders} orders)`,
+            impact_estimate: round2(t.sales),
+            entity_type: "search_term", entity_name: t.search_term,
+            campaign_name: t.campaign_name, campaign_id: t.campaign_id,
+            ad_group_id: adGroupId,
+            evidence: {
+              action_type: "harvest_exact",
+              why: t.orders + " order(s) at " + acos.toFixed(0) + "% ACOS on " + usd(t.spend) +
+                " spend (target " + targetAcos + "%)" + windowSuffix + ".",
+              spend: round2(t.spend), orders: t.orders, clicks: t.clicks,
+              sales: round2(t.sales), acos: round2(acos), cpc: round2(cpc),
+              suggested_bid: startBid, target_acos: targetAcos,
+              match_types: matchTypes, ad_groups: adGroups, window: win,
+            },
+            suggested_action:
+              "Add " + term + " as an Exact match keyword in campaign " + camp + " → " + adGroupPhrase(t) +
+              " (or your manual exact campaign), starting near its current CPC of " + usd(startBid) + ". " +
+              "Then add it as a Negative exact in " + adGroupPhrase(t) +
+              ", where it currently serves, so the two do not compete.",
             status: "open",
           });
         }
 
         // P1: REDUCE_BID
-        if (acos > targetAcos * 1.5 && clicks >= 5 && orders > 0 && spend >= 5) {
-          const savings = Math.round(spend * (1 - targetAcos / Math.max(acos, 1)) * 100) / 100;
+        if (acos > targetAcos * 1.5 && t.clicks >= 5 && t.orders > 0 && t.spend >= 5) {
+          const savings = round2(t.spend * (1 - targetAcos / Math.max(acos, 1)));
+          // Scale the current CPC by how far ACOS overshoots the target.
+          const newBid = round2(Math.max(cpc * (targetAcos / acos), 0.02));
+          const kw = t.keyword || t.search_term;
           recs.push({
             type: "REDUCE_BID", priority: "P1",
             impact_estimate: savings,
-            entity_type: "keyword", entity_name: st.keyword || st.search_term,
-            campaign_name: st.campaign_name, campaign_id: st.campaign_id,
-            ad_group_id: st.ad_group_id || "",
-            evidence: JSON.stringify({ spend, acos, orders, clicks, target_acos: targetAcos }),
-            suggested_action: `Reduce bid: ACOS ${acos.toFixed(0)}% vs target ${targetAcos}% → save ~$${savings.toFixed(2)}`,
+            entity_type: "keyword", entity_name: kw,
+            campaign_name: t.campaign_name, campaign_id: t.campaign_id,
+            ad_group_id: adGroupId,
+            evidence: {
+              action_type: "reduce_bid",
+              why: "ACOS " + acos.toFixed(0) + "% vs " + targetAcos + "% target on " + usd(t.spend) +
+                " spend, " + t.orders + " order(s), " + t.clicks + " clicks" + windowSuffix + ".",
+              spend: round2(t.spend), orders: t.orders, clicks: t.clicks,
+              sales: round2(t.sales), acos: round2(acos), cpc: round2(cpc),
+              suggested_bid: newBid, target_acos: targetAcos,
+              match_types: matchTypes, ad_groups: adGroups, window: win,
+            },
+            suggested_action:
+              "Open campaign " + camp + " → " + adGroupPhrase(t) +
+              " → Keywords, and lower the bid on \"" + kw + "\" from about " + usd(cpc) +
+              " to " + usd(newBid) + " to pull it toward the " + targetAcos + "% ACOS target. " +
+              "Re-check in 7 days before cutting further.",
             status: "open",
           });
         }
       }
 
-      // Clear old open recs, insert fresh
-      await sb.from("ads_recommendations").delete().eq("status", "open");
-      if (recs.length) {
-        for (let i = 0; i < recs.length; i += 500) {
-          await sb.from("ads_recommendations").insert(recs.slice(i, i + 500));
+      // P1: WASTED_SPEND_ROLLUP — top campaigns by zero-order spend. Parity
+      // with actions_engine.py, which the dashboard's "Waste" label expects.
+      const campaignWaste = new Map<string, { spend: number; terms: number; campaign_id: string }>();
+      for (const t of byTerm.values()) {
+        if (t.orders !== 0) continue;
+        const e = campaignWaste.get(t.campaign_name) ?? { spend: 0, terms: 0, campaign_id: t.campaign_id };
+        e.spend += t.spend;
+        e.terms += 1;
+        campaignWaste.set(t.campaign_name, e);
+      }
+      const topWaste = [...campaignWaste.entries()]
+        .sort((a, b) => b[1].spend - a[1].spend)
+        .slice(0, 5)
+        .filter(([, w]) => w.spend >= 5);
+      for (const [name, w] of topWaste) {
+        recs.push({
+          type: "WASTED_SPEND_ROLLUP", priority: "P1",
+          impact_estimate: round2(w.spend),
+          entity_type: "campaign", entity_name: name,
+          campaign_name: name, campaign_id: w.campaign_id, ad_group_id: "",
+          evidence: {
+            action_type: "review_campaign",
+            why: usd(w.spend) + " across " + w.terms + " search terms with 0 orders" + windowSuffix + ".",
+            spend: round2(w.spend), orders: 0, zero_order_terms: w.terms, window: win,
+          },
+          suggested_action:
+            "Open campaign \"" + name + "\" → Search terms report for the last " + rangeDays +
+            " days, sort by Spend, and add Negative exact keywords for the " + w.terms +
+            " terms with 0 orders (" + usd(w.spend) + " of wasted spend). " +
+            "The individual P0 rows below list the biggest offenders.",
+          status: "open",
+        });
+      }
+
+      const priorityOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2 };
+      recs.sort((a, b) =>
+        (priorityOrder[String(a.priority)] ?? 9) - (priorityOrder[String(b.priority)] ?? 9) ||
+        Number(b.impact_estimate) - Number(a.impact_estimate));
+
+      // Replace the open queue. Both writes are checked: an unchecked insert
+      // after a successful delete would wipe the queue and still report ok.
+      const del = await sb.from("ads_recommendations").delete().eq("status", "open");
+      if (del.error) {
+        return Response.json({ ok: false, error: `Could not clear old recommendations: ${del.error.message}` }, { status: 500 });
+      }
+      for (let i = 0; i < recs.length; i += 500) {
+        const ins = await sb.from("ads_recommendations").insert(recs.slice(i, i + 500));
+        if (ins.error) {
+          return Response.json({
+            ok: false,
+            error: `Saved ${i} of ${recs.length} recommendations, then failed: ${ins.error.message}`,
+          }, { status: 500 });
         }
       }
 
-      return Response.json({ ok: true, count: recs.length });
+      return Response.json({
+        ok: true, count: recs.length,
+        window: { ...win, terms: byTerm.size, rows: terms.length },
+        target_acos: targetAcos,
+      });
     }
 
     // Update status
     const { id, status } = body;
-    if (!id || !status) return Response.json({ error: "id and status required" }, { status: 400 });
+    if (!id || !status) return Response.json({ ok: false, error: "id and status required" }, { status: 400 });
     const sb = getServerSupabase();
-    await sb.from("ads_recommendations").update({ status }).eq("id", id);
+    const upd = await sb.from("ads_recommendations").update({ status }).eq("id", id);
+    if (upd.error) return Response.json({ ok: false, error: upd.error.message }, { status: 500 });
     return Response.json({ ok: true });
   } catch (e) {
-    return Response.json({ error: String(e) }, { status: 500 });
+    return Response.json({ ok: false, error: String(e) }, { status: 500 });
   }
 }

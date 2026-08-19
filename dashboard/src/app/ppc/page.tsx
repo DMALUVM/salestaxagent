@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, Fragment } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,12 @@ import {
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
 import { isConfigured } from "@/lib/supabase";
-import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw } from "lucide-react";
+import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy } from "lucide-react";
+import {
+  ACTION_LABELS, ACTION_STYLES, actionTypeOf, doThisOf, whyOf,
+  suggestedBidOf, matchTypesOf, adGroupsOf,
+  buildPlanMarkdown, buildGrokPrompt, type RecLike,
+} from "@/lib/ppc-actions";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 function fmtD(n: number) { return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -35,8 +40,9 @@ interface SearchTerm {
 }
 interface Rec {
   id: string; type: string; priority: string; impact_estimate: number;
-  entity_name: string; campaign_name: string; suggested_action: string;
-  evidence: string | Record<string, unknown>; status: string;
+  entity_type: string; entity_name: string; campaign_name: string;
+  suggested_action: string;
+  evidence: string | Record<string, unknown> | null; status: string;
 }
 interface PPCData {
   kpi7: KPIs | null; kpi7Days: number;
@@ -56,14 +62,32 @@ const PRIORITY_COLORS: Record<string, string> = {
   P1: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800",
   P2: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800",
 };
-const TYPE_LABELS: Record<string, string> = {
-  NEGATE_SEARCH_TERM: "Negate",
-  HARVEST_SEARCH_TERM: "Harvest",
-  REDUCE_BID: "Reduce bid",
-  INCREASE_BID: "Increase bid",
-  STARVE_OOS: "OOS pause",
-  WASTED_SPEND_ROLLUP: "Waste",
+// Row labels now come from the action vocabulary in @/lib/ppc-actions, which
+// maps legacy `type` values too — see TYPE_TO_ACTION there.
+
+/** Inline banner state — every generate outcome lands here, including failures. */
+interface Notice { kind: "success" | "warn" | "error"; text: string }
+
+const NOTICE_STYLES: Record<Notice["kind"], string> = {
+  success: "border-emerald-500/40 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200",
+  warn: "border-amber-500/40 bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
+  error: "border-red-500/40 bg-red-50 text-red-900 dark:bg-red-950/40 dark:text-red-200",
 };
+
+function NoticeBanner({ notice, onDismiss }: { notice: Notice; onDismiss: () => void }) {
+  return (
+    <div role={notice.kind === "error" ? "alert" : "status"}
+      className={`flex items-start gap-2.5 rounded-lg border p-3 text-xs ${NOTICE_STYLES[notice.kind]}`}>
+      {notice.kind === "success"
+        ? <CheckCircle className="mt-px h-4 w-4 shrink-0" />
+        : <AlertTriangle className="mt-px h-4 w-4 shrink-0" />}
+      <span className="flex-1">{notice.text}</span>
+      <button onClick={onDismiss} aria-label="Dismiss" className="shrink-0 opacity-60 hover:opacity-100">
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
 
 type Range = "7d" | "14d" | "30d" | "90d";
 const RANGES: Range[] = ["7d", "14d", "30d", "90d"];
@@ -76,6 +100,9 @@ export default function PPCPage() {
   const [range, setRange] = useState<Range>("7d");
   const [generating, setGenerating] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [targetAcos, setTargetAcos] = useState(30);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -107,15 +134,42 @@ export default function PPCPage() {
 
   async function generateRecs() {
     setGenerating(true);
+    setNotice(null);
     try {
       const resp = await fetch("/api/ppc", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generate", target_acos: 30 }),
+        body: JSON.stringify({
+          action: "generate",
+          target_acos: targetAcos,
+          range_days: RANGE_DAYS[range],
+        }),
       });
-      const result = await resp.json();
-      if (result.ok) { await loadData(); setTab("actions"); }
-    } catch { /* */ }
-    setGenerating(false);
+
+      // A non-2xx must never look like success — read the server's message.
+      let result: { ok?: boolean; count?: number; message?: string; error?: string } = {};
+      try { result = await resp.json(); } catch { /* non-JSON body */ }
+
+      if (!resp.ok || result.ok === false) {
+        setNotice({ kind: "error", text: result.error ?? `Generate failed (HTTP ${resp.status})` });
+        return;
+      }
+      if (!result.count) {
+        // Nothing to generate is an outcome, not a silent no-op.
+        setNotice({ kind: "warn", text: result.message ?? "No search term data — run Ads sync first" });
+        return;
+      }
+
+      await loadData();
+      setTab("actions");
+      setNotice({
+        kind: "success",
+        text: `Generated ${result.count} recommendation${result.count === 1 ? "" : "s"} from the last ${RANGE_DAYS[range]} days at ${targetAcos}% target ACOS.`,
+      });
+    } catch (e) {
+      setNotice({ kind: "error", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setGenerating(false);
+    }
   }
 
   async function syncAds(days: number) {
@@ -147,7 +201,14 @@ export default function PPCPage() {
   const rangeCutoff = data?.cutoffs?.[range];
   const rangeSeries = rangeCutoff ? series.filter((d) => d.date >= rangeCutoff) : series;
   const searchTerms = data?.searchTerms ?? [];
-  const recs = (data?.recommendations ?? []).filter((r) => r.status === "open");
+  // Priority first, then dollars — same order the exported plan numbers them
+  // in, so row 1 on screen is action 1 in the .md. P0 is "money burning now".
+  const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+  const recs = (data?.recommendations ?? [])
+    .filter((r) => r.status === "open")
+    .sort((a, b) =>
+      (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) ||
+      b.impact_estimate - a.impact_estimate);
   const campaigns = data?.campaigns ?? [];
   const hasData = series.length > 0 || searchTerms.length > 0;
 
@@ -157,6 +218,45 @@ export default function PPCPage() {
   const lastSyncLabel = data?.lastSync
     ? new Date(data.lastSync).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
     : "never";
+
+  /** Everything the exported plan needs — same numbers the KPI cards show. */
+  function planContext() {
+    return {
+      range: range.toUpperCase(), rangeDays,
+      // The window the plan covers, not the whole table — these must agree
+      // with the KPI numbers directly below them.
+      dateMin: rangeSeries[0]?.date ?? data?.dateMin ?? null,
+      dateMax: rangeSeries[rangeSeries.length - 1]?.date ?? data?.dateMax ?? null,
+      targetAcos, generatedOn: new Date().toISOString().slice(0, 10),
+      kpi: kpi ? { spend: kpi.spend, adSales: kpi.adSales, acos: kpi.acos, tacos: kpi.tacos } : null,
+      wastedSpend: wastedTotal,
+    };
+  }
+
+  function exportPlan() {
+    const ctx = planContext();
+    const md = buildPlanMarkdown(recs as RecLike[], ctx);
+    const url = URL.createObjectURL(new Blob([md], { type: "text/markdown;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ppc-action-plan-${ctx.generatedOn}-${range}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    setNotice({ kind: "success", text: `Downloaded ${a.download} — ${recs.length} actions.` });
+  }
+
+  async function copyGrokPrompt() {
+    const ctx = planContext();
+    const prompt = buildGrokPrompt(buildPlanMarkdown(recs as RecLike[], ctx), ctx);
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setNotice({ kind: "success", text: "Grok prompt copied — paste it into Grok for a 7-day execution checklist." });
+    } catch (e) {
+      setNotice({ kind: "error", text: `Could not copy to clipboard: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -168,9 +268,17 @@ export default function PPCPage() {
             Phase 1: Read + Recommend
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            Target ACOS
+            <input type="number" min={1} max={200} step={1} value={targetAcos}
+              onChange={(e) => setTargetAcos(Math.min(200, Math.max(1, Number(e.target.value) || 0)))}
+              className="h-8 w-16 rounded-md border bg-transparent px-2 text-right text-xs tabular-nums text-foreground" />
+            %
+          </label>
           <Button variant="outline" size="sm" onClick={generateRecs} disabled={generating || !hasData}>
-            {generating ? "Generating..." : "Generate Recs"}
+            {generating && <RefreshCw className="mr-1 h-3 w-3 animate-spin" />}
+            {generating ? "Generating..." : `Generate Recs (${range.toUpperCase()})`}
           </Button>
           <Button variant="outline" size="sm" onClick={() => syncAds(14)} disabled={syncing}>
             <RefreshCw className={`mr-1 h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
@@ -178,6 +286,8 @@ export default function PPCPage() {
           </Button>
         </div>
       </div>
+
+      {notice && <NoticeBanner notice={notice} onDismiss={() => setNotice(null)} />}
 
       {!hasData ? (
         <Card>
@@ -271,16 +381,30 @@ export default function PPCPage() {
             </Card>
           )}
 
-          {/* Tab bar */}
-          <div className="flex gap-1">
-            {(["actions", "search", "campaigns"] as const).map((t) => (
-              <button key={t} onClick={() => setTab(t)}
-                className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
-                  tab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"
-                }`}>
-                {t === "actions" ? `Actions (${recs.length})` : t === "search" ? "Search Terms" : "Campaigns"}
-              </button>
-            ))}
+          {/* Tab bar + plan export */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex gap-1">
+              {(["actions", "search", "campaigns"] as const).map((t) => (
+                <button key={t} onClick={() => setTab(t)}
+                  className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                    tab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}>
+                  {t === "actions" ? `Actions (${recs.length})` : t === "search" ? "Search Terms" : "Campaigns"}
+                </button>
+              ))}
+            </div>
+            {tab === "actions" && (
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={exportPlan} disabled={!recs.length}>
+                  <Download className="mr-1 h-3 w-3" />
+                  Export plan (.md)
+                </Button>
+                <Button variant="outline" size="sm" onClick={copyGrokPrompt} disabled={!recs.length}>
+                  <ClipboardCopy className="mr-1 h-3 w-3" />
+                  Copy Grok prompt
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Actions queue */}
@@ -288,39 +412,61 @@ export default function PPCPage() {
             <Card>
               <CardContent className="p-0 overflow-x-auto">
                 {recs.length === 0 ? (
-                  <div className="p-4 text-center">
-                    <p className="text-sm text-muted-foreground">No open recommendations.</p>
-                    <Button variant="outline" size="sm" className="mt-2" onClick={generateRecs} disabled={generating}>
-                      {generating ? "Generating..." : "Generate Recommendations"}
+                  <div className="p-6 text-center">
+                    <p className="text-sm font-medium">No open recommendations.</p>
+                    <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+                      Run <strong>Generate Recommendations</strong> after an Ads sync has pulled search terms.
+                      Without search-term rows there is nothing to negate, harvest or re-bid — sync first
+                      (<code>python -m src.main ads-sync --days {rangeDays}</code>), then generate.
+                    </p>
+                    <Button variant="outline" size="sm" className="mt-3" onClick={generateRecs} disabled={generating}>
+                      {generating && <RefreshCw className="mr-1 h-3 w-3 animate-spin" />}
+                      {generating ? "Generating..." : `Generate Recommendations (${range.toUpperCase()}, ${targetAcos}% ACOS)`}
                     </Button>
                   </div>
                 ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-16">Priority</TableHead>
-                        <TableHead className="w-24">Type</TableHead>
-                        <TableHead>Entity</TableHead>
-                        <TableHead>Campaign</TableHead>
-                        <TableHead className="text-right">Impact</TableHead>
+                        <TableHead className="w-14">Priority</TableHead>
+                        <TableHead className="w-32">Action</TableHead>
+                        <TableHead>Do this</TableHead>
+                        <TableHead className="w-[160px]">Campaign</TableHead>
+                        <TableHead className="w-24 text-right">Impact</TableHead>
                         <TableHead className="w-20" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {recs.map((r) => (
-                        <TableRow key={r.id}>
+                      {recs.map((r) => {
+                        const at = actionTypeOf(r);
+                        const open = expanded === r.id;
+                        return (
+                        <Fragment key={r.id}>
+                        <TableRow className="cursor-pointer" onClick={() => setExpanded(open ? null : r.id)}>
                           <TableCell>
                             <Badge variant="outline" className={`text-[10px] ${PRIORITY_COLORS[r.priority] ?? ""}`}>
                               {r.priority}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-xs font-medium">{TYPE_LABELS[r.type] ?? r.type}</TableCell>
-                          <TableCell className="text-xs max-w-[200px] truncate" title={r.suggested_action}>
-                            {r.entity_name.slice(0, 40)}
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground truncate max-w-[150px]">{r.campaign_name}</TableCell>
-                          <TableCell className="text-right tabular-nums font-medium text-red-600">${fmtD(r.impact_estimate)}</TableCell>
                           <TableCell>
+                            <Badge variant="outline" className={`text-[10px] whitespace-nowrap ${ACTION_STYLES[at]}`}>
+                              {ACTION_LABELS[at]}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {/* Fixed-width block: a table cell would otherwise
+                                stretch to fit the sentence and push Campaign
+                                and Impact off-screen. */}
+                            <div className="flex w-[26rem] items-start gap-1.5 whitespace-normal xl:w-[34rem]">
+                              <ChevronRight className={`mt-0.5 h-3 w-3 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+                              <span className={open ? "" : "line-clamp-2"}>{doThisOf(r)}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground truncate max-w-[160px]" title={r.campaign_name}>
+                            {r.campaign_name}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums font-medium text-red-600">${fmtD(r.impact_estimate)}</TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
                             <div className="flex gap-1">
                               <Button variant="ghost" size="sm" className="h-6 w-6 p-0"
                                 title="Mark applied" onClick={() => updateRec(r.id, "applied")}>
@@ -333,7 +479,45 @@ export default function PPCPage() {
                             </div>
                           </TableCell>
                         </TableRow>
-                      ))}
+                        {open && (
+                          <TableRow className="bg-muted/40 hover:bg-muted/40">
+                            <TableCell />
+                            <TableCell colSpan={5} className="py-3">
+                              {/* whitespace-normal: TableCell sets nowrap, which
+                                  would run these sentences off the card. */}
+                              <dl className="grid max-w-4xl gap-x-6 gap-y-2 text-xs whitespace-normal sm:grid-cols-[7rem_1fr]">
+                                <dt className="text-muted-foreground">Do this</dt>
+                                <dd className="font-medium">{doThisOf(r)}</dd>
+                                <dt className="text-muted-foreground">Why</dt>
+                                <dd>{whyOf(r)}</dd>
+                                <dt className="text-muted-foreground">
+                                  {r.entity_type === "campaign" ? "Campaign" : r.entity_type === "keyword" ? "Keyword" : "Search term"}
+                                </dt>
+                                <dd className="break-all">{r.entity_name}</dd>
+                                <dt className="text-muted-foreground">Campaign</dt>
+                                <dd>
+                                  {r.campaign_name || "—"}
+                                  {adGroupsOf(r).length > 0 && (
+                                    <span className="text-muted-foreground"> · ad group {adGroupsOf(r).join(", ")}</span>
+                                  )}
+                                </dd>
+                                {matchTypesOf(r).length > 0 && (<>
+                                  <dt className="text-muted-foreground">Match type</dt>
+                                  <dd>{matchTypesOf(r).join(", ")}</dd>
+                                </>)}
+                                {suggestedBidOf(r) !== null && (<>
+                                  <dt className="text-muted-foreground">Suggested bid</dt>
+                                  <dd className="tabular-nums">${fmtD(suggestedBidOf(r) as number)}</dd>
+                                </>)}
+                                <dt className="text-muted-foreground">Impact estimate</dt>
+                                <dd className="tabular-nums">${fmtD(r.impact_estimate)}</dd>
+                              </dl>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </Fragment>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 )}
