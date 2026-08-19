@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
-from src.amazon_ads.client import fetch_report
+from src.amazon_ads.client import fetch_report, SEARCH_TERM_TIMEOUT
 from src.db import upsert_rows
 from src.rules import ADS_MAX_CHUNK_DAYS
 
@@ -81,7 +81,11 @@ def _fetch_campaigns_chunk(start: date, end: date) -> list[dict]:
 
 
 def _fetch_search_terms_chunk(start: date, end: date) -> list[dict]:
-    """Fetch SP search term report for a ≤30-day range."""
+    """Fetch SP search term report for a ≤30-day range.
+
+    Uses SEARCH_TERM_TIMEOUT (90 min) — these reports are much larger
+    than campaign reports and routinely exceed 30 minutes.
+    """
     config = {
         "startDate": start.isoformat(),
         "endDate": end.isoformat(),
@@ -101,7 +105,7 @@ def _fetch_search_terms_chunk(start: date, end: date) -> list[dict]:
             "format": "GZIP_JSON",
         },
     }
-    return fetch_report(config)
+    return fetch_report(config, timeout=SEARCH_TERM_TIMEOUT)
 
 
 # ── Chunked fetchers ──
@@ -147,33 +151,48 @@ def fetch_campaigns_daily(start: date, end: date) -> dict:
 
 
 def fetch_search_terms(start: date, end: date) -> dict:
-    """Fetch SP search term report, auto-chunked to ≤30 days."""
+    """Fetch SP search term report, auto-chunked to ≤30 days.
+
+    Retries each failed chunk once before recording the error.
+    """
     chunks = _date_chunks(start, end)
     all_parsed: list[dict] = []
     errors: list[str] = []
 
     for i, (cs, ce) in enumerate(chunks, 1):
         log.info("Search terms chunk %d/%d: %s → %s", i, len(chunks), cs, ce)
-        try:
-            rows = _fetch_search_terms_chunk(cs, ce)
-            for r in rows:
-                m = _metrics(r)
-                all_parsed.append({
-                    "date": cs.isoformat(),
-                    "search_term": r.get("searchTerm", ""),
-                    "campaign_id": str(r.get("campaignId", "")),
-                    "campaign_name": r.get("campaignName", ""),
-                    "ad_group_id": str(r.get("adGroupId", "")),
-                    "ad_group_name": r.get("adGroupName", ""),
-                    "keyword": r.get("keyword", ""),
-                    "keyword_id": str(r.get("keywordId", "")),
-                    "match_type": r.get("matchType", ""),
-                    **m,
-                })
-        except Exception as e:
-            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:120]}"
-            log.warning("Search terms %s", msg)
+        rows = None
+        last_err = None
+        for attempt in range(2):  # try + retry once
+            try:
+                rows = _fetch_search_terms_chunk(cs, ce)
+                break
+            except Exception as e:
+                last_err = e
+                if attempt == 0:
+                    log.warning("Search terms chunk %d failed (attempt 1), retrying: %s",
+                                i, str(e)[:120])
+
+        if rows is None:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(last_err)[:120]}"
+            log.warning("Search terms %s (gave up after retry)", msg)
             errors.append(msg)
+            continue
+
+        for r in rows:
+            m = _metrics(r)
+            all_parsed.append({
+                "date": cs.isoformat(),
+                "search_term": r.get("searchTerm", ""),
+                "campaign_id": str(r.get("campaignId", "")),
+                "campaign_name": r.get("campaignName", ""),
+                "ad_group_id": str(r.get("adGroupId", "")),
+                "ad_group_name": r.get("adGroupName", ""),
+                "keyword": r.get("keyword", ""),
+                "keyword_id": str(r.get("keywordId", "")),
+                "match_type": r.get("matchType", ""),
+                **m,
+            })
 
     inserted = 0
     if all_parsed:

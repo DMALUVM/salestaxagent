@@ -19,12 +19,14 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://advertising-api.amazon.com"
 POLL_INTERVAL = 30  # seconds (Ads reports take 5-20 minutes)
-MAX_TIMEOUT = 1800  # 30 minutes
+DEFAULT_TIMEOUT = 1800    # 30 minutes — sufficient for campaigns
+SEARCH_TERM_TIMEOUT = 5400  # 90 minutes — search term reports are much larger
 
 
 def create_report(config: dict) -> str:
     """Create an async report. Returns reportId."""
     headers = ads_headers()
+    report_type = config.get("configuration", {}).get("reportTypeId", "unknown")
     resp = httpx.post(f"{BASE_URL}/reporting/reports",
                       headers=headers, json=config, timeout=20)
     if resp.status_code == 401:
@@ -33,24 +35,33 @@ def create_report(config: dict) -> str:
         raise PermissionError("Ads API forbidden (403) — check profile scope")
     resp.raise_for_status()
     data = resp.json()
-    return data.get("reportId", "")
+    report_id = data.get("reportId", "")
+    log.info("Ads report created: %s (type=%s)", report_id, report_type)
+    return report_id
 
 
-def poll_report(report_id: str, timeout: int = MAX_TIMEOUT) -> dict:
+def poll_report(report_id: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
     """Poll until report is COMPLETED or fails."""
     headers = ads_headers()
     start = time.time()
+    last_status = ""
     while time.time() - start < timeout:
         resp = httpx.get(f"{BASE_URL}/reporting/reports/{report_id}",
                          headers=headers, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         status = data.get("status", "")
+        if status != last_status:
+            elapsed = int(time.time() - start)
+            log.info("Report %s: status=%s (elapsed %ds)", report_id, status, elapsed)
+            last_status = status
         if status == "COMPLETED":
             return data
         if status in ("FAILED", "CANCELLED"):
-            raise RuntimeError(f"Report {report_id} status: {status}")
+            raise RuntimeError(f"Report {report_id} final status: {status}")
         time.sleep(POLL_INTERVAL)
+    log.warning("Report %s timed out after %ds (last status: %s)",
+                report_id, timeout, last_status)
     raise TimeoutError(f"Report {report_id} timed out after {timeout}s")
 
 
@@ -66,16 +77,21 @@ def download_report(url: str) -> list[dict]:
         return resp.json()
 
 
-def fetch_report(config: dict) -> list[dict]:
-    """Create → poll → download a report. Returns list of row dicts."""
+def fetch_report(config: dict, timeout: int | None = None) -> list[dict]:
+    """Create → poll → download a report. Returns list of row dicts.
+
+    Args:
+        config: Ads Reporting v3 request body.
+        timeout: Poll timeout in seconds. Defaults to DEFAULT_TIMEOUT.
+    """
     report_id = create_report(config)
-    log.info("Ads report created: %s", report_id)
-    completed = poll_report(report_id)
+    poll_timeout = timeout if timeout is not None else DEFAULT_TIMEOUT
+    completed = poll_report(report_id, timeout=poll_timeout)
     download_url = completed.get("url", "")
     if not download_url:
         raise RuntimeError(f"No download URL for report {report_id}")
     rows = download_report(download_url)
-    log.info("Ads report %s: %d rows", report_id, len(rows))
+    log.info("Ads report %s: %d rows downloaded", report_id, len(rows))
     return rows
 
 

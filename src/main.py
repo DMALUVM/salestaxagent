@@ -582,10 +582,16 @@ def ads_sync_cmd(days):
                                f"Dates: {val.get('date_min', '?')} → {val.get('date_max', '?')}")
 
     click.echo(f"  Range: {result.get('start', '?')} → {result.get('end', '?')}")
-    if errors:
-        job_finish(run_id, "fail", f"{len(errors)} chunk errors")
-    else:
+
+    # Determine job outcome: partial success if campaigns loaded but search terms failed
+    campaigns_ok = isinstance(result.get("campaigns"), dict) and "error" not in result.get("campaigns", {})
+    st_ok = isinstance(result.get("search_terms"), dict) and not result.get("search_terms", {}).get("errors") and "error" not in result.get("search_terms", {})
+    if campaigns_ok and st_ok:
         job_finish(run_id, "success", f"{days}d synced")
+    elif campaigns_ok and not st_ok:
+        job_finish(run_id, "success", f"{days}d synced (campaigns OK, search_terms partial: {len(errors)} errors)")
+    else:
+        job_finish(run_id, "fail", f"{len(errors)} chunk errors")
 
 
 @cli.command("ads-actions")
