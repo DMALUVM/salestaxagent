@@ -1,0 +1,28 @@
+{
+  "amazon": {
+    "timezone": "America/Los_Angeles",
+    "date_field": "purchase-date",
+    "include_statuses": ["pending", "unshipped", "partiallyshipped", "shipped"],
+    "exclude_statuses": ["cancelled"],
+    "pulse_source": "amazon_spapi",
+    "price_field": "item-price"
+  },
+  "shopify": {
+    "timezone": "America/New_York"
+  },
+  "spapi": {
+    "max_chunk_days": 30
+  },
+  "ads": {
+    "max_report_days": 31,
+    "max_chunk_days": 30,
+    "mandatory_chunking": true
+  },
+  "pnl": {
+    "cogs_source": "sku_costs",
+    "contribution_formula": "payout - cogs - ad_spend",
+    "finances_label": "Amazon Payout (before COGS)",
+    "default_referral_pct": 0.15,
+    "default_fba_fee_per_unit": 3.50
+  }
+}

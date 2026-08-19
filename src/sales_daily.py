@@ -16,11 +16,12 @@ from zoneinfo import ZoneInfo
 
 from src.channels import SHOPIFY, AMAZON
 from src.db import upsert_rows, get_client
+from src.rules import AMAZON_TZ, SHOPIFY_TZ, is_excluded_status
 
 log = logging.getLogger(__name__)
 
-TZ_SHOPIFY = ZoneInfo("America/New_York")
-TZ_AMAZON = ZoneInfo("America/Los_Angeles")
+TZ_SHOPIFY = SHOPIFY_TZ
+TZ_AMAZON = AMAZON_TZ
 NY = TZ_SHOPIFY
 LA = TZ_AMAZON
 
@@ -372,8 +373,8 @@ def sync_amazon_daily(days: int = 7) -> dict:
         H = _build_header_lookup(reader.fieldnames)
 
         for row in reader:
-            status = _get(row, H, "order-status").lower()
-            if status == "cancelled":
+            status = _get(row, H, "order-status")
+            if is_excluded_status(status):
                 continue  # skip cancelled, include pending/shipped/etc.
 
             pd_str = _get(row, H, "purchase-date")

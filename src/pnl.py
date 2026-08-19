@@ -19,11 +19,12 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from src.db import fetch_all, upsert_rows
+from src.rules import PNL_DEFAULT_REFERRAL_PCT, PNL_DEFAULT_FBA_FEE_PER_UNIT
 
 log = logging.getLogger(__name__)
 
-DEFAULT_REFERRAL_PCT = float(os.environ.get("DEFAULT_REFERRAL_PCT", "0.15"))
-DEFAULT_FBA_FEE_PER_UNIT = float(os.environ.get("DEFAULT_FBA_FEE_PER_UNIT", "3.50"))
+DEFAULT_REFERRAL_PCT = float(os.environ.get("DEFAULT_REFERRAL_PCT", str(PNL_DEFAULT_REFERRAL_PCT)))
+DEFAULT_FBA_FEE_PER_UNIT = float(os.environ.get("DEFAULT_FBA_FEE_PER_UNIT", str(PNL_DEFAULT_FBA_FEE_PER_UNIT)))
 
 
 def compute_pnl(days: int = 30) -> dict:

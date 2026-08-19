@@ -15,6 +15,7 @@ from src.channels import AMAZON
 from src.db import delete_rows, log_audit, log_ingestion, upsert_rows
 from src.mappers.fc_to_state import fc_to_state
 from src.models.schema import InventoryEvent, SalesByState
+from src.rules import SPAPI_MAX_CHUNK_DAYS, is_excluded_status
 from src.sku_normalize import normalize_sku
 
 from src.amazon_sp.client import request_and_download
@@ -179,7 +180,7 @@ def _month_end(d: date) -> date:
     return date(d.year, d.month + 1, 1) - timedelta(days=1)
 
 
-MAX_CHUNK_DAYS = 30
+MAX_CHUNK_DAYS = SPAPI_MAX_CHUNK_DAYS
 
 
 def _date_chunks(start: date, end: date) -> list[tuple[date, date]]:
@@ -267,8 +268,8 @@ def parse_orders_report(content: str) -> dict:
             result["rows_skipped"] += 1
             continue
 
-        # Skip cancelled / pending orders
-        if status in ("cancelled", "pending"):
+        # Skip excluded statuses (cancelled only — pending IS included)
+        if is_excluded_status(status):
             result["rows_skipped"] += 1
             continue
 

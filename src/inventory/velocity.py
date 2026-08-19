@@ -19,11 +19,12 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from src.db import upsert_rows, fetch_all
+from src.rules import AMAZON_TZ, SHOPIFY_TZ, is_excluded_status
 
 log = logging.getLogger(__name__)
 
-LA = ZoneInfo("America/Los_Angeles")
-NY = ZoneInfo("America/New_York")
+LA = AMAZON_TZ
+NY = SHOPIFY_TZ
 
 
 # ---------------------------------------------------------------------------
@@ -63,8 +64,8 @@ def _fetch_amazon_sku_units(days: int = 400) -> dict[str, dict[date, int]]:
         H = _build_header_lookup(reader.fieldnames)
 
         for row in reader:
-            status = _get(row, H, "order-status").lower()
-            if status == "cancelled":
+            status = _get(row, H, "order-status")
+            if is_excluded_status(status):
                 continue
 
             sku = _get(row, H, "sku", "seller-sku", "msku")

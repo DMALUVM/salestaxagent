@@ -10,10 +10,11 @@ from datetime import date, timedelta
 
 from src.amazon_ads.client import fetch_report
 from src.db import upsert_rows
+from src.rules import ADS_MAX_CHUNK_DAYS
 
 log = logging.getLogger(__name__)
 
-MAX_CHUNK_DAYS = 30  # Amazon Ads API max range
+MAX_CHUNK_DAYS = ADS_MAX_CHUNK_DAYS
 
 
 def _safe(v, default=0):
