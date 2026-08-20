@@ -88,6 +88,89 @@ def _fetch_campaigns_chunk(start: date, end: date) -> list[dict]:
     return fetch_report(config)
 
 
+def _fetch_placements_chunk(start: date, end: date) -> list[dict]:
+    """Fetch SP placement performance for a ≤30-day range.
+
+    Same spCampaigns report grouped by campaignPlacement. Verified against the
+    live API: returns Top of Search on-Amazon / Detail Page on-Amazon / Other
+    on-Amazon / Off Amazon.
+    """
+    config = {
+        "startDate": start.isoformat(),
+        "endDate": end.isoformat(),
+        "configuration": {
+            "adProduct": "SPONSORED_PRODUCTS",
+            "groupBy": ["campaignPlacement"],
+            "columns": [
+                "date", "campaignName", "campaignId", "placementClassification",
+                "impressions", "clicks", "spend", "sales14d", "purchases14d",
+            ],
+            "reportTypeId": "spCampaigns",
+            "timeUnit": "DAILY",
+            "format": "GZIP_JSON",
+        },
+    }
+    return fetch_report(config)
+
+
+def fetch_placements(start: date, end: date) -> dict:
+    """Fetch placement performance, auto-chunked to ≤30 days.
+
+    Requires supabase/migration_ads_placement.sql. If the table is absent the
+    upsert fails loudly rather than silently discarding a completed report.
+    """
+    chunks = _date_chunks(start, end)
+    all_parsed: list[dict] = []
+    errors: list[str] = []
+
+    for i, (cs, ce) in enumerate(chunks, 1):
+        log.info("Placements chunk %d/%d: %s → %s", i, len(chunks), cs, ce)
+        try:
+            rows = _fetch_placements_chunk(cs, ce)
+        except Exception as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:120]}"
+            log.warning("Placement %s", msg)
+            errors.append(msg)
+            continue
+
+        for r in rows:
+            placement = r.get("placementClassification") or "Unknown"
+            all_parsed.append({
+                "date": r.get("date", cs.isoformat()),
+                "campaign_id": str(r.get("campaignId", "")),
+                "campaign_name": r.get("campaignName", ""),
+                "placement": placement,
+                **_metrics(r),
+            })
+
+    inserted = 0
+    if all_parsed:
+        # Deduplicate on the primary key before upserting.
+        seen: dict[tuple, dict] = {}
+        for p in all_parsed:
+            seen[(p["date"], p["campaign_id"], p["placement"])] = p
+        try:
+            inserted = upsert_rows("ads_placement_daily", list(seen.values()),
+                                   on_conflict="date,campaign_id,placement")
+        except Exception as e:
+            # A missing table is a setup step, not a failure to alert on every
+            # night. Anything else is a real error and propagates.
+            if "ads_placement_daily" in str(e) and "schema cache" in str(e):
+                log.warning("ads_placement_daily missing — run "
+                            "supabase/migration_ads_placement.sql to enable placement data")
+                return {"rows": len(all_parsed), "inserted": 0, "chunks": len(chunks),
+                        "errors": [], "skipped": "table missing: run migration_ads_placement.sql"}
+            raise
+
+    dates = [r["date"] for r in all_parsed if r.get("date")]
+    return {
+        "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
+        "errors": errors,
+        "date_min": min(dates) if dates else None,
+        "date_max": max(dates) if dates else None,
+    }
+
+
 def _fetch_search_terms_chunk(start: date, end: date) -> list[dict]:
     """Fetch SP search term report for a ≤30-day range.
 
@@ -233,6 +316,8 @@ def fetch_search_terms(start: date, end: date,
 
 def sync_ads(days: int = 14, campaigns_only: bool = False,
              search_terms_only: bool = False,
+             placements_only: bool = False,
+             with_placements: bool = False,
              search_term_chunk_days: int | None = None) -> dict:
     """Ads sync: campaigns and/or search terms, auto-chunked.
 
@@ -245,19 +330,26 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
     feeds the /ppc KPIs and trends never waits on a 90-minute report. A failure
     in one half is recorded but never aborts the other.
     """
-    if campaigns_only and search_terms_only:
-        raise ValueError("campaigns_only and search_terms_only are mutually exclusive")
+    only_flags = [campaigns_only, search_terms_only, placements_only]
+    if sum(bool(f) for f in only_flags) > 1:
+        raise ValueError("campaigns_only, search_terms_only and placements_only "
+                         "are mutually exclusive")
 
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=days - 1)
 
-    do_campaigns = not search_terms_only
-    do_search_terms = not campaigns_only
+    any_only = any(only_flags)
+    do_campaigns = campaigns_only or not any_only
+    do_search_terms = search_terms_only or not any_only
+    # Placements are opt-in on a full sync: they are a second spCampaigns
+    # report, so they double that report's runtime when not needed.
+    do_placements = placements_only or (with_placements and not any_only)
 
     results: dict = {
         "start": start.isoformat(), "end": end.isoformat(), "days": days,
         "ran": [k for k, on in (("campaigns", do_campaigns),
-                                ("search_terms", do_search_terms)) if on],
+                                ("search_terms", do_search_terms),
+                                ("placements", do_placements)) if on],
     }
 
     log.info("Ads sync: %s → %s (%d days) — %s", start, end, days,
@@ -277,5 +369,12 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
         except Exception as e:
             log.exception("Search term sync failed")
             results["search_terms"] = {"error": str(e)[:200]}
+
+    if do_placements:
+        try:
+            results["placements"] = fetch_placements(start, end)
+        except Exception as e:
+            log.exception("Placement sync failed")
+            results["placements"] = {"error": str(e)[:200]}
 
     return results

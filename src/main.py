@@ -552,9 +552,14 @@ def ads_test_cmd():
               help="Sync campaigns only — returns without waiting on search terms")
 @click.option("--search-terms-only", is_flag=True,
               help="Sync search terms only")
+@click.option("--placements-only", is_flag=True,
+              help="Sync placement performance only (needs migration_ads_placement.sql)")
+@click.option("--with-placements", is_flag=True,
+              help="Also sync placement performance on a full sync")
 @click.option("--search-term-chunk-days", default=None, type=int,
               help="Chunk size for search-term reports (default 7)")
-def ads_sync_cmd(days, campaigns_only, search_terms_only, search_term_chunk_days):
+def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
+                 with_placements, search_term_chunk_days):
     """Sync Amazon Ads campaigns + search terms (auto-chunked).
 
     Campaigns chunk at ≤30 days; search terms at 7 by default because those
@@ -564,26 +569,32 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, search_term_chunk_days
     if not settings.amazon_ads_enabled:
         click.echo("Amazon Ads not configured. Set AMAZON_ADS_* in .env")
         return
-    if campaigns_only and search_terms_only:
-        raise click.UsageError("--campaigns-only and --search-terms-only are mutually exclusive")
+    if sum(bool(f) for f in (campaigns_only, search_terms_only, placements_only)) > 1:
+        raise click.UsageError("--campaigns-only, --search-terms-only and "
+                               "--placements-only are mutually exclusive")
     from src.amazon_ads.reports import sync_ads, SEARCH_TERM_CHUNK_DAYS
     from src.db import job_start, job_finish
 
     job_name = ("ads_campaigns_sync" if campaigns_only else
-                "ads_search_terms_sync" if search_terms_only else "ads_sync")
+                "ads_search_terms_sync" if search_terms_only else
+                "ads_placements_sync" if placements_only else "ads_sync")
     st_chunk = search_term_chunk_days or SEARCH_TERM_CHUNK_DAYS
 
     run_id = job_start(job_name)
     scope = ("campaigns only" if campaigns_only else
-             "search terms only" if search_terms_only else "campaigns + search terms")
+             "search terms only" if search_terms_only else
+             "placements only" if placements_only else
+             "campaigns + search terms" + (" + placements" if with_placements else ""))
     click.echo(f"Syncing last {days} days of Ads data ({scope}; "
                f"campaigns ≤30d chunks, search terms {st_chunk}d chunks)...")
     result = sync_ads(days=days, campaigns_only=campaigns_only,
                       search_terms_only=search_terms_only,
+                      placements_only=placements_only,
+                      with_placements=with_placements,
                       search_term_chunk_days=search_term_chunk_days)
     errors = []
 
-    for key in ["campaigns", "search_terms"]:
+    for key in ["campaigns", "search_terms", "placements"]:
         val = result.get(key)
         if val is None:
             continue  # this half was skipped — don't report it as "0 rows"
@@ -619,7 +630,7 @@ def _ads_sync_outcome(result: dict, days: int) -> tuple[str, str]:
     landing while search terms time out is a *partial*, not a failure — the
     /ppc KPIs and trends are current either way.
     """
-    def half(name: str) -> str | None:
+    def half(name: str) -> str | None:  # noqa: D401
         val = result.get(name)
         if not isinstance(val, dict):
             return None                       # did not run
@@ -628,7 +639,8 @@ def _ads_sync_outcome(result: dict, days: int) -> tuple[str, str]:
         return "partial" if val.get("errors") else "ok"
 
     campaigns, search_terms = half("campaigns"), half("search_terms")
-    ran = [s for s in (campaigns, search_terms) if s is not None]
+    placements = half("placements")
+    ran = [s for s in (campaigns, search_terms, placements) if s is not None]
     if not ran:
         return "fail", "nothing ran"
 
@@ -638,6 +650,8 @@ def _ads_sync_outcome(result: dict, days: int) -> tuple[str, str]:
         detail.append(f"campaigns {campaigns}")
     if search_terms:
         detail.append(f"search_terms {search_terms}")
+    if placements:
+        detail.append(f"placements {placements}")
     summary = f"{days}d {scope}: " + ", ".join(detail)
 
     if all(s == "ok" for s in ran):
@@ -2461,6 +2475,20 @@ def run():
                 coalesce=True,
             )
             click.echo("[Scheduler] Ads campaigns backfill weekly Sunday 03:00 (90d)")
+
+            # Placement performance at 05:15 — between campaigns and search
+            # terms. Second spCampaigns report, so it is its own job rather
+            # than doubling the 05:00 run's time.
+            scheduler.add_job(
+                _run_ads_placements_sync,
+                "cron",
+                hour=5,
+                minute=15,
+                id="ads_placements_sync",
+                misfire_grace_time=3600,
+                coalesce=True,
+            )
+            click.echo("[Scheduler] Ads placements sync daily at 05:15 (14d)")
         else:
             click.echo("[Scheduler] Amazon Ads not configured — ads jobs not scheduled")
 
@@ -2946,7 +2974,8 @@ def _ads_alert(subject: str, detail: str) -> None:
 
 
 def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
-                      search_terms_only: bool = False, label: str) -> None:
+                      search_terms_only: bool = False,
+                      placements_only: bool = False, label: str) -> None:
     """Shared body for the ads sync jobs."""
     from src.db import job_start, job_finish
     from src.amazon_ads.reports import sync_ads
@@ -2954,7 +2983,8 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
     run_id = job_start(job_name)
     try:
         result = sync_ads(days=days, campaigns_only=campaigns_only,
-                          search_terms_only=search_terms_only)
+                          search_terms_only=search_terms_only,
+                          placements_only=placements_only)
     except Exception as e:
         print(f"[Ads {label}] Failed: {e}")
         job_finish(run_id, "fail", str(e)[:500])
@@ -2962,7 +2992,7 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
         return
 
     status, message = _ads_sync_outcome(result, days)
-    for key in ("campaigns", "search_terms"):
+    for key in ("campaigns", "search_terms", "placements"):
         val = result.get(key)
         if isinstance(val, dict):
             if "error" in val:
@@ -2999,6 +3029,16 @@ def _run_ads_campaigns_backfill():
     """Sunday 03:00 — 90 days of campaigns (3 × 30-day chunks) for long trends."""
     _run_ads_sync_job("ads_campaigns_backfill", days=90, campaigns_only=True,
                       label="campaigns 90d")
+
+
+def _run_ads_placements_sync():
+    """05:15 — placement (Top of Search / Detail Page / Other) performance.
+
+    No-ops with a clear message until supabase/migration_ads_placement.sql has
+    been run, so it never alerts nightly for a setup step.
+    """
+    _run_ads_sync_job("ads_placements_sync", days=14, placements_only=True,
+                      label="placements")
 
 
 def _run_ads_actions():

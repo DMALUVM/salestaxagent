@@ -33,7 +33,33 @@ interface DailyPoint {
 interface CampaignAgg {
   campaign_name: string; spend: number; sales: number; orders: number;
   clicks: number; impressions: number; acos: number; roas: number; cvr: number;
+  role: string;
 }
+interface RoleAgg {
+  role: string; label: string; description: string | null; campaigns: number;
+  spend: number; sales: number; clicks: number; orders: number;
+  budgetSharePct: number; acos: number | null; roas: number | null;
+  cvr: number | null; tacos: number | null;
+}
+interface PlacementAgg {
+  placement: string; spend: number; sales: number; clicks: number; orders: number;
+  impressions: number; sharePct: number; acos: number | null;
+  cvr: number | null; cpc: number | null;
+}
+
+/** Role badge tints — cool for finding demand, warm for spending on rank. */
+const ROLE_STYLES: Record<string, string> = {
+  discovery: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900",
+  profit: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
+  ranking: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
+  defense: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-900",
+};
+const ROLE_BARS: Record<string, string> = {
+  discovery: "bg-[#2a78d6] dark:bg-[#3987e5]",
+  profit: "bg-[#12996a] dark:bg-[#199e70]",
+  ranking: "bg-[#eb6834] dark:bg-[#d95926]",
+  defense: "bg-[#4a3aa7] dark:bg-[#9085e9]",
+};
 interface SearchTerm {
   search_term: string; campaign_name: string; keyword: string; match_type: string;
   spend: number; sales_14d: number; orders_14d: number; clicks: number; acos: number;
@@ -52,8 +78,12 @@ interface PPCData {
   dailySeries: DailyPoint[];
   /** Server-computed window start dates, so chart and KPIs share one window. */
   cutoffs: Record<Range, string> | null;
+  /** Yesterday in America/Los_Angeles — the newest closed reporting day. */
+  asOf: string | null; today: string | null; adsThrough: string | null;
   dateMin: string | null; dateMax: string | null; daysInDb: number;
-  campaigns: CampaignAgg[]; searchTerms: SearchTerm[];
+  campaigns: CampaignAgg[]; roles: RoleAgg[];
+  placements: PlacementAgg[]; placementsAvailable: boolean;
+  searchTerms: SearchTerm[];
   recommendations: Rec[];
   /** Newest finished ads sync of any kind, plus which job and how it ended. */
   lastSync: string | null; lastSyncJob: string | null; lastSyncStatus: string | null;
@@ -209,8 +239,14 @@ export default function PPCPage() {
   const series = data?.dailySeries ?? [];
   // Chart shows exactly the window the KPI card sums, using the server's own
   // cutoff so the two can never disagree about where the window starts.
+  // Same inclusive [cutoff .. asOf] bounds the KPI cards use, so the chart and
+  // the cards can never cover different days. The server already trims the
+  // series at as-of; the upper bound here keeps that true if it ever doesn't.
   const rangeCutoff = data?.cutoffs?.[range];
-  const rangeSeries = rangeCutoff ? series.filter((d) => d.date >= rangeCutoff) : series;
+  const asOf = data?.asOf ?? null;
+  const rangeSeries = series.filter(
+    (d) => (!rangeCutoff || d.date >= rangeCutoff) && (!asOf || d.date <= asOf)
+  );
   const searchTerms = data?.searchTerms ?? [];
   // Priority first, then dollars — same order the exported plan numbers them
   // in, so row 1 on screen is action 1 in the .md. P0 is "money burning now".
@@ -221,6 +257,8 @@ export default function PPCPage() {
       (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) ||
       b.impact_estimate - a.impact_estimate);
   const campaigns = data?.campaigns ?? [];
+  const roles = data?.roles ?? [];
+  const placements = data?.placements ?? [];
   const hasData = series.length > 0 || searchTerms.length > 0;
 
   const wastedTotal = searchTerms.filter((s) => s.orders_14d === 0).reduce((sum, s) => sum + Number(s.spend ?? 0), 0);
@@ -319,6 +357,7 @@ export default function PPCPage() {
           {/* Data freshness + range toggle */}
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
+              As of <span className="font-medium text-foreground">{asOf ?? "?"}</span> (America/Los_Angeles) ·{" "}
               Data: {data?.dateMin ?? "?"} → {data?.dateMax ?? "?"} · {data?.daysInDb ?? 0} days in DB · last sync {lastSyncLabel}
               {lastSyncJobLabel && ` (${lastSyncJobLabel}`}
               {lastSyncJobLabel && data?.lastSyncStatus && data.lastSyncStatus !== "success" && (
@@ -383,6 +422,101 @@ export default function PPCPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Budget share by role */}
+          {roles.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Budget by role
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    30 closed days ending {data?.asOf}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* One bar, segmented by share of spend */}
+                <div className="mb-3 flex h-2 w-full overflow-hidden rounded-full">
+                  {roles.map((r) => (
+                    <div key={r.role} className={ROLE_BARS[r.role] ?? "bg-muted"}
+                      style={{ width: `${r.budgetSharePct}%` }}
+                      title={`${r.label} ${r.budgetSharePct}%`} />
+                  ))}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {roles.map((r) => (
+                    <div key={r.role} className="rounded-lg border p-3" title={r.description ?? undefined}>
+                      <div className="flex items-center justify-between">
+                        <Badge variant="outline" className={`text-[10px] ${ROLE_STYLES[r.role] ?? ""}`}>
+                          {r.label}
+                        </Badge>
+                        <span className="text-sm font-semibold tabular-nums">{r.budgetSharePct}%</span>
+                      </div>
+                      <p className="mt-1.5 text-lg font-semibold tabular-nums">${fmt(Math.round(r.spend))}</p>
+                      <p className="text-[10px] text-muted-foreground tabular-nums">
+                        {r.campaigns} campaigns · ACOS {r.acos != null ? `${r.acos}%` : "—"} · TACoS {r.tacos != null ? `${r.tacos}%` : "—"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-3 text-[10px] text-muted-foreground">
+                  Roles are matched from campaign names in <code>config/ads_strategy.json</code>.
+                  Discovery finds terms, Profit harvests them, Ranking buys position on hero ASINs,
+                  Defense protects your own listings — each is judged against a different bar, so
+                  a high-ACOS Ranking campaign is not automatically a problem.
+                  TACoS here is that role&rsquo;s spend over total Amazon sales.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Placement performance */}
+          {data?.placementsAvailable && placements.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Placement
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    30 closed days ending {data?.asOf}
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0 overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Placement</TableHead>
+                      <TableHead className="text-right">Spend</TableHead>
+                      <TableHead className="text-right">Share</TableHead>
+                      <TableHead className="text-right">Sales</TableHead>
+                      <TableHead className="text-right">ACOS</TableHead>
+                      <TableHead className="text-right">CVR</TableHead>
+                      <TableHead className="text-right">CPC</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {placements.map((p) => (
+                      <TableRow key={p.placement}>
+                        <TableCell className="text-xs font-medium">{p.placement}</TableCell>
+                        <TableCell className="text-right tabular-nums">${fmtD(p.spend)}</TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">{p.sharePct}%</TableCell>
+                        <TableCell className="text-right tabular-nums">${fmt(Math.round(p.sales))}</TableCell>
+                        <TableCell className="text-right tabular-nums">{p.acos != null ? `${p.acos}%` : "—"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{p.cvr != null ? `${p.cvr}%` : "—"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{p.cpc != null ? `$${fmtD(p.cpc)}` : "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+          {data && !data.placementsAvailable && (
+            <p className="text-xs text-muted-foreground">
+              Placement breakdown not enabled — run <code>supabase/migration_ads_placement.sql</code>,
+              then <code>python -m src.main ads-sync --days 14 --placements-only</code>.
+            </p>
+          )}
 
           {/* Trend chart */}
           {series.length > 0 && (
@@ -592,6 +726,7 @@ export default function PPCPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Campaign</TableHead>
+                      <TableHead className="w-24">Role</TableHead>
                       <TableHead className="text-right">Spend</TableHead>
                       <TableHead className="text-right">Sales</TableHead>
                       <TableHead className="text-right">ACOS</TableHead>
@@ -604,6 +739,11 @@ export default function PPCPage() {
                     {campaigns.map((d) => (
                       <TableRow key={d.campaign_name}>
                         <TableCell className="text-xs font-medium truncate max-w-[250px]">{d.campaign_name}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`text-[9px] whitespace-nowrap ${ROLE_STYLES[d.role] ?? ""}`}>
+                            {d.role}
+                          </Badge>
+                        </TableCell>
                         <TableCell className="text-right tabular-nums">${fmtD(d.spend)}</TableCell>
                         <TableCell className="text-right tabular-nums">${fmt(Math.round(d.sales))}</TableCell>
                         <TableCell className={`text-right tabular-nums ${d.acos > 35 ? "text-red-500" : ""}`}>{d.acos.toFixed(0)}%</TableCell>

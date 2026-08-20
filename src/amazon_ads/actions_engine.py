@@ -233,6 +233,87 @@ def generate_recommendations(
                         f"before cutting further."),
             ))
 
+    # ── P1: INCREASE_BID — scale confirmed winners ──
+    # Sourced from the two-window search-term loop rather than this single
+    # window: a term only earns more budget if the short window says it
+    # converts under the scale bar AND the long window does not contradict it.
+    # Emitted for terms already running as exact (nothing left to harvest) —
+    # non-exact winners get a HARVEST card above instead, so the two never
+    # collide on the same (type, entity, campaign) key.
+    try:
+        from src.amazon_ads.search_terms import run_loop
+        from src.amazon_ads.strategy import THRESHOLDS as _TH
+
+        loop = run_loop(target_acos=target_acos)
+        bump = float(_TH["scale"]["bid_increase_pct"])
+        for w in loop["winners"]:
+            if "exact" not in w["match_types"]:
+                continue  # harvest first; bid up once it is an exact keyword
+            cpc = w["cpc"]
+            if cpc <= 0:
+                continue
+            new_bid = round(max(cpc * (1 + bump), MIN_BID), 2)
+            kw = w["keyword"] or w["search_term"]
+            long_note = ""
+            if w.get("long"):
+                long_note = (f" Confirmed over {loop['meta']['long_window'][0]}→"
+                             f"{loop['meta']['long_window'][1]}: {w['long']['orders']} orders, "
+                             f"ACOS {w['long']['acos']}%.")
+            recs.append(_make_rec(
+                type="INCREASE_BID",
+                priority="P1",
+                impact=w["sales"],
+                entity_type="keyword",
+                entity_name=kw,
+                campaign_name=w["campaign_name"],
+                campaign_id=w["campaign_id"],
+                ad_group_id=sorted(w["ad_group_ids"])[0] if w["ad_group_ids"] else "",
+                evidence={
+                    "action_type": "increase_bid",
+                    "why": (f"{w['orders']} orders at {w['acos']:.0f}% ACOS on "
+                            f"{_usd(w['spend'])} spend — under the {w['scale_bar']}% scale "
+                            f"bar (break-even target {target_acos:.0f}%)."),
+                    "spend": round(w["spend"], 2), "orders": w["orders"],
+                    "clicks": w["clicks"], "sales": round(w["sales"], 2),
+                    "acos": round(w["acos"], 2), "cpc": round(cpc, 2),
+                    "suggested_bid": new_bid, "target_acos": target_acos,
+                    "scale_bar": w["scale_bar"], "role": w["role"],
+                    "match_types": sorted(w["match_types"]),
+                    "ad_groups": sorted(w["ad_group_names"]),
+                    "short_window": loop["meta"]["short_window"],
+                    "long_window": loop["meta"]["long_window"],
+                    "long": w.get("long"),
+                    "window": window,
+                },
+                action=(f'Raise the bid on "{kw}" in campaign "{w["campaign_name"]}" from '
+                        f"about {_usd(cpc)} to {_usd(new_bid)} (+{bump * 100:.0f}%) to take "
+                        f"more of this traffic while it converts under target.{long_note} "
+                        f"Re-check ACOS in 7 days."),
+            ))
+    except Exception:
+        log.exception("Winner scaling skipped — search-term loop unavailable")
+
+    # ── P1: ADJUST_TOS_MODIFIER — Top of Search placement efficiency ──
+    # Recommendation only, and only when ads_placement_daily has data: an
+    # absent or empty table yields zero cards rather than an error or a guess.
+    # One card per campaign; the table's UNIQUE (type, entity_name, campaign_id)
+    # backs that up.
+    try:
+        from src.amazon_ads.placement import recommend_tos_modifiers
+
+        tos_cards, tos_meta = recommend_tos_modifiers(target_acos)
+        seen_campaigns: set[str] = set()
+        for card in tos_cards:
+            if card["campaign_id"] in seen_campaigns:
+                continue
+            seen_campaigns.add(card["campaign_id"])
+            recs.append(card)
+        if tos_meta.get("available") and not tos_cards:
+            log.info("TOS placement: no modifier changes justified (%s)",
+                     tos_meta.get("verdicts"))
+    except Exception:
+        log.exception("TOS placement recommendations skipped")
+
     # ── P1: WASTED_SPEND_ROLLUP — top campaigns by zero-order spend ──
     campaign_waste: dict[str, dict] = defaultdict(
         lambda: {"spend": 0.0, "terms": 0, "campaign_id": ""})

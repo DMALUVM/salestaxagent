@@ -1,4 +1,6 @@
 import { getServerSupabase } from "@/lib/supabase-server";
+import { amazonAsOf, amazonToday, windowStart } from "@/lib/as-of";
+import { classifyCampaign, roleLabels, roleOrder, roleDescriptions, roleConfigSource } from "@/lib/ads-roles";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -55,14 +57,22 @@ export async function GET() {
   try {
     const sb = getServerSupabase();
 
-    // ── Window cutoffs (shared by KPIs and the trend chart so both agree) ──
-    const now = new Date();
-    function cutoff(days: number) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - days);
-      return d.toISOString().slice(0, 10);
-    }
-    const cutoffs = { "7d": cutoff(7), "14d": cutoff(14), "30d": cutoff(30), "90d": cutoff(90) };
+    // ── Window bounds — the same closed-day boundary Contribution P&L uses ──
+    // As-of is yesterday in America/Los_Angeles (the Amazon/ads reporting day),
+    // and every window is inclusive: [asOf - (n-1) .. asOf], so "7D" is always
+    // 7 whole closed days.
+    //
+    // These used to be derived from `new Date().toISOString()`. That is a UTC
+    // date, so from 00:00 UTC (17:00 Pacific) the cutoff advanced a day while
+    // LA was still on the previous date — "7D" quietly became 6 days of ads and
+    // under-reported spend against the P&L for seven hours every evening.
+    const asOf = amazonAsOf();
+    const cutoffs = {
+      "7d": windowStart(asOf, 7),
+      "14d": windowStart(asOf, 14),
+      "30d": windowStart(asOf, 30),
+      "90d": windowStart(asOf, 90),
+    };
 
     // ── Fetch ALL campaign-daily rows (paginated — ~150 campaigns/day, so 90d
     //    is ~13k rows and blows past PostgREST's 1,000-row default). Narrow
@@ -125,16 +135,21 @@ export async function GET() {
     // when the denominator is 0 so the chart can break the line instead of
     // drawing a fake trough. TACOS = ad spend / Amazon sales — same definition
     // as the KPI card, just scoped to a single day.
-    const dailySeries: DailyPoint[] = dailyBase.map(d => {
-      const amazonSales = salesByDate.get(d.date) ?? 0;
-      return {
-        ...d,
-        amazon_sales: amazonSales,
-        acos: d.ad_sales > 0 ? (d.spend / d.ad_sales) * 100 : null,
-        roas: d.spend > 0 ? d.ad_sales / d.spend : null,
-        tacos: amazonSales > 0 ? (d.spend / amazonSales) * 100 : null,
-      };
-    });
+    // Anything after as-of is an open day: today's ads are still accruing and
+    // its Amazon sales are partial, so it is not a complete point on the series
+    // and must not land in a KPI window.
+    const dailySeries: DailyPoint[] = dailyBase
+      .filter(d => d.date <= asOf)
+      .map(d => {
+        const amazonSales = salesByDate.get(d.date) ?? 0;
+        return {
+          ...d,
+          amazon_sales: amazonSales,
+          acos: d.ad_sales > 0 ? (d.spend / d.ad_sales) * 100 : null,
+          roas: d.spend > 0 ? d.ad_sales / d.spend : null,
+          tacos: amazonSales > 0 ? (d.spend / amazonSales) * 100 : null,
+        };
+      });
 
     // ── Date range info ──
     const dateMin = dailySeries.length ? dailySeries[0].date : null;
@@ -142,12 +157,15 @@ export async function GET() {
     const daysInDb = dailySeries.length;
 
     // ── Compute KPIs for 7D / 14D / 30D / 90D windows ──
+    // Inclusive on both ends: [cutoff .. asOf]. The upper bound is what keeps a
+    // partial today out of the totals, and what makes a "7D" window exactly 7
+    // closed days no matter what the server's UTC clock says.
     function kpisForRange(days: 7 | 14 | 30 | 90) {
       const c = cutoffs[`${days}d` as keyof typeof cutoffs];
-      const filtered = dailyBase.filter(r => r.date >= c);
+      const filtered = dailyBase.filter(r => r.date >= c && r.date <= asOf);
       let totalSales = 0;
       for (const [d, g] of salesByDate) {
-        if (d >= c) totalSales += g;
+        if (d >= c && d <= asOf) totalSales += g;
       }
       return { kpis: aggregate(filtered, totalSales), days: filtered.length };
     }
@@ -171,11 +189,102 @@ export async function GET() {
     const campaigns = Object.entries(campaignAgg)
       .map(([name, d]) => ({
         campaign_name: name, ...d,
+        role: classifyCampaign(name),
         acos: d.sales > 0 ? (d.spend / d.sales) * 100 : 0,
         roas: d.spend > 0 ? d.sales / d.spend : 0,
         cvr: d.clicks > 0 ? (d.orders / d.clicks) * 100 : 0,
       }))
       .sort((a, b) => b.spend - a.spend);
+
+    // ── Budget share by role, over the 30-day closed window ──
+    // Roles answer "what is this spend for", so the share is judged on the same
+    // window as the KPI cards rather than on all history.
+    const roleWindowStart = cutoffs["30d"];
+    const roleAgg: Record<string, { spend: number; sales: number; clicks: number; orders: number; campaigns: Set<string> }> = {};
+    for (const c of allCampaignRows) {
+      const d = String(c.date ?? "");
+      if (!d || d < roleWindowStart || d > asOf) continue;
+      const name = String(c.campaign_name ?? "");
+      const role = classifyCampaign(name);
+      const e = roleAgg[role] ?? { spend: 0, sales: 0, clicks: 0, orders: 0, campaigns: new Set<string>() };
+      e.spend += Number(c.spend ?? 0);
+      e.sales += Number(c.sales_14d ?? 0);
+      e.clicks += Number(c.clicks ?? 0);
+      e.orders += Number(c.orders_14d ?? 0);
+      e.campaigns.add(name);
+      roleAgg[role] = e;
+    }
+    const roleSpendTotal = Object.values(roleAgg).reduce((s, e) => s + e.spend, 0);
+    // TACoS per role = that role's spend over TOTAL Amazon sales: the share of
+    // the business's revenue this role consumes.
+    const roleAmazonSales = kpi30.kpis.totalSales;
+    const roles = roleOrder()
+      .filter((r) => roleAgg[r])
+      .map((r) => {
+        const e = roleAgg[r];
+        return {
+          role: r,
+          label: roleLabels()[r] ?? r,
+          description: roleDescriptions()[r] ?? null,
+          campaigns: e.campaigns.size,
+          spend: Math.round(e.spend * 100) / 100,
+          sales: Math.round(e.sales * 100) / 100,
+          clicks: e.clicks,
+          orders: e.orders,
+          budgetSharePct: roleSpendTotal > 0 ? Math.round((e.spend / roleSpendTotal) * 1000) / 10 : 0,
+          acos: e.sales > 0 ? Math.round((e.spend / e.sales) * 1000) / 10 : null,
+          roas: e.spend > 0 ? Math.round((e.sales / e.spend) * 100) / 100 : null,
+          cvr: e.clicks > 0 ? Math.round((e.orders / e.clicks) * 1000) / 10 : null,
+          tacos: roleAmazonSales > 0 ? Math.round((e.spend / roleAmazonSales) * 10000) / 100 : null,
+        };
+      });
+
+    // ── Placement performance (optional table) ──
+    // Needs supabase/migration_ads_placement.sql; absent until that is run, so
+    // the page degrades to a prompt rather than an error.
+    let placements: Array<Record<string, unknown>> = [];
+    let placementsAvailable = false;
+    try {
+      const agg: Record<string, { spend: number; sales: number; clicks: number; orders: number; impressions: number }> = {};
+      let offset = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data, error } = await sb.from("ads_placement_daily")
+          .select("date,placement,spend,sales_14d,orders_14d,clicks,impressions")
+          .gte("date", cutoffs["30d"]).lte("date", asOf)
+          .range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        placementsAvailable = true;
+        const page = data ?? [];
+        for (const r of page) {
+          const p = String(r.placement ?? "Unknown");
+          const e = agg[p] ?? { spend: 0, sales: 0, clicks: 0, orders: 0, impressions: 0 };
+          e.spend += Number(r.spend ?? 0);
+          e.sales += Number(r.sales_14d ?? 0);
+          e.clicks += Number(r.clicks ?? 0);
+          e.orders += Number(r.orders_14d ?? 0);
+          e.impressions += Number(r.impressions ?? 0);
+          agg[p] = e;
+        }
+        if (page.length < pageSize) break;
+        offset += pageSize;
+      }
+      const totalSpend = Object.values(agg).reduce((s, e) => s + e.spend, 0);
+      placements = Object.entries(agg).map(([placement, e]) => ({
+        placement,
+        spend: Math.round(e.spend * 100) / 100,
+        sales: Math.round(e.sales * 100) / 100,
+        clicks: e.clicks,
+        orders: e.orders,
+        impressions: e.impressions,
+        sharePct: totalSpend > 0 ? Math.round((e.spend / totalSpend) * 1000) / 10 : 0,
+        acos: e.sales > 0 ? Math.round((e.spend / e.sales) * 1000) / 10 : null,
+        cvr: e.clicks > 0 ? Math.round((e.orders / e.clicks) * 1000) / 10 : null,
+        cpc: e.clicks > 0 ? Math.round((e.spend / e.clicks) * 100) / 100 : null,
+      })).sort((a, b) => b.spend - a.spend);
+    } catch {
+      placementsAvailable = false;
+    }
 
     // ── Search terms ──
     let searchTerms: unknown[] = [];
@@ -242,14 +351,21 @@ export async function GET() {
       kpi30: kpi30.kpis, kpi30Days: kpi30.days,
       kpi90: kpi90.kpis, kpi90Days: kpi90.days,
       dailySeries, cutoffs,
+      asOf, today: amazonToday(), timezone: "America/Los_Angeles",
+      /** Newest day with ad data at or before as-of. */
+      adsThrough: dateMax,
       dateMin, dateMax, daysInDb,
-      campaigns, searchTerms, recommendations,
+      campaigns, roles, roleConfigSource: roleConfigSource(),
+      placements, placementsAvailable,
+      searchTerms, recommendations,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
     });
   } catch {
     return Response.json({
       kpi7: null, kpi14: null, kpi30: null, kpi90: null,
-      dailySeries: [], cutoffs: null, campaigns: [], searchTerms: [], recommendations: [],
+      dailySeries: [], cutoffs: null, campaigns: [], roles: [], placements: [],
+      placementsAvailable: false, searchTerms: [], recommendations: [],
+      asOf: null, today: null, adsThrough: null,
       lastSyncJob: null, lastSyncStatus: null, lastActions: null,
       dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,
     });

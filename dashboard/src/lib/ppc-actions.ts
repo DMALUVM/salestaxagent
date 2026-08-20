@@ -14,6 +14,8 @@ export type ActionType =
   | "negate_phrase"
   | "harvest_exact"
   | "reduce_bid"
+  | "increase_bid"
+  | "adjust_tos_modifier"
   | "review_campaign";
 
 /** Short column label. */
@@ -22,6 +24,8 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   negate_phrase: "Negate phrase",
   harvest_exact: "Harvest exact",
   reduce_bid: "Reduce bid",
+  increase_bid: "Increase bid",
+  adjust_tos_modifier: "TOS modifier",
   review_campaign: "Review campaign",
 };
 
@@ -31,6 +35,8 @@ export const ACTION_STYLES: Record<ActionType, string> = {
   negate_phrase: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900",
   harvest_exact: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
   reduce_bid: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
+  increase_bid: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
+  adjust_tos_modifier: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-900",
   review_campaign: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900",
 };
 
@@ -39,6 +45,8 @@ const TYPE_TO_ACTION: Record<string, ActionType> = {
   NEGATE_SEARCH_TERM: "negate_exact",
   HARVEST_SEARCH_TERM: "harvest_exact",
   REDUCE_BID: "reduce_bid",
+  INCREASE_BID: "increase_bid",
+  ADJUST_TOS_MODIFIER: "adjust_tos_modifier",
   WASTED_SPEND_ROLLUP: "review_campaign",
   STARVE_OOS: "review_campaign",
 };

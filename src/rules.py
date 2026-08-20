@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -60,6 +61,26 @@ PNL_CONTRIBUTION_FORMULA: str = _RULES["pnl"]["contribution_formula"]
 PNL_FINANCES_LABEL: str = _RULES["pnl"]["finances_label"]
 PNL_DEFAULT_REFERRAL_PCT: float = _RULES["pnl"]["default_referral_pct"]
 PNL_DEFAULT_FBA_FEE_PER_UNIT: float = _RULES["pnl"]["default_fba_fee_per_unit"]
+
+
+def amazon_as_of(now: datetime | None = None) -> date:
+    """Yesterday in the Amazon reporting timezone — the newest closed day.
+
+    Python counterpart of dashboard/src/lib/as-of.ts. Today is always partial
+    (sales still accruing, ads synced only through yesterday), so every window
+    that claims to be N days ends here. Derived from AMAZON_TZ, never from the
+    machine's clock or a UTC date: from 00:00 UTC — 17:00 Pacific — a UTC date
+    is already tomorrow in LA terms and silently shortens the window.
+    """
+    moment = now or datetime.now(AMAZON_TZ)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=AMAZON_TZ)
+    return moment.astimezone(AMAZON_TZ).date() - timedelta(days=1)
+
+
+def window_start(as_of: date, days: int) -> date:
+    """Inclusive start of a `days`-long window ending on `as_of`."""
+    return as_of - timedelta(days=days - 1)
 
 
 def is_excluded_status(status: str) -> bool:
