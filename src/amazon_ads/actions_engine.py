@@ -373,18 +373,78 @@ def generate_recommendations(
     return recs
 
 
+#: Lowest number wins when two rules produce the same queue key.
+_PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+
+
+def _dedupe_queue_key(recs: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Collapse recs sharing ads_recommendations' UNIQUE key.
+
+    The key is (type, entity_name, campaign_id). Two rules can legitimately
+    land on it: REDUCE_BID and INCREASE_BID use the KEYWORD as entity_name, and
+    one campaign routinely serves many search terms through a single keyword
+    (this account has 69 such (keyword, campaign) pairs, one of them covering
+    224 terms). Two qualifying terms would then emit the same row twice.
+
+    Keeps the highest priority, then the largest impact estimate — the version
+    of the action worth showing first. Returns (kept, dropped).
+    """
+    best: dict[tuple[str, str, str], dict] = {}
+    dropped: list[dict] = []
+    for r in recs:
+        key = (str(r.get("type") or ""), str(r.get("entity_name") or ""),
+               str(r.get("campaign_id") or ""))
+        incumbent = best.get(key)
+        if incumbent is None:
+            best[key] = r
+            continue
+        challenger_rank = (_PRIORITY_RANK.get(str(r.get("priority")), 9),
+                           -float(r.get("impact_estimate") or 0))
+        incumbent_rank = (_PRIORITY_RANK.get(str(incumbent.get("priority")), 9),
+                          -float(incumbent.get("impact_estimate") or 0))
+        if challenger_rank < incumbent_rank:
+            best[key] = r
+            dropped.append(incumbent)
+        else:
+            dropped.append(r)
+    return list(best.values()), dropped
+
+
 def _persist(recs: list[dict]) -> None:
-    """Replace the open queue. Raises if the write fails.
+    """Replace the whole queue. Raises if the write fails.
+
+    The queue is rewritten every run, so the clear must be TOTAL. It used to
+    delete only `status='open'`, which left applied and dismissed rows behind —
+    and the next run re-emitting one of those same actions collided with the
+    surviving row:
+
+        duplicate key value violates unique constraint
+        "ads_recommendations_type_entity_name_campaign_id_key"
+
+    Clearing everything is safe because the durable history lives in
+    ads_action_decisions (with its own key and its own applied/dismissed
+    timestamps); this table is only ever "what to do now".
 
     The delete happens first, so a silent insert failure would leave the user
     with an empty Actions tab and no error — the caller needs to hear about it.
     """
     client = get_client()
-    client.table("ads_recommendations").delete().eq("status", "open").execute()
+    # PostgREST refuses an unfiltered DELETE, so match every row explicitly.
+    # One statement, not a per-status pass: a partial clear is what broke this.
+    client.table("ads_recommendations").delete().neq(
+        "id", "00000000-0000-0000-0000-000000000000").execute()
     if not recs:
         return
+
+    kept, dropped = _dedupe_queue_key(recs)
+    if dropped:
+        log.warning("Queue dedupe: dropped %d recommendation(s) colliding on "
+                    "(type, entity_name, campaign_id); kept the highest priority. "
+                    "Examples: %s", len(dropped),
+                    [f"{d.get('type')}/{d.get('entity_name')}" for d in dropped[:3]])
+
     payload = []
-    for r in recs:
+    for r in kept:
         row = dict(r)
         # evidence is a jsonb column; send the object, not a JSON string.
         if isinstance(row.get("evidence"), str):
@@ -393,8 +453,13 @@ def _persist(recs: list[dict]) -> None:
             except Exception:
                 pass
         payload.append(row)
+
+    # upsert, not insert: the full clear above should make every row new, but a
+    # concurrent run (scheduler and a manual CLI overlapping) must degrade to
+    # overwriting a row rather than aborting the whole batch.
     for i in range(0, len(payload), 500):
-        client.table("ads_recommendations").insert(payload[i:i + 500]).execute()
+        client.table("ads_recommendations").upsert(
+            payload[i:i + 500], on_conflict="type,entity_name,campaign_id").execute()
 
 
 def _make_rec(*, type: str, priority: str, impact: float,
