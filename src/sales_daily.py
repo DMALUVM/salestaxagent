@@ -390,8 +390,28 @@ def sync_amazon_daily(days: int = 7) -> dict:
             if order_id:
                 day_orders[ds].add(order_id)
 
+    # ── Drop the partial leading day ────────────────────────────
+    # The orders report is bounded in UTC, but purchase dates are bucketed into
+    # America/Los_Angeles days (business rule 1). UTC midnight on `start` is
+    # 17:00 the PREVIOUS LA day, so the report always carries the last ~7 hours
+    # of the day before the window — which then upserts a partial value over a
+    # complete one and never gets revisited.
+    #
+    # Observed 2026-08-20 with days=7 (window 08-13 → 08-20): 68 orders, all in
+    # UTC hours 00-06, bucketed to LA 2026-08-12 and overwrote the true
+    # $3,133.84 with $1,049.28 — a third of the day. That is the short bar on
+    # the Overview 30-day chart.
+    start_iso = start.isoformat()
+    partial_leading = {ds: day_gross[ds] for ds in day_gross if ds < start_iso}
+    for ds in partial_leading:
+        log.info("sync_amazon_daily: dropping partial leading day %s "
+                 "($%.2f from %d order(s) that fall before the window start in LA)",
+                 ds, partial_leading[ds], len(day_orders.get(ds, set())))
+
     rows = []
     for ds in sorted(day_gross):
+        if ds < start_iso:
+            continue  # only partially covered by this window — never write it
         rows.append({
             "sale_date": ds,
             "channel": AMAZON,
@@ -401,7 +421,8 @@ def sync_amazon_daily(days: int = 7) -> dict:
         })
 
     if not rows:
-        return {"rows_upserted": 0, "days": 0, "total_gross": 0}
+        return {"rows_upserted": 0, "days": 0, "total_gross": 0,
+                "dropped_partial_days": sorted(partial_leading)}
 
     count = upsert_rows("sales_daily", rows, on_conflict="sale_date,channel")
     total_gross = sum(r["gross_sales"] for r in rows)

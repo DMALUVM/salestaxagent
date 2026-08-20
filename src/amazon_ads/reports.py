@@ -64,28 +64,161 @@ def _date_chunks(start: date, end: date,
     return chunks
 
 
+# ── Ad products ────────────────────────────────────────────────
+#
+# The Amazon Ads console's daily "Total cost" spans all three ad products, but
+# this sync used to request Sponsored Products only — which is why the agent
+# read ~6% under the console on 2026-08-19 ($393.64 vs $417.09) while CPC, CTR
+# and ROAS matched almost exactly: the rates were right, the volume was short.
+#
+# Metric column names differ per product (SP reports `spend`/`sales14d`, SB and
+# SD report `cost`/`sales`), and not every account exposes every column, so
+# each product carries a list of candidate column sets tried in order.
+# campaign_type on the row records which product a campaign belongs to; the
+# table's PRIMARY KEY (date, campaign_id) already separates them.
+
+AD_PRODUCTS: dict[str, dict] = {
+    "SP": {
+        "ad_product": "SPONSORED_PRODUCTS",
+        "report_type": "spCampaigns",
+        "column_sets": [
+            ["date", "campaignName", "campaignId", "campaignStatus",
+             "campaignBudgetAmount", "campaignBudgetType",
+             "impressions", "clicks", "spend", "sales14d", "purchases14d"],
+            ["date", "campaignName", "campaignId",
+             "impressions", "clicks", "spend", "sales14d", "purchases14d"],
+        ],
+    },
+    "SB": {
+        "ad_product": "SPONSORED_BRANDS",
+        "report_type": "sbCampaigns",
+        "column_sets": [
+            ["date", "campaignName", "campaignId", "campaignStatus",
+             "impressions", "clicks", "cost", "sales", "purchases"],
+            ["date", "campaignName", "campaignId",
+             "impressions", "clicks", "cost", "sales"],
+            ["date", "campaignName", "campaignId", "impressions", "clicks", "cost"],
+        ],
+    },
+    "SD": {
+        "ad_product": "SPONSORED_DISPLAY",
+        "report_type": "sdCampaigns",
+        "column_sets": [
+            ["date", "campaignName", "campaignId", "campaignStatus",
+             "impressions", "clicks", "cost", "sales", "purchases"],
+            ["date", "campaignName", "campaignId",
+             "impressions", "clicks", "cost", "sales"],
+            ["date", "campaignName", "campaignId", "impressions", "clicks", "cost"],
+        ],
+    },
+}
+
+DEFAULT_AD_PRODUCTS = ("SP", "SB", "SD")
+
+# Poll timeouts differ by product on purpose.
+#
+# Sponsored Products keeps the client default (1800s). It is the report the KPI
+# cards, PPC actions and P&L all depend on, and Amazon's report queue does go
+# through slow spells where a normally-instant report sits PENDING for many
+# minutes — observed on this account. Trimming SP's headroom would turn those
+# spells into nightly failures.
+#
+# SB and SD are capped tighter: they are additive spend, they are fetched after
+# SP has already been committed, and a Brands report that hangs must not hold
+# the nightly ads window open. Losing a night of SB/SD costs a few percent of
+# spend accuracy and is reported as a partial; losing SP costs the dashboard.
+# 300s: a campaign report that is actually going to generate does so in one to
+# three minutes. When Amazon's queue stalls it stalls for far longer than any
+# cap worth waiting out, so a tighter bound just surfaces the stall sooner —
+# each chunk has already committed, and the next run picks the day back up.
+CAMPAIGN_REPORT_TIMEOUT = {"SB": 300, "SD": 300}
+
+
+def _normalise_metric_keys(r: dict) -> dict:
+    """Map SB/SD metric names onto the SP names `_metrics()` expects."""
+    out = dict(r)
+    if out.get("spend") is None and out.get("cost") is not None:
+        out["spend"] = out["cost"]
+    if out.get("sales14d") is None:
+        for k in ("sales", "attributedSales14d", "attributedSales"):
+            if out.get(k) is not None:
+                out["sales14d"] = out[k]
+                break
+    if out.get("purchases14d") is None:
+        for k in ("purchases", "attributedConversions14d", "attributedConversions"):
+            if out.get(k) is not None:
+                out["purchases14d"] = out[k]
+                break
+    return out
+
+
+def _fetch_report_with_backoff(config: dict, attempts: int = 3,
+                               base_sleep: float = 45.0,
+                               timeout: int | None = None) -> list[dict]:
+    """fetch_report with backoff on 429 (rate limited) and 425 (too early).
+
+    The Ads reporting API rate-limits aggressively and answers 425 while an
+    identical report is still being produced. Both are transient, so they are
+    retried rather than surfaced as a hard failure.
+    """
+    import time
+
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return fetch_report(config, timeout=timeout)
+        except Exception as e:
+            msg = str(e)
+            transient = "429" in msg or "425" in msg
+            last = e
+            if not transient or attempt == attempts - 1:
+                raise
+            wait = base_sleep * (2 ** attempt)
+            log.warning("Ads report %s (attempt %d/%d) — backing off %.0fs",
+                        "rate limited" if "429" in msg else "not ready",
+                        attempt + 1, attempts, wait)
+            time.sleep(wait)
+    raise last  # unreachable, keeps type checkers happy
+
+
 # ── Campaign daily (single chunk) ──
 
-def _fetch_campaigns_chunk(start: date, end: date) -> list[dict]:
-    """Fetch SP campaign daily metrics for a ≤30-day range."""
-    config = {
-        "startDate": start.isoformat(),
-        "endDate": end.isoformat(),
-        "configuration": {
-            "adProduct": "SPONSORED_PRODUCTS",
-            "groupBy": ["campaign"],
-            "columns": [
-                "date", "campaignName", "campaignId", "campaignStatus",
-                "campaignBudgetAmount", "campaignBudgetType",
-                "impressions", "clicks", "spend",
-                "sales14d", "purchases14d",
-            ],
-            "reportTypeId": "spCampaigns",
-            "timeUnit": "DAILY",
-            "format": "GZIP_JSON",
-        },
-    }
-    return fetch_report(config)
+def _fetch_campaigns_chunk(start: date, end: date,
+                           product: str = "SP") -> list[dict]:
+    """Fetch campaign daily metrics for one ad product over a ≤30-day range.
+
+    Tries each configured column set in order: accounts differ in which columns
+    they expose, and a rejected column set is a 400, not a data problem.
+    """
+    spec = AD_PRODUCTS[product]
+    last: Exception | None = None
+    for columns in spec["column_sets"]:
+        config = {
+            "startDate": start.isoformat(),
+            "endDate": end.isoformat(),
+            "configuration": {
+                "adProduct": spec["ad_product"],
+                "groupBy": ["campaign"],
+                "columns": columns,
+                "reportTypeId": spec["report_type"],
+                "timeUnit": "DAILY",
+                "format": "GZIP_JSON",
+            },
+        }
+        try:
+            rows = _fetch_report_with_backoff(
+                config, timeout=CAMPAIGN_REPORT_TIMEOUT.get(product))
+            log.info("%s campaigns: %d row(s) using columns %s",
+                     product, len(rows), columns[-3:])
+            return rows
+        except Exception as e:
+            last = e
+            if "400" in str(e) or "422" in str(e):
+                log.info("%s column set rejected, trying a narrower one: %s",
+                         product, str(e)[:120])
+                continue
+            raise
+    raise last if last else RuntimeError(f"no column set worked for {product}")
 
 
 def _fetch_placements_chunk(start: date, end: date) -> list[dict]:
@@ -201,45 +334,128 @@ def _fetch_search_terms_chunk(start: date, end: date) -> list[dict]:
 
 # ── Chunked fetchers ──
 
-def fetch_campaigns_daily(start: date, end: date) -> dict:
-    """Fetch SP campaign daily metrics, auto-chunked to ≤30 days."""
-    chunks = _date_chunks(start, end)
+def fetch_campaigns_daily(start: date, end: date,
+                          ad_products: tuple[str, ...] | None = None,
+                          chunk_days: int | None = None,
+                          on_progress=None) -> dict:
+    """Fetch campaign daily metrics for each ad product, chunked to ≤30 days.
+
+    Sponsored Products, Brands and Display are fetched independently and every
+    row is stamped with its `campaign_type` (SP | SB | SD) so downstream math
+    can either total them or split them, never guess.
+
+    Each product soft-fails on its own: if SB or SD errors out — and they are
+    the ones that rate-limit — SP rows are still written and the nightly job
+    still reports success for the data it did get. `by_type` carries the
+    per-product outcome so callers can alert on a partial sync.
+    """
+    products = tuple(ad_products or DEFAULT_AD_PRODUCTS)
+    # Smaller chunks are the useful backfill knob: a 30-day SB/SD report is one
+    # all-or-nothing gamble against a queue that stalls, while seven 4-day ones
+    # commit what they get and report progress as they go.
+    chunks = _date_chunks(start, end, chunk_days)
+    say = on_progress or (lambda _msg: None)
     all_parsed: list[dict] = []
     errors: list[str] = []
+    by_type: dict[str, dict] = {}
+    inserted = 0
 
-    for i, (cs, ce) in enumerate(chunks, 1):
-        log.info("Campaigns chunk %d/%d: %s → %s", i, len(chunks), cs, ce)
-        try:
-            rows = _fetch_campaigns_chunk(cs, ce)
+    for product in products:
+        if product not in AD_PRODUCTS:
+            log.warning("Unknown ad product %r — skipping", product)
+            continue
+
+        parsed: list[dict] = []
+        product_errors: list[str] = []
+        product_inserted = 0
+
+        for i, (cs, ce) in enumerate(chunks, 1):
+            log.info("%s campaigns chunk %d/%d: %s → %s",
+                     product, i, len(chunks), cs, ce)
+            try:
+                rows = _fetch_campaigns_chunk(cs, ce, product)
+            except Exception as e:
+                msg = f"{product} chunk {i} ({cs}→{ce}): {str(e)[:120]}"
+                log.warning("Campaign %s", msg)
+                product_errors.append(msg)
+                say(f"    {product} chunk {i}/{len(chunks)} {cs}→{ce}: FAILED — {str(e)[:80]}")
+                continue
+
+            chunk_rows = []
             for r in rows:
-                m = _metrics(r)
-                all_parsed.append({
+                m = _metrics(_normalise_metric_keys(r))
+                chunk_rows.append({
                     "date": r.get("date", cs.isoformat()),
                     "campaign_id": str(r.get("campaignId", "")),
                     "campaign_name": r.get("campaignName", ""),
-                    "campaign_type": "SP",
+                    "campaign_type": product,
                     "campaign_status": r.get("campaignStatus", ""),
                     "budget": _safe(r.get("campaignBudgetAmount")),
                     **m,
                 })
-        except Exception as e:
-            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:120]}"
-            log.warning("Campaign %s", msg)
-            errors.append(msg)
 
-    inserted = 0
-    if all_parsed:
-        inserted = upsert_rows("ads_campaigns_daily", all_parsed,
-                               on_conflict="date,campaign_id")
+            # Commit each chunk as it lands. Sponsored Products is fetched
+            # first, so its rows are in the table before SB/SD are even
+            # attempted — a hung Brands report, which is a real failure mode on
+            # this account, cannot take down the rows the KPI cards and P&L
+            # read. Within a product it also means a backfill that stalls
+            # halfway keeps the days it already got.
+            #
+            # A campaign id is unique across ad products, so (date, campaign_id)
+            # separates SP/SB/SD rows. Dedupe anyway — a repeated chunk boundary
+            # would otherwise send two rows with the same key in one request,
+            # which PostgREST rejects outright.
+            chunk_spend = sum(r["spend"] for r in chunk_rows)
+            if chunk_rows:
+                seen: dict[tuple, dict] = {}
+                for r in chunk_rows:
+                    seen[(r["date"], r["campaign_id"])] = r
+                try:
+                    product_inserted += upsert_rows("ads_campaigns_daily",
+                                                    list(seen.values()),
+                                                    on_conflict="date,campaign_id")
+                except Exception as e:
+                    msg = f"{product} chunk {i} upsert: {str(e)[:120]}"
+                    log.warning("Campaign %s", msg)
+                    product_errors.append(msg)
+                    say(f"    {product} chunk {i}/{len(chunks)} upsert FAILED — {str(e)[:80]}")
+
+            parsed.extend(chunk_rows)
+            say(f"    {product} chunk {i}/{len(chunks)} {cs}→{ce}: "
+                f"{len(chunk_rows)} row(s), ${chunk_spend:,.2f} — committed")
+
+        spend = round(sum(r["spend"] for r in parsed), 2)
+        by_type[product] = {
+            "rows": len(parsed),
+            "inserted": product_inserted,
+            "spend": spend,
+            "clicks": sum(r["clicks"] for r in parsed),
+            "errors": product_errors,
+            "ok": not product_errors,
+        }
+        log.info("%s campaigns: %d row(s), $%.2f spend, %d error(s)",
+                 product, len(parsed), spend, len(product_errors))
+
+        inserted += product_inserted
+        all_parsed.extend(parsed)
+        errors.extend(product_errors)
 
     total_spend = sum(r["spend"] for r in all_parsed)
     # min/max, not first/last — rows come back in API order, not date order.
     dates = [r["date"] for r in all_parsed if r.get("date")]
+    ok_products = [p for p, v in by_type.items() if v["ok"]]
+    failed_products = [p for p, v in by_type.items() if not v["ok"]]
     return {
         "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
         "errors": errors, "total_spend": round(total_spend, 2),
         "date_min": min(dates) if dates else None,
         "date_max": max(dates) if dates else None,
+        "by_type": by_type,
+        "products_ok": ok_products,
+        "products_failed": failed_products,
+        # Partial = some products landed, others did not. The nightly job uses
+        # this to alert without treating a lost SB report as a lost sync.
+        "partial": bool(ok_products and failed_products),
     }
 
 
@@ -318,7 +534,10 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
              search_terms_only: bool = False,
              placements_only: bool = False,
              with_placements: bool = False,
-             search_term_chunk_days: int | None = None) -> dict:
+             search_term_chunk_days: int | None = None,
+             ad_products: tuple[str, ...] | None = None,
+             campaign_chunk_days: int | None = None,
+             on_progress=None) -> dict:
     """Ads sync: campaigns and/or search terms, auto-chunked.
 
     Campaign ranges are chunked to ≤30 days; search-term ranges to
@@ -329,6 +548,11 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
     ever touching the search-term endpoint, so the fast daily refresh that
     feeds the /ppc KPIs and trends never waits on a 90-minute report. A failure
     in one half is recorded but never aborts the other.
+
+    Campaigns cover Sponsored Products, Brands and Display by default; pass
+    `ad_products` to narrow it (e.g. a backfill of just the two new products).
+    Search terms and placements stay SP-only — the SB/SD reports have no
+    search-term grain to feed the negate/harvest loop.
     """
     only_flags = [campaigns_only, search_terms_only, placements_only]
     if sum(bool(f) for f in only_flags) > 1:
@@ -357,7 +581,9 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
 
     if do_campaigns:
         try:
-            results["campaigns"] = fetch_campaigns_daily(start, end)
+            results["campaigns"] = fetch_campaigns_daily(
+                start, end, ad_products=ad_products,
+                chunk_days=campaign_chunk_days, on_progress=on_progress)
         except Exception as e:
             log.exception("Campaign sync failed")
             results["campaigns"] = {"error": str(e)[:200]}

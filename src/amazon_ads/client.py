@@ -45,14 +45,27 @@ def create_report(config: dict) -> str:
 
 
 def poll_report(report_id: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
-    """Poll until report is COMPLETED or fails."""
+    """Poll until report is COMPLETED or fails.
+
+    The access token is re-fetched on a 401. A poll can outlive the token —
+    a slow report followed a long one and the poll came back 401 Unauthorized
+    partway through, throwing away a report that was still being produced.
+    Headers are cheap to rebuild; a finished report is not.
+    """
     headers = ads_headers()
     start = time.time()
     last_status = ""
+    refreshed = False
     while time.time() - start < timeout:
         resp = httpx.get(f"{BASE_URL}/reporting/reports/{report_id}",
                          headers=headers, timeout=15)
+        if resp.status_code == 401 and not refreshed:
+            log.info("Report %s: token expired mid-poll — refreshing", report_id)
+            headers = ads_headers(force_refresh=True)
+            refreshed = True
+            continue
         resp.raise_for_status()
+        refreshed = False  # a good response re-arms the one-shot refresh
         data = resp.json()
         status = data.get("status", "")
         if status != last_status:

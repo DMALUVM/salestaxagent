@@ -47,6 +47,11 @@ def _fetch_amazon_sku_units(days: int = 400) -> dict[str, dict[date, int]]:
     start = end - timedelta(days=days)
 
     sku_units: dict[str, dict[date, int]] = defaultdict(lambda: defaultdict(int))
+    # Same UTC-bound / LA-bucket guard as sync_amazon_daily and pnl.py: the
+    # report's UTC start is 17:00 the previous LA day, so it carries a partial
+    # day before the window. Harmless here (that day is ~400 days back, outside
+    # every velocity window) but dropped for consistency with the other two.
+    dropped_partial = 0
 
     for c_start, c_end in _date_chunks(start, end):
         try:
@@ -85,8 +90,14 @@ def _fetch_amazon_sku_units(days: int = 400) -> dict[str, dict[date, int]]:
             if not sale_date:
                 continue
 
+            if sale_date < start:
+                dropped_partial += qty
+                continue
             sku_units[sku][sale_date] += qty
 
+    if dropped_partial:
+        log.info("[Velocity] dropped %d unit(s) on the partial leading LA day "
+                 "before %s", dropped_partial, start)
     return dict(sku_units)
 
 

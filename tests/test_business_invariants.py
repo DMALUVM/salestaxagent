@@ -268,7 +268,7 @@ class TestAdsSyncSplit:
 
         called = []
         monkeypatch.setattr(reports, "fetch_campaigns_daily",
-                            lambda s, e: called.append("campaigns") or {"rows": 1})
+                            lambda s, e, **kw: called.append("campaigns") or {"rows": 1})
         monkeypatch.setattr(reports, "fetch_search_terms",
                             lambda s, e, chunk_days=None: called.append("search_terms") or {"rows": 1})
 
@@ -283,7 +283,7 @@ class TestAdsSyncSplit:
 
         called = []
         monkeypatch.setattr(reports, "fetch_campaigns_daily",
-                            lambda s, e: called.append("campaigns") or {"rows": 1})
+                            lambda s, e, **kw: called.append("campaigns") or {"rows": 1})
         monkeypatch.setattr(reports, "fetch_search_terms",
                             lambda s, e, chunk_days=None: called.append("search_terms") or {"rows": 1})
 
@@ -300,7 +300,7 @@ class TestAdsSyncSplit:
             raise TimeoutError("report timed out after 5400s")
 
         monkeypatch.setattr(reports, "fetch_campaigns_daily",
-                            lambda s, e: {"rows": 42, "inserted": 42, "errors": []})
+                            lambda s, e, **kw: {"rows": 42, "inserted": 42, "errors": []})
         monkeypatch.setattr(reports, "fetch_search_terms", boom)
 
         result = reports.sync_ads(days=7)
@@ -400,3 +400,114 @@ class TestPNLDefaults:
     def test_cogs_source(self):
         from src.rules import PNL_COGS_SOURCE
         assert PNL_COGS_SOURCE == "sku_costs"
+
+
+class TestAdProductCoverage:
+    """Account ad spend must span Sponsored Products, Brands and Display.
+
+    The Amazon Ads console totals all three. Fetching only Sponsored Products
+    under-reports account spend — which is what made the agent read ~6% below
+    the console — and a failure in one product must never discard the others.
+    """
+
+    def test_all_three_products_are_default(self):
+        from src.amazon_ads.reports import AD_PRODUCTS, DEFAULT_AD_PRODUCTS
+        assert set(DEFAULT_AD_PRODUCTS) == {"SP", "SB", "SD"}
+        for p in DEFAULT_AD_PRODUCTS:
+            assert p in AD_PRODUCTS
+            assert AD_PRODUCTS[p]["ad_product"].startswith("SPONSORED_")
+            assert AD_PRODUCTS[p]["column_sets"], f"{p} has no column sets"
+
+    def test_rows_are_typed(self, monkeypatch):
+        """Every stored row carries its campaign_type — never an untyped blend."""
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        def fake_chunk(cs, ce, product="SP"):
+            return [{"date": "2026-08-19", "campaignId": f"{product}-1",
+                     "campaignName": f"{product} camp",
+                     "impressions": 100, "clicks": 10,
+                     "spend" if product == "SP" else "cost": 5.0}]
+
+        # One upsert per ad product: SP is committed before SB/SD are tried,
+        # so collect across calls rather than assuming a single write.
+        written: list[dict] = []
+
+        def fake_upsert(table, rows, on_conflict=None):
+            written.extend(rows)
+            return len(rows)
+
+        monkeypatch.setattr(reports, "_fetch_campaigns_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows", fake_upsert)
+
+        r = reports.fetch_campaigns_daily(date(2026, 8, 19), date(2026, 8, 19))
+        types = {row["campaign_type"] for row in written}
+        assert types == {"SP", "SB", "SD"}
+        # cost → spend normalisation: SB/SD spend must not silently be 0.
+        assert all(row["spend"] == 5.0 for row in written)
+        assert r["total_spend"] == 15.0
+        assert r["by_type"]["SB"]["spend"] == 5.0
+
+    def test_sb_failure_keeps_sp(self, monkeypatch):
+        """SB/SD blowing up must not cost us the Sponsored Products rows."""
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        def fake_chunk(cs, ce, product="SP"):
+            if product != "SP":
+                raise RuntimeError("429 rate limited")
+            return [{"date": "2026-08-19", "campaignId": "sp-1",
+                     "campaignName": "sp", "impressions": 1, "clicks": 1,
+                     "spend": 393.64}]
+
+        monkeypatch.setattr(reports, "_fetch_campaigns_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows",
+                            lambda t, rows, on_conflict=None: len(rows))
+
+        r = reports.fetch_campaigns_daily(date(2026, 8, 19), date(2026, 8, 19))
+        assert r["total_spend"] == 393.64
+        assert r["products_ok"] == ["SP"]
+        assert set(r["products_failed"]) == {"SB", "SD"}
+        assert r["partial"] is True
+
+    def test_sp_is_committed_before_sb_sd(self, monkeypatch):
+        """SP rows must be written before SB/SD are attempted.
+
+        SB reports hang on this account. If the whole run were buffered into a
+        single upsert at the end, a hang would cost us the Sponsored Products
+        rows the KPI cards and P&L read — the exact thing the soft-fail is for.
+        """
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        events: list[str] = []
+
+        def fake_chunk(cs, ce, product="SP"):
+            events.append(f"fetch:{product}")
+            if product == "SB":
+                raise TimeoutError("Report abc timed out after 900s")
+            return [{"date": "2026-08-19", "campaignId": f"{product}-1",
+                     "campaignName": product, "impressions": 1, "clicks": 1,
+                     "spend": 1.0}]
+
+        def fake_upsert(table, rows, on_conflict=None):
+            events.append(f"upsert:{rows[0]['campaign_type']}")
+            return len(rows)
+
+        monkeypatch.setattr(reports, "_fetch_campaigns_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows", fake_upsert)
+
+        reports.fetch_campaigns_daily(date(2026, 8, 19), date(2026, 8, 19))
+        assert events.index("upsert:SP") < events.index("fetch:SB")
+
+    def test_sp_keeps_full_poll_headroom(self):
+        """SP must not be given a tighter poll cap than SB/SD.
+
+        Amazon's report queue goes through slow spells where even a one-day SP
+        report sits PENDING for many minutes. SP feeds the KPI cards and P&L,
+        so it keeps the client default; only the additive products are capped.
+        """
+        from src.amazon_ads.reports import CAMPAIGN_REPORT_TIMEOUT
+        assert "SP" not in CAMPAIGN_REPORT_TIMEOUT
+        assert CAMPAIGN_REPORT_TIMEOUT["SB"] < 1800
+        assert CAMPAIGN_REPORT_TIMEOUT["SD"] < 1800

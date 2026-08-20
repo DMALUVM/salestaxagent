@@ -38,6 +38,13 @@ interface KPIs {
   tacos: number;
 }
 
+/** SP | SB | SD. Rows written before the SB/SD sync existed have no type and
+ *  are Sponsored Products by definition — that is all the sync ever fetched. */
+function campaignTypeOf(c: Record<string, unknown>): string {
+  const t = String(c.campaign_type ?? "").trim().toUpperCase();
+  return t || "SP";
+}
+
 function aggregate(rows: DailyBase[], totalSales: number): KPIs {
   const spend = rows.reduce((s, r) => s + r.spend, 0);
   const adSales = rows.reduce((s, r) => s + r.ad_sales, 0);
@@ -80,7 +87,12 @@ export async function GET() {
     // ── Fetch ALL campaign-daily rows (paginated — ~150 campaigns/day, so 90d
     //    is ~13k rows and blows past PostgREST's 1,000-row default). Narrow
     //    select: the client never sees these rows, only the rollups below. ──
-    const CAMPAIGN_COLS = "date,campaign_name,spend,sales_14d,orders_14d,clicks,impressions";
+    // campaign_type is SP | SB | SD. Every rollup below sums across all three
+    // — the console's totals do too — but the campaign table and the by-type
+    // panel surface it so a Sponsored Brands line is never mistaken for a
+    // Sponsored Products one.
+    const CAMPAIGN_COLS =
+      "date,campaign_name,campaign_type,spend,sales_14d,orders_14d,clicks,impressions";
     let allCampaignRows: Array<Record<string, unknown>> = [];
     try {
       let offset = 0;
@@ -179,10 +191,10 @@ export async function GET() {
     const kpi90 = kpisForRange(90);
 
     // ── Campaign-level aggregation for selected range (all available data) ──
-    const campaignAgg: Record<string, { spend: number; sales: number; orders: number; clicks: number; impressions: number }> = {};
+    const campaignAgg: Record<string, { spend: number; sales: number; orders: number; clicks: number; impressions: number; type: string }> = {};
     for (const c of allCampaignRows) {
       const name = String(c.campaign_name ?? "");
-      if (!campaignAgg[name]) campaignAgg[name] = { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 };
+      if (!campaignAgg[name]) campaignAgg[name] = { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0, type: campaignTypeOf(c) };
       campaignAgg[name].spend += Number(c.spend ?? 0);
       campaignAgg[name].sales += Number(c.sales_14d ?? 0);
       campaignAgg[name].orders += Number(c.orders_14d ?? 0);
@@ -192,6 +204,7 @@ export async function GET() {
     const campaigns = Object.entries(campaignAgg)
       .map(([name, d]) => ({
         campaign_name: name, ...d,
+        campaign_type: d.type,
         role: classifyCampaign(name),
         acos: d.sales > 0 ? (d.spend / d.sales) * 100 : 0,
         roas: d.spend > 0 ? d.sales / d.spend : 0,
@@ -217,6 +230,43 @@ export async function GET() {
 
     /** Role rollup over [from .. asOf]. Classification is unchanged — name
      *  patterns from config/ads_strategy.json via classifyCampaign(). */
+    /** Spend/clicks/sales split by ad product over [from .. asOf].
+     *  The KPI cards stay account-wide totals (SP+SB+SD, matching the console);
+     *  this is the breakdown that shows where those totals came from. */
+    function typesFor(from: string, windowSpend: number) {
+      const agg: Record<string, {
+        spend: number; sales: number; clicks: number; orders: number;
+        campaigns: Set<string>;
+      }> = {};
+      for (const c of allCampaignRows) {
+        const d = String(c.date ?? "");
+        if (!d || d < from || d > asOf) continue;
+        const t = campaignTypeOf(c);
+        const e = agg[t] ?? { spend: 0, sales: 0, clicks: 0, orders: 0, campaigns: new Set<string>() };
+        e.spend += Number(c.spend ?? 0);
+        e.sales += Number(c.sales_14d ?? 0);
+        e.clicks += Number(c.clicks ?? 0);
+        e.orders += Number(c.orders_14d ?? 0);
+        e.campaigns.add(String(c.campaign_name ?? ""));
+        agg[t] = e;
+      }
+      return ["SP", "SB", "SD"].filter((t) => agg[t]).map((t) => {
+        const e = agg[t];
+        return {
+          type: t,
+          label: { SP: "Sponsored Products", SB: "Sponsored Brands", SD: "Sponsored Display" }[t] ?? t,
+          campaigns: e.campaigns.size,
+          spend: Math.round(e.spend * 100) / 100,
+          sales: Math.round(e.sales * 100) / 100,
+          clicks: e.clicks,
+          orders: e.orders,
+          spendSharePct: windowSpend > 0 ? Math.round((e.spend / windowSpend) * 1000) / 10 : 0,
+          acos: e.sales > 0 ? Math.round((e.spend / e.sales) * 1000) / 10 : null,
+          cpc: e.clicks > 0 ? Math.round((e.spend / e.clicks) * 100) / 100 : null,
+        };
+      });
+    }
+
     function rolesFor(from: string, amazonSales: number, windowSpend: number) {
       const agg: Record<string, {
         spend: number; sales: number; clicks: number; orders: number;
@@ -300,6 +350,10 @@ export async function GET() {
         cutoffs[k], kpiByRange[k].kpis.totalSales, kpiByRange[k].kpis.spend,
       )])
     ) as Record<RangeKey, ReturnType<typeof rolesFor>>;
+
+    const adTypesByRange = Object.fromEntries(
+      RANGE_KEYS.map((k) => [k, typesFor(cutoffs[k], kpiByRange[k].kpis.spend)])
+    ) as Record<RangeKey, ReturnType<typeof typesFor>>;
 
     // ── Placement rows (optional table) ──
     // Fetched once over the widest window, then aggregated per range in memory
@@ -454,7 +508,7 @@ export async function GET() {
         storageAvailable: strategy.storageAvailable,
         updatedAt: strategy.updatedAt,
       },
-      rolesByRange, placementsByRange, placementsAvailable,
+      rolesByRange, adTypesByRange, placementsByRange, placementsAvailable,
       searchTerms, recommendations,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
       targetAcos, targetAcosAsOf,
@@ -463,7 +517,7 @@ export async function GET() {
     return Response.json({
       kpi7: null, kpi14: null, kpi30: null, kpi90: null,
       dailySeries: [], cutoffs: null, campaigns: [],
-      rolesByRange: null, placementsByRange: null, placementsAvailable: false,
+      rolesByRange: null, adTypesByRange: null, placementsByRange: null, placementsAvailable: false,
       strategy: null,
       searchTerms: [], recommendations: [],
       asOf: null, today: null, adsThrough: null,

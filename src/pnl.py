@@ -115,8 +115,10 @@ def _sku_units_by_day(days: int) -> tuple[dict[str, dict[str, int]], dict[str, i
 
     end = date.today()
     start = end - timedelta(days=days)
+    start_iso = start.isoformat()
     out: dict[str, dict[str, int]] = defaultdict(dict)
     excluded: dict[str, int] = defaultdict(int)
+    partial_leading: dict[str, int] = defaultdict(int)
 
     for c_start, c_end in _date_chunks(start, end):
         try:
@@ -148,11 +150,24 @@ def _sku_units_by_day(days: int) -> tuple[dict[str, dict[str, int]], dict[str, i
                 continue
 
             d = sale_date.isoformat()
+            # Drop the partial leading day — same rule as sync_amazon_daily.
+            # The orders report is bounded in UTC but bucketed into LA days, so
+            # UTC midnight on `start` is 17:00 the previous LA day and the
+            # report always carries that day's last ~7 hours. Counting them
+            # would understate the boundary day's units, and therefore its COGS
+            # and contribution, with no later run ever correcting it.
+            if d < start_iso:
+                partial_leading[d] += qty
+                continue
             # Same basis as gross_sales: the line must carry revenue.
             if _parse_money(_get(row, H, "item-price")) <= 0:
                 excluded[d] += qty
                 continue
             out[d][sku] = out[d].get(sku, 0) + qty
+
+    for d, u in sorted(partial_leading.items()):
+        log.info("P&L units: dropping partial leading day %s (%d unit(s) before "
+                 "the window start in LA)", d, u)
 
     for d, u in sorted(excluded.items()):
         log.warning("%s: excluded %d unit(s) on zero-revenue order lines "

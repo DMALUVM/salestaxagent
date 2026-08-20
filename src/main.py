@@ -558,12 +558,25 @@ def ads_test_cmd():
               help="Also sync placement performance on a full sync")
 @click.option("--search-term-chunk-days", default=None, type=int,
               help="Chunk size for search-term reports (default 7)")
+@click.option("--campaign-chunk-days", default=None, type=int,
+              help="Chunk size for campaign reports (default 30, max 30). "
+                   "Use a smaller value to backfill SB/SD incrementally — each "
+                   "chunk commits on its own and prints progress.")
+@click.option("--ad-products", default=None,
+              help="Comma-separated ad products for campaigns: SP,SB,SD "
+                   "(default: all three). Search terms and placements are "
+                   "always Sponsored Products.")
 def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
-                 with_placements, search_term_chunk_days):
+                 with_placements, search_term_chunk_days, campaign_chunk_days,
+                 ad_products):
     """Sync Amazon Ads campaigns + search terms (auto-chunked).
 
     Campaigns chunk at ≤30 days; search terms at 7 by default because those
     reports are far heavier and a wide window times out.
+
+    Campaigns cover Sponsored Products, Brands and Display; each row carries
+    its campaign_type so the totals match the Ads console while the breakdown
+    stays available.
     """
     from src.config import settings
     if not settings.amazon_ads_enabled:
@@ -572,8 +585,17 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
     if sum(bool(f) for f in (campaigns_only, search_terms_only, placements_only)) > 1:
         raise click.UsageError("--campaigns-only, --search-terms-only and "
                                "--placements-only are mutually exclusive")
-    from src.amazon_ads.reports import sync_ads, SEARCH_TERM_CHUNK_DAYS
+    from src.amazon_ads.reports import sync_ads, SEARCH_TERM_CHUNK_DAYS, AD_PRODUCTS
     from src.db import job_start, job_finish
+
+    products = None
+    if ad_products:
+        products = tuple(p.strip().upper() for p in ad_products.split(",") if p.strip())
+        unknown = [p for p in products if p not in AD_PRODUCTS]
+        if unknown:
+            raise click.UsageError(
+                f"unknown ad product(s) {', '.join(unknown)} — choose from "
+                f"{', '.join(AD_PRODUCTS)}")
 
     job_name = ("ads_campaigns_sync" if campaigns_only else
                 "ads_search_terms_sync" if search_terms_only else
@@ -591,8 +613,21 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
                       search_terms_only=search_terms_only,
                       placements_only=placements_only,
                       with_placements=with_placements,
-                      search_term_chunk_days=search_term_chunk_days)
+                      search_term_chunk_days=search_term_chunk_days,
+                      ad_products=products,
+                      campaign_chunk_days=campaign_chunk_days,
+                      on_progress=click.echo)
     errors = []
+
+    camp = result.get("campaigns")
+    if isinstance(camp, dict) and camp.get("by_type"):
+        for t in ("SP", "SB", "SD"):
+            v = camp["by_type"].get(t)
+            if not v:
+                continue
+            click.echo(f"  {t}: {v['rows']} rows, ${v['spend']:,.2f} spend, "
+                       f"{v['clicks']:,} clicks"
+                       + ("" if v["ok"] else f"  ⚠ {len(v['errors'])} error(s)"))
 
     for key in ["campaigns", "search_terms", "placements"]:
         val = result.get(key)
@@ -640,6 +675,20 @@ def _ads_sync_outcome(result: dict, days: int) -> tuple[str, str]:
 
     campaigns, search_terms = half("campaigns"), half("search_terms")
     placements = half("placements")
+
+    # Ad-product detail: a whole missing product (SB or SD) is a different kind
+    # of partial than a single timed-out chunk, and it is the one that silently
+    # under-reports spend against the console. Name it in the message.
+    camp = result.get("campaigns")
+    product_note = ""
+    if isinstance(camp, dict) and camp.get("by_type"):
+        ok = camp.get("products_ok") or []
+        bad = camp.get("products_failed") or []
+        parts = "/".join(f"{t} ${camp['by_type'][t]['spend']:,.2f}"
+                         for t in ("SP", "SB", "SD") if t in camp["by_type"])
+        product_note = f" [{parts}]"
+        if bad:
+            product_note += f" — {'+'.join(bad)} FAILED, {'+'.join(ok) or 'nothing'} kept"
     ran = [s for s in (campaigns, search_terms, placements) if s is not None]
     if not ran:
         return "fail", "nothing ran"
@@ -652,7 +701,7 @@ def _ads_sync_outcome(result: dict, days: int) -> tuple[str, str]:
         detail.append(f"search_terms {search_terms}")
     if placements:
         detail.append(f"placements {placements}")
-    summary = f"{days}d {scope}: " + ", ".join(detail)
+    summary = f"{days}d {scope}: " + ", ".join(detail) + product_note
 
     if all(s == "ok" for s in ran):
         return "success", summary
@@ -707,6 +756,126 @@ def ads_actions_cmd(target_acos, days):
                f"{len(recs)} recs ({days}d, target {target_acos:.1f}%)",
                stats={"count": len(recs), "target_acos": target_acos,
                       "target_basis": target_basis, "days": days})
+
+
+@cli.command("ads-reconcile")
+@click.option("--date", "target_date", default=None,
+              help="Day to reconcile (YYYY-MM-DD). Defaults to the LA as-of day.")
+@click.option("--expect-spend", default=None, type=float, help="Amazon Ads console spend")
+@click.option("--expect-clicks", default=None, type=int, help="Amazon Ads console clicks")
+@click.option("--tolerance-pct", default=2.0, help="Gap that counts as a mismatch")
+def ads_reconcile_cmd(target_date, expect_spend, expect_clicks, tolerance_pct):
+    """Compare stored ads totals for a day against the Amazon Ads console.
+
+    Amazon is the source of truth for ad spend and clicks. This prints what the
+    agent has stored, using the ACTUAL column names on ads_campaigns_daily:
+
+        spend        -> spend
+        clicks       -> clicks
+        attributed   -> sales_14d     (there is no `sales` column)
+        orders       -> orders_14d    (there is no `orders`/`purchases` column)
+        impressions  -> impressions
+    """
+    from datetime import date as _date
+    from src.db import get_client
+    from src.rules import amazon_as_of
+
+    day = target_date or amazon_as_of().isoformat()
+    try:
+        _date.fromisoformat(day)
+    except ValueError:
+        raise click.UsageError(f"--date must be YYYY-MM-DD, got {day!r}")
+
+    client = get_client()
+    rows, offset = [], 0
+    while True:
+        page = (client.table("ads_campaigns_daily")
+                .select("campaign_id,campaign_name,campaign_status,campaign_type,"
+                        "spend,clicks,impressions,sales_14d,orders_14d")
+                .eq("date", day).range(offset, offset + 999).execute().data) or []
+        rows.extend(page)
+        if len(page) < 1000:
+            break
+        offset += 1000
+
+    spend = sum(float(r.get("spend") or 0) for r in rows)
+    clicks = sum(int(r.get("clicks") or 0) for r in rows)
+    impressions = sum(int(r.get("impressions") or 0) for r in rows)
+    sales = sum(float(r.get("sales_14d") or 0) for r in rows)
+    orders = sum(int(r.get("orders_14d") or 0) for r in rows)
+
+    click.echo(f"ads_campaigns_daily — {day}  (America/Los_Angeles reporting day)")
+    click.echo(f"  campaign rows : {len(rows)}")
+    click.echo(f"  spend         : ${spend:,.2f}   [column: spend]")
+    click.echo(f"  clicks        : {clicks:,}        [column: clicks]")
+    click.echo(f"  impressions   : {impressions:,}")
+    click.echo(f"  CPC           : ${spend / clicks:,.2f}" if clicks else "  CPC           : —")
+    click.echo(f"  CTR           : {clicks / impressions * 100:.2f}%" if impressions else "  CTR           : —")
+    click.echo(f"  attributed sales: ${sales:,.2f}   [column: sales_14d, 14-day attribution]")
+    click.echo(f"  orders        : {orders:,}        [column: orders_14d]")
+    click.echo(f"  ROAS          : {sales / spend:.2f}" if spend else "  ROAS          : —")
+    click.echo(f"  ACOS          : {spend / sales * 100:.1f}%" if sales else "  ACOS          : —")
+
+    active = sum(1 for r in rows if str(r.get("campaign_status", "")).upper() == "ENABLED")
+    click.echo(f"  campaigns     : {active} enabled / {len(rows)} rows")
+
+    # By ad product. The console's daily total spans Sponsored Products,
+    # Brands and Display, so a per-type breakdown is what makes an agent-vs-
+    # console gap diagnosable rather than just visible.
+    by_type: dict[str, dict] = {}
+    for r in rows:
+        t = (r.get("campaign_type") or "SP").upper()
+        b = by_type.setdefault(t, {"rows": 0, "spend": 0.0, "clicks": 0,
+                                   "impressions": 0, "sales": 0.0})
+        b["rows"] += 1
+        b["spend"] += float(r.get("spend") or 0)
+        b["clicks"] += int(r.get("clicks") or 0)
+        b["impressions"] += int(r.get("impressions") or 0)
+        b["sales"] += float(r.get("sales_14d") or 0)
+
+    click.echo("")
+    click.echo("  by campaign_type:")
+    click.echo(f"    {'type':<6} {'rows':>5} {'spend':>11} {'clicks':>8} "
+               f"{'share':>7} {'CPC':>7}")
+    for t in ("SP", "SB", "SD"):
+        b = by_type.get(t)
+        if not b:
+            click.echo(f"    {t:<6} {'—':>5} {'—':>11} {'—':>8} {'—':>7} {'—':>7}"
+                       "   (no rows stored for this day)")
+            continue
+        share = (b["spend"] / spend * 100) if spend else 0.0
+        cpc = (b["spend"] / b["clicks"]) if b["clicks"] else 0.0
+        click.echo(f"    {t:<6} {b['rows']:>5} ${b['spend']:>10,.2f} "
+                   f"{b['clicks']:>8,} {share:>6.1f}% "
+                   f"{('$%.2f' % cpc) if b['clicks'] else '—':>7}")
+    other = {t: b for t, b in by_type.items() if t not in ("SP", "SB", "SD")}
+    for t, b in sorted(other.items()):
+        share = (b["spend"] / spend * 100) if spend else 0.0
+        click.echo(f"    {t:<6} {b['rows']:>5} ${b['spend']:>10,.2f} "
+                   f"{b['clicks']:>8,} {share:>6.1f}%")
+    click.echo(f"    {'TOTAL':<6} {len(rows):>5} ${spend:>10,.2f} {clicks:>8,} "
+               f"{100.0 if spend else 0.0:>6.1f}%")
+    missing = [t for t in ("SB", "SD") if t not in by_type]
+    if missing:
+        click.echo(f"    note: no {'/'.join(missing)} rows — if the console shows "
+                   f"spend there, run: ads-sync --days N --campaigns-only")
+    click.echo("")
+
+    mismatch = False
+    for label, got, want in (("spend", spend, expect_spend), ("clicks", float(clicks), expect_clicks)):
+        if want is None:
+            continue
+        gap = got - float(want)
+        pct = (abs(gap) / float(want) * 100) if want else 0.0
+        ok = pct <= tolerance_pct
+        mismatch = mismatch or not ok
+        arrow = "OK " if ok else "GAP"
+        fmt_got = f"${got:,.2f}" if label == "spend" else f"{got:,.0f}"
+        fmt_want = f"${float(want):,.2f}" if label == "spend" else f"{float(want):,.0f}"
+        click.echo(f"  [{arrow}] {label}: agent {fmt_got} vs console {fmt_want}  "
+                   f"({gap:+,.2f}, {pct:.2f}%)")
+    if (expect_spend or expect_clicks) and not mismatch:
+        click.echo("  Within tolerance — Amazon remains the source of truth for spend/clicks.")
 
 
 @cli.command("ads-outcomes")
@@ -3075,6 +3244,11 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
         return
 
     status, message = _ads_sync_outcome(result, days)
+    camp = result.get("campaigns")
+    if isinstance(camp, dict):
+        for t, v in (camp.get("by_type") or {}).items():
+            print(f"[Ads {label}] {t}: {v['rows']} rows, ${v['spend']:,.2f} spend, "
+                  f"{v['clicks']:,} clicks, {'ok' if v['ok'] else 'FAILED'}")
     for key in ("campaigns", "search_terms", "placements"):
         val = result.get(key)
         if isinstance(val, dict):
@@ -3087,9 +3261,17 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
     print(f"[Ads {label}] {status}: {message}")
 
     job_finish(run_id, status, message, stats=result.get("campaigns") or result.get("search_terms"))
-    # Partial = some chunks landed; only a total failure is worth a push alert.
+    # A chunk that timed out and will be re-fetched tomorrow is routine and
+    # stays in the log. Two things do get a push: a total failure, and an ad
+    # product that dropped out entirely — the latter under-reports account
+    # spend against the Amazon console for as long as it goes unnoticed, which
+    # is exactly how the SP-only sync hid ~6% of spend.
+    lost_products = (camp.get("products_failed") or []) if isinstance(camp, dict) else []
     if status == "fail":
         _ads_alert(f"Ads {label} sync failed", message)
+    elif lost_products:
+        _ads_alert(f"Ads {label} sync partial — {'+'.join(lost_products)} missing",
+                   message)
 
 
 def _run_ads_campaigns_sync():

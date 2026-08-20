@@ -38,6 +38,13 @@ interface CampaignAgg {
   campaign_name: string; spend: number; sales: number; orders: number;
   clicks: number; impressions: number; acos: number; roas: number; cvr: number;
   role: string;
+  /** SP | SB | SD — which Amazon ad product this campaign belongs to. */
+  campaign_type: string;
+}
+interface AdTypeAgg {
+  type: string; label: string; campaigns: number;
+  spend: number; sales: number; clicks: number; orders: number;
+  spendSharePct: number; acos: number | null; cpc: number | null;
 }
 interface RoleAgg {
   role: string; label: string; description: string | null; campaigns: number;
@@ -67,6 +74,14 @@ const ROLE_STYLES: Record<string, string> = {
   ranking: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
   defense: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-900",
 };
+/** Ad-product badge. Deliberately a neutral/slate family so it reads as
+ *  metadata and never competes with the role colours beside it. */
+const AD_TYPE_STYLES: Record<string, string> = {
+  SP: "bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-700",
+  SB: "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-900",
+  SD: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200 dark:bg-fuchsia-950/40 dark:text-fuchsia-300 dark:border-fuchsia-900",
+};
+
 const ROLE_BARS: Record<string, string> = {
   discovery: "bg-[#2a78d6] dark:bg-[#3987e5]",
   profit: "bg-[#12996a] dark:bg-[#199e70]",
@@ -97,6 +112,7 @@ interface PPCData {
   campaigns: CampaignAgg[];
   /** One bucket per range — the server owns the bounds for both panels. */
   rolesByRange: Record<Range, RoleBucket> | null;
+  adTypesByRange: Record<Range, AdTypeAgg[]> | null;
   placementsByRange: Record<Range, PlacementAgg[]> | null;
   placementsAvailable: boolean;
   searchTerms: SearchTerm[];
@@ -578,6 +594,7 @@ export default function PPCPage() {
   const campaigns = data?.campaigns ?? [];
   // Both panels read the bucket for the selected range — no client-side date math.
   const roleBucket = data?.rolesByRange?.[range] ?? null;
+  const adTypes = data?.adTypesByRange?.[range] ?? [];
   const roles = roleBucket?.rows ?? [];
   const roleOther = roleBucket?.other ?? null;
   const recon = roleBucket?.reconciliation ?? null;
@@ -761,6 +778,49 @@ export default function PPCPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Spend by ad product — the KPI cards above are SP+SB+SD combined,
+              which is what the Amazon Ads console totals. This says which
+              products those totals came from, so a mismatch is traceable to a
+              product rather than a mystery. */}
+          {adTypes.length > 0 && (
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                  <p className="text-xs font-medium">
+                    Spend by ad product
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      {windowLabel(roleDays)}
+                    </span>
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    KPIs and TACoS above include all products
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {adTypes.map((t) => (
+                    <div key={t.type} className="rounded-md border p-3">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className={`text-[9px] ${AD_TYPE_STYLES[t.type] ?? ""}`}>
+                          {t.type}
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground truncate">{t.label}</span>
+                      </div>
+                      <p className="mt-1 text-lg font-semibold tabular-nums">${fmtD(t.spend)}</p>
+                      <p className="text-[10px] text-muted-foreground tabular-nums">
+                        {t.spendSharePct.toFixed(1)}% of spend · {fmt(t.clicks)} clicks
+                        {t.cpc != null ? ` · $${t.cpc.toFixed(2)} CPC` : ""}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground tabular-nums">
+                        {t.campaigns} campaign{t.campaigns === 1 ? "" : "s"}
+                        {t.acos != null ? ` · ${t.acos.toFixed(0)}% ACOS` : ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Budget share by role */}
           {roles.length > 0 && (
@@ -1193,6 +1253,7 @@ export default function PPCPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Campaign</TableHead>
+                      <TableHead className="w-14">Type</TableHead>
                       <TableHead className="w-24">Role</TableHead>
                       <TableHead className="text-right">Spend</TableHead>
                       <TableHead className="text-right">Sales</TableHead>
@@ -1206,6 +1267,11 @@ export default function PPCPage() {
                     {campaigns.map((d) => (
                       <TableRow key={d.campaign_name}>
                         <TableCell className="text-xs font-medium truncate max-w-[250px]">{d.campaign_name}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`text-[9px] whitespace-nowrap ${AD_TYPE_STYLES[d.campaign_type] ?? ""}`}>
+                            {d.campaign_type || "SP"}
+                          </Badge>
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline" className={`text-[9px] whitespace-nowrap ${ROLE_STYLES[d.role] ?? ""}`}>
                             {d.role}

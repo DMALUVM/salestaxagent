@@ -15,6 +15,7 @@ import type {
   StateRule,
 } from "@/lib/types";
 import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
+import { buildLast30Series } from "@/lib/overview-series";
 import { LoadingState } from "@/components/loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isConfigured } from "@/lib/supabase";
@@ -121,6 +122,8 @@ export default function Pulse() {
   const { data: salesByState } = useSupabaseQuery<SalesByState>("sales_by_state");
 
   const [channelFilter, setChannelFilter] = useState<ChFilter>("all");
+  /** Hovered/focused index in the 30-day chart, or null. */
+  const [hoverDay, setHoverDay] = useState<number | null>(null);
 
   const todayStr = localDate(new Date());
 
@@ -193,22 +196,10 @@ export default function Pulse() {
     const hasYoyL7 = salesDaily.some((r) => r.sale_date >= yoyL7Start && r.sale_date <= yoyL7End);
     const hasYoyL30 = salesDaily.some((r) => r.sale_date >= yoyL30Start && r.sale_date <= yoyL30End);
 
-    // 30-day chart data
-    const dailyMap = new Map<string, { shopify: number; amazon: number }>();
-    for (const row of salesDaily) {
-      const ch = normalizeChannel(row.channel);
-      let entry = dailyMap.get(row.sale_date);
-      if (!entry) { entry = { shopify: 0, amazon: 0 }; dailyMap.set(row.sale_date, entry); }
-      if (ch === SHOPIFY) entry.shopify += Number(row.gross_sales);
-      else if (ch === AMAZON) entry.amazon += Number(row.gross_sales);
-    }
-    const last30: { date: string; shopify: number; amazon: number }[] = [];
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - i);
-      const ds = localDate(d);
-      const entry = dailyMap.get(ds);
-      last30.push({ date: ds, shopify: entry?.shopify ?? 0, amazon: entry?.amazon ?? 0 });
-    }
+    // 30-day chart data — built by the pure, unit-tested series builder so the
+    // window, date contiguity and channel bucketing stay pinned by tests
+    // (src/lib/overview-series.test.ts).
+    const last30 = buildLast30Series(salesDaily, now);
 
     // Data freshness
     let maxShopifyDate = "", maxAmazonDate = "";
@@ -413,21 +404,76 @@ export default function Pulse() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-px" style={{ height: "160px" }}>
-            {sales.last30.map((day) => {
-              const total = day.shopify + day.amazon;
-              const barH = chartMax > 0 ? (total / chartMax) * 160 : 0;
-              const shopifyH = total > 0 ? (day.shopify / total) * barH : 0;
-              const amazonH = barH - shopifyH;
-              return (
-                <div key={day.date} className="flex-1 flex flex-col justify-end min-w-0"
-                  title={`${day.date}\nShopify: $${fmt(Math.round(day.shopify))}\nAmazon: $${fmt(Math.round(day.amazon))}\nTotal: $${fmt(Math.round(total))}`}>
-                  {amazonH > 0 && <div className="w-full rounded-t-sm bg-orange-400" style={{ height: `${amazonH}px` }} />}
-                  {shopifyH > 0 && <div className={`w-full bg-blue-500 ${amazonH <= 0 ? "rounded-t-sm" : ""}`} style={{ height: `${shopifyH}px` }} />}
-                  {barH === 0 && <div className="w-full bg-muted" style={{ height: "1px" }} />}
+          <div className="relative">
+            <div className="flex gap-px" style={{ height: "160px" }}>
+              {sales.last30.map((day, i) => {
+                const total = day.total;
+                const barH = chartMax > 0 ? (total / chartMax) * 160 : 0;
+                const shopifyH = total > 0 ? (day.shopify / total) * barH : 0;
+                const amazonH = barH - shopifyH;
+                const active = hoverDay === i;
+                return (
+                  <div
+                    key={day.date}
+                    // Hover target is the whole column, not just the painted
+                    // bar, so short and empty days are reachable too.
+                    className={`flex-1 flex flex-col justify-end min-w-0 cursor-default ${active ? "bg-muted/60" : ""}`}
+                    onMouseEnter={() => setHoverDay(i)}
+                    onMouseLeave={() => setHoverDay((h) => (h === i ? null : h))}
+                    onFocus={() => setHoverDay(i)}
+                    onBlur={() => setHoverDay((h) => (h === i ? null : h))}
+                    tabIndex={0}
+                    aria-label={`${day.date}: Shopify $${fmt(Math.round(day.shopify))}, Amazon $${fmt(Math.round(day.amazon))}`}
+                  >
+                    {amazonH > 0 && <div className="w-full rounded-t-sm bg-orange-400" style={{ height: `${amazonH}px` }} />}
+                    {shopifyH > 0 && <div className={`w-full bg-blue-500 ${amazonH <= 0 ? "rounded-t-sm" : ""}`} style={{ height: `${shopifyH}px` }} />}
+                    {/* A day with no row at all is a gap, not a $0 result: draw
+                        a hatched placeholder instead of a stub bar that reads
+                        as a genuinely terrible day. */}
+                    {barH === 0 && !day.hasData && (
+                      <div className="w-full rounded-t-sm border-t border-dashed border-muted-foreground/50" style={{ height: "6px" }} />
+                    )}
+                    {barH === 0 && day.hasData && (
+                      <div className="w-full bg-muted" style={{ height: "1px" }} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {hoverDay !== null && sales.last30[hoverDay] && (
+              <div
+                className="pointer-events-none absolute z-10 w-44 rounded-md border bg-popover p-2 text-popover-foreground shadow-md"
+                style={{
+                  left: `${((hoverDay + 0.5) / sales.last30.length) * 100}%`,
+                  top: 0,
+                  transform: hoverDay > sales.last30.length / 2
+                    ? "translateX(calc(-100% - 8px))" : "translateX(8px)",
+                }}
+              >
+                <p className="mb-1 text-[11px] font-medium">{sales.last30[hoverDay].date}</p>
+                {[
+                  { label: "Amazon", value: sales.last30[hoverDay].amazon, dot: "bg-orange-400" },
+                  { label: "Shopify", value: sales.last30[hoverDay].shopify, dot: "bg-blue-500" },
+                ].map((r) => (
+                  <div key={r.label} className="flex items-center justify-between gap-2 text-[11px] leading-5">
+                    <span className="flex items-center gap-1.5 text-muted-foreground">
+                      <span className={`inline-block h-0.5 w-2.5 rounded-full ${r.dot}`} />
+                      {r.label}
+                    </span>
+                    <span className="tabular-nums font-medium">${fmt(Math.round(r.value))}</span>
+                  </div>
+                ))}
+                <div className="mt-1 flex items-center justify-between gap-2 border-t pt-1 text-[11px]">
+                  <span className="text-muted-foreground">Total</span>
+                  <span className="tabular-nums font-semibold">${fmt(Math.round(sales.last30[hoverDay].total))}</span>
                 </div>
-              );
-            })}
+                {!sales.last30[hoverDay].hasData && (
+                  <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
+                    No sales_daily row for this date — data gap, not a $0 day.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
             <span>30d ago</span>
