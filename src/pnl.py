@@ -41,6 +41,13 @@ log = logging.getLogger(__name__)
 DEFAULT_REFERRAL_PCT = float(os.environ.get("DEFAULT_REFERRAL_PCT", str(PNL_DEFAULT_REFERRAL_PCT)))
 DEFAULT_FBA_FEE_PER_UNIT = float(os.environ.get("DEFAULT_FBA_FEE_PER_UNIT", str(PNL_DEFAULT_FBA_FEE_PER_UNIT)))
 
+#: Sanity thresholds. A day breaching one is still stored — silently dropping a
+#: day would hide a real problem — but it is logged and flagged in the row's
+#: meta so the UI and the operator can see that the inputs disagree.
+MAX_FEE_PCT_OF_SALES = 60.0   # referral + FBA above this means the bases disagree
+MIN_REVENUE_PER_UNIT = 5.0    # ASP floor; below it, units are inflated vs sales
+MAX_REVENUE_PER_UNIT = 200.0  # ASP ceiling; above it, units are missing
+
 #: SKU-grain row that carries ad spend which cannot be attributed to a SKU.
 #: Campaign spend is campaign-level, so today that is all of it. The identity
 #: sum(sku rows) + unallocated == account row therefore always holds.
@@ -75,25 +82,83 @@ def _ad_spend_by_day(start: date) -> dict[str, float]:
     return dict(out)
 
 
-def _sku_units_by_day(days: int) -> dict[str, dict[str, int]]:
-    """{date: {sku: units}} from the Amazon orders report.
+def _sku_units_by_day(days: int) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
+    """{date: {sku: units}} from the Amazon orders report, on the REVENUE basis.
 
-    Reuses the velocity engine's parser, so order-status and timezone rules
-    (business rules 1 and 2) are applied in exactly one place.
+    Returns (units_by_day, excluded_units_by_day).
+
+    Only lines that carry an item-price are counted, because gross_sales is the
+    sum of those same item-prices. Counting a zero-revenue line would charge it
+    per-unit FBA fees and COGS against revenue it never produced — on
+    2026-08-05 one order line (1,500 units, blank item-price) did exactly that,
+    inflating units 220 -> 1,712 and driving contribution to -$8,104.
+
+    Deliberately NOT the velocity engine's `_fetch_amazon_sku_units`: that one
+    counts every unit on purpose, which is right for demand/forecasting and
+    wrong for a revenue-basis P&L. Status and timezone rules (business rules 1
+    and 2) are still applied here exactly as they are there.
     """
-    try:
-        from src.inventory.velocity import _fetch_amazon_sku_units
-        by_sku = _fetch_amazon_sku_units(days=days)
-    except Exception:
-        log.exception("Could not load per-SKU units; COGS will be 0")
-        return {}
+    import csv
+    import io
 
+    try:
+        from src.amazon_sp.client import request_and_download
+        from src.amazon_sp.reports import (
+            ORDERS_REPORT, _date_chunks, _detect_delimiter,
+            _build_header_lookup, _get, _parse_money,
+        )
+        from src.sales_daily import _to_tz_date
+        from src.rules import AMAZON_TZ, is_excluded_status
+    except Exception:
+        log.exception("Could not import orders-report helpers; COGS will be 0")
+        return {}, {}
+
+    end = date.today()
+    start = end - timedelta(days=days)
     out: dict[str, dict[str, int]] = defaultdict(dict)
-    for sku, per_day in by_sku.items():
-        for d, units in per_day.items():
-            if units:
-                out[d.isoformat()][sku] = out[d.isoformat()].get(sku, 0) + int(units)
-    return dict(out)
+    excluded: dict[str, int] = defaultdict(int)
+
+    for c_start, c_end in _date_chunks(start, end):
+        try:
+            content = request_and_download(ORDERS_REPORT, c_start, c_end)
+        except Exception as e:
+            log.warning("Orders chunk %s->%s failed: %s", c_start, c_end, e)
+            continue
+
+        delimiter = _detect_delimiter(content.split("\n", 1)[0])
+        reader = csv.DictReader(io.StringIO(content), delimiter=delimiter, quotechar='"')
+        if not reader.fieldnames:
+            continue
+        H = _build_header_lookup(reader.fieldnames)
+
+        for row in reader:
+            if is_excluded_status(_get(row, H, "order-status")):
+                continue
+            sku = _get(row, H, "sku", "seller-sku", "msku")
+            if not sku:
+                continue
+            try:
+                qty = max(int(float(_get(row, H, "quantity") or "0")), 0)
+            except (ValueError, TypeError):
+                qty = 0
+            if qty == 0:
+                continue
+            sale_date = _to_tz_date(_get(row, H, "purchase-date"), AMAZON_TZ)
+            if not sale_date:
+                continue
+
+            d = sale_date.isoformat()
+            # Same basis as gross_sales: the line must carry revenue.
+            if _parse_money(_get(row, H, "item-price")) <= 0:
+                excluded[d] += qty
+                continue
+            out[d][sku] = out[d].get(sku, 0) + qty
+
+    for d, u in sorted(excluded.items()):
+        log.warning("%s: excluded %d unit(s) on zero-revenue order lines "
+                    "(no item-price) from P&L units", d, u)
+
+    return dict(out), dict(excluded)
 
 
 def _settled_by_day(days: int) -> dict[str, dict]:
@@ -169,7 +234,7 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
 
     # ── Ad spend, COGS inputs, settlement ──
     daily_ads = _ad_spend_by_day(start)
-    sku_units = _sku_units_by_day(days) if with_skus else {}
+    sku_units, excluded_units = _sku_units_by_day(days) if with_skus else ({}, {})
     settled = _settled_by_day(days)
 
     try:
@@ -188,6 +253,7 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
     account_rows: list[dict] = []
     sku_rows: list[dict] = []
     missing_cost_skus: set[str] = set()
+    flagged_days: list[dict] = []
 
     for d in all_dates:
         sales = round(daily_sales.get(d, 0.0), 2)
@@ -224,6 +290,30 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
 
         contribution = round(sales - referral - fba - ads - cogs, 2)
 
+        # ── Sanity guard: never write a junk day silently ──
+        # These catch the two ways the inputs can disagree: units inflated
+        # relative to sales (zero-revenue lines, double-counted chunks) and
+        # sales missing relative to units (a partial sales_daily row).
+        warnings: list[str] = []
+        fee_pct = ((referral + fba) / sales * 100) if sales > 0 else 0.0
+        rev_per_unit = (sales / units) if units else 0.0
+        if sales > 0 and fee_pct > MAX_FEE_PCT_OF_SALES:
+            warnings.append(f"fees {fee_pct:.0f}% of sales")
+        if units and sales > 0 and rev_per_unit < MIN_REVENUE_PER_UNIT:
+            warnings.append(f"revenue/unit ${rev_per_unit:.2f} below ${MIN_REVENUE_PER_UNIT:.2f}"
+                            f" — units likely inflated vs sales")
+        if units and sales > 0 and rev_per_unit > MAX_REVENUE_PER_UNIT:
+            warnings.append(f"revenue/unit ${rev_per_unit:.2f} above ${MAX_REVENUE_PER_UNIT:.2f}"
+                            f" — units likely missing")
+        if units == 0 and sales > 0:
+            warnings.append("sales with no units — COGS and FBA fees will be 0")
+        if warnings:
+            log.warning("P&L %s looks inconsistent (%s): sales=%.2f units=%d fees=%.2f "
+                        "cogs=%.2f contribution=%.2f",
+                        d, "; ".join(warnings), sales, units, referral + fba, cogs, contribution)
+            flagged_days.append({"date": d, "issues": warnings, "sales": sales,
+                                 "units": units, "contribution": contribution})
+
         account_rows.append({
             "date": d,
             "grain": "account",
@@ -250,6 +340,8 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
                 "settled_payout": s["payout"] if s else None,
                 "settled_fees": s["fees"] if s else None,
                 "settled_refunds": s["refunds"] if s else None,
+                "excluded_zero_revenue_units": excluded_units.get(d, 0) or None,
+                "sanity_warnings": warnings or None,
             }),
         })
 
@@ -330,6 +422,8 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
         "fee_basis": fee_basis,
         "has_cogs": has_cogs,
         "missing_cost_skus": sorted(missing_cost_skus),
+        "flagged_days": flagged_days,
+        "excluded_zero_revenue_units": sum(excluded_units.values()),
         "referral_pct": DEFAULT_REFERRAL_PCT,
         "fba_per_unit": DEFAULT_FBA_FEE_PER_UNIT,
     }

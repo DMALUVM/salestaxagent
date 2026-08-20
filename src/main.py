@@ -899,6 +899,18 @@ def pnl_sync_cmd(days, no_skus):
     if result.get("missing_cost_skus"):
         click.echo(f"  ⚠ no sku_costs entry for {len(result['missing_cost_skus'])} SKU(s), "
                    f"used average unit cost: {', '.join(result['missing_cost_skus'][:5])}")
+    if result.get("excluded_zero_revenue_units"):
+        click.echo(f"  ⚠ excluded {result['excluded_zero_revenue_units']} unit(s) on order lines "
+                   f"with no item-price (kept units on the same basis as gross_sales)")
+    flagged = result.get("flagged_days") or []
+    if flagged:
+        click.echo(click.style(f"  ⚠ {len(flagged)} day(s) failed the sanity check "
+                               f"— stored, but the inputs disagree:", fg="yellow"))
+        for f in flagged[:10]:
+            click.echo(f"      {f['date']}  sales ${f['sales']:,.2f}  units {f['units']}  "
+                       f"contribution ${f['contribution']:,.2f}  — {'; '.join(f['issues'])}")
+    else:
+        click.echo("  Sanity check: all days within expected fee % and revenue/unit bands")
 
 
 @cli.command("pulse-audit")
