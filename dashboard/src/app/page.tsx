@@ -111,6 +111,18 @@ export default function Pulse() {
     limit: 10,
   });
 
+  // Entity obligations live in their own table and their own page; the Pulse
+  // only needs the overdue count so it can label that line separately from
+  // sales tax. A missing table (migration not run) simply yields 0.
+  const [entityOverdue, setEntityOverdue] = useState(0);
+  useEffect(() => {
+    if (!configured) return;
+    fetch("/api/entity-obligations")
+      .then((r) => r.json())
+      .then((d) => setEntityOverdue(d?.counts?.overdue ?? 0))
+      .catch(() => {});
+  }, [configured]);
+
   // B2: Job health
   const [jobRuns, setJobRuns] = useState<Array<{ job_name: string; status: string; started_at: string; message: string | null }>>([]);
   useEffect(() => {
@@ -258,7 +270,10 @@ export default function Pulse() {
       const reason = r.has_economic_nexus ? "economic crossed" : r.fba_present ? "T1 FBA + direct" : "home/3PL";
       items.push({ label: `${r.state_code} — register (${reason})`, href: "/registrations" });
     }
-    if (od.length > 0) items.push({ label: `${od.length} overdue filing${od.length > 1 ? "s" : ""}`, href: "/liability" });
+    // "sales-tax" is in the label on purpose: entity fees get their own line
+    // below, and the two must never be read as the same kind of obligation.
+    if (od.length > 0) items.push({ label: `${od.length} overdue sales-tax filing${od.length > 1 ? "s" : ""}`, href: "/liability" });
+    if (entityOverdue > 0) items.push({ label: `${entityOverdue} overdue entity filing${entityOverdue > 1 ? "s" : ""}`, href: "/entity" });
     const dueSoon = up.filter((f) => f.days_until_due >= 0 && f.days_until_due <= 14);
     if (dueSoon.length > 0 && od.length === 0) {
       items.push({ label: `${dueSoon.length} filing${dueSoon.length > 1 ? "s" : ""} due within 14d`, href: "/liability" });
@@ -266,8 +281,8 @@ export default function Pulse() {
     for (const r of recs.filter((r) => r.recommendation === "REVIEW").slice(0, 2))
       items.push({ label: `${r.state_code} — review with CPA`, href: "/registrations" });
 
-    return { overdue: od, upcomingOpen: up, actionCount: ac, nextFiling: nf, nextFilingDays: nfDays, criticalItems: items };
-  }, [filings, nexus, recs, todayStr]);
+    return { overdue: od, upcomingOpen: up, actionCount: ac + entityOverdue, nextFiling: nf, nextFilingDays: nfDays, criticalItems: items };
+  }, [filings, nexus, recs, todayStr, entityOverdue]);
 
   if (!configured) return <SetupPrompt />;
   if (l1 || l2 || l3) return <LoadingState />;

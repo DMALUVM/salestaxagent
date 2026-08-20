@@ -16,6 +16,13 @@
 /** Periods needing nothing further from the user. */
 export const SETTLED_STATUSES = new Set(["filed", "not_required"]);
 
+/**
+ * Recurring within-year cadences. Two different ones covering the same months
+ * are a duplicate; `annual` is deliberately excluded because a yearly
+ * reconciliation return legitimately coexists with a periodic cadence.
+ */
+export const PERIODIC_TYPES = new Set(["monthly", "quarterly", "semi_annual"]);
+
 export interface FilingRow {
   state_code: string;
   period_type?: string | null;
@@ -95,9 +102,15 @@ export function obligationStatus(
   // state's frequency leaves the old cadence behind forever. The state then
   // carries two overlapping sets covering the same months, and filing one
   // leaves the other looking unfiled. Only the current cadence is live.
+  //
+  // This applies ONLY between two periodic cadences. An `annual` row alongside
+  // a periodic cadence is NOT a leftover — several states require a yearly
+  // reconciliation on top of periodic returns (Hawaii's G-49 sits on top of
+  // the G-45 periodics exactly this way).
   const freq = nexus.assigned_frequency;
   const periodType = filing.period_type;
-  if (freq && periodType && periodType !== freq) {
+  if (freq && periodType && periodType !== freq
+      && PERIODIC_TYPES.has(periodType) && PERIODIC_TYPES.has(freq)) {
     return {
       reason: "superseded_frequency",
       detail: `period_type=${periodType}, state files ${freq}`,

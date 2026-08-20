@@ -124,12 +124,20 @@ def send_daily_summary(
 
     today = _date.today()
     try:
+        entity_view = None
+        try:
+            from src.compliance.entity_obligations import current_view
+            entity_view = current_view(today)
+        except Exception as e:
+            log.warning("Entity obligations unavailable: %s", str(e)[:200])
+
         sections = build_sections(
             fetch_all("nexus_status"),
             fetch_all("filing_calendar"),
             fetch_all("franchise_tax_flags"),
             today,
             econ_approaching=econ_approaching,
+            entity_view=entity_view,
         )
         body = render_sections(sections, today)
         action_needed = len(sections.action_needed_states)

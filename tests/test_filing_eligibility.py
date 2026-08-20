@@ -95,6 +95,17 @@ class TestFrequencyMismatch:
         why = obligation_status(f, nexus(assigned_frequency="quarterly"))
         assert why is not None and why.reason == "superseded_frequency"
 
+    def test_annual_reconciliation_is_not_superseded(self):
+        """Hawaii files G-45 periodics PLUS a G-49 annual return.
+
+        Treating the annual row as a stale duplicate of the semi-annual cadence
+        hid a real filing. Only two periodic cadences supersede each other.
+        """
+        f = filing(state_code="HI", period_type="annual", period_label="2026",
+                   period_end="2026-12-31", due_date="2027-01-20")
+        n = nexus(state_code="HI", assigned_frequency="semi_annual")
+        assert is_open_obligation(f, n)
+
     def test_no_assigned_frequency_keeps_every_period(self):
         """Without a stated cadence there is nothing to contradict."""
         f = filing(period_type="semi_annual", period_label="2026-H2",

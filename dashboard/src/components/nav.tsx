@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   DollarSign,
   Calendar,
+  Building2,
   ClipboardCheck,
   MapPin,
   MapPinned,
@@ -38,6 +39,9 @@ const primaryLinks: NavItem[] = [
   { href: "/liability", label: "What Do I Owe?", icon: DollarSign },
   { href: "/calendar", label: "Filing Calendar", icon: Calendar },
   { href: "/registrations", label: "Nexus & Registrations", icon: ClipboardCheck },
+  // Entity-level filings (annual reports, franchise tax, foreign qualification).
+  // Separate from the Filing Calendar on purpose — these are not sales tax.
+  { href: "/entity", label: "Entity & Compliance", icon: Building2 },
   { href: "/inventory", label: "Inventory", icon: Warehouse },
   // Demand Forecast + Inbound Planner merged into one destination with tabs.
   { href: "/planning", label: "Planning", icon: TrendingUp },

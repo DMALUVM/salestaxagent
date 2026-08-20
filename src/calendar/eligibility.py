@@ -28,6 +28,11 @@ SETTLED_STATUSES = frozenset({"filed", "not_required"})
 # separate kind of thing.
 OPEN_STATUSES = frozenset({"pending", "late"})
 
+# Recurring within-year cadences. Two different ones covering the same months
+# are a duplicate; `annual` is deliberately excluded because a yearly
+# reconciliation return legitimately coexists with a periodic cadence.
+PERIODIC_TYPES = frozenset({"monthly", "quarterly", "semi_annual"})
+
 
 @dataclass(frozen=True)
 class Ineligible:
@@ -85,14 +90,22 @@ def obligation_status(filing: dict, nexus: dict | None) -> Ineligible | None:
         return Ineligible("filed_through",
                           f"period ended {period_end}, filed through {filed_through}")
 
-    # ── Frequency mismatch ──────────────────────────────────────
+    # ── Superseded cadence ──────────────────────────────────────
     # The calendar upserts on (state, period_type, period_label), so changing a
     # state's frequency leaves the old cadence's rows behind forever. The state
     # then carries two overlapping sets covering the same months, and filing
     # one leaves the other looking unfiled. Only the current cadence is live.
+    #
+    # This applies ONLY between two periodic cadences. An `annual` row
+    # alongside a periodic cadence is NOT a leftover — several states require a
+    # yearly reconciliation on top of periodic returns (Hawaii's G-49 annual
+    # GET return sits on top of the G-45 periodics exactly this way). Excluding
+    # a real annual return is a worse failure than showing one extra row, so
+    # annual is never treated as superseded.
     freq = nexus.get("assigned_frequency")
     period_type = filing.get("period_type")
-    if freq and period_type and period_type != freq:
+    if (freq and period_type and period_type != freq
+            and period_type in PERIODIC_TYPES and freq in PERIODIC_TYPES):
         return Ineligible("superseded_frequency",
                           f"period_type={period_type}, state files {freq}")
 

@@ -77,11 +77,22 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
     parts.append(f"MTD Total:   ${total_mtd:,.2f}")
 
     try:
+        # Entity obligations are computed, not stored-and-trusted, so a
+        # corrected rule takes effect immediately. A failure here must not cost
+        # the sales-tax sections, so it degrades to None.
+        entity_view = None
+        try:
+            from src.compliance.entity_obligations import current_view
+            entity_view = current_view(ref)
+        except Exception:
+            pass
+
         sections = build_sections(
             fetch_all("nexus_status"),
             fetch_all("filing_calendar"),
             fetch_all("franchise_tax_flags"),
             ref,
+            entity_view=entity_view,
         )
         parts.extend(render_sections(sections, ref))
     except Exception:

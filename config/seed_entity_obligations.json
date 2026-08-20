@@ -1,0 +1,220 @@
+{
+  "_metadata": {
+    "description": "Entity-level, foreign-qualification and excise obligations that are NOT ordinary sales-tax remittance. Each rule carries its applicability condition, a due-date RULE (never a hardcoded date), a confidence tag and an official source.",
+    "disclaimer": "Monitoring aid only. Not legal or tax advice. Amounts and dates change; last_reviewed tells you how stale a rule is.",
+    "applies_when_values": {
+      "home_state": "the profile's home_state matches this state",
+      "foreign_qualified": "the state appears in profile.foreign_qualified",
+      "sales_tax_registered": "nexus_status.is_registered is true for this state",
+      "user_confirmed": "only when enabled_obligations['XX:type'] is explicitly true — never scheduled automatically"
+    },
+    "due_rule_kinds": {
+      "fixed_month_day": "same calendar date every year (uses month/day)",
+      "months_after_year_end": "N months after fiscal year end, on a given day",
+      "anniversary": "anniversary of a profile date (formation_date or qualified_date)"
+    },
+    "last_updated": "2026-08-20"
+  },
+  "obligations": [
+    {
+      "state_code": "MD",
+      "obligation_type": "entity_annual",
+      "form_code": "Form 1",
+      "title": "Maryland Annual Report (+ Business Personal Property Return if applicable)",
+      "applies_when": "home_state",
+      "also_applies_when": "foreign_qualified",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "fixed_month_day",
+        "month": 4,
+        "day": 15
+      },
+      "due_rule_text": "April 15 each year.",
+      "amount_estimate": 300,
+      "amount_note": "$300 annual report filing fee for an LLC. A Business Personal Property Return must be filed WITH the annual report if the entity owns/leases personal property in Maryland or maintains a Maryland trader's licence — answer SDAT's two threshold questions to confirm.",
+      "confidence": "high",
+      "source": {
+        "authority": "Maryland State Department of Assessments and Taxation (SDAT)",
+        "citation": "Form 1 — Annual Report and Business Personal Property Return",
+        "url": "https://dat.maryland.gov/SDAT%20Forms/PPR_Forms/2025_Form1_Instructions.pdf"
+      },
+      "notes": "All domestic and foreign entities formed, qualified or registered in Maryland must file the Annual Report. Late filing draws a penalty of 1/10 of 1% of the county assessment plus interest. This is an SDAT filing and is entirely separate from any Comptroller sales-and-use tax return.",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "OK",
+      "obligation_type": "foreign_llc_report",
+      "form_code": "Annual Certificate",
+      "title": "Oklahoma LLC Annual Certificate (foreign LLC)",
+      "applies_when": "foreign_qualified",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "anniversary",
+        "anchor": "qualified_date"
+      },
+      "due_rule_text": "On the anniversary date of the LLC's Oklahoma registration each year.",
+      "amount_estimate": 25,
+      "amount_note": "$25 filing fee.",
+      "confidence": "high",
+      "source": {
+        "authority": "Oklahoma Secretary of State",
+        "citation": "Limited Liability Company Annual Certificate (SOS Form)",
+        "url": "https://www.sos.ok.gov/forms/Llcannualcertificate.PDF"
+      },
+      "notes": "A foreign LLC registered to do business in Oklahoma files an annual certificate each year on its anniversary date, confirming it is active and stating its principal place of business and e-mail address. Oklahoma's separate corporate franchise tax was repealed for periods after 2023 — verify current status with a CPA before assuming any franchise filing is still required.",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "CA",
+      "obligation_type": "franchise_tax",
+      "form_code": "FTB 3522 (LLC Tax Voucher)",
+      "title": "California $800 minimum LLC annual tax",
+      "applies_when": "user_confirmed",
+      "review_when": "fba_inventory_or_economic_nexus",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "fixed_month_day",
+        "month": 4,
+        "day": 15
+      },
+      "due_rule_text": "15th day of the 4th month OF the taxable year — April 15 for a calendar-year LLC, i.e. during the year it covers, not after it. A first-year LLC's $800 is due the 15th day of the 4th month after filing its articles, so the first year needs checking by hand.",
+      "amount_estimate": 800,
+      "amount_note": "$800 minimum annual tax. LLCs with California-source income over $250,000 owe an additional fee ($900–$11,790). Form 568 is the annual return and has its own deadline.",
+      "confidence": "high",
+      "confidence_note": "The $800 amount and due-date rule are high confidence. Whether THIS entity is 'doing business' in California is the contested part — that is why the obligation is review-only until confirmed.",
+      "source": {
+        "authority": "California Franchise Tax Board",
+        "citation": "Cal. Rev. & Tax. Code §§ 17941, 23101; multiple OTA decisions 2019–2024",
+        "url": "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html"
+      },
+      "notes": "The FTB treats FBA inventory storage in California as 'doing business', and the OTA has sustained that position. It is administered by the FTB, not the CDTFA, so registering for California sales tax does not address it. This is deliberately NOT auto-scheduled: it turns on a legal position about this specific entity. Confirm with a CPA, then set enabled_obligations['CA:franchise_tax'] = true to start tracking the fee.",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "HI",
+      "obligation_type": "get_excise",
+      "form_code": "G-49",
+      "title": "Hawaii GET annual return / reconciliation",
+      "applies_when": "sales_tax_registered",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "months_after_year_end",
+        "months": 4,
+        "day": 20
+      },
+      "due_rule_text": "20th day of the 4th month following the close of the taxable year (April 20 for a calendar-year filer).",
+      "amount_estimate": null,
+      "confidence": "high",
+      "source": {
+        "authority": "Hawaii Department of Taxation",
+        "citation": "Form G-49, Annual Return and Reconciliation of General Excise / Use Tax Return",
+        "url": "https://tax.hawaii.gov/geninfo/get/"
+      },
+      "notes": "Hawaii's General Excise Tax is a tax on the business, not a sales tax on the buyer, and it works as two filings: periodic G-45 returns plus an annual G-49 reconciliation. The G-45 periodics are already tracked in filing_calendar under Hawaii's assigned frequency; only the G-49 is added here, so the two are never double-counted.",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "KY",
+      "obligation_type": "entity_annual",
+      "form_code": "Annual Report",
+      "title": "Kentucky Secretary of State annual report",
+      "applies_when": "foreign_qualified",
+      "also_applies_when": "home_state",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "fixed_month_day",
+        "month": 6,
+        "day": 30
+      },
+      "due_rule_text": "By June 30 each year (filing window opens January 1).",
+      "amount_estimate": 15,
+      "amount_note": "$15 filing fee.",
+      "confidence": "high",
+      "source": {
+        "authority": "Kentucky Secretary of State",
+        "citation": "Annual Reports — Business Filings",
+        "url": "https://www.sos.ky.gov/bus/business-filings/Pages/Annual-Reports.aspx"
+      },
+      "notes": "Required of entities registered with the Kentucky Secretary of State. Missing June 30 leads to administrative dissolution. NOTE: this is an entity-registration obligation — being registered for Kentucky SALES TAX does not by itself create it, which is why it is gated on foreign qualification rather than on nexus_status.",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "KY",
+      "obligation_type": "franchise_tax",
+      "form_code": "Form 725 / Schedule LLET",
+      "title": "Kentucky Limited Liability Entity Tax (LLET)",
+      "applies_when": "user_confirmed",
+      "review_when": "fba_inventory_or_economic_nexus",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "months_after_year_end",
+        "months": 4,
+        "day": 15
+      },
+      "due_rule_text": "Generally the 15th day of the 4th month after the close of the taxable year — CONFIRM against the form instructions for the entity's filing type before relying on it.",
+      "amount_estimate": 175,
+      "amount_note": "$175 minimum LLET per taxable year.",
+      "confidence": "medium",
+      "confidence_note": "The $175 minimum is confirmed by the Department of Revenue. Whether a remote/FBA seller with no Kentucky presence beyond inventory is 'doing business' for LLET purposes is NOT settled here, and the exact due date depends on the entity's filing form. Review-only until a CPA confirms.",
+      "source": {
+        "authority": "Kentucky Department of Revenue",
+        "citation": "Corporation Income and Limited Liability Entity Tax; Schedule LLET",
+        "url": "https://revenue.ky.gov/Business/Corporation-Income-and-Limited-Liability-Entity-Tax/Pages/default.aspx"
+      },
+      "notes": "Deliberately not auto-scheduled. Kentucky was called out as 'verify what actually applies; do not assume' — this rule records what was verified (the $175 minimum exists) and what was not (that it applies to this entity).",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "TX",
+      "obligation_type": "franchise_tax",
+      "form_code": "Franchise Tax Report + Public Information Report",
+      "title": "Texas franchise tax report and PIR",
+      "applies_when": "user_confirmed",
+      "review_when": "fba_inventory_or_economic_nexus",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "fixed_month_day",
+        "month": 5,
+        "day": 15
+      },
+      "due_rule_text": "May 15 each year.",
+      "amount_estimate": 0,
+      "amount_note": "No tax due below the no-tax-due revenue threshold, but the Public Information Report is still required of entities registered with the Comptroller.",
+      "confidence": "medium",
+      "confidence_note": "The May 15 date is high confidence. Whether this entity has a Texas franchise-tax filing requirement depends on whether it is registered with the Comptroller / has nexus — confirm before scheduling.",
+      "source": {
+        "authority": "Texas Comptroller of Public Accounts",
+        "citation": "Franchise Tax — report filing requirements",
+        "url": "https://comptroller.texas.gov/taxes/franchise/"
+      },
+      "notes": "Already represented in config/seed_franchise_rules.json as a review flag; this entry adds the schedulable form once the user confirms the entity is registered with the Comptroller.",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "NV",
+      "obligation_type": "franchise_tax",
+      "form_code": "Commerce Tax Return",
+      "title": "Nevada Commerce Tax",
+      "applies_when": "user_confirmed",
+      "review_when": "nevada_gross_revenue_over_threshold",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "fixed_month_day",
+        "month": 8,
+        "day": 14
+      },
+      "due_rule_text": "45 days after the June 30 fiscal year end (on or about August 14) — CONFIRM the current date with the Department of Taxation.",
+      "amount_estimate": 0,
+      "amount_note": "Applies only to Nevada gross revenue above $4,000,000 for the fiscal year.",
+      "confidence": "low",
+      "confidence_note": "Deliberately low. The threshold is high, most sellers are below it, and the filing-requirement-below-threshold rules have changed. This exists to keep Nevada OUT of the sales-tax calendar as a phantom quarterly return, not to assert a filing is owed.",
+      "source": {
+        "authority": "Nevada Department of Taxation",
+        "citation": "Commerce Tax",
+        "url": "https://tax.nv.gov/commerce-tax/"
+      },
+      "notes": "Never auto-scheduled. Nevada's commerce tax is an annual gross-receipts tax with a $4M threshold and must not be turned into quarterly sales-tax dues.",
+      "last_reviewed": "2026-08-20"
+    }
+  ]
+}

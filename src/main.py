@@ -1121,6 +1121,185 @@ def pnl_validate_cmd(target_date):
     click.echo(f"  Compare to: {v['compare_to']}")
 
 
+def _entity_line(o) -> str:
+    due = o.due_date.isoformat() if o.due_date else "no date"
+    if o.days_overdue:
+        when = f"OVERDUE {o.days_overdue}d"
+    elif o.days_until_due is not None:
+        when = f"in {o.days_until_due}d"
+    else:
+        when = "—"
+    amt = f" ~${o.amount_estimate:,.0f}" if o.amount_estimate else ""
+    return (f"    {o.state_code} {o.form_code:<24} {o.period_label}  "
+            f"due {due:<12} {when:<14} [{o.confidence}]{amt}")
+
+
+@cli.command("entity-audit")
+@click.option("--year", default=None, type=int, help="Limit to one tax year")
+@click.option("--show-sources/--no-show-sources", default=False,
+              help="Print the official source behind each obligation")
+def entity_audit_cmd(year, show_sources):
+    """Entity, franchise and foreign-qualification obligations — not sales tax.
+
+    Driven by config/entity_profile.json plus the sourced rules in
+    config/seed_entity_obligations.json. Contested positions (e.g. whether FBA
+    inventory makes the LLC 'doing business' in California) are listed for
+    review and never given a due date until confirmed in the profile.
+
+    Monitoring aid — not legal or tax advice.
+    """
+    from datetime import date as _date
+    from src.compliance.entity_obligations import current_view
+
+    today = _date.today()
+    years = [year] if year else None
+    v = current_view(today, years)
+    profile = v["profile"]
+
+    if not profile:
+        raise click.ClickException(
+            "No config/entity_profile.json — cannot tell which entity "
+            "obligations apply.")
+
+    fq = ", ".join(e.get("state", "?") for e in profile.get("foreign_qualified") or [])
+    click.echo(f"Entity & compliance obligations — {today}")
+    click.echo(f"  profile: {profile.get('entity_type', '?')} · home "
+               f"{profile.get('home_state', '?')} · foreign-qualified "
+               f"{fq or '(none)'}")
+    click.echo(f"  overdue {len(v['overdue'])} · upcoming {len(v['upcoming'])} · "
+               f"needs profile data {len(v['undated'])} · "
+               f"review-only {len(v['review'])} · settled {len(v['settled'])}")
+
+    if v["overdue"]:
+        click.echo("\n  OVERDUE (entity — NOT sales tax):")
+        for o in v["overdue"]:
+            click.echo(_entity_line(o))
+
+    if v["upcoming"]:
+        click.echo("\n  Upcoming:")
+        for o in v["upcoming"]:
+            click.echo(_entity_line(o))
+
+    if v["undated"]:
+        click.echo("\n  Applies, but no due date can be computed:")
+        for o in v["undated"]:
+            click.echo(_entity_line(o))
+            click.echo(f"        → {o.due_note}")
+
+    if v["review"]:
+        click.echo("\n  Review with a CPA — applies only if the entity's facts "
+                   "support it, so nothing is scheduled:")
+        for r in v["review"]:
+            amt = f" ~${r['amount_estimate']:,.0f}" if r.get("amount_estimate") else ""
+            click.echo(f"    {r['state_code']} {r['form_code']} — {r['title']} "
+                       f"[{r['confidence']}]{amt}")
+            if r.get("confidence_note"):
+                click.echo(f"        {r['confidence_note'][:150]}")
+            click.echo(f"        → {r['reason']}")
+
+    if v["settled"]:
+        click.echo(f"\n  Settled: " + ", ".join(
+            f"{o.state_code} {o.form_code} {o.period_label} ({o.status})"
+            for o in v["settled"]))
+
+    if show_sources:
+        click.echo("\n  Sources:")
+        seen = set()
+        for o in v["overdue"] + v["upcoming"] + v["undated"]:
+            k = (o.state_code, o.source_citation)
+            if k in seen:
+                continue
+            seen.add(k)
+            click.echo(f"    {o.state_code} {o.form_code}: {o.source_authority} — "
+                       f"{o.source_citation}")
+            click.echo(f"        {o.source_url}")
+        for r in v["review"]:
+            click.echo(f"    {r['state_code']} {r['form_code']}: "
+                       f"{r['source_authority']} — {r['source_citation']}")
+            click.echo(f"        {r['source_url']}")
+
+    # Overlap with the sales-tax calendar. Reported, never auto-resolved.
+    from src.compliance.entity_obligations import find_calendar_overlap
+    from src.db import fetch_all as _fetch_all
+    overlap = find_calendar_overlap(
+        v["overdue"] + v["upcoming"] + v["undated"] + v["settled"],
+        _fetch_all("filing_calendar"))
+    if overlap:
+        click.echo("\n  ⚠ Same period tracked in BOTH calendars — pick one:")
+        for o in overlap:
+            click.echo(f"    {o['state_code']} {o['period_label']}: "
+                       f"filing_calendar annual row (due {o['calendar_due']}) "
+                       f"vs entity {o['entity_form']} (due {o['entity_due']})")
+        click.echo("      The entity row names the form and cites the source. To drop "
+                   "the sales-tax duplicate:")
+        for o in overlap:
+            click.echo(f"      python -m src.main filing-mark {o['state_code']} "
+                       f"{o['period_label']} --status not_required "
+                       f"--notes \"tracked as {o['entity_form']} in entity calendar\"")
+
+    click.echo("\n  Monitoring aid — not legal or tax advice.")
+
+
+@cli.command("entity-calendar")
+@click.option("--year", default=None, type=int, help="Tax year to sync (default: this year + next)")
+@click.option("--dry-run/--apply", default=True, help="Dry run by default")
+def entity_calendar_cmd(year, dry_run):
+    """Write computed entity obligations to compliance_obligations.
+
+    Recomputes due dates from the rules every time, but never reopens a period
+    the user marked filed / not_required / dismissed.
+    """
+    from datetime import date as _date
+    from src.compliance.entity_obligations import (
+        build_obligations, load_profile, load_rules, sync_obligations,
+    )
+    from src.db import fetch_all
+
+    today = _date.today()
+    years = [year] if year else [today.year, today.year + 1]
+    registered = {n["state_code"] for n in fetch_all("nexus_status")
+                  if n.get("is_registered") is True}
+    scheduled, review = build_obligations(
+        load_profile(), load_rules(), registered, years, today)
+
+    r = sync_obligations(scheduled, dry_run=dry_run)
+    if r.get("skipped"):
+        raise click.ClickException(r["skipped"])
+
+    verb = "would write" if r["dry_run"] else "wrote"
+    click.echo(f"{'DRY RUN — ' if r['dry_run'] else ''}{verb} "
+               f"{r['would_write'] if r['dry_run'] else r['written']} obligation row(s) "
+               f"for {years}")
+    click.echo(f"  settled periods preserved: {r['settled_preserved']}")
+    click.echo(f"  review-only (not written, needs confirmation): {len(review)}")
+    for o in scheduled:
+        due = o.due_date.isoformat() if o.due_date else "no date"
+        click.echo(f"    {o.state_code} {o.obligation_type:<18} {o.form_code:<24} "
+                   f"{o.period_label} due {due}")
+    if r["dry_run"]:
+        click.echo("\n  Re-run with --apply to write.")
+
+
+@cli.command("entity-mark")
+@click.argument("state_code")
+@click.argument("obligation_type")
+@click.argument("period_label")
+@click.option("--status", type=click.Choice(["filed", "not_required", "dismissed", "open"]),
+              default="filed")
+@click.option("--notes", default=None, help="Why (kept on the row)")
+def entity_mark_cmd(state_code, obligation_type, period_label, status, notes):
+    """Mark an entity obligation filed / not required / dismissed."""
+    from src.compliance.entity_obligations import mark_obligation
+
+    row = mark_obligation(state_code.upper(), obligation_type, period_label,
+                          status, notes)
+    if not row:
+        raise click.ClickException(
+            f"No obligation row for {state_code.upper()} {obligation_type} "
+            f"{period_label} — run `entity-calendar --apply` first")
+    click.echo(f"{state_code.upper()} {obligation_type} {period_label} → {status}")
+
+
 @cli.command("filing-audit")
 @click.option("--state", default=None, help="Limit to one state code")
 @click.option("--show-excluded/--no-show-excluded", default=True,

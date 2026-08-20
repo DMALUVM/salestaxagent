@@ -125,3 +125,63 @@ class TestRender:
         assert "more" in out
         # The whole digest stays short even with 20 outstanding states.
         assert len(out.splitlines()) < 12
+
+
+class TestEntitySectionIsSeparate:
+    """Entity fees must never render as sales-tax remittance."""
+
+    def _ob(self, **kw):
+        from src.compliance.entity_obligations import Obligation
+        base = dict(
+            state_code="MD", obligation_type="entity_annual", form_code="Form 1",
+            title="MD Annual Report", frequency="annual", period_label="2026",
+            due_date=date(2026, 4, 15), due_rule_text="", status="open",
+            confidence="high", source_authority="SDAT", source_citation="",
+            source_url="", amount_estimate=300, notes="", basis="", scheduled=True,
+            last_reviewed="", days_overdue=127,
+        )
+        base.update(kw)
+        return Obligation(**base)
+
+    def test_entity_overdue_is_not_in_the_sales_tax_bucket(self):
+        s = build_sections([], [], [], TODAY,
+                           entity_view={"overdue": [self._ob()], "upcoming": [],
+                                        "undated": []})
+        assert s.overdue == []            # sales-tax bucket untouched
+        assert len(s.entity_overdue) == 1
+
+    def test_render_labels_the_two_buckets_differently(self):
+        rows = [nx("TX", is_registered=True, registration_date="2020-01-01",
+                   assigned_frequency="quarterly")]
+        s = build_sections(rows, [fc("TX", "2026-Q1", "2026-04-20")], [], TODAY,
+                           entity_view={"overdue": [self._ob()], "upcoming": [],
+                                        "undated": []})
+        out = "\n".join(render_sections(s, TODAY))
+        assert "Overdue sales-tax filings" in out
+        assert "Entity &amp; other filings" in out
+        assert "(not sales tax)" in out
+
+    def test_entity_overdue_counts_toward_action_needed(self):
+        s = build_sections([], [], [], TODAY,
+                           entity_view={"overdue": [self._ob()], "upcoming": [],
+                                        "undated": []})
+        assert s.action_needed_states == ["MD"]
+
+    def test_undated_obligations_are_reported_once_not_per_year(self):
+        undated = [self._ob(state_code="OK", form_code="Annual Certificate",
+                            period_label=y, due_date=None, days_overdue=None)
+                   for y in ("2026", "2027")]
+        s = build_sections([], [], [], TODAY,
+                           entity_view={"overdue": [], "upcoming": [],
+                                        "undated": undated})
+        out = "\n".join(render_sections(s, TODAY))
+        assert out.count("OK Annual Certificate") == 1
+        assert "entity_profile.json" in out
+
+    def test_far_future_entity_dues_are_outside_the_window(self):
+        far = self._ob(period_label="2027", due_date=date(2027, 4, 15),
+                       days_overdue=None, days_until_due=238)
+        s = build_sections([], [], [], TODAY, upcoming_within_days=45,
+                           entity_view={"overdue": [], "upcoming": [far],
+                                        "undated": []})
+        assert s.entity_upcoming == []

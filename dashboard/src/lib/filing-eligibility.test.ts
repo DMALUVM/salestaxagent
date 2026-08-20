@@ -90,6 +90,14 @@ describe("frequency mismatch", () => {
     assert.equal(obligationStatus(f, nexus())?.reason, "superseded_frequency");
   });
 
+  test("an annual reconciliation is NOT superseded by a periodic cadence", () => {
+    // Hawaii files G-45 periodics plus a G-49 annual return. Treating the
+    // annual row as a stale duplicate hid a real filing.
+    const f = filing({ state_code: "HI", period_type: "annual", period_label: "2026", period_end: "2026-12-31", due_date: "2027-01-20" });
+    const n = nexus({ state_code: "HI", assigned_frequency: "semi_annual" });
+    assert.equal(isOpenObligation(f, n), true);
+  });
+
   test("no assigned frequency keeps every period", () => {
     const f = filing({ period_type: "semi_annual", period_label: "2026-H2", period_end: "2026-12-31", due_date: "2027-01-20" });
     assert.equal(isOpenObligation(f, nexus({ assigned_frequency: null })), true);

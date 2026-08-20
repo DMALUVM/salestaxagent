@@ -57,8 +57,15 @@ class DigestSections:
     critical_flags: list[dict] = field(default_factory=list)
     warning_flag_count: int = 0
 
+    # Entity / franchise / foreign-qualification obligations. A separate bucket
+    # from `overdue`/`upcoming` above, which are sales-tax returns only — an
+    # entity fee must never render as an overdue sales-tax remittance.
+    entity_overdue: list = field(default_factory=list)
+    entity_upcoming: list = field(default_factory=list)
+    entity_needs_profile: list = field(default_factory=list)
+
     @property
-    def action_needed_states(self) -> list[str]:
+    def action_needed_states(self) -> list[str]:  # noqa: D401
         """States where a human decision is genuinely outstanding.
 
         Three kinds, and nothing else:
@@ -74,13 +81,17 @@ class DigestSections:
         states = set(self.unregistered_nexus_open)
         states.update(f.get("state_code") for f in self.overdue if f.get("state_code"))
         states.update(f.get("state_code") for f in self.critical_flags if f.get("state_code"))
+        # A missed entity filing is a real, dated obligation the user accepted
+        # by being registered or qualified there, so it counts too.
+        states.update(o.state_code for o in self.entity_overdue if o.state_code)
         return sorted(s for s in states if s)
 
 
 def build_sections(nexus_rows: list[dict], filing_rows: list[dict],
                    franchise_flags: list[dict], today: date,
                    econ_approaching: list[str] | None = None,
-                   upcoming_within_days: int = 45) -> DigestSections:
+                   upcoming_within_days: int = 45,
+                   entity_view: dict | None = None) -> DigestSections:
     """Assemble the digest sections from raw table rows."""
     s = DigestSections()
     approaching = set(econ_approaching or [])
@@ -120,6 +131,14 @@ def build_sections(nexus_rows: list[dict], filing_rows: list[dict],
     s.upcoming = [f for f in cls["upcoming"]
                   if (f.get("days_until_due") or 0) <= upcoming_within_days]
 
+    # Entity obligations, computed by src/compliance/entity_obligations.py.
+    # Passed in rather than fetched so this stays a pure function.
+    if entity_view:
+        s.entity_overdue = list(entity_view.get("overdue") or [])
+        s.entity_upcoming = [o for o in (entity_view.get("upcoming") or [])
+                             if (o.days_until_due or 0) <= upcoming_within_days]
+        s.entity_needs_profile = list(entity_view.get("undated") or [])
+
     open_flags = [f for f in franchise_flags if f.get("status") == "open"]
     s.critical_flags = [f for f in open_flags if f.get("severity") == "critical"]
     s.warning_flag_count = sum(1 for f in open_flags if f.get("severity") == "warning")
@@ -146,7 +165,7 @@ def render_sections(s: DigestSections, today: date) -> list[str]:
     # ── Filings: registered states with real open periods only ──
     if s.overdue:
         parts.append("")
-        parts.append("<b>🚨 Overdue filings:</b>")
+        parts.append("<b>🚨 Overdue sales-tax filings:</b>")
         for f in s.overdue[:5]:
             parts.append(f"  {f.get('state_code')} {f.get('period_label')} — "
                          f"due {f.get('due_date')} ({f.get('days_overdue')}d late)")
@@ -158,7 +177,25 @@ def render_sections(s: DigestSections, today: date) -> list[str]:
             f"{f.get('state_code')} {f.get('period_label')} ({f.get('days_until_due')}d)"
             for f in s.upcoming[:3]
         )
-        parts.append(f"📅 Next due: {nxt}")
+        parts.append(f"📅 Sales tax next due: {nxt}")
+
+    # ── Entity & other filings — explicitly NOT sales tax ──
+    if s.entity_overdue or s.entity_upcoming or s.entity_needs_profile:
+        parts.append("")
+        parts.append("<b>🏢 Entity &amp; other filings</b> <i>(not sales tax)</i>")
+        for o in s.entity_overdue[:4]:
+            parts.append(f"  ⚠️ {o.state_code} {o.form_code} {o.period_label} — "
+                         f"due {o.due_date} ({o.days_overdue}d late) [{o.confidence}]")
+        for o in s.entity_upcoming[:4]:
+            parts.append(f"  {o.state_code} {o.form_code} {o.period_label} — "
+                         f"due {o.due_date} ({o.days_until_due}d) [{o.confidence}]")
+        if s.entity_needs_profile:
+            # One line per distinct obligation, not per year — the same missing
+            # profile date blocks every year at once.
+            distinct = sorted({f"{o.state_code} {o.form_code}"
+                               for o in s.entity_needs_profile})
+            parts.append(f"  <i>needs a date in entity_profile.json before it can "
+                         f"be scheduled: {', '.join(distinct[:3])}</i>")
 
     # ── Registration decisions still outstanding ──
     if s.unregistered_nexus_open:
