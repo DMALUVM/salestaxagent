@@ -14,12 +14,15 @@ import path from "node:path";
 
 export type CampaignRole = "discovery" | "profit" | "ranking" | "defense";
 
+export interface RoleTarget { min: number; max: number }
+
 interface RoleConfig {
   order: CampaignRole[];
   labels: Record<string, string>;
   descriptions: Record<string, string>;
   patterns: Record<string, string[]>;
   default: CampaignRole;
+  targets?: Record<string, RoleTarget | null>;
 }
 
 const FALLBACK: RoleConfig = {
@@ -86,4 +89,24 @@ export function roleOrder(): CampaignRole[] {
 /** Where the taxonomy came from — surfaced so a stale fallback is visible. */
 export function roleConfigSource(): string {
   return load().source;
+}
+
+/**
+ * Target spend-share band for a role, or null when none is configured.
+ * Bands live in config/ads_strategy.json → roles.targets; the UI only renders
+ * the verdict, so no threshold is ever written into component logic.
+ */
+export function roleTarget(role: string): RoleTarget | null {
+  const t = load().cfg.targets?.[role];
+  if (!t || typeof t.min !== "number" || typeof t.max !== "number") return null;
+  return t;
+}
+
+/** "above" / "below" / "in_range" against the configured band. */
+export function shareStatus(role: string, sharePct: number): "above" | "below" | "in_range" | null {
+  const t = roleTarget(role);
+  if (!t) return null;
+  if (sharePct > t.max) return "above";
+  if (sharePct < t.min) return "below";
+  return "in_range";
 }

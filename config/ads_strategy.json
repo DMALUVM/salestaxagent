@@ -21,7 +21,15 @@
       "profit": ["\\bexact\\b", "\\bpm\\b", "harvest"],
       "discovery": ["\\bauto\\b", "\\bbroad\\b", "\\bphrase\\b", "loose match", "catch all", "discovery", "research"]
     },
-    "default": "discovery"
+    "default": "discovery",
+
+    "targets": {
+      "_comment": "Optional target bands for each role's share of ad spend in the selected window, as percentages. Used for a visual hint only — nothing enforces or auto-adjusts budgets. Set a role to null to opt it out of the hint.",
+      "discovery": { "min": 15, "max": 30 },
+      "profit": { "min": 45, "max": 70 },
+      "ranking": { "min": 5, "max": 20 },
+      "defense": { "min": 2, "max": 10 }
+    }
   },
 
   "thresholds": {

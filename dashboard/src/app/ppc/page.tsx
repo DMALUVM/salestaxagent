@@ -37,14 +37,23 @@ interface CampaignAgg {
 }
 interface RoleAgg {
   role: string; label: string; description: string | null; campaigns: number;
+  daysWithData: number;
   spend: number; sales: number; clicks: number; orders: number;
   budgetSharePct: number; acos: number | null; roas: number | null;
   cvr: number | null; tacos: number | null;
+  targetSharePct: { min: number; max: number } | null;
+  shareStatus: "above" | "below" | "in_range" | null;
 }
+interface RoleOther { spend: number; budgetSharePct: number; tacos: number | null }
+interface RoleReconciliation {
+  accountTacos: number | null; roleTacosSum: number | null; otherTacos: number;
+  roleSpend: number; accountSpend: number; amazonSales: number;
+}
+interface RoleBucket { rows: RoleAgg[]; other: RoleOther | null; reconciliation: RoleReconciliation }
 interface PlacementAgg {
   placement: string; spend: number; sales: number; clicks: number; orders: number;
-  impressions: number; sharePct: number; acos: number | null;
-  cvr: number | null; cpc: number | null;
+  impressions: number; daysWithData: number; sharePct: number;
+  acos: number | null; cvr: number | null; cpc: number | null;
 }
 
 /** Role badge tints — cool for finding demand, warm for spending on rank. */
@@ -81,14 +90,19 @@ interface PPCData {
   /** Yesterday in America/Los_Angeles — the newest closed reporting day. */
   asOf: string | null; today: string | null; adsThrough: string | null;
   dateMin: string | null; dateMax: string | null; daysInDb: number;
-  campaigns: CampaignAgg[]; roles: RoleAgg[];
-  placements: PlacementAgg[]; placementsAvailable: boolean;
+  campaigns: CampaignAgg[];
+  /** One bucket per range — the server owns the bounds for both panels. */
+  rolesByRange: Record<Range, RoleBucket> | null;
+  placementsByRange: Record<Range, PlacementAgg[]> | null;
+  placementsAvailable: boolean;
   searchTerms: SearchTerm[];
   recommendations: Rec[];
   /** Newest finished ads sync of any kind, plus which job and how it ended. */
   lastSync: string | null; lastSyncJob: string | null; lastSyncStatus: string | null;
   /** Last successful scheduled actions run — the queue refreshes on its own. */
   lastActions: string | null;
+  /** Break-even target ACOS from the last actions run (not recomputed here). */
+  targetAcos: number | null; targetAcosAsOf: string | null;
 }
 
 const SYNC_JOB_LABELS: Record<string, string> = {
@@ -257,8 +271,19 @@ export default function PPCPage() {
       (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) ||
       b.impact_estimate - a.impact_estimate);
   const campaigns = data?.campaigns ?? [];
-  const roles = data?.roles ?? [];
-  const placements = data?.placements ?? [];
+  // Both panels read the bucket for the selected range — no client-side date math.
+  const roleBucket = data?.rolesByRange?.[range] ?? null;
+  const roles = roleBucket?.rows ?? [];
+  const roleOther = roleBucket?.other ?? null;
+  const recon = roleBucket?.reconciliation ?? null;
+  const placements = data?.placementsByRange?.[range] ?? [];
+  // Days actually carrying data inside the window, so a sparse short window
+  // says so rather than implying a full one.
+  const roleDays = roles.reduce((m, r) => Math.max(m, r.daysWithData), 0);
+  const placementDays = placements.reduce((m, p) => Math.max(m, p.daysWithData), 0);
+  const windowLabel = (dataDays: number) =>
+    `${rangeDays} closed day${rangeDays === 1 ? "" : "s"} ending ${data?.asOf ?? "?"}` +
+    (dataDays > 0 && dataDays < rangeDays ? ` · ${dataDays} with data` : "");
   const hasData = series.length > 0 || searchTerms.length > 0;
 
   const wastedTotal = searchTerms.filter((s) => s.orders_14d === 0).reduce((sum, s) => sum + Number(s.spend ?? 0), 0);
@@ -430,7 +455,7 @@ export default function PPCPage() {
                 <CardTitle className="text-sm font-medium">
                   Budget by role
                   <span className="ml-2 font-normal text-muted-foreground">
-                    30 closed days ending {data?.asOf}
+                    {windowLabel(roleDays)}
                   </span>
                 </CardTitle>
               </CardHeader>
@@ -456,32 +481,146 @@ export default function PPCPage() {
                       <p className="text-[10px] text-muted-foreground tabular-nums">
                         {r.campaigns} campaigns · ACOS {r.acos != null ? `${r.acos}%` : "—"} · TACoS {r.tacos != null ? `${r.tacos}%` : "—"}
                       </p>
+                      {/* Target band and verdict both come from the server,
+                          which reads config/ads_strategy.json → roles.targets. */}
+                      {r.targetSharePct && (
+                        <p className={`mt-1 text-[10px] tabular-nums ${
+                          r.shareStatus === "in_range" ? "text-muted-foreground"
+                            : r.shareStatus === "above" ? "text-amber-600 dark:text-amber-400"
+                            : "text-blue-600 dark:text-blue-400"}`}>
+                          target {r.targetSharePct.min}–{r.targetSharePct.max}%
+                          {r.shareStatus === "above" && " · above target"}
+                          {r.shareStatus === "below" && " · below target"}
+                          {r.shareStatus === "in_range" && " · on target"}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>
-                <p className="mt-3 text-[10px] text-muted-foreground">
+                {/* TACoS reconciliation: role slices are additive against the
+                    same denominator as the account figure. */}
+                {recon && (
+                  <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg border bg-muted/30 p-2.5 text-[11px]"
+                    title={"Role TACoS values are additive slices of total Amazon sales, not shares of TACoS. "
+                      + "The spend % figures on the cards are shares of ad spend and sum to 100%."}>
+                    <span className="text-muted-foreground">
+                      Account TACoS{" "}
+                      <span className="font-semibold tabular-nums text-foreground">
+                        {recon.accountTacos != null ? `${recon.accountTacos}%` : "—"}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Sum of role TACoS{" "}
+                      <span className="font-semibold tabular-nums text-foreground">
+                        {recon.roleTacosSum != null ? `${recon.roleTacosSum}%` : "—"}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      Other{" "}
+                      <span className="font-semibold tabular-nums text-foreground">
+                        {roleOther ? `${roleOther.tacos ?? 0}% ($${fmtD(roleOther.spend)})` : "0% ($0.00)"}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">
+                      = roles + Other{" "}
+                      <span className="font-semibold tabular-nums text-foreground">
+                        {recon.roleTacosSum != null
+                          ? `${Math.round((recon.roleTacosSum + recon.otherTacos) * 100) / 100}%`
+                          : "—"}
+                      </span>
+                    </span>
+                  </div>
+                )}
+                <p className="mt-2 text-[10px] text-muted-foreground">
                   Roles are matched from campaign names in <code>config/ads_strategy.json</code>.
                   Discovery finds terms, Profit harvests them, Ranking buys position on hero ASINs,
                   Defense protects your own listings — each is judged against a different bar, so
                   a high-ACOS Ranking campaign is not automatically a problem.
-                  TACoS here is that role&rsquo;s spend over total Amazon sales.
+                  Role TACoS is that role&rsquo;s spend over <em>total</em> Amazon sales, so the values
+                  are additive slices of revenue and sum to account TACoS — they are not shares of
+                  TACoS. The percentages on the cards are shares of ad spend and sum to 100%.
                 </p>
               </CardContent>
             </Card>
           )}
 
+          {/* Quick review — one line, selected range only */}
+          {roles.length > 0 && (() => {
+            const pick = (role: string) => roles.find((r) => r.role === role) ?? null;
+            const discovery = pick("discovery");
+            const profit = pick("profit");
+            const placeAcos = (name: string) =>
+              placements.find((p) => p.placement === name)?.acos ?? null;
+            const tos = placeAcos("Top of Search on-Amazon");
+            const detail = placeAcos("Detail Page on-Amazon");
+            const target = data?.targetAcos ?? null;
+            const cmp = (v: number | null) =>
+              v == null || target == null ? "" : v <= target ? " ✓" : " ✗";
+            const tone = (v: number | null) =>
+              v == null || target == null ? "text-foreground"
+                : v <= target ? "text-emerald-600" : "text-amber-600 dark:text-amber-400";
+            return (
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border p-3 text-xs">
+                <span className="font-medium">Quick review ({range.toUpperCase()})</span>
+                <span className="text-muted-foreground">
+                  Discovery share{" "}
+                  <span className={`font-semibold tabular-nums ${
+                    discovery?.shareStatus === "above" ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
+                    {discovery ? `${discovery.budgetSharePct}%` : "—"}
+                  </span>
+                  {discovery?.targetSharePct && (
+                    <span className="text-muted-foreground">
+                      {" "}(target {discovery.targetSharePct.min}–{discovery.targetSharePct.max}%)
+                    </span>
+                  )}
+                </span>
+                <span className="text-muted-foreground">
+                  Profit ACOS{" "}
+                  <span className={`font-semibold tabular-nums ${tone(profit?.acos ?? null)}`}>
+                    {profit?.acos != null ? `${profit.acos}%` : "—"}{cmp(profit?.acos ?? null)}
+                  </span>
+                  {target != null && (
+                    <span className="text-muted-foreground"> vs {target}% break-even</span>
+                  )}
+                </span>
+                <span className="text-muted-foreground">
+                  TOS ACOS{" "}
+                  <span className={`font-semibold tabular-nums ${tone(tos)}`}>
+                    {tos != null ? `${tos}%` : "—"}{cmp(tos)}
+                  </span>
+                </span>
+                <span className="text-muted-foreground">
+                  Detail Page ACOS{" "}
+                  <span className={`font-semibold tabular-nums ${tone(detail)}`}>
+                    {detail != null ? `${detail}%` : "—"}{cmp(detail)}
+                  </span>
+                </span>
+                {data?.targetAcosAsOf && (
+                  <span className="text-[10px] text-muted-foreground">
+                    break-even from the actions run on {data.targetAcosAsOf.slice(0, 10)}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Placement performance */}
-          {data?.placementsAvailable && placements.length > 0 && (
+          {data?.placementsAvailable && (
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">
                   Placement
                   <span className="ml-2 font-normal text-muted-foreground">
-                    30 closed days ending {data?.asOf}
+                    {windowLabel(placementDays)}
                   </span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
+                {placements.length === 0 ? (
+                  <p className="p-4 text-center text-sm text-muted-foreground">
+                    No placement rows inside the {range.toUpperCase()} window.
+                  </p>
+                ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -508,6 +647,7 @@ export default function PPCPage() {
                     ))}
                   </TableBody>
                 </Table>
+                )}
               </CardContent>
             </Card>
           )}
