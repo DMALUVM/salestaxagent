@@ -1287,12 +1287,19 @@ def entity_calendar_cmd(year, dry_run):
 @click.option("--status", type=click.Choice(["filed", "not_required", "dismissed", "open"]),
               default="filed")
 @click.option("--notes", default=None, help="Why (kept on the row)")
-def entity_mark_cmd(state_code, obligation_type, period_label, status, notes):
+@click.option("--filed-date", default=None,
+              help="When it was actually filed (YYYY-MM-DD). Defaults to today.")
+@click.option("--no-filed-date", "no_stamp", is_flag=True,
+              help="Filed, but the exact date is unknown — record no filing date "
+                   "rather than asserting today's.")
+def entity_mark_cmd(state_code, obligation_type, period_label, status, notes,
+                    filed_date, no_stamp):
     """Mark an entity obligation filed / not required / dismissed."""
     from src.compliance.entity_obligations import mark_obligation
 
     row = mark_obligation(state_code.upper(), obligation_type, period_label,
-                          status, notes)
+                          status, notes, filed_date=filed_date,
+                          stamp_today=not no_stamp)
     if not row:
         raise click.ClickException(
             f"No obligation row for {state_code.upper()} {obligation_type} "

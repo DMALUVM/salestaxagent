@@ -425,8 +425,16 @@ def sync_obligations(obligations: list[Obligation], dry_run: bool = False) -> di
 
 
 def mark_obligation(state_code: str, obligation_type: str, period_label: str,
-                    status: str, notes: str | None = None) -> dict | None:
-    """Record the user's decision on one obligation period."""
+                    status: str, notes: str | None = None,
+                    filed_date: str | None = None,
+                    stamp_today: bool = True) -> dict | None:
+    """Record the user's decision on one obligation period.
+
+    `filed_date` records when it was actually filed. Pass `stamp_today=False`
+    with no date when the user knows it was filed but not exactly when —
+    recording today would assert a filing date that is known to be wrong, and a
+    blank field is more honest than a confident falsehood.
+    """
     from datetime import date as _date
     from src.db import get_client, log_audit
 
@@ -435,7 +443,11 @@ def mark_obligation(state_code: str, obligation_type: str, period_label: str,
 
     updates = {"status": status, "user_notes": notes}
     if status == "filed":
-        updates["filed_date"] = _date.today().isoformat()
+        if filed_date:
+            _date.fromisoformat(filed_date)   # reject a malformed date loudly
+            updates["filed_date"] = filed_date
+        elif stamp_today:
+            updates["filed_date"] = _date.today().isoformat()
 
     try:
         resp = (get_client().table(TABLE).update(updates)

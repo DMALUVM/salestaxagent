@@ -2,32 +2,70 @@
   "_metadata": {
     "description": "Entity profile driving which entity-level / remote-seller obligations apply. Sales-tax registration is tracked separately in nexus_status.is_registered and is NOT the same thing as entity qualification.",
     "disclaimer": "Monitoring aid only. Not legal or tax advice. Confirm every obligation with a CPA before relying on it.",
-    "how_to_extend": "Add a state to foreign_qualified to start tracking its foreign-entity obligations. Set enabled_obligations['XX:type'] to true/false to force an obligation on or off regardless of the rules.",
+    "how_to_extend": "See _HOW_TO below — it is the one place that explains every knob in this file.",
     "last_updated": "2026-08-20"
   },
-
+  "_HOW_TO": {
+    "1_set_the_OK_qualification_date": [
+      "Oklahoma's annual certificate is due on the ANNIVERSARY of the date the",
+      "foreign LLC registered with the OK Secretary of State. Until that date is",
+      "known the obligation is tracked with NO due date rather than a guessed one.",
+      "Fill in: foreign_qualified[state=OK].qualified_date = \"YYYY-MM-DD\"",
+      "Where to find it: the filed Certificate of Qualification, or search the entity",
+      "at https://www.sos.ok.gov/corp/corpInquiryFind.aspx (the 'Formation Date' /",
+      "'Qualification Date' shown for the Oklahoma registration).",
+      "Then run: python -m src.main entity-calendar --apply"
+    ],
+    "2_add_another_foreign_state": [
+      "Append to foreign_qualified: {\"state\": \"XX\", \"qualified_date\": \"YYYY-MM-DD\"}",
+      "Any rule in config/seed_entity_obligations.json whose applies_when is",
+      "'foreign_qualified' then starts tracking for that state. No code change needed.",
+      "Then run: python -m src.main entity-calendar --apply"
+    ],
+    "3_enable_CA_TX_KY_after_a_CPA_confirms": [
+      "CA $800 franchise tax, TX franchise report + PIR, KY LLET and NV commerce tax",
+      "are REVIEW-ONLY. They are never scheduled automatically because whether they",
+      "apply turns on a legal position about this entity, not on a fact in this file.",
+      "Once a CPA confirms one applies, add it to enabled_obligations, e.g.:",
+      "    \"enabled_obligations\": { \"CA:franchise_tax\": true }",
+      "Keys are \"STATE:obligation_type\". Setting false permanently suppresses an",
+      "obligation the rules would otherwise schedule.",
+      "Then run: python -m src.main entity-calendar --apply",
+      "See the reasoning and sources: python -m src.main entity-audit --show-sources"
+    ],
+    "4_mark_something_filed_or_not_required": [
+      "Dashboard (easiest): Entity & Compliance page -> Mark filed / Not required /",
+      "Dismiss on the obligation card. The reason you type is kept on the record.",
+      "CLI equivalent:",
+      "    python -m src.main entity-mark MD entity_annual 2026 --status filed",
+      "    python -m src.main entity-mark OK foreign_llc_report 2026 --status not_required --notes \"why\"",
+      "Settled periods are preserved — re-running entity-calendar never reopens them.",
+      "Sales-tax returns are a DIFFERENT command: python -m src.main filing-mark"
+    ],
+    "5_what_this_file_does_not_do": [
+      "It does not decide what is legally owed. It records facts about the entity",
+      "(home state, where it is qualified, what a CPA has confirmed) so the rules in",
+      "config/seed_entity_obligations.json can be applied to the right states.",
+      "Monitoring aid — not legal or tax advice."
+    ]
+  },
   "home_state": "MD",
   "entity_type": "LLC",
-
   "//formation_date": "Date the LLC was formed in the home state. Required for obligations whose due date is an anniversary rather than a fixed calendar date. Leave null if unknown — the obligation is still listed, with due_date null and a 'needs formation_date' note, rather than a guessed date.",
   "formation_date": null,
-
   "//fiscal_year_end": "MM-DD. Drives 'Nth month after year end' rules. Calendar year is the default.",
   "fiscal_year_end": "12-31",
-
   "foreign_qualified": [
     {
       "state": "OK",
       "//qualified_date": "Date the foreign LLC registration was filed with the OK Secretary of State. Oklahoma's annual certificate is due on this anniversary, so without it the obligation is listed but its due date stays null.",
-      "qualified_date": null,
+      "qualified_date": "2025-02-25",
       "//annual_due_month_day": "Optional MM-DD override if the state assigned a fixed date rather than the anniversary.",
       "annual_due_month_day": null
     }
   ],
-
   "//enabled_obligations": "Explicit overrides, keyed 'STATE:obligation_type'. true forces tracking even when the rules would not schedule it (e.g. the user confirms a CA doing-business position). false suppresses it permanently. Anything absent follows the rules.",
   "enabled_obligations": {},
-
   "//remote_seller": "Channels that create the FBA/remote-seller 'doing business' exposure some states assert. Used only to raise review flags — never to schedule a fee on its own.",
   "remote_seller": {
     "amazon_fba": true,
