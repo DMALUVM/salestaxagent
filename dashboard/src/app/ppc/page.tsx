@@ -4,12 +4,16 @@ import { useEffect, useState, useCallback, useRef, Fragment } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
 import { isConfigured } from "@/lib/supabase";
-import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy } from "lucide-react";
+import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy, Settings2 } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import {
   ACTION_LABELS, ACTION_STYLES, actionTypeOf, doThisOf, whyOf,
   suggestedBidOf, matchTypesOf, adGroupsOf,
@@ -103,6 +107,192 @@ interface PPCData {
   lastActions: string | null;
   /** Break-even target ACOS from the last actions run (not recomputed here). */
   targetAcos: number | null; targetAcosAsOf: string | null;
+  /** Whether the target bands are file defaults or operator overrides. */
+  strategy: { isCustom: boolean; storageAvailable: boolean; updatedAt: string | null } | null;
+}
+
+interface TargetBand { min: number; max: number }
+
+/**
+ * Target editor. Saves role spend-share bands through /api/ppc/settings, which
+ * writes to Supabase with the service-role key server-side — the client never
+ * gains new database access. Values are validated on the server; this dialog
+ * mirrors the same checks so mistakes are caught before a round trip.
+ */
+function TargetsDialog({
+  open, onOpenChange, onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onSaved: (msg: Notice) => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [roles, setRoles] = useState<string[]>([]);
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const [draft, setDraft] = useState<Record<string, TargetBand | null>>({});
+  const [defaults, setDefaults] = useState<Record<string, TargetBand | null>>({});
+  const [isCustom, setIsCustom] = useState(false);
+  const [storageAvailable, setStorageAvailable] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // The dialog is remounted each time it opens (see `key` at the call site),
+  // so state starts fresh and this effect only fetches — no synchronous
+  // setState resets, which would cascade a render on every open.
+  useEffect(() => {
+    if (!open) return;
+    fetch("/api/ppc/settings").then((r) => r.json()).then((d) => {
+      if (d.error) { setError(String(d.error)); setLoading(false); return; }
+      setRoles(d.roles ?? []);
+      setLabels(d.labels ?? {});
+      setDraft(d.targets ?? {});
+      setDefaults(d.defaults ?? {});
+      setIsCustom(Boolean(d.isCustom));
+      setStorageAvailable(d.storageAvailable !== false);
+      setLoading(false);
+    }).catch((e) => { setError(String(e)); setLoading(false); });
+  }, [open]);
+
+  // Same rules the server enforces — shown inline so a bad value never
+  // requires a failed save to discover.
+  const localErrors: string[] = [];
+  for (const role of roles) {
+    const b = draft[role];
+    if (!b) continue;
+    if (!Number.isFinite(b.min) || !Number.isFinite(b.max)) localErrors.push(`${role}: min and max must be numbers`);
+    else if (b.min < 0 || b.max > 100) localErrors.push(`${role}: must be between 0 and 100`);
+    else if (b.min > b.max) localErrors.push(`${role}: min (${b.min}%) is above max (${b.max}%)`);
+  }
+  const bands = roles.map((r) => draft[r]).filter((b): b is TargetBand => !!b);
+  const minSum = bands.reduce((s, b) => s + (Number(b.min) || 0), 0);
+  const maxSum = bands.reduce((s, b) => s + (Number(b.max) || 0), 0);
+  const overlapWarnings: string[] = [];
+  if (bands.length && minSum > 100) overlapWarnings.push(`Minimums total ${minSum}% — above 100%, so a role will always read below target.`);
+  if (bands.length === roles.length && bands.length && maxSum < 100) overlapWarnings.push(`Maximums total ${maxSum}% — below 100%, so a role will always read above target.`);
+
+  function setBand(role: string, key: "min" | "max", raw: string) {
+    const v = raw === "" ? NaN : Number(raw);
+    setDraft((d) => ({ ...d, [role]: { min: d[role]?.min ?? 0, max: d[role]?.max ?? 0, [key]: v } as TargetBand }));
+  }
+
+  async function save() {
+    setSaving(true); setError(null);
+    try {
+      const resp = await fetch("/api/ppc/settings", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets: draft }),
+      });
+      const d = await resp.json().catch(() => ({}));
+      if (!resp.ok || d.ok === false) {
+        setError(d.error ?? `Save failed (HTTP ${resp.status})`);
+        return;
+      }
+      onOpenChange(false);
+      onSaved({
+        kind: "success",
+        text: "Targets saved." + (d.warnings?.length ? ` ${d.warnings.join(" ")}` : ""),
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setSaving(false); }
+  }
+
+  async function reset() {
+    setSaving(true); setError(null);
+    try {
+      const resp = await fetch("/api/ppc/settings", { method: "DELETE" });
+      const d = await resp.json().catch(() => ({}));
+      if (!resp.ok || d.ok === false) { setError(d.error ?? "Reset failed"); return; }
+      onOpenChange(false);
+      onSaved({ kind: "success", text: "Targets reset to the defaults in config/ads_strategy.json." });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Role spend-share targets</DialogTitle>
+          <DialogDescription>
+            The band each role&rsquo;s share of ad spend should sit in. Used for the
+            above/below/on-target hints — nothing adjusts budgets automatically.
+          </DialogDescription>
+        </DialogHeader>
+
+        {loading ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              {isCustom
+                ? "Custom — saved values are overriding the file defaults."
+                : "Using defaults from config/ads_strategy.json."}
+            </p>
+            {!storageAvailable && (
+              <p className="rounded-md border border-amber-500/40 bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                Settings table not found — run <code>supabase/migration_ads_strategy_settings.sql</code> to
+                enable saving. Targets still read from the config file.
+              </p>
+            )}
+
+            <div className="grid grid-cols-[1fr_5rem_5rem] items-center gap-2 text-xs font-medium text-muted-foreground">
+              <span>Role</span><span className="text-right">Min %</span><span className="text-right">Max %</span>
+            </div>
+            {roles.map((role) => (
+              <div key={role} className="grid grid-cols-[1fr_5rem_5rem] items-center gap-2">
+                <div>
+                  <span className="text-sm">{labels[role] ?? role}</span>
+                  {defaults[role] && (
+                    <span className="ml-2 text-[10px] text-muted-foreground tabular-nums">
+                      default {defaults[role]!.min}–{defaults[role]!.max}%
+                    </span>
+                  )}
+                </div>
+                <Input type="number" min={0} max={100} step={1} className="h-8 text-right text-xs"
+                  value={Number.isFinite(draft[role]?.min as number) ? String(draft[role]?.min) : ""}
+                  onChange={(e) => setBand(role, "min", e.target.value)} />
+                <Input type="number" min={0} max={100} step={1} className="h-8 text-right text-xs"
+                  value={Number.isFinite(draft[role]?.max as number) ? String(draft[role]?.max) : ""}
+                  onChange={(e) => setBand(role, "max", e.target.value)} />
+              </div>
+            ))}
+
+            {localErrors.length > 0 && (
+              <p role="alert" className="rounded-md border border-red-500/40 bg-red-50 p-2 text-xs text-red-800 dark:bg-red-950/40 dark:text-red-200">
+                {localErrors.join(" · ")}
+              </p>
+            )}
+            {overlapWarnings.length > 0 && localErrors.length === 0 && (
+              <p className="rounded-md border border-amber-500/40 bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                {overlapWarnings.join(" ")}
+              </p>
+            )}
+            {error && (
+              <p role="alert" className="rounded-md border border-red-500/40 bg-red-50 p-2 text-xs text-red-800 dark:bg-red-950/40 dark:text-red-200">
+                {error}
+              </p>
+            )}
+          </div>
+        )}
+
+        <DialogFooter className="gap-2 sm:justify-between">
+          <Button variant="ghost" size="sm" onClick={reset} disabled={saving || loading || !isCustom}>
+            Reset to defaults
+          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={save} disabled={saving || loading || localErrors.length > 0 || !storageAvailable}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 const SYNC_JOB_LABELS: Record<string, string> = {
@@ -158,6 +348,7 @@ export default function PPCPage() {
   const [targetAcos, setTargetAcos] = useState(30);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [targetsOpen, setTargetsOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -367,6 +558,15 @@ export default function PPCPage() {
 
       {notice && <NoticeBanner notice={notice} onDismiss={() => setNotice(null)} />}
 
+      {/* Saving refetches, so the strip, hints and quick-review row all pick up
+          the new bands immediately for whichever range is selected. */}
+      <TargetsDialog
+        key={targetsOpen ? "targets-open" : "targets-closed"}
+        open={targetsOpen}
+        onOpenChange={setTargetsOpen}
+        onSaved={(msg) => { setNotice(msg); loadData(); }}
+      />
+
       {!hasData ? (
         <Card>
           <CardContent className="py-12 text-center">
@@ -452,12 +652,23 @@ export default function PPCPage() {
           {roles.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Budget by role
-                  <span className="ml-2 font-normal text-muted-foreground">
-                    {windowLabel(roleDays)}
-                  </span>
-                </CardTitle>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <CardTitle className="text-sm font-medium">
+                    Budget by role
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      {windowLabel(roleDays)}
+                    </span>
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-[10px]">
+                      {data?.strategy?.isCustom ? "Custom targets" : "Using defaults"}
+                    </Badge>
+                    <Button variant="outline" size="sm" onClick={() => setTargetsOpen(true)}>
+                      <Settings2 className="mr-1 h-3 w-3" />
+                      Targets
+                    </Button>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 {/* One bar, segmented by share of spend */}

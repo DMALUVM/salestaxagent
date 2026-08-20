@@ -394,3 +394,51 @@ Press Ctrl+C to stop.
 
 Agent is running. Watching for files and running scheduled tasks.
 
+
+Shutting down...
+Agent stopped.
+Starting Sales Tax Compliance Agent...
+Press Ctrl+C to stop.
+
+[Watcher] Watching /Users/maloney_assistant/sales-tax-agent/incoming for new files...
+[Scheduler] Timezone: America/New_York
+[Scheduler] Shopify polling every 2h
+[Scheduler] Daily analysis at 08:00
+[Scheduler] Deadline check at 09:00
+[Scheduler] SP-API refresh daily at 06:00
+[Scheduler] Source monitoring every Monday at 07:00
+[Scheduler] CPA exports daily at 06:30
+[Scheduler] Daily digest at 08:05
+[Scheduler] Inventory sync daily at 06:30
+[Scheduler] 3PL sync daily at 06:35
+[Scheduler] Ads campaigns sync daily at 05:00 (30d, ≤30d chunks)
+[Scheduler] Ads search terms sync daily at 05:30 (7d, 7d chunks)
+[Scheduler] Ads actions daily at 06:00 (7d, target ACOS 30%)
+[Scheduler] Ads campaigns backfill weekly Sunday 03:00 (90d)
+[Scheduler] Ads placements sync daily at 05:15 (14d)
+[Scheduler] Contribution P&L daily at 06:45 (after sales + ads)
+[Scheduler] GitHub backup weekly Sunday 09:00
+[Scheduler] Job worker every 45s
+
+── Schedule ─────────────────────────────────────
+  shopify_poll          trigger: interval[2:00:00]
+  daily_analysis        trigger: cron[hour='8', minute='0']
+  deadline_check        trigger: cron[hour='9', minute='0']
+  spapi_refresh         trigger: cron[hour='6', minute='0']
+  source_monitoring     trigger: cron[day_of_week='mon', hour='7', minute='0']
+  cpa_exports           trigger: cron[hour='6', minute='30']
+  daily_digest          trigger: cron[hour='8', minute='5']
+  inventory_sync        trigger: cron[hour='6', minute='30']
+  3pl_sync              trigger: cron[hour='6', minute='35']
+  ads_campaigns_sync    trigger: cron[hour='5', minute='0']
+  ads_search_terms_sync  trigger: cron[hour='5', minute='30']
+  ads_actions           trigger: cron[hour='6', minute='0']
+  ads_campaigns_backfill  trigger: cron[day_of_week='sun', hour='3', minute='0']
+  ads_placements_sync   trigger: cron[hour='5', minute='15']
+  pnl_sync              trigger: cron[hour='6', minute='45']
+  github_backup         trigger: cron[day_of_week='sun', hour='9', minute='0']
+  job_worker            trigger: interval[0:00:45]
+─────────────────────────────────────────────────
+
+Agent is running. Watching for files and running scheduled tasks.
+

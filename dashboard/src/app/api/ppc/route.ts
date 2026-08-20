@@ -2,8 +2,8 @@ import { getServerSupabase } from "@/lib/supabase-server";
 import { amazonAsOf, amazonToday, windowStart } from "@/lib/as-of";
 import {
   classifyCampaign, roleLabels, roleOrder, roleDescriptions, roleConfigSource,
-  roleTarget, shareStatus,
 } from "@/lib/ads-roles";
+import { loadMergedStrategy, roleTargetOf, shareStatusOf } from "@/lib/ads-strategy-settings";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -204,6 +204,11 @@ export async function GET() {
     // the server ships one bucket per range. The client picks a bucket by the
     // selected toggle, so it can never apply its own bounds and disagree with
     // the numbers beside it.
+    // Target bands come from config/ads_strategy.json deep-merged with any
+    // operator overrides saved from the dashboard, so the bands the UI shows
+    // and the ones the nightly Python job reads are the same document.
+    const strategy = await loadMergedStrategy(sb);
+
     const RANGE_KEYS = ["7d", "14d", "30d", "90d"] as const;
     type RangeKey = typeof RANGE_KEYS[number];
     const kpiByRange: Record<RangeKey, { kpis: KPIs; days: number }> = {
@@ -256,8 +261,8 @@ export async function GET() {
           // window: an additive slice of revenue, not a share of TACoS.
           tacos: amazonSales > 0 ? Math.round((e.spend / amazonSales) * 10000) / 100 : null,
           // Config-driven target band; the UI renders the verdict only.
-          targetSharePct: roleTarget(r),
-          shareStatus: shareStatus(r, share),
+          targetSharePct: roleTargetOf(strategy.merged, r),
+          shareStatus: shareStatusOf(strategy.merged, r, share),
         };
       });
 
@@ -444,6 +449,11 @@ export async function GET() {
       adsThrough: dateMax,
       dateMin, dateMax, daysInDb,
       campaigns, roleConfigSource: roleConfigSource(),
+      strategy: {
+        isCustom: strategy.isCustom,
+        storageAvailable: strategy.storageAvailable,
+        updatedAt: strategy.updatedAt,
+      },
       rolesByRange, placementsByRange, placementsAvailable,
       searchTerms, recommendations,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
@@ -454,6 +464,7 @@ export async function GET() {
       kpi7: null, kpi14: null, kpi30: null, kpi90: null,
       dailySeries: [], cutoffs: null, campaigns: [],
       rolesByRange: null, placementsByRange: null, placementsAvailable: false,
+      strategy: null,
       searchTerms: [], recommendations: [],
       asOf: null, today: null, adsThrough: null,
       lastSyncJob: null, lastSyncStatus: null, lastActions: null,

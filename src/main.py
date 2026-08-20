@@ -662,12 +662,25 @@ def _ads_sync_outcome(result: dict, days: int) -> tuple[str, str]:
 
 
 @cli.command("ads-actions")
-@click.option("--target-acos", default=30.0, help="Target ACOS %")
+@click.option("--target-acos", default=None, type=float,
+              help="Target ACOS %. Defaults to the break-even target computed "
+                   "from COGS/fee inputs.")
 @click.option("--days", default=7, help="Lookback window for search terms")
 def ads_actions_cmd(target_acos, days):
-    """Generate PPC action recommendations (replaces the open queue)."""
+    """Generate PPC action recommendations (replaces the open queue).
+
+    With no --target-acos, the break-even target is derived from sku_costs and
+    the P&L fee inputs — the same computation the nightly job uses, so a manual
+    run and the scheduled run judge terms by the same bar.
+    """
     from src.amazon_ads.actions_engine import generate_recommendations
+    from src.amazon_ads.strategy import account_target_acos
     from src.db import job_start, job_finish
+
+    if target_acos is None:
+        target_acos, target_basis = account_target_acos()
+    else:
+        target_basis = "explicit"
 
     run_id = job_start("ads_actions")
     try:
@@ -678,18 +691,22 @@ def ads_actions_cmd(target_acos, days):
 
     if not recs:
         msg = (f"No recommendations — no search term data in the last {days} days, "
-               f"or everything is within the {target_acos:.0f}% target")
+               f"or everything is within the {target_acos:.1f}% target")
         click.echo(msg)
-        job_finish(run_id, "success", msg)
+        job_finish(run_id, "success", msg,
+                   stats={"count": 0, "target_acos": target_acos,
+                          "target_basis": target_basis, "days": days})
         return
 
-    click.echo(f"{len(recs)} recommendations ({days}d window, target ACOS {target_acos:.0f}%):")
+    click.echo(f"{len(recs)} recommendations ({days}d window, "
+               f"target ACOS {target_acos:.1f}% [{target_basis}]):")
     for r in recs[:15]:
         click.echo(f"  [{r['priority']}] {r['type']}: {r.get('entity_name','')[:40]}")
         click.echo(f"       Impact: ${r['impact_estimate']:.2f}  {r['suggested_action'][:80]}")
     job_finish(run_id, "success",
-               f"{len(recs)} recs ({days}d, target {target_acos:.0f}%)",
-               stats={"count": len(recs), "target_acos": target_acos, "days": days})
+               f"{len(recs)} recs ({days}d, target {target_acos:.1f}%)",
+               stats={"count": len(recs), "target_acos": target_acos,
+                      "target_basis": target_basis, "days": days})
 
 
 @cli.command("jobs")
@@ -3049,10 +3066,17 @@ def _run_ads_actions():
     """
     from src.db import job_start, job_finish
     from src.amazon_ads.actions_engine import generate_recommendations
+    from src.amazon_ads.strategy import account_target_acos
 
     run_id = job_start("ads_actions")
     try:
-        recs = generate_recommendations(target_acos=30.0, lookback_days=7)
+        # Break-even derived from the same COGS/fee inputs the CLI and the
+        # strategy layer use — never a hardcoded target. A flat 30% was
+        # cutting terms that are profitable at this account's ~37.7%
+        # break-even, and left the dashboard reading a target the engine had
+        # not actually applied.
+        target_acos, target_basis = account_target_acos()
+        recs = generate_recommendations(target_acos=target_acos, lookback_days=7)
     except Exception as e:
         print(f"[Ads actions] Failed: {e}")
         job_finish(run_id, "fail", str(e)[:500])
@@ -3062,17 +3086,23 @@ def _run_ads_actions():
     if not recs:
         msg = "No recommendations — no search term data in the last 7 days"
         print(f"[Ads actions] {msg}")
-        job_finish(run_id, "success", msg)
+        # Still record the target so the dashboard's break-even line stays
+        # current on a quiet night instead of falling back to config.
+        job_finish(run_id, "success", msg,
+                   stats={"count": 0, "target_acos": target_acos,
+                          "target_basis": target_basis, "days": 7})
         return
 
     by_priority: dict[str, int] = {}
     for r in recs:
         by_priority[r["priority"]] = by_priority.get(r["priority"], 0) + 1
-    msg = f"{len(recs)} recs (" + ", ".join(f"{k} {v}" for k, v in sorted(by_priority.items())) + ")"
-    print(f"[Ads actions] {msg}")
+    msg = (f"{len(recs)} recs (" + ", ".join(f"{k} {v}" for k, v in sorted(by_priority.items()))
+           + f") at {target_acos:.1f}% target")
+    print(f"[Ads actions] {msg} [{target_basis}]")
     job_finish(run_id, "success", msg,
                stats={"count": len(recs), "by_priority": by_priority,
-                      "target_acos": 30.0, "days": 7})
+                      "target_acos": target_acos, "target_basis": target_basis,
+                      "days": 7})
 
 
 def _run_pnl_sync():

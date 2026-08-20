@@ -34,6 +34,82 @@ _CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "ads_strategy.js
 with open(_CONFIG_PATH) as fh:
     STRATEGY: dict = json.load(fh)
 
+#: Settings the operator may override from the dashboard. Anything outside this
+#: allowlist is rejected by the settings API, so every key that reaches the DB
+#: is one both readers actually honour — no silently-ignored overrides.
+OVERRIDABLE_PATHS: tuple[tuple[str, ...], ...] = (("roles", "targets"),)
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursive merge; override wins, missing keys fall through to base."""
+    out = dict(base)
+    for k, v in (override or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def load_overrides() -> dict:
+    """Operator overrides from ads_strategy_settings, or {} if unavailable.
+
+    A missing table, missing row or unreachable DB all mean "no overrides" —
+    the file defaults still apply, so tuning is additive and never a hard
+    dependency for the nightly jobs.
+    """
+    try:
+        from src.db import get_client
+        resp = (get_client().table("ads_strategy_settings")
+                .select("settings").eq("id", "default").limit(1).execute())
+        row = (resp.data or [{}])[0]
+        settings = row.get("settings") or {}
+        return settings if isinstance(settings, dict) else {}
+    except Exception as e:
+        if "ads_strategy_settings" in str(e):
+            log.debug("ads_strategy_settings not present — using file defaults")
+        else:
+            log.warning("Could not read ads_strategy_settings: %s", str(e)[:160])
+        return {}
+
+
+def load_strategy() -> dict:
+    """File defaults deep-merged with operator overrides.
+
+    Read fresh each call: the nightly jobs run once, and the dashboard hits its
+    own route, so there is no hot loop to cache for — and a stale cache here
+    would mean a saved target silently not applying.
+    """
+    return _deep_merge(STRATEGY, load_overrides())
+
+
+def role_target(role: str, strategy: dict | None = None) -> dict | None:
+    """Target spend-share band {min,max} for a role, or None if unset."""
+    cfg = strategy or load_strategy()
+    t = (cfg.get("roles", {}).get("targets") or {}).get(role)
+    if not isinstance(t, dict):
+        return None
+    if not isinstance(t.get("min"), (int, float)) or not isinstance(t.get("max"), (int, float)):
+        return None
+    return {"min": float(t["min"]), "max": float(t["max"])}
+
+
+def share_status(role: str, share_pct: float,
+                 strategy: dict | None = None) -> str | None:
+    """'above' / 'below' / 'in_range' against the configured band.
+
+    Same comparison the dashboard renders, so both sides agree by construction.
+    """
+    t = role_target(role, strategy)
+    if not t:
+        return None
+    if share_pct > t["max"]:
+        return "above"
+    if share_pct < t["min"]:
+        return "below"
+    return "in_range"
+
+
 ROLE_ORDER: list[str] = STRATEGY["roles"]["order"]
 ROLE_LABELS: dict[str, str] = STRATEGY["roles"]["labels"]
 ROLE_DEFAULT: str = STRATEGY["roles"]["default"]
