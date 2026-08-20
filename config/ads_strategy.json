@@ -78,5 +78,12 @@
     "_comment": "Search-term loop windows, in days, inclusive and ending on the LA as-of date.",
     "short_days": 14,
     "long_days": 60
+  },
+
+  "learning": {
+    "_comment": "Action decision log and outcome snapshots. Observation only — no model is trained and no bid is ever written from this data.",
+    "snapshot_offsets_days": [7, 14, 30],
+    "snapshot_statuses": ["applied", "dismissed"],
+    "baseline_lookback_days": 14
   }
 }

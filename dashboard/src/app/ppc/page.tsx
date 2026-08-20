@@ -334,6 +334,120 @@ function NoticeBanner({ notice, onDismiss }: { notice: Notice; onDismiss: () => 
   );
 }
 
+interface ImpactByType {
+  actionType: string; open: number; applied: number; dismissed: number;
+  expired: number; total: number; impactEstimate: number;
+}
+interface ImpactHorizon {
+  horizonDays: number;
+  byStatus: Array<{ status: string; n: number; spend: number; adSales: number; orders: number; acos: number | null }>;
+}
+interface ImpactData {
+  available: boolean; caveat: string; note?: string;
+  totals: { decisions: number; outcomes: number; applied: number; dismissed: number;
+            open: number; firstAsOf: string | null; lastAsOf: string | null } | null;
+  byType: ImpactByType[];
+  horizons: ImpactHorizon[];
+}
+
+/**
+ * Decision-log summary. Deliberately plain: these are outcomes that FOLLOWED
+ * actions, not effects attributable to them, and the panel says so rather than
+ * dressing them up as a scorecard.
+ */
+function ImpactPanel() {
+  const [data, setData] = useState<ImpactData | null>(null);
+  useEffect(() => {
+    fetch("/api/ppc/impact").then((r) => r.json()).then(setData).catch(() => {});
+  }, []);
+
+  if (!data) return null;
+  if (!data.available) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Action learning log not enabled — run <code>supabase/migration_ads_learning.sql</code>{" "}
+        to start recording decisions and their outcomes.
+      </p>
+    );
+  }
+  const t = data.totals;
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">
+          Action log
+          {t && (
+            <span className="ml-2 font-normal text-muted-foreground">
+              {t.decisions} decisions{t.firstAsOf ? ` since ${t.firstAsOf}` : ""} ·{" "}
+              {t.applied} applied · {t.dismissed} dismissed · {t.outcomes} outcome snapshots
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Action</TableHead>
+                <TableHead className="text-right">Logged</TableHead>
+                <TableHead className="text-right">Open</TableHead>
+                <TableHead className="text-right">Applied</TableHead>
+                <TableHead className="text-right">Dismissed</TableHead>
+                <TableHead className="text-right">Impact est.</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.byType.map((b) => (
+                <TableRow key={b.actionType}>
+                  <TableCell className="text-xs">
+                    <Badge variant="outline" className={`text-[10px] ${ACTION_STYLES[b.actionType as keyof typeof ACTION_STYLES] ?? ""}`}>
+                      {ACTION_LABELS[b.actionType as keyof typeof ACTION_LABELS] ?? b.actionType}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{b.total}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{b.open}</TableCell>
+                  <TableCell className="text-right tabular-nums text-emerald-600">{b.applied}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{b.dismissed}</TableCell>
+                  <TableCell className="text-right tabular-nums">${fmt(Math.round(b.impactEstimate))}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        {data.horizons.length > 0 && (
+          <div className="space-y-1 text-xs">
+            {data.horizons.map((h) => (
+              <div key={h.horizonDays} className="flex flex-wrap items-center gap-x-5">
+                <span className="font-medium">+{h.horizonDays}d after decision</span>
+                {h.byStatus.map((s) => (
+                  <span key={s.status} className="text-muted-foreground">
+                    {s.status} (n={s.n}): spend{" "}
+                    <span className="tabular-nums text-foreground">${fmtD(s.spend)}</span>, ad sales{" "}
+                    <span className="tabular-nums text-foreground">${fmtD(s.adSales)}</span>
+                    {s.acos != null && <>, ACOS <span className="tabular-nums text-foreground">{s.acos}%</span></>}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+        {data.horizons.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            No outcome snapshots yet — they are written once a decision&rsquo;s +7 day has closed.
+          </p>
+        )}
+
+        <p className="rounded-lg border border-amber-500/40 bg-amber-50 p-2.5 text-[11px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          <strong>Observational, not causal.</strong> {data.caveat} Nothing here is applied
+          automatically — every action still needs confirming in Seller Central.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 type Range = "7d" | "14d" | "30d" | "90d";
 const RANGES: Range[] = ["7d", "14d", "30d", "90d"];
 const RANGE_DAYS: Record<Range, number> = { "7d": 7, "14d": 14, "30d": 30, "90d": 90 };
@@ -1032,6 +1146,8 @@ export default function PPCPage() {
               </CardContent>
             </Card>
           )}
+
+          {tab === "actions" && <ImpactPanel />}
 
           {/* Search terms */}
           {tab === "search" && (

@@ -750,9 +750,31 @@ export async function POST(request: Request) {
     const { id, status } = body;
     if (!id || !status) return Response.json({ ok: false, error: "id and status required" }, { status: 400 });
     const sb = getServerSupabase();
+
+    // Read the linked decision first: the update below does not return the row,
+    // and the decision log is what a future model trains on.
+    let decisionId: string | null = null;
+    try {
+      const r = await sb.from("ads_recommendations").select("decision_id").eq("id", id).limit(1);
+      decisionId = r.data?.[0]?.decision_id ?? null;
+    } catch { /* column absent until migration_ads_learning.sql is run */ }
+
     const upd = await sb.from("ads_recommendations").update({ status }).eq("id", id);
     if (upd.error) return Response.json({ ok: false, error: upd.error.message }, { status: 500 });
-    return Response.json({ ok: true });
+
+    // Mirror onto the append-only decision row so the outcome snapshots know
+    // when the action was taken. Extends the existing path — the dashboard
+    // still calls this one endpoint.
+    let decisionLogged = false;
+    if (decisionId && (status === "applied" || status === "dismissed")) {
+      const patch: Record<string, unknown> = { status };
+      patch[status === "applied" ? "applied_at" : "dismissed_at"] = new Date().toISOString();
+      try {
+        const d = await sb.from("ads_action_decisions").update(patch).eq("id", decisionId);
+        decisionLogged = !d.error;
+      } catch { /* learning tables not present yet */ }
+    }
+    return Response.json({ ok: true, decisionLogged });
   } catch (e) {
     return Response.json({ ok: false, error: String(e) }, { status: 500 });
   }

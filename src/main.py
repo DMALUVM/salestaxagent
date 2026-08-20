@@ -709,6 +709,58 @@ def ads_actions_cmd(target_acos, days):
                       "target_basis": target_basis, "days": days})
 
 
+@cli.command("ads-outcomes")
+@click.option("--dry-run", is_flag=True, help="Show what would be written, write nothing")
+@click.option("--as-of", default=None, help="Override the LA as-of date (YYYY-MM-DD)")
+def ads_outcomes_cmd(dry_run, as_of):
+    """Snapshot outcomes for applied/dismissed actions whose window has closed.
+
+    Idempotent — a horizon already recorded is skipped, and a horizon whose
+    window has not closed yet is not written at all.
+    """
+    from datetime import date as _date
+    from src.amazon_ads.learning import snapshot_outcomes
+
+    target = _date.fromisoformat(as_of) if as_of else None
+    r = snapshot_outcomes(as_of=target, dry_run=dry_run)
+    if r.get("skipped"):
+        click.echo(f"Skipped: {r['skipped']}")
+        return
+    if r.get("error"):
+        raise click.ClickException(r["error"])
+    click.echo(f"as-of {r['as_of']}  horizons {r['offsets']}")
+    click.echo(f"  decisions considered : {r['decisions_considered']}")
+    click.echo(f"  due this run         : {r.get('due', 0)}")
+    click.echo(f"  written              : {r['written']}{' (dry run)' if dry_run else ''}")
+    click.echo(f"  not due yet          : {r['skipped_not_due']}")
+    click.echo(f"  already recorded     : {r['already_present']}")
+    for sample in (r.get("sample") or [])[:3]:
+        click.echo(f"    +{sample['horizon_days']}d {sample['window_start']}→{sample['window_end']}"
+                   f"  spend ${sample['spend']:.2f} sales ${sample['ad_sales']:.2f}")
+
+
+@cli.command("ads-impact")
+def ads_impact_cmd():
+    """Observational summary of action decisions and their outcomes."""
+    from src.amazon_ads.learning import impact_summary
+    r = impact_summary()
+    if not r.get("available"):
+        click.echo(r.get("note") or r.get("error") or "Learning tables unavailable")
+        return
+    t = r["totals"]
+    click.echo(f"decisions {t['decisions']}  (applied {t['applied']}, dismissed {t['dismissed']}, "
+               f"open {t['open']})   outcome rows {t['outcomes']}")
+    click.echo(f"\n{'action type':22s}{'total':>7s}{'open':>7s}{'applied':>9s}{'dismissed':>11s}")
+    for k, v in sorted(r["by_type"].items(), key=lambda kv: -kv[1]["total"]):
+        click.echo(f"{k:22s}{v['total']:7d}{v['open']:7d}{v['applied']:9d}{v['dismissed']:11d}")
+    for h, statuses in sorted(r["horizons"].items()):
+        click.echo(f"\n  {h} post-decision window:")
+        for st, v in statuses.items():
+            click.echo(f"    {st:10s} n={v['n']:3d}  spend ${v['spend']:>9,.2f}  "
+                       f"ad sales ${v['ad_sales']:>9,.2f}  ACOS {v['acos']}%")
+    click.echo(f"\n{r['caveat']}")
+
+
 @cli.command("jobs")
 @click.option("--limit", default=20, help="How many runs to show")
 @click.option("--job", default=None, help="Filter to one job_name")
@@ -2524,6 +2576,20 @@ def run():
         )
         click.echo("[Scheduler] Contribution P&L daily at 06:45 (after sales + ads)")
 
+        # Outcome snapshots at 07:00 — last in the chain, because it reads the
+        # ads tables (05:00-05:30), the action decisions (06:00) and the P&L
+        # contribution rows (06:45) that the earlier jobs write.
+        scheduler.add_job(
+            _run_ads_outcomes,
+            "cron",
+            hour=7,
+            minute=0,
+            id="ads_outcomes",
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
+        click.echo("[Scheduler] Action outcome snapshots daily at 07:00 (after P&L)")
+
         # Weekly GitHub backup (Sunday 09:00)
         scheduler.add_job(
             _run_github_backup,
@@ -3103,6 +3169,39 @@ def _run_ads_actions():
                stats={"count": len(recs), "by_priority": by_priority,
                       "target_acos": target_acos, "target_basis": target_basis,
                       "days": 7})
+
+
+def _run_ads_outcomes():
+    """07:00 — snapshot outcomes for actions whose +7/+14/+30 day has closed.
+
+    Observation only: records what happened after each applied or dismissed
+    action so action types can later be compared by contribution. Writes no
+    bids and trains nothing.
+    """
+    from src.db import job_start, job_finish
+    from src.amazon_ads.learning import snapshot_outcomes
+
+    run_id = job_start("ads_outcomes")
+    try:
+        r = snapshot_outcomes()
+    except Exception as e:
+        print(f"[Ads outcomes] Failed: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        return
+
+    if r.get("skipped"):
+        print(f"[Ads outcomes] Skipped: {r['skipped']}")
+        job_finish(run_id, "success", f"skipped: {r['skipped']}")
+        return
+    if r.get("error"):
+        print(f"[Ads outcomes] Error: {r['error']}")
+        job_finish(run_id, "fail", r["error"][:400])
+        return
+
+    msg = (f"{r['written']} snapshot(s) written, {r['skipped_not_due']} not due, "
+           f"{r['already_present']} already recorded ({r['decisions_considered']} decisions)")
+    print(f"[Ads outcomes] {msg}")
+    job_finish(run_id, "success", msg, stats=r)
 
 
 def _run_pnl_sync():

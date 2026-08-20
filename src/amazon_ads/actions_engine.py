@@ -358,6 +358,18 @@ def generate_recommendations(
     # ── Persist: clear old open recs, insert fresh ──
     _persist(recs)
 
+    # ── Append to the decision log (never deleted) ──
+    # The queue above holds only "what to do now"; this records what was
+    # recommended on this as-of date, with evidence frozen, so outcomes can be
+    # attributed later. Best-effort: a logging failure must not lose the queue.
+    try:
+        from src.amazon_ads.learning import log_decisions, link_recommendations
+        logged = log_decisions(recs)
+        if logged.get("logged"):
+            link_recommendations()
+    except Exception:
+        log.exception("Decision logging skipped")
+
     return recs
 
 
