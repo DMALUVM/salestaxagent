@@ -5,11 +5,13 @@ import { useSupabaseQuery } from "@/lib/hooks";
 import type { FilingEntry, NexusStatus } from "@/lib/types";
 import { FilingStatusBadge, FrequencyBadge } from "@/components/status-badge";
 import { LoadingState } from "@/components/loading";
+import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -337,6 +339,59 @@ function daysUntil(dateStr: string) {
 // Filing table
 // ---------------------------------------------------------------------------
 
+/**
+ * Mark a period as not owed — a genuine exemption, or a false positive the
+ * user wants gone.
+ *
+ * Both land on `not_required` because the filing_calendar CHECK constraint
+ * allows pending/filed/late/not_required only; the user's reason is kept in
+ * filed_notes rather than invented as a status the database would reject. The
+ * nightly rebuild preserves settled periods, so this does not come back.
+ */
+function NotRequiredButton({
+  filing,
+  onDone,
+}: {
+  filing: FilingEntry;
+  onDone: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  async function mark() {
+    const reason = window.prompt(
+      `Mark ${filing.state_code} ${filing.period_label} as NOT required.\n\n` +
+        "Why? (e.g. \"below threshold\", \"marketplace facilitator files this\", " +
+        "\"duplicate period\")",
+      "",
+    );
+    if (reason === null) return; // cancelled
+    setBusy(true);
+    const sb = getSupabase();
+    await sb
+      .from("filing_calendar")
+      .update({
+        status: "not_required",
+        filed_notes: reason.trim() || "marked not required by user",
+      })
+      .eq("id", filing.id);
+    setBusy(false);
+    onDone();
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={mark}
+      disabled={busy}
+      title="Not required / dismiss false positive"
+      className="text-xs"
+    >
+      {busy ? "…" : "N/A"}
+    </Button>
+  );
+}
+
 function FilingTable({
   rows,
   mode,
@@ -433,6 +488,7 @@ function FilingTable({
                   {f.status !== "filed" ? (
                     <div className="flex gap-1">
                       <QuickMarkButton filing={f} onDone={onRefetch} />
+                      <NotRequiredButton filing={f} onDone={onRefetch} />
                       <MarkCompleteDialog
                         filing={f}
                         onComplete={onRefetch}
@@ -468,27 +524,25 @@ export default function CalendarPage() {
 
   if (loading || l2) return <LoadingState />;
 
-  // Build registration date lookup to filter pre-registration periods
-  const regDateMap = new Map<string, string>();
-  for (const n of nexusData) {
-    if (n.registration_date) regDateMap.set(n.state_code, n.registration_date);
-  }
-
-  // Filter out periods that end entirely before registration date
-  const validFilings = filings.filter((f) => {
-    const regDate = regDateMap.get(f.state_code);
-    if (!regDate) return true; // no registration date → keep (legacy)
-    const periodEnd = f.period_end ?? f.due_date;
-    return periodEnd >= regDate;
-  });
-
+  // Eligibility comes from lib/filing-eligibility.ts, mirroring
+  // src/calendar/eligibility.py, so this page, the Pulse chips, the Telegram
+  // digest and the filing-audit CLI agree on what "overdue" means.
+  //
+  // This used to filter on status + registration_date only: it never checked
+  // is_registered, never honoured nexus_status.last_filed_through, and never
+  // noticed a state carrying two overlapping period cadences.
   const today = new Date().toISOString().slice(0, 10);
-  const pending = validFilings.filter(
-    (f) => f.status === "pending" || f.status === "late",
+  const cls = classifyFilings<FilingEntry & FilingRow>(
+    filings as Array<FilingEntry & FilingRow>,
+    nexusData as unknown as NexusRow[],
+    today,
   );
-  const overdue = pending.filter((f) => f.due_date < today);
-  const upcoming = pending.filter((f) => f.due_date >= today);
-  const completed = validFilings.filter((f) => f.status === "filed");
+  const overdue = cls.overdue;
+  const upcoming = cls.upcoming;
+  const completed = filings.filter((f) => f.status === "filed");
+  // Rows excluded for a reason other than "already settled" — shown so a
+  // period that vanished from Overdue is explainable rather than mysterious.
+  const notApplicable = cls.excluded.filter((f) => f.excluded_reason !== "settled");
 
   const defaultTab =
     overdue.length > 0
@@ -564,6 +618,9 @@ export default function CalendarPage() {
             <TabsTrigger value="upcoming">
               Upcoming ({upcoming.length})
             </TabsTrigger>
+            <TabsTrigger value="not_applicable">
+              Not applicable ({notApplicable.length})
+            </TabsTrigger>
             <TabsTrigger value="completed">
               Completed ({completed.length})
             </TabsTrigger>
@@ -596,6 +653,50 @@ export default function CalendarPage() {
                 mode="upcoming"
                 onRefetch={refetch}
               />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="not_applicable" className="mt-4">
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground mb-3">
+                Periods that are not open sales-tax obligations. Shown so a
+                deadline that disappeared from Overdue is explainable — not
+                because anything is wrong.
+              </p>
+              {notApplicable.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nothing excluded.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="py-1 pr-4">State</th>
+                        <th className="py-1 pr-4">Period</th>
+                        <th className="py-1 pr-4">Due</th>
+                        <th className="py-1 pr-4">Reason</th>
+                        <th className="py-1">Detail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {notApplicable.map((f) => (
+                        <tr key={f.id} className="border-t">
+                          <td className="py-1 pr-4 font-medium">{f.state_code}</td>
+                          <td className="py-1 pr-4">{f.period_label}</td>
+                          <td className="py-1 pr-4 tabular-nums">{f.due_date}</td>
+                          <td className="py-1 pr-4">
+                            <Badge variant="outline" className="text-[9px] whitespace-nowrap">
+                              {f.excluded_reason.replace(/_/g, " ")}
+                            </Badge>
+                          </td>
+                          <td className="py-1 text-muted-foreground">{f.excluded_detail}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

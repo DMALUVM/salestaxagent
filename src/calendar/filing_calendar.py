@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 from src.db import fetch_all, upsert_rows, update_row, insert_rows, log_audit
 from src.config import settings
+from src.calendar.eligibility import SETTLED_STATUSES, classify_filings
 
 
 def generate_filing_entries(state_code: str, frequency: str, year: int,
@@ -132,6 +133,20 @@ def populate_calendar_for_registered_states(year: int | None = None) -> dict:
     total_created = 0
     states_populated = set()
 
+    # Rows the user has already settled. The upsert below writes
+    # status="pending" on every generated period, so without this any period
+    # already marked filed or not_required would be silently reopened on the
+    # next nightly analyze — and reappear as an OVERDUE chip the user had
+    # already dealt with. Settled periods are dropped from the write entirely
+    # rather than written with their existing status, so this can never be the
+    # thing that changes a status.
+    settled_keys = {
+        (r.get("state_code"), r.get("period_type"), r.get("period_label"))
+        for r in fetch_all("filing_calendar")
+        if str(r.get("status") or "") in SETTLED_STATUSES
+    }
+    preserved = 0
+
     for record in registered:
         sc = record["state_code"]
         frequency = record.get("assigned_frequency")
@@ -143,9 +158,13 @@ def populate_calendar_for_registered_states(year: int | None = None) -> dict:
 
         for yr in years:
             entries = generate_filing_entries(sc, frequency, yr, due_day)
-            if entries:
+            kept = [e for e in entries
+                    if (e["state_code"], e["period_type"], e["period_label"])
+                    not in settled_keys]
+            preserved += len(entries) - len(kept)
+            if kept:
                 inserted = upsert_rows(
-                    "filing_calendar", entries,
+                    "filing_calendar", kept,
                     on_conflict="state_code,period_type,period_label",
                 )
                 total_created += inserted
@@ -154,13 +173,16 @@ def populate_calendar_for_registered_states(year: int | None = None) -> dict:
     log_audit(
         action="populate_filing_calendar",
         category="calendar",
-        details={"years": years, "states": sorted(states_populated), "entries_created": total_created},
+        details={"years": years, "states": sorted(states_populated),
+                 "entries_created": total_created,
+                 "settled_preserved": preserved},
     )
 
     return {
         "years": years,
         "states_populated": sorted(states_populated),
         "entries_created": total_created,
+        "settled_preserved": preserved,
     }
 
 
@@ -183,67 +205,123 @@ def generate_filings_for_state(state_code: str, frequency: str, due_day: int = 2
 
 
 def get_upcoming_deadlines(days_ahead: int | None = None) -> list[dict]:
-    """Return upcoming + overdue filing deadlines.
+    """Return upcoming + overdue filing deadlines for real obligations only.
 
-    Skips periods whose period_end <= last_filed_through for that state.
-    This prevents false OVERDUE for historically-generated calendar entries
-    that the user has already filed (tracked via nexus_status.last_filed_through).
+    Eligibility lives in src/calendar/eligibility.py so this, the dashboard and
+    the Telegram digest cannot drift apart. A period is surfaced only when the
+    state is registered, the period falls after registration, it is not covered
+    by last_filed_through, it matches the state's current filing frequency, and
+    the user has not settled it.
     """
     if days_ahead is None:
         days_ahead = settings.alert_days_before_deadline
 
     today = date.today()
     cutoff = today + timedelta(days=days_ahead)
+    cutoff_iso = cutoff.isoformat()
 
-    all_filings = fetch_all("filing_calendar", order="due_date")
+    result = classify_filings(
+        fetch_all("filing_calendar", order="due_date"),
+        fetch_all("nexus_status"),
+        today,
+    )
 
-    # Build last_filed_through lookup from nexus_status
-    nexus_rows = fetch_all("nexus_status")
-    filed_through: dict[str, str] = {}
-    for n in nexus_rows:
-        ft = n.get("last_filed_through")
-        if ft:
-            filed_through[n["state_code"]] = str(ft)
-
-    def _is_already_filed(filing: dict) -> bool:
-        """True if this period is covered by last_filed_through."""
-        sc = filing.get("state_code", "")
-        ft = filed_through.get(sc)
-        if not ft:
-            return False
-        pe = str(filing.get("period_end", ""))
-        return pe <= ft
-
-    upcoming = []
-    for filing in all_filings:
-        if filing.get("status") in ("filed", "not_required"):
-            continue
-        if _is_already_filed(filing):
-            continue
-
-        due_str = filing.get("due_date")
-        due = date.fromisoformat(due_str) if isinstance(due_str, str) else due_str
-
-        if due and today <= due <= cutoff:
-            filing["days_until_due"] = (due - today).days
-            upcoming.append(filing)
-
-    overdue = []
-    for filing in all_filings:
-        if filing.get("status") in ("filed", "not_required"):
-            continue
-        if _is_already_filed(filing):
-            continue
-
-        due_str = filing.get("due_date")
-        due = date.fromisoformat(due_str) if isinstance(due_str, str) else due_str
-
-        if due and due < today:
-            filing["days_overdue"] = (today - due).days
-            filing["status"] = "late"
-            overdue.append(filing)
-
+    overdue = [dict(f, status="late") for f in result["overdue"]]
+    upcoming = [f for f in result["upcoming"]
+                if str(f.get("due_date")) <= cutoff_iso]
     return overdue + upcoming
+
+
+def audit_filing_calendar(today: date | None = None) -> dict:
+    """Explain every calendar row: live obligation, or excluded and why.
+
+    Read-only. This is what makes a vanished OVERDUE chip checkable rather
+    than something the user has to take on faith.
+    """
+    return classify_filings(
+        fetch_all("filing_calendar", order="due_date"),
+        fetch_all("nexus_status"),
+        today or date.today(),
+    )
+
+
+def cleanup_filing_calendar(dry_run: bool = True, today: date | None = None) -> dict:
+    """Settle calendar rows that are not real obligations.
+
+    Open rows that fail the eligibility rules are set to `not_required` with
+    the reason recorded in filed_notes, so they stop producing chips and the
+    nightly rebuild does not recreate them (settled periods are preserved).
+
+    Rows are never deleted: the row is the evidence for why a period was
+    dismissed, and `not_required` is reversible where a delete is not.
+    Already-settled rows are left completely alone.
+    """
+    result = audit_filing_calendar(today)
+    stamp = (today or date.today()).isoformat()
+
+    changes = []
+    for row in result["excluded"]:
+        if row["excluded_reason"] == "settled":
+            continue  # already resolved — nothing to do
+        changes.append({
+            "state_code": row.get("state_code"),
+            "period_type": row.get("period_type"),
+            "period_label": row.get("period_label"),
+            "due_date": str(row.get("due_date")),
+            "from_status": row.get("status"),
+            "reason": row["excluded_reason"],
+            "detail": row["excluded_detail"],
+        })
+
+    if not dry_run:
+        for c in changes:
+            update_row(
+                "filing_calendar",
+                {"state_code": c["state_code"],
+                 "period_type": c["period_type"],
+                 "period_label": c["period_label"]},
+                {"status": "not_required",
+                 "filed_notes": f"auto-cleanup {stamp}: {c['reason']} — {c['detail']}"},
+            )
+        if changes:
+            log_audit(
+                action="cleanup_filing_calendar",
+                category="calendar",
+                details={"settled": len(changes),
+                         "reasons": sorted({c["reason"] for c in changes})},
+            )
+
+    return {
+        "dry_run": dry_run,
+        "changed": len(changes),
+        "changes": changes,
+        "still_overdue": len(result["overdue"]),
+        "still_upcoming": len(result["upcoming"]),
+    }
+
+
+def mark_filing_not_required(state_code: str, period_label: str,
+                             reason: str | None = None) -> dict | None:
+    """Mark a period as not owed — a genuine exemption or a false positive.
+
+    The filing_calendar CHECK constraint allows pending/filed/late/not_required
+    only, so both cases land on `not_required` and the user's stated reason is
+    kept in filed_notes rather than invented as a status the DB would reject.
+    """
+    note = reason or "marked not required by user"
+    result = update_row(
+        "filing_calendar",
+        {"state_code": state_code, "period_label": period_label},
+        {"status": "not_required", "filed_notes": note},
+    )
+    if result:
+        log_audit(
+            action="mark_filing_not_required",
+            category="calendar",
+            details={"period_label": period_label, "reason": note},
+            state_code=state_code,
+        )
+    return result
 
 
 def mark_filing_complete(state_code: str, period_label: str,

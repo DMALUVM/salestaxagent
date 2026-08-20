@@ -1121,6 +1121,113 @@ def pnl_validate_cmd(target_date):
     click.echo(f"  Compare to: {v['compare_to']}")
 
 
+@cli.command("filing-audit")
+@click.option("--state", default=None, help="Limit to one state code")
+@click.option("--show-excluded/--no-show-excluded", default=True,
+              help="List rows that are not real obligations, with the reason")
+def filing_audit_cmd(state, show_excluded):
+    """Explain every filing_calendar row: live obligation, or excluded and why.
+
+    Read-only. Sales-tax deadlines require the state to be registered; nexus
+    alone produces register/review actions, never an overdue return.
+    """
+    from datetime import date as _date
+    from src.calendar.filing_calendar import audit_filing_calendar
+
+    r = audit_filing_calendar()
+    today = _date.today()
+
+    def keep(rows):
+        return [x for x in rows if not state or x.get("state_code") == state.upper()]
+
+    overdue, upcoming, excluded = keep(r["overdue"]), keep(r["upcoming"]), keep(r["excluded"])
+
+    click.echo(f"filing_calendar audit — {today} "
+               f"(sales-tax obligations for registered states only)")
+    click.echo(f"  OVERDUE  : {len(overdue)}")
+    click.echo(f"  upcoming : {len(upcoming)}")
+    click.echo(f"  excluded : {len(excluded)}")
+
+    if overdue:
+        click.echo("\n  OVERDUE — registered, past due, not settled:")
+        for x in overdue:
+            click.echo(f"    {x['state_code']} {x['period_label']:<9} "
+                       f"due {x['due_date']}  ({x['days_overdue']}d late)")
+
+    if upcoming:
+        click.echo("\n  Next 5 upcoming:")
+        for x in upcoming[:5]:
+            click.echo(f"    {x['state_code']} {x['period_label']:<9} "
+                       f"due {x['due_date']}  (in {x['days_until_due']}d)")
+
+    if show_excluded and excluded:
+        from collections import Counter
+        click.echo(f"\n  Excluded by reason: "
+                   f"{dict(Counter(x['excluded_reason'] for x in excluded))}")
+        for x in excluded:
+            if x["excluded_reason"] == "settled":
+                continue
+            click.echo(f"    {x['state_code']} {x['period_label']:<9} "
+                       f"{x['period_type']:<12} → {x['excluded_reason']}: "
+                       f"{x['excluded_detail']}")
+
+
+@cli.command("filing-cleanup")
+@click.option("--dry-run/--apply", default=True,
+              help="Dry run by default; --apply writes the changes")
+def filing_cleanup_cmd(dry_run):
+    """Settle calendar rows that are not real obligations.
+
+    Sets them to `not_required` with the reason in filed_notes. Nothing is
+    deleted — the row is the evidence for why a period was dismissed, and the
+    rebuild preserves settled periods so they stay settled.
+    """
+    from src.calendar.filing_calendar import cleanup_filing_calendar
+
+    r = cleanup_filing_calendar(dry_run=dry_run)
+    verb = "would settle" if r["dry_run"] else "settled"
+    click.echo(f"{'DRY RUN — ' if r['dry_run'] else ''}{verb} {r['changed']} row(s)")
+    for c in r["changes"]:
+        click.echo(f"  {c['state_code']} {c['period_label']:<9} {c['period_type']:<12} "
+                   f"due {c['due_date']}  {c['from_status']} → not_required  "
+                   f"({c['reason']}: {c['detail']})")
+    click.echo(f"  remaining: {r['still_overdue']} overdue, "
+               f"{r['still_upcoming']} upcoming")
+    if r["dry_run"] and r["changed"]:
+        click.echo("\n  Re-run with --apply to write these changes.")
+
+
+@cli.command("filing-mark")
+@click.argument("state_code")
+@click.argument("period_label")
+@click.option("--status", type=click.Choice(["filed", "not_required"]),
+              default="filed", help="What to record for this period")
+@click.option("--amount", default=None, type=float, help="Filed amount")
+@click.option("--zero-return", is_flag=True, help="Filed as a zero return")
+@click.option("--notes", default=None, help="Reason or reference")
+def filing_mark_cmd(state_code, period_label, status, amount, zero_return, notes):
+    """Mark one period filed, or not required / dismissed as a false positive.
+
+    A settled period is preserved by the nightly rebuild, so it will not come
+    back as an overdue chip.
+    """
+    from src.calendar.filing_calendar import (
+        mark_filing_complete, mark_filing_not_required,
+    )
+
+    sc = state_code.upper()
+    if status == "filed":
+        r = mark_filing_complete(sc, period_label, amount=amount,
+                                 notes=notes, is_zero_return=zero_return)
+    else:
+        r = mark_filing_not_required(sc, period_label, reason=notes)
+
+    if not r:
+        raise click.ClickException(
+            f"No filing_calendar row for {sc} {period_label}")
+    click.echo(f"{sc} {period_label} → {status}")
+
+
 @cli.command("pnl-sync")
 @click.option("--days", default=30, help="Days to compute")
 @click.option("--no-skus", is_flag=True,

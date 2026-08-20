@@ -6,10 +6,14 @@ its economic nexus threshold (was under, now over on this run).
 """
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from src.config import settings
 from src.db import insert_rows
+
+log = logging.getLogger(__name__)
 
 
 # ── Low-level sender ────────────────────────────────────────
@@ -100,53 +104,50 @@ def send_daily_summary(
 ) -> dict:
     """Send a single consolidated Telegram summary after analysis.
 
-    Sections are included only when they have content.
+    Sections come from src/alerts/digest_sections.py, which is registration-
+    aware: a state the user already registered in is reported as monitoring,
+    never as a "go register" nudge, and filing lines are gated on the same
+    eligibility rules as the dashboard chips.
+
+    The legacy arguments are still accepted so existing callers keep working,
+    but the counts are recomputed from the tables rather than trusted — the
+    old `action_needed` counted every unregistered nexus state and the old
+    overdue count came from a source that ignored last_filed_through.
     """
+    from datetime import date as _date
+
+    from src.alerts.digest_sections import build_sections, render_sections
+    from src.db import fetch_all
+
     parts: list[str] = []
     parts.append("<b>📊 Sales Tax Agent — Daily Summary</b>")
 
-    # ── Physical nexus
-    phys_line = f"📦 Physical nexus: {phys_nexus_count} states"
-    if new_phys_states:
-        phys_line += f" (<b>NEW:</b> {', '.join(new_phys_states)})"
-    parts.append(phys_line)
-
-    # ── Economic nexus
-    if econ_exceeded:
-        exc_list = ", ".join(econ_exceeded[:10])
-        parts.append(f"💰 Economic exceeded: {len(econ_exceeded)} ({exc_list})")
-    if econ_approaching:
-        app_list = ", ".join(econ_approaching[:8])
-        parts.append(f"📈 Approaching: {len(econ_approaching)} ({app_list})")
-    if newly_crossed:
-        parts.append(
-            f"🚨 <b>Newly crossed threshold:</b> {', '.join(newly_crossed)} "
-            f"— see dedicated alert(s)"
+    today = _date.today()
+    try:
+        sections = build_sections(
+            fetch_all("nexus_status"),
+            fetch_all("filing_calendar"),
+            fetch_all("franchise_tax_flags"),
+            today,
+            econ_approaching=econ_approaching,
         )
+        body = render_sections(sections, today)
+        action_needed = len(sections.action_needed_states)
+        overdue_count = len(sections.overdue)
+    except Exception as e:  # never let a summary failure break the run
+        log.warning("Digest sections failed, falling back to counts: %s", str(e)[:200])
+        body = [f"📦 Physical nexus: {phys_nexus_count} states"]
+        if action_needed:
+            body.append(f"\n⚡ <b>Action needed: {action_needed}</b>")
 
-    # ── Franchise flags
-    if critical_flags:
-        flag_items = [f"{f.get('state_code', '?')}" for f in critical_flags[:5]]
-        parts.append(f"🏛️ Critical flags: {', '.join(flag_items)}")
-    if warning_flags:
-        parts.append(f"⚠️ Warning flags: {len(warning_flags)}")
+    # A newly crossed threshold is genuinely new information — keep it loud,
+    # above the standing picture.
+    if new_phys_states:
+        parts.append(f"🆕 <b>New physical nexus:</b> {', '.join(new_phys_states)}")
+    if newly_crossed:
+        parts.append(f"🚨 <b>Newly crossed threshold:</b> {', '.join(newly_crossed)}")
 
-    # ── Filing calendar
-    if overdue_count > 0:
-        parts.append(f"🚨 Overdue filings: {overdue_count}")
-    if upcoming_deadlines:
-        next_items = []
-        for d in upcoming_deadlines[:3]:
-            sc = d.get("state_code", "?")
-            period = d.get("period_label", "?")
-            due = str(d.get("due_date", "?"))
-            days = d.get("days_until_due", "?")
-            next_items.append(f"{sc} {period} ({days}d)")
-        parts.append(f"📅 Next due: {' · '.join(next_items)}")
-
-    # ── Action needed
-    if action_needed > 0:
-        parts.append(f"\n⚡ <b>Action needed: {action_needed} state{'s' if action_needed != 1 else ''}</b>")
+    parts.extend(body)
 
     # ── Footer
     parts.append("\n<i>Monitoring aid — not tax advice.</i>")

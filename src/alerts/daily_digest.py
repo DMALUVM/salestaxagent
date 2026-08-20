@@ -22,70 +22,12 @@ def _month_start(ref: date) -> str:
     return ref.replace(day=1).isoformat()
 
 
-def _compute_next_due(
-    last_filed_through: str | None,
-    frequency: str | None,
-    due_day: int,
-) -> dict | None:
-    """Lightweight next-due computation mirroring the dashboard helper."""
-    if not last_filed_through or not frequency:
-        return None
-
-    from datetime import date as _date
-
-    try:
-        ft = _date.fromisoformat(last_filed_through)
-    except (ValueError, TypeError):
-        return None
-
-    start = ft + timedelta(days=1)
-    y, m = start.year, start.month
-
-    freq = frequency.lower().replace("-", "_")
-
-    if freq == "monthly":
-        # End of that calendar month
-        if m == 12:
-            pe = _date(y + 1, 1, 1) - timedelta(days=1)
-        else:
-            pe = _date(y, m + 1, 1) - timedelta(days=1)
-    elif freq == "quarterly":
-        q_end_month = ((m - 1) // 3 + 1) * 3
-        if q_end_month == 12:
-            pe = _date(y + 1, 1, 1) - timedelta(days=1)
-        else:
-            pe = _date(y, q_end_month + 1, 1) - timedelta(days=1)
-    elif freq in ("semi_annual", "semi-annual"):
-        pe = _date(y, 6, 30) if m <= 6 else _date(y, 12, 31)
-    elif freq == "annual":
-        pe = _date(y, 12, 31)
-    else:
-        # fallback to monthly
-        if m == 12:
-            pe = _date(y + 1, 1, 1) - timedelta(days=1)
-        else:
-            pe = _date(y, m + 1, 1) - timedelta(days=1)
-
-    # Due date = due_day of the month after period end
-    due_month = pe.month + 1
-    due_year = pe.year
-    if due_month > 12:
-        due_month = 1
-        due_year += 1
-    clamped_day = min(due_day, 28)
-    due = _date(due_year, due_month, clamped_day)
-
-    days_until = (due - date.today()).days
-    period_label = f"{pe.strftime('%b %Y')}"
-
-    return {
-        "due_date": due.isoformat(),
-        "days_until": days_until,
-        "period_label": period_label,
-    }
-
-
-# ── Core ───────────────────────────────────────────────────
+# NOTE: _compute_next_due() was removed here. It derived a synthetic "next
+# due" from last_filed_through + frequency, which was a second source of truth
+# alongside filing_calendar. It disagreed with the dashboard and reported any
+# state with an old last_filed_through as permanently OVERDUE. Filing lines now
+# come from src/alerts/digest_sections.py, which uses the same eligibility
+# rules as the dashboard chips and the filing-audit CLI.
 
 
 def build_digest_message(ref_date: date | None = None) -> str | None:
@@ -119,29 +61,14 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
     if total_mtd == 0 and not sales_rows:
         return None
 
-    # ── Next filings for registered states ──
-    nexus_rows = fetch_all("nexus_status")
-    filing_lines: list[str] = []
+    # ── Filings, nexus and flags ──
+    # These used to be derived here from last_filed_through + frequency
+    # arithmetic, a second source of truth that disagreed with both the
+    # dashboard and filing_calendar. It also produced permanent OVERDUE for
+    # any state whose last_filed_through was old. Now the digest renders the
+    # same registration-gated sections everything else uses.
+    from src.alerts.digest_sections import build_sections, render_sections
 
-    for n in nexus_rows:
-        is_reg = n.get("is_registered")
-        if is_reg is not True and is_reg != "true" and is_reg != 1:
-            continue
-        freq = n.get("assigned_frequency")
-        lft = n.get("last_filed_through")
-        if not freq or not lft:
-            continue
-        due_info = _compute_next_due(lft, freq, 20)
-        if due_info and due_info["days_until"] <= 45:
-            sc = n.get("state_code", "??")
-            filing_lines.append(
-                f"  {sc}: {due_info['period_label']} due {due_info['due_date']} "
-                f"({due_info['days_until']}d)"
-            )
-
-    filing_lines.sort()
-
-    # ── Build message ──
     parts: list[str] = []
     parts.append(f"<b>Daily Digest -- {month_label}</b>")
     parts.append("")
@@ -149,30 +76,18 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
     parts.append(f"MTD Amazon:  ${amazon_mtd:,.2f}")
     parts.append(f"MTD Total:   ${total_mtd:,.2f}")
 
-    # Overdue filings
-    overdue_lines: list[str] = []
-    for n in nexus_rows:
-        is_reg = n.get("is_registered")
-        if is_reg is not True and is_reg != "true" and is_reg != 1:
-            continue
-        freq = n.get("assigned_frequency")
-        lft = n.get("last_filed_through")
-        if not freq or not lft:
-            continue
-        due_info = _compute_next_due(lft, freq, 20)
-        if due_info and due_info["days_until"] < 0:
-            sc = n.get("state_code", "??")
-            overdue_lines.append(f"  ⚠️ {sc}: OVERDUE ({abs(due_info['days_until'])}d past due)")
-
-    if overdue_lines:
-        parts.append("")
-        parts.append("<b>OVERDUE:</b>")
-        parts.extend(overdue_lines[:5])
-
-    if filing_lines:
-        parts.append("")
-        parts.append("<b>Upcoming Filings:</b>")
-        parts.extend(filing_lines)
+    try:
+        sections = build_sections(
+            fetch_all("nexus_status"),
+            fetch_all("filing_calendar"),
+            fetch_all("franchise_tax_flags"),
+            ref,
+        )
+        parts.extend(render_sections(sections, ref))
+    except Exception:
+        # A digest that loses its compliance section is still worth sending
+        # for the MTD numbers; a digest that raises is not sent at all.
+        pass
 
     # Stale sync warning
     try:
@@ -200,21 +115,16 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
     except Exception:
         pass
 
-    # C4: Failed job_runs in last 24h
+    # Failed job_runs in last 24h — one line per job that is STILL broken.
+    # Listing every fail row meant a single incident appeared several times and
+    # failures a later run had already recovered kept being reported, which is
+    # how the list stopped being read.
     try:
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-        job_rows = fetch_all("job_runs")
-        cutoff = (_dt.now(_tz.utc) - _td(hours=24)).isoformat()
-        failed_jobs = [
-            j for j in job_rows
-            if j.get("status") == "fail"
-            and (j.get("started_at") or "") > cutoff
-        ]
-        if failed_jobs:
-            parts.append("")
-            parts.append("<b>Failed Jobs (24h):</b>")
-            for j in failed_jobs[:5]:
-                parts.append(f"  ❌ {j['job_name']}: {(j.get('message') or 'unknown')[:80]}")
+        from src.alerts.job_health import current_failures, render_failures
+
+        since = (_dt.now(_tz.utc) - _td(hours=24)).isoformat()
+        parts.extend(render_failures(current_failures(fetch_all("job_runs"), since)))
     except Exception:
         pass
 

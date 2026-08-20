@@ -16,6 +16,7 @@ import type {
 } from "@/lib/types";
 import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
 import { buildLast30Series } from "@/lib/overview-series";
+import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
 import { LoadingState } from "@/components/loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isConfigured } from "@/lib/supabase";
@@ -229,26 +230,28 @@ export default function Pulse() {
     [stateRules, nexus, salesByState, flags],
   );
 
-  const { overdue, actionCount, nextFiling, nextFilingDays, criticalItems } = useMemo(() => {
-    // Registration date lookup — exclude pre-registration periods from overdue
-    const regDateMap = new Map<string, string>();
-    for (const n of (nexus ?? [])) {
-      if (n.registration_date) regDateMap.set(n.state_code, n.registration_date);
-    }
-    function isPostRegistration(f: { state_code: string; period_end?: string; due_date: string }) {
-      const regDate = regDateMap.get(f.state_code);
-      if (!regDate) return true;
-      return (f.period_end ?? f.due_date) >= regDate;
-    }
-
-    const validPending = (filings ?? []).filter(
-      (f) => (f.status === "pending" || f.status === "late") && isPostRegistration(f),
+  const { overdue, upcomingOpen, actionCount, nextFiling, nextFilingDays, criticalItems } = useMemo(() => {
+    // Eligibility lives in lib/filing-eligibility.ts, mirroring
+    // src/calendar/eligibility.py, so these chips, the CLI audit and the
+    // Telegram digest cannot disagree about what "overdue" means.
+    //
+    // This used to filter on status + registration_date alone. It never
+    // checked is_registered, never honoured nexus_status.last_filed_through,
+    // and never noticed a state carrying two overlapping period cadences —
+    // which is how NV showed OVERDUE for 2026-Q1/Q2 that were already covered
+    // by last_filed_through 2026-06-30 and duplicated by a filed 2026-H1.
+    const cls = classifyFilings<FilingEntry & FilingRow>(
+      (filings ?? []) as Array<FilingEntry & FilingRow>,
+      (nexus ?? []) as unknown as NexusRow[],
+      todayStr,
     );
-    const od = validPending.filter((f) => f.due_date < todayStr);
+    const od = cls.overdue;
+    const up = cls.upcoming;
+
     const regNow = recs.filter((r) => r.recommendation === "REGISTER_NOW");
     const ac = od.length + regNow.length;
-    const nf = validPending.find((f) => f.due_date >= todayStr);
-    const nfDays = nf ? Math.ceil((new Date(nf.due_date).getTime() - Date.now()) / 86400000) : null;
+    const nf = up[0];
+    const nfDays = nf ? nf.days_until_due : null;
 
     const items: { label: string; href: string }[] = [];
     for (const r of regNow.slice(0, 3)) {
@@ -256,19 +259,15 @@ export default function Pulse() {
       items.push({ label: `${r.state_code} — register (${reason})`, href: "/registrations" });
     }
     if (od.length > 0) items.push({ label: `${od.length} overdue filing${od.length > 1 ? "s" : ""}`, href: "/liability" });
-    // Due-soon filings (next 14 days)
-    const dueSoon = validPending.filter((f) => {
-      const days = Math.ceil((new Date(f.due_date).getTime() - Date.now()) / 86400000);
-      return days >= 0 && days <= 14;
-    });
+    const dueSoon = up.filter((f) => f.days_until_due >= 0 && f.days_until_due <= 14);
     if (dueSoon.length > 0 && od.length === 0) {
       items.push({ label: `${dueSoon.length} filing${dueSoon.length > 1 ? "s" : ""} due within 14d`, href: "/liability" });
     }
     for (const r of recs.filter((r) => r.recommendation === "REVIEW").slice(0, 2))
       items.push({ label: `${r.state_code} — review with CPA`, href: "/registrations" });
 
-    return { overdue: od, actionCount: ac, nextFiling: nf, nextFilingDays: nfDays, criticalItems: items };
-  }, [filings, recs, todayStr]);
+    return { overdue: od, upcomingOpen: up, actionCount: ac, nextFiling: nf, nextFilingDays: nfDays, criticalItems: items };
+  }, [filings, nexus, recs, todayStr]);
 
   if (!configured) return <SetupPrompt />;
   if (l1 || l2 || l3) return <LoadingState />;
@@ -295,7 +294,8 @@ export default function Pulse() {
   const l7Yoy = pickYoY(sales.bL7, sales.bYoyL7, sales.hasYoyL7);
   const l30Yoy = pickYoY(sales.bL30, sales.bYoyL30, sales.hasYoyL30);
 
-  const upcoming = (filings ?? []).filter((f) => f.status === "pending" && f.due_date >= todayStr).slice(0, 4);
+  // Same eligible set as the chips above — never a raw status filter.
+  const upcoming = upcomingOpen.slice(0, 4);
   const chartMax = Math.max(...sales.last30.map((d) => d.shopify + d.amazon), 1);
 
   return (
