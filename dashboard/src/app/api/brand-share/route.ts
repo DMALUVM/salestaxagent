@@ -9,34 +9,69 @@ import { getServerSupabase } from "@/lib/supabase-server";
  * once per (week, query), never once per ASIN row.
  */
 interface WeeklyRow {
+  id: number;
   week_start: string;
+  week_end: string | null;
   query_normalized: string;
   is_branded: boolean;
   asin_purchases: number | null;
   total_purchases: number | null;
 }
 
+/** Trailing window. 52 weeks of history, never a row cap. */
+const MAX_WEEKS = 52;
+
+// A dashboard must never serve a stale rollup after a sync lands.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const sb = getServerSupabase();
-    const { data, error } = await sb
-      .from("sqp_weekly")
-      .select("week_start,query_normalized,is_branded,asin_purchases,total_purchases")
-      .order("week_start", { ascending: true });
 
-    if (error) {
-      const missing = /sqp_weekly/.test(error.message ?? "");
-      return Response.json({
-        available: false,
-        setupHint: missing
-          ? "Run supabase/migration_sqp_weekly.sql, then `sqp-sync --apply`."
-          : null,
-        error: missing ? null : error.message,
-        weeks: [], opportunities: [], callouts: [],
-      });
+    // 52 weeks back from today, as a week_start floor.
+    const floor = new Date();
+    floor.setUTCDate(floor.getUTCDate() - MAX_WEEKS * 7);
+    const cutoff = floor.toISOString().slice(0, 10);
+
+    // sqp_weekly holds one row per (asin, query, week) — ~600-900 rows for a
+    // single week, so 23 weeks is >15,000 rows. PostgREST caps a response at
+    // 1000, and the previous version of this route asked for everything in one
+    // unpaginated request ordered by week_start ASC. It therefore received the
+    // OLDEST 1000 rows and nothing else: two March weeks, presented as the
+    // whole history while May-August sat in the table unread. Page through it.
+    //
+    // The ORDER BY reaches `id` because hundreds of rows share a week_start;
+    // ordering by the date alone leaves page boundaries undefined, which
+    // silently drops and duplicates rows across pages.
+    let rows: WeeklyRow[] = [];
+    let offset = 0;
+    const pageSize = 1000;
+    for (;;) {
+      const r = await sb
+        .from("sqp_weekly")
+        .select("id,week_start,week_end,query_normalized,is_branded,asin_purchases,total_purchases")
+        .gte("week_start", cutoff)
+        .order("week_start", { ascending: true })
+        .order("id", { ascending: true })
+        .range(offset, offset + pageSize - 1);
+      if (r.error) {
+        const missing = /sqp_weekly/.test(r.error.message ?? "");
+        return Response.json({
+          available: false,
+          setupHint: missing
+            ? "Run supabase/migration_sqp_weekly.sql, then `sqp-sync --apply`."
+            : null,
+          error: missing ? null : r.error.message,
+          weeks: [], opportunities: [], callouts: [],
+        });
+      }
+      const page = (r.data ?? []) as WeeklyRow[];
+      rows = rows.concat(page);
+      if (page.length < pageSize) break;
+      offset += pageSize;
     }
 
-    const rows = (data ?? []) as WeeklyRow[];
     if (!rows.length) {
       return Response.json({
         available: true, weeks: [], opportunities: [], callouts: [],
@@ -46,7 +81,7 @@ export async function GET() {
 
     const n = (v: unknown) => Number(v ?? 0) || 0;
     const weeks = new Map<string, {
-      week_start: string;
+      week_start: string; week_end: string | null;
       brandedPurchases: number; nonBrandedPurchases: number;
       brandedMarket: number; nonBrandedMarket: number;
       brandedQueries: number; nonBrandedQueries: number;
@@ -58,11 +93,13 @@ export async function GET() {
       if (!wk) continue;
       let w = weeks.get(wk);
       if (!w) {
-        w = { week_start: wk, brandedPurchases: 0, nonBrandedPurchases: 0,
+        w = { week_start: wk, week_end: r.week_end ?? null,
+              brandedPurchases: 0, nonBrandedPurchases: 0,
               brandedMarket: 0, nonBrandedMarket: 0,
               brandedQueries: 0, nonBrandedQueries: 0 };
         weeks.set(wk, w);
       }
+      if (!w.week_end && r.week_end) w.week_end = r.week_end;
       if (r.is_branded) w.brandedPurchases += n(r.asin_purchases);
       else w.nonBrandedPurchases += n(r.asin_purchases);
 
@@ -129,7 +166,17 @@ export async function GET() {
         `We convert ${(last.brandedShare * 100).toFixed(0)}% of branded demand vs ${(last.nonBrandedShare * 100).toFixed(1)}% of non-brand demand — a ${(last.brandedShare / last.nonBrandedShare).toFixed(0)}x gap.`);
     }
 
-    return Response.json({ available: true, weeks: series, opportunities, callouts });
+    // rowsRead vs weekCount makes a future truncation visible instead of it
+    // masquerading as a short history, which is exactly how this went unnoticed.
+    return Response.json({
+      available: true, weeks: series, opportunities, callouts,
+      meta: {
+        rowsRead: rows.length, weekCount: series.length,
+        firstWeek: series[0]?.week_start ?? null,
+        lastWeek: series[series.length - 1]?.week_start ?? null,
+        windowWeeks: MAX_WEEKS, cutoff,
+      },
+    });
   } catch (e) {
     return Response.json({
       available: false, weeks: [], opportunities: [], callouts: [],

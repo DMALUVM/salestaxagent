@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
  */
 interface Week {
   week_start: string;
+  week_end: string | null;
   brandedPurchases: number;
   nonBrandedPurchases: number;
   totalPurchases: number;
@@ -33,10 +34,46 @@ interface Payload {
   callouts: string[];
   setupHint?: string | null;
   error?: string | null;
+  meta?: { rowsRead: number; weekCount: number; firstWeek: string | null;
+           lastWeek: string | null } | null;
 }
 
 const pct = (v: number | null | undefined, dp = 0) =>
   v === null || v === undefined ? "—" : `${(v * 100).toFixed(dp)}%`;
+
+/** Trailing window, matched to the API. History is never capped below this. */
+const MAX_WEEKS = 52;
+
+/** A week with no stored data — plotted as an empty column, never skipped. */
+type Column = { week: Week | null; week_start: string };
+
+const addDays = (iso: string, days: number) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * One column per calendar week between the first and last stored week.
+ *
+ * Plotting only the weeks that have rows would silently close a gap: a missing
+ * sync would render as an unbroken trend rather than as the hole it is. Every
+ * week that exists in the payload is plotted (never a "last N" subset), and
+ * anything absent in between becomes an empty column.
+ */
+function toColumns(weeks: Week[]): Column[] {
+  if (!weeks.length) return [];
+  const byStart = new Map(weeks.map((w) => [w.week_start, w]));
+  const out: Column[] = [];
+  const last = weeks[weeks.length - 1].week_start;
+  let cursor = weeks[0].week_start;
+  // Bounded by MAX_WEEKS so a bad date can never spin this loop.
+  for (let i = 0; cursor <= last && i <= MAX_WEEKS + 1; i++) {
+    out.push({ week_start: cursor, week: byStart.get(cursor) ?? null });
+    cursor = addDays(cursor, 7);
+  }
+  return out;
+}
 
 export function BrandShare() {
   const [d, setD] = useState<Payload | null>(null);
@@ -47,9 +84,18 @@ export function BrandShare() {
 
   if (!d) return null;
 
-  const weeks = (d.weeks ?? []).slice(-15);
+  // Every stored week the API returned, chronological, newest last. The old
+  // slice(-15) was a second cap stacked on an already-truncated payload.
+  const weeks = (d.weeks ?? []).slice(-MAX_WEEKS);
   const latest = weeks[weeks.length - 1];
+  const columns = toColumns(weeks);
   const maxMix = Math.max(...weeks.map((w) => w.brandedMix ?? 0), 0.01);
+  // The KPI strip, the bullets and the bars all read this same array, so they
+  // cannot disagree about which week is "latest".
+  const spanLabel = weeks.length
+    ? `${weeks.length} week${weeks.length === 1 ? "" : "s"} · ` +
+      `${weeks[0].week_start} → ${latest?.week_end ?? latest?.week_start}`
+    : "no weeks stored";
 
   return (
     <Card>
@@ -57,7 +103,7 @@ export function BrandShare() {
         <CardTitle className="text-sm font-medium">
           Branded vs non-branded
           <span className="ml-2 font-normal text-muted-foreground">
-            last {weeks.length} weeks · Search Query Performance
+            {spanLabel} · Search Query Performance
           </span>
         </CardTitle>
       </CardHeader>
@@ -128,29 +174,38 @@ export function BrandShare() {
                   box, so the bar escaped the chart and painted over the
                   opportunities table below. overflow-hidden is the second belt:
                   nothing in this chart can ever render outside its own column. */}
-              <div className="flex items-end gap-1 overflow-hidden" style={{ height: 64 }}>
-                {weeks.map((w) => {
+              <div className="flex items-end gap-px overflow-hidden" style={{ height: 64 }}>
+                {columns.map((c) => {
+                  const w = c.week;
                   const fillPct = Math.max(
                     0,
-                    Math.min(100, ((w.brandedMix ?? 0) / maxMix) * 100),
+                    Math.min(100, ((w?.brandedMix ?? 0) / maxMix) * 100),
                   );
                   return (
                     <div
-                      key={w.week_start}
-                      className="relative h-full flex-1 overflow-hidden rounded-t bg-muted"
-                      title={`${w.week_start}: mix ${pct(w.brandedMix)} · branded share ${pct(w.brandedShare)} · non-brand share ${pct(w.nonBrandedShare, 1)}`}
+                      key={c.week_start}
+                      className={`relative h-full flex-1 overflow-hidden rounded-t ${
+                        w ? "bg-muted" : "bg-transparent border-b border-dashed border-muted"
+                      }`}
+                      title={
+                        w
+                          ? `${w.week_start} → ${w.week_end ?? "?"}: mix ${pct(w.brandedMix)} · branded share ${pct(w.brandedShare)} · non-brand share ${pct(w.nonBrandedShare, 1)}`
+                          : `${c.week_start}: no SQP data stored for this week`
+                      }
                     >
-                      <div
-                        className="absolute inset-x-0 bottom-0 rounded-t bg-[#2a78d6] dark:bg-[#3987e5]"
-                        style={{ height: `${fillPct}%` }}
-                      />
+                      {w && (
+                        <div
+                          className="absolute inset-x-0 bottom-0 rounded-t bg-[#2a78d6] dark:bg-[#3987e5]"
+                          style={{ height: `${fillPct}%` }}
+                        />
+                      )}
                     </div>
                   );
                 })}
               </div>
               <div className="mt-1 flex justify-between text-[9px] text-muted-foreground tabular-nums">
                 <span>{weeks[0]?.week_start}</span>
-                <span>{latest?.week_start}</span>
+                <span>{latest?.week_end ?? latest?.week_start}</span>
               </div>
             </div>
 
