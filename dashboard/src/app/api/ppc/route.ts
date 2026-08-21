@@ -490,12 +490,137 @@ export async function GET() {
     ) as Record<RangeKey, ReturnType<typeof placementsFor>>;
 
 
-    // ── Search terms ──
-    let searchTerms: unknown[] = [];
+    // ── Search terms, aggregated ──
+    //
+    // The previous version selected raw DAILY rows with `.limit(300)` and no
+    // date filter, so one term appeared once per (date, campaign, ad group) and
+    // the table read as if a single query were running in a dozen different
+    // campaigns. Totals were also double-counted across days, and the selected
+    // range was ignored entirely.
+    //
+    // Now: one row per search term for the chosen window, carrying its campaign
+    // breakdown for the drilldown and its per-day series for the "by day"
+    // expansion. Rolled up server-side so the client never re-derives totals and
+    // cannot disagree with the KPI cards.
+    interface TermCampaign {
+      campaign_id: string; campaign_name: string;
+      spend: number; sales: number; orders: number; clicks: number;
+      ad_groups: string[];
+    }
+    interface TermDay {
+      date: string; spend: number; sales: number; orders: number; clicks: number;
+    }
+    interface TermAgg {
+      search_term: string;
+      /** Lowercased/collapsed — the join key the organic-rank gate uses. */
+      term_key: string;
+      match_types: string[];
+      spend: number; sales: number; orders: number; clicks: number; impressions: number;
+      campaign_count: number;
+      campaigns: TermCampaign[];
+      days: TermDay[];
+    }
+
+    const termKey = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
+
+    let termRows: Array<Record<string, unknown>> = [];
     try {
-      const r = await sb.from("ads_search_terms_daily").select("*").order("spend", { ascending: false }).limit(300);
-      searchTerms = r.data ?? [];
-    } catch { /* */ }
+      let offset = 0;
+      const pageSize = 1000;
+      while (true) {
+        const r = await sb.from("ads_search_terms_daily")
+          .select("date,search_term,campaign_id,campaign_name,ad_group_name," +
+                  "match_type,spend,sales_14d,orders_14d,clicks,impressions")
+          .gte("date", cutoffs["90d"]).lte("date", asOf)
+          .order("date", { ascending: true })
+          .order("search_term", { ascending: true })
+          .order("campaign_id", { ascending: true })
+          .range(offset, offset + pageSize - 1);
+        if (r.error) throw new Error(r.error.message);
+        // Cast through unknown: the generated row type is not assignable to the
+        // loose Record shape this aggregation uses.
+        const page = (r.data ?? []) as unknown as Array<Record<string, unknown>>;
+        termRows = termRows.concat(page);
+        if (page.length < pageSize) break;
+        offset += pageSize;
+      }
+    } catch (e) {
+      loadErrors.push(`ads_search_terms_daily: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    /** Roll daily rows up to one entry per term for [from .. asOf]. */
+    function termsFor(from: string, limit = 250): TermAgg[] {
+      const byTerm = new Map<string, TermAgg>();
+      const campIdx = new Map<string, Map<string, TermCampaign>>();
+      const dayIdx = new Map<string, Map<string, TermDay>>();
+
+      for (const r of termRows) {
+        const d = String(r.date ?? "");
+        if (!d || d < from || d > asOf) continue;
+        const term = String(r.search_term ?? "");
+        if (!term) continue;
+        const key = termKey(term);
+
+        let t = byTerm.get(key);
+        if (!t) {
+          t = { search_term: term, term_key: key, match_types: [],
+                spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0,
+                campaign_count: 0, campaigns: [], days: [] };
+          byTerm.set(key, t);
+          campIdx.set(key, new Map());
+          dayIdx.set(key, new Map());
+        }
+
+        const spend = Number(r.spend ?? 0);
+        const sales = Number(r.sales_14d ?? 0);
+        const orders = Number(r.orders_14d ?? 0);
+        const clicks = Number(r.clicks ?? 0);
+        t.spend += spend; t.sales += sales; t.orders += orders;
+        t.clicks += clicks; t.impressions += Number(r.impressions ?? 0);
+
+        const mt = String(r.match_type ?? "").toLowerCase();
+        if (mt && !t.match_types.includes(mt)) t.match_types.push(mt);
+
+        // Per campaign — the drilldown. Keyed on campaign_id so two campaigns
+        // sharing a name stay distinct.
+        const cid = String(r.campaign_id ?? "");
+        const camps = campIdx.get(key)!;
+        let c = camps.get(cid);
+        if (!c) {
+          c = { campaign_id: cid, campaign_name: String(r.campaign_name ?? ""),
+                spend: 0, sales: 0, orders: 0, clicks: 0, ad_groups: [] };
+          camps.set(cid, c);
+        }
+        c.spend += spend; c.sales += sales; c.orders += orders; c.clicks += clicks;
+        const ag = String(r.ad_group_name ?? "");
+        if (ag && !c.ad_groups.includes(ag)) c.ad_groups.push(ag);
+
+        // Per day — only revealed when the user expands, never the default view.
+        const days = dayIdx.get(key)!;
+        let dd = days.get(d);
+        if (!dd) { dd = { date: d, spend: 0, sales: 0, orders: 0, clicks: 0 }; days.set(d, dd); }
+        dd.spend += spend; dd.sales += sales; dd.orders += orders; dd.clicks += clicks;
+      }
+
+      const out: TermAgg[] = [];
+      for (const [key, t] of byTerm) {
+        const camps = [...campIdx.get(key)!.values()].sort((a, b) => b.spend - a.spend);
+        t.campaigns = camps;
+        t.campaign_count = camps.length;
+        t.days = [...dayIdx.get(key)!.values()].sort((a, b) => a.date.localeCompare(b.date));
+        t.match_types.sort();
+        out.push(t);
+      }
+      out.sort((a, b) => b.spend - a.spend);
+      return out.slice(0, limit);
+    }
+
+    const searchTermsByRange = Object.fromEntries(
+      RANGE_KEYS.map((k) => [k, termsFor(cutoffs[k])]),
+    ) as Record<RangeKey, TermAgg[]>;
+
+    // Back-compat for any caller still reading the flat list.
+    const searchTerms = searchTermsByRange["7d"];
 
     // ── Recommendations (paginated — a limit here would under-count the
     //    "Actions (N)" badge, which must match what is actually open) ──
@@ -581,7 +706,7 @@ export async function GET() {
       loadErrors,
       rolesByRange, adTypesByRange, spendScopeByRange,
       placementsByRange, placementsAvailable,
-      searchTerms, recommendations,
+      searchTerms, searchTermsByRange, recommendations,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
       targetAcos, targetAcosAsOf,
     });
@@ -596,7 +721,7 @@ export async function GET() {
       rolesByRange: null, adTypesByRange: null, spendScopeByRange: null,
       placementsByRange: null, placementsAvailable: false,
       strategy: null,
-      searchTerms: [], recommendations: [],
+      searchTerms: [], searchTermsByRange: null, recommendations: [],
       asOf: null, today: null, adsThrough: null,
       lastSyncJob: null, lastSyncStatus: null, lastActions: null,
       dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,

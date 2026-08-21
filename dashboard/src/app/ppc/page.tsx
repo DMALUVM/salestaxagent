@@ -92,9 +92,24 @@ const ROLE_BARS: Record<string, string> = {
   ranking: "bg-[#eb6834] dark:bg-[#d95926]",
   defense: "bg-[#4a3aa7] dark:bg-[#9085e9]",
 };
+/** One row per SEARCH TERM for the selected range — not one row per day. */
+interface TermCampaign {
+  campaign_id: string; campaign_name: string;
+  spend: number; sales: number; orders: number; clicks: number;
+  ad_groups: string[];
+}
+interface TermDay {
+  date: string; spend: number; sales: number; orders: number; clicks: number;
+}
 interface SearchTerm {
-  search_term: string; campaign_name: string; keyword: string; match_type: string;
-  spend: number; sales_14d: number; orders_14d: number; clicks: number; acos: number;
+  search_term: string;
+  /** Normalized join key — the same one the organic-rank gate uses. */
+  term_key: string;
+  match_types: string[];
+  spend: number; sales: number; orders: number; clicks: number; impressions: number;
+  campaign_count: number;
+  campaigns: TermCampaign[];
+  days: TermDay[];
 }
 interface Rec {
   id: string; type: string; priority: string; impact_estimate: number;
@@ -127,6 +142,7 @@ interface PPCData {
   placementsByRange: Record<Range, PlacementAgg[]> | null;
   placementsAvailable: boolean;
   searchTerms: SearchTerm[];
+  searchTermsByRange: Record<Range, SearchTerm[]> | null;
   recommendations: Rec[];
   /** Newest finished ads sync of any kind, plus which job and how it ended. */
   lastSync: string | null; lastSyncJob: string | null; lastSyncStatus: string | null;
@@ -483,6 +499,11 @@ export default function PPCPage() {
   const [data, setData] = useState<PPCData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"actions" | "search" | "campaigns">("actions");
+  // Which search term is expanded, and whether its drilldown shows campaigns
+  // (default) or the per-day series. Daily rows are never the default view —
+  // that is what made one term look like a dozen campaigns.
+  const [openTerm, setOpenTerm] = useState<string | null>(null);
+  const [byDay, setByDay] = useState(false);
   const [range, setRange] = useState<Range>("7d");
   const [generating, setGenerating] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -593,7 +614,8 @@ export default function PPCPage() {
   const rangeSeries = series.filter(
     (d) => (!rangeCutoff || d.date >= rangeCutoff) && (!asOf || d.date <= asOf)
   );
-  const searchTerms = data?.searchTerms ?? [];
+  // Aggregated for the SELECTED range, so the table agrees with the KPI cards.
+  const searchTerms = data?.searchTermsByRange?.[range] ?? data?.searchTerms ?? [];
   // Priority first, then dollars — same order the exported plan numbers them
   // in, so row 1 on screen is action 1 in the .md. P0 is "money burning now".
   const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
@@ -620,7 +642,9 @@ export default function PPCPage() {
     (dataDays > 0 && dataDays < rangeDays ? ` · ${dataDays} with data` : "");
   const hasData = series.length > 0 || searchTerms.length > 0;
 
-  const wastedTotal = searchTerms.filter((s) => s.orders_14d === 0).reduce((sum, s) => sum + Number(s.spend ?? 0), 0);
+  // Rolled-up rows, so a term is counted once rather than once per day.
+  const wastedTotal = searchTerms.filter((s) => s.orders === 0)
+    .reduce((sum, s) => sum + Number(s.spend ?? 0), 0);
 
   // Format last sync
   const stamp = (iso: string) =>
@@ -1120,7 +1144,7 @@ export default function PPCPage() {
                 <div>
                   <p className="font-semibold text-red-600">${fmtD(wastedTotal)} wasted</p>
                   <p className="text-xs text-muted-foreground">
-                    {searchTerms.filter((s) => s.orders_14d === 0 && s.spend >= 5).length} terms with $5+ spend, 0 orders
+                    {searchTerms.filter((s) => s.orders === 0 && s.spend >= 5).length} terms with $5+ spend, 0 orders
                   </p>
                 </div>
               </CardContent>
@@ -1303,8 +1327,8 @@ export default function PPCPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Search Term</TableHead>
-                      <TableHead>Campaign</TableHead>
-                      <TableHead>Match</TableHead>
+                      <TableHead className="w-32">Campaigns</TableHead>
+                      <TableHead className="w-28">Match</TableHead>
                       <TableHead className="text-right">Spend</TableHead>
                       <TableHead className="text-right">Sales</TableHead>
                       <TableHead className="text-right">Orders</TableHead>
@@ -1312,24 +1336,157 @@ export default function PPCPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {searchTerms.slice(0, 50).map((s, i) => (
-                      <TableRow key={i} className={s.orders_14d === 0 && s.spend > 5 ? "bg-red-50/50 dark:bg-red-950/20" : ""}>
-                        <TableCell className="text-xs font-medium max-w-[200px] truncate">{s.search_term}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground truncate max-w-[150px]">{s.campaign_name}</TableCell>
-                        <TableCell className="text-xs">{s.match_type}</TableCell>
-                        <TableCell className="text-right tabular-nums">${fmtD(s.spend)}</TableCell>
-                        <TableCell className="text-right tabular-nums">${fmtD(s.sales_14d)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.orders_14d}</TableCell>
-                        <TableCell className={`text-right tabular-nums ${s.acos > 35 ? "text-red-500" : s.acos > 25 ? "text-amber-500" : "text-emerald-500"}`}>
-                          {s.acos > 0 ? `${s.acos.toFixed(0)}%` : "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {searchTerms.slice(0, 50).map((s) => {
+                      const open = openTerm === s.term_key;
+                      const acos = s.sales > 0 ? (s.spend / s.sales) * 100 : 0;
+                      const waste = s.orders === 0 && s.spend > 5;
+                      return (
+                        <Fragment key={s.term_key}>
+                          <TableRow
+                            className={`cursor-pointer ${waste ? "bg-red-50/50 dark:bg-red-950/20" : ""}`}
+                            onClick={() => { setOpenTerm(open ? null : s.term_key); setByDay(false); }}
+                          >
+                            <TableCell className="text-xs font-medium max-w-[260px]">
+                              <div className="flex items-start gap-1.5">
+                                <ChevronRight className={`mt-0.5 h-3 w-3 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+                                <span className="truncate">{s.search_term}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {/* Multi-campaign overlap is the thing worth
+                                  noticing: the same query bidding against
+                                  itself in several campaigns. */}
+                              {s.campaign_count > 1 ? (
+                                <Badge variant="outline" className="text-[9px] whitespace-nowrap bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900">
+                                  {s.campaign_count} campaigns
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground truncate block max-w-[8rem]">
+                                  {s.campaigns[0]?.campaign_name ?? "—"}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {s.match_types.join(", ") || "—"}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">${fmtD(s.spend)}</TableCell>
+                            <TableCell className="text-right tabular-nums">${fmtD(s.sales)}</TableCell>
+                            <TableCell className="text-right tabular-nums">{s.orders}</TableCell>
+                            <TableCell className={`text-right tabular-nums ${acos > 35 ? "text-red-500" : acos > 25 ? "text-amber-500" : "text-emerald-500"}`}>
+                              {acos > 0 ? `${acos.toFixed(0)}%` : "—"}
+                            </TableCell>
+                          </TableRow>
+
+                          {open && (
+                            <TableRow className="bg-muted/40 hover:bg-muted/40">
+                              <TableCell colSpan={7} className="p-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <p className="text-xs font-medium">
+                                    &ldquo;{s.search_term}&rdquo; — {s.campaign_count} campaign
+                                    {s.campaign_count === 1 ? "" : "s"} over {windowLabel(kpiDays ?? 0)}
+                                  </p>
+                                  <Button variant="ghost" size="sm" className="text-xs"
+                                          onClick={(e) => { e.stopPropagation(); setByDay(!byDay); }}>
+                                    {byDay ? "Show by campaign" : "Show by report period"}
+                                  </Button>
+                                </div>
+
+                                {!byDay ? (
+                                  <table className="mt-2 w-full text-xs">
+                                    <thead>
+                                      <tr className="text-left text-muted-foreground">
+                                        <th className="py-1 pr-3">Campaign</th>
+                                        <th className="py-1 pr-3">Ad groups</th>
+                                        <th className="py-1 pr-3 text-right">Spend</th>
+                                        <th className="py-1 pr-3 text-right">Sales</th>
+                                        <th className="py-1 pr-3 text-right">Orders</th>
+                                        <th className="py-1 pr-3 text-right">ACOS</th>
+                                        <th className="py-1">Campaign ID</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {s.campaigns.map((c) => {
+                                        const ca = c.sales > 0 ? (c.spend / c.sales) * 100 : 0;
+                                        return (
+                                          <tr key={c.campaign_id} className="border-t align-top">
+                                            <td className="py-1 pr-3">{c.campaign_name || "—"}</td>
+                                            <td className="py-1 pr-3 text-muted-foreground">
+                                              {c.ad_groups.join(", ") || "—"}
+                                            </td>
+                                            <td className="py-1 pr-3 text-right tabular-nums">${fmtD(c.spend)}</td>
+                                            <td className="py-1 pr-3 text-right tabular-nums">${fmtD(c.sales)}</td>
+                                            <td className="py-1 pr-3 text-right tabular-nums">{c.orders}</td>
+                                            <td className={`py-1 pr-3 text-right tabular-nums ${ca > 35 ? "text-red-500" : ""}`}>
+                                              {ca > 0 ? `${ca.toFixed(0)}%` : "—"}
+                                            </td>
+                                            <td className="py-1">
+                                              {/* Copy-friendly: Campaign Manager
+                                                  search takes the name, and the
+                                                  id disambiguates duplicates. */}
+                                              <button
+                                                type="button"
+                                                className="font-mono text-[10px] text-blue-600 hover:underline dark:text-blue-400"
+                                                title="Copy campaign name + ID for the Ads console"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  navigator.clipboard?.writeText(
+                                                    `${c.campaign_name}\t${c.campaign_id}`);
+                                                }}
+                                              >
+                                                {c.campaign_id || "—"} ⧉
+                                              </button>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                ) : (
+                                  <>
+                                  <p className="mt-2 text-[10px] text-muted-foreground">
+                                    Search-term reports are pulled with
+                                    <code className="mx-1">timeUnit=SUMMARY</code>
+                                    per chunk, so each row is one reporting period
+                                    stamped with its start date — Amazon does not
+                                    publish true per-day search-term grain here.
+                                  </p>
+                                  <table className="mt-1 w-full text-xs">
+                                    <thead>
+                                      <tr className="text-left text-muted-foreground">
+                                        <th className="py-1 pr-3">Period start</th>
+                                        <th className="py-1 pr-3 text-right">Spend</th>
+                                        <th className="py-1 pr-3 text-right">Sales</th>
+                                        <th className="py-1 pr-3 text-right">Orders</th>
+                                        <th className="py-1 text-right">Clicks</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {s.days.map((d) => (
+                                        <tr key={d.date} className="border-t">
+                                          <td className="py-1 pr-3 tabular-nums">{d.date}</td>
+                                          <td className="py-1 pr-3 text-right tabular-nums">${fmtD(d.spend)}</td>
+                                          <td className="py-1 pr-3 text-right tabular-nums">${fmtD(d.sales)}</td>
+                                          <td className="py-1 pr-3 text-right tabular-nums">{d.orders}</td>
+                                          <td className="py-1 text-right tabular-nums">{d.clicks}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                  </>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>
             </Card>
           )}
+
+          {tab === "actions" && <ImpactPanel />}
 
           {/* Campaigns */}
           {tab === "campaigns" && (
