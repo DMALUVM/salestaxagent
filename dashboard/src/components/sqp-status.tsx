@@ -19,6 +19,9 @@ interface Status {
   bySource?: Record<string, number>;
   asins?: string[];
   newestAsOf?: string | null;
+  oldestAsOf?: string | null;
+  weeksStored?: number;
+  weekEnds?: string[];
   ageDays?: number | null;
   stale?: boolean;
   setupHint?: string | null;
@@ -109,6 +112,24 @@ export function SqpStatus() {
                 </span>
               )}
             </div>
+
+            {(s.weeksStored ?? 0) > 0 && (
+              <p className="text-[10px] text-muted-foreground">
+                <span className="font-medium">{s.weeksStored}</span> week
+                {s.weeksStored === 1 ? "" : "s"} stored
+                {s.oldestAsOf && s.newestAsOf
+                  ? ` (${s.oldestAsOf} → ${s.newestAsOf})`
+                  : ""}
+                {(s.weeksStored ?? 0) < 8 && (
+                  <>
+                    {" "}— trends need more history. Run{" "}
+                    <code>sqp-backfill --max-weeks 4 --apply</code> on the agent,
+                    about 4 weeks/day; SQP quota is tight so there is no
+                    one-click bulk load.
+                  </>
+                )}
+              </p>
+            )}
 
             <p className="text-[10px] text-muted-foreground">
               sources: {Object.entries(s.bySource ?? {}).map(([k, v]) => `${k} ${v}`).join(" · ") || "none"}

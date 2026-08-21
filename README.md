@@ -432,6 +432,49 @@ recent complete week returns nothing, the sync retries the **previous** complete
 period once and reports which period actually supplied the data. An empty week
 is therefore never mistaken for a broken pipeline.
 
+### Ads spend: as-of rule and scope
+
+Every ads window on `/ppc` is **closed days ending yesterday in
+America/Los_Angeles** — never a rolling window that includes today. Today is
+still accruing: including it would make every KPI drift downward through the
+day and never match a console figure pulled at a different hour. "7D" therefore
+means seven whole closed LA days.
+
+Two reconciliation rules, both checkable with one command:
+
+```bash
+python -m src.main ads-spend-audit --expect-spend 3010.34
+```
+
+1. **Header spend covers all ad products the account runs** — Sponsored
+   Products **+ Brands + Display**, matching what Seller Central totals. If
+   SB/SD rows are missing for a window, `/ppc` says so under the KPI strip
+   rather than quietly reporting an SP-only number as the total.
+2. **Placement data is Sponsored Products only.** Amazon publishes placement
+   breakdowns for SP campaigns; there is no SB/SD equivalent. So placement rows
+   legitimately sum to less than the header, and the difference is shown as an
+   explicit **unallocated** figure instead of leaving two panels disagreeing.
+
+Worked example (7 closed days ending 2026-08-20):
+
+| | |
+|---|---|
+| Console | $3,010.34 |
+| Agent total | $3,010.34 (SP $2,800.73 + SB $203.85 + SD $5.76) |
+| Placement rows | $2,800.73 |
+| Unallocated (SB/SD, no placement data) | $209.61 |
+
+**Re-sync once** if the header looks low:
+
+```bash
+python -m src.main ads-sync --days 7 --campaigns-only --ad-products SB,SD
+python -m src.main ads-spend-audit --expect-spend <console figure>
+```
+
+SB/SD reports on this account intermittently sit in PENDING; when they do, the
+sync soft-fails, SP data is kept, and the header note makes the omission
+visible rather than silent.
+
 ### Report quota
 
 SQP report requests are tightly rate-limited. Three ad-hoc `sqp-sync` runs in
@@ -442,6 +485,51 @@ and prefer the *Sync SQP now* button only when you actually need fresh data.
 A quota error is detected explicitly and reported as a rate limit, not as an
 empty period, and it suppresses the previous-period retry (retrying would spend
 the quota that just ran out).
+
+### Multi-week backfill (for trends)
+
+The weekly job only moves forward. Branded-vs-non-branded trends and rank-band
+history need several weeks, so there is a separate backfill that walks
+completed Sun–Sat weeks **backward, one report request at a time**.
+
+```bash
+python -m src.main sqp-backfill --max-weeks 4              # dry run: lists weeks
+python -m src.main sqp-backfill --max-weeks 4 --apply      # fetches them
+python -m src.main sqp-backfill --from 2026-06-01 --to 2026-08-15 --apply
+```
+
+**Recommended cadence: about 4 weeks per day until caught up.** This is not an
+instant history load, and that is deliberate — SQP report requests are tightly
+rate-limited and three ad-hoc calls in quick succession already produced
+`QuotaExceeded`.
+
+Safety properties, all test-pinned:
+
+| Flag | Default | Why |
+|---|---|---|
+| `--max-weeks` | 4 | one invocation cannot burn the day's quota |
+| `--sleep` | 90s | spacing between report requests |
+| `--resume/--no-resume` | resume | weeks already stored are skipped, not re-fetched |
+| `--dry-run/--apply` | dry-run | you see the week list before spending quota |
+| `--refresh-actions` | off | rebuilds recommendations **once at the end**, not per week |
+
+On `QuotaExceeded` the walk **stops immediately** — it never retries the failed
+week, because retrying into a rate limit is what turns one refusal into a
+lockout. Weeks already written are kept, and the command prints when and how to
+resume. Re-running the identical command skips completed weeks automatically.
+
+`--to` is clamped to the last complete week; an in-progress week is never
+requested.
+
+**Progress is derived from the data**, not from a stored cursor: the backfill
+reads which `as_of` / `week_end` values already exist in
+`keyword_organic_rank` and `sqp_weekly`. A cursor can drift out of sync after a
+partial write or a manual delete — the rows cannot.
+
+**Where to run it:** on the Mac Mini agent (it needs SP-API credentials and can
+run for minutes). Not from the dashboard — the /ppc card shows how many weeks
+are stored and suggests the command, but there is deliberately no one-click
+bulk-load button that could burn the quota in a single tap.
 
 ### Permissions checklist
 

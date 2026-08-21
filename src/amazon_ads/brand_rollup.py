@@ -32,6 +32,20 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 
+# A single impression on a 20,000-purchase query is not "presence". Requiring a
+# meaningful impression share is what separates queries we genuinely compete on
+# from ones our ASIN merely brushed against. 1% is a judgement call, not a
+# derived constant — tune it with the operator rather than treating it as fact.
+PRESENCE_MIN_IMPRESSION_SHARE = 0.01
+
+
+def _f(v) -> float:
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _i(v) -> int:
     try:
         return int(v or 0)
@@ -48,6 +62,15 @@ class Bucket:
     impressions: int = 0
     market_impressions: int = 0
     queries: int = 0
+    # Same figures restricted to queries where we actually had presence.
+    # Without this the denominator is dominated by huge queries our ASIN
+    # merely brushed against ("baking soda", "aquaphor", competitor brands) —
+    # 73% of the live non-brand denominator came from queries with ~0%
+    # impression share and zero sales, which makes the headline share number
+    # look catastrophic for reasons that have nothing to do with performance.
+    market_purchases_present: int = 0
+    purchases_present: int = 0
+    queries_present: int = 0
 
     @property
     def share(self) -> float | None:
@@ -55,6 +78,17 @@ class Bucket:
         if self.market_purchases <= 0:
             return None
         return self.purchases / self.market_purchases
+
+    @property
+    def share_present(self) -> float | None:
+        """Share on queries where we actually appeared (impression share > 0).
+
+        The business-meaningful figure. `share` is the raw aggregate and is
+        reported alongside so the scoping is visible rather than hidden.
+        """
+        if self.market_purchases_present <= 0:
+            return None
+        return self.purchases_present / self.market_purchases_present
 
     @property
     def click_share(self) -> float | None:
@@ -96,6 +130,9 @@ class WeekRollup:
             "non_branded_mix": self.non_branded_mix,
             "branded_share": self.branded.share,
             "non_branded_share": self.non_branded.share,
+            "branded_share_present": self.branded.share_present,
+            "non_branded_share_present": self.non_branded.share_present,
+            "non_branded_queries_present": self.non_branded.queries_present,
             "branded_queries": self.branded.queries,
             "non_branded_queries": self.non_branded.queries,
         }
@@ -126,6 +163,10 @@ def rollup_weeks(rows: list[dict]) -> list[WeekRollup]:
         b.clicks += _i(r.get("asin_clicks"))
         b.impressions += _i(r.get("asin_impressions"))
 
+        present = _f(r.get("impression_share")) >= PRESENCE_MIN_IMPRESSION_SHARE
+        if present:
+            b.purchases_present += _i(r.get("asin_purchases"))
+
         # Market totals are a property of the QUERY, not of our ASIN. Counting
         # them once per (week, query) is what keeps share from collapsing when
         # a query is served by several of our ASINs.
@@ -134,6 +175,9 @@ def rollup_weeks(rows: list[dict]) -> list[WeekRollup]:
             seen_market.add(key)
             b.queries += 1
             b.market_purchases += _i(r.get("total_purchases"))
+            if present:
+                b.queries_present += 1
+                b.market_purchases_present += _i(r.get("total_purchases"))
             b.market_clicks += _i(r.get("total_clicks"))
             b.market_impressions += _i(r.get("total_impressions"))
 

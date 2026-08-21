@@ -116,6 +116,10 @@ interface PPCData {
   /** One bucket per range — the server owns the bounds for both panels. */
   rolesByRange: Record<Range, RoleBucket> | null;
   adTypesByRange: Record<Range, AdTypeAgg[]> | null;
+  spendScopeByRange: Record<Range, {
+    total: number; placementSpend: number; unallocated: number;
+    productsPresent: string[]; productsMissing: string[];
+  }> | null;
   placementsByRange: Record<Range, PlacementAgg[]> | null;
   placementsAvailable: boolean;
   searchTerms: SearchTerm[];
@@ -598,6 +602,7 @@ export default function PPCPage() {
   // Both panels read the bucket for the selected range — no client-side date math.
   const roleBucket = data?.rolesByRange?.[range] ?? null;
   const adTypes = data?.adTypesByRange?.[range] ?? [];
+  const spendScope = data?.spendScopeByRange?.[range] ?? null;
   const roles = roleBucket?.rows ?? [];
   const roleOther = roleBucket?.other ?? null;
   const recon = roleBucket?.reconciliation ?? null;
@@ -785,6 +790,33 @@ export default function PPCPage() {
           <BrandShare />
 
           <SqpStatus />
+
+          {spendScope && spendScope.productsMissing.length > 0 && (
+            <p className="text-[10px] text-amber-700 dark:text-amber-400">
+              SPEND covers{" "}
+              <span className="font-medium">
+                {spendScope.productsPresent.join(" + ") || "no ad products"}
+              </span>{" "}
+              only — no {spendScope.productsMissing.join("/")} rows are stored for
+              this window. Seller Central totals span Sponsored Products, Brands
+              and Display, so the console will read higher. Run{" "}
+              <code>ads-spend-audit --expect-spend &lt;console&gt;</code> to see
+              the gap attributed.
+            </p>
+          )}
+          {spendScope && Math.abs(spendScope.unallocated) >= 0.01 && (
+            <p className="text-[10px] text-muted-foreground">
+              Placement rows account for ${spendScope.placementSpend.toLocaleString(
+                undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+              of ${spendScope.total.toLocaleString(
+                undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })};{" "}
+              <span className="font-medium">
+                ${Math.abs(spendScope.unallocated).toLocaleString(
+                  undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} unallocated
+              </span>{" "}
+              (placement data is Sponsored Products only).
+            </p>
+          )}
 
           {/* Spend by ad product — the KPI cards above are SP+SB+SD combined,
               which is what the Amazon Ads console totals. This says which

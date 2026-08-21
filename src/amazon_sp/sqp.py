@@ -568,3 +568,170 @@ def _upsert_weekly(rows: list[dict]) -> int:
                      "to enable the branded market-share tracker")
             return 0
         raise
+
+
+# ── Multi-week backfill ─────────────────────────────────────────
+#
+# Trends need history, but SQP report requests are tightly rate-limited — three
+# ad-hoc calls in quick succession already produced QuotaExceeded once. So the
+# backfill is deliberately slow and small by default: it walks one completed
+# week at a time, sleeps between requests, caps how many weeks a single
+# invocation may spend, and stops dead on a quota error rather than retrying.
+#
+# Progress is DERIVED from the data (which as_of dates already have rows)
+# rather than kept in a cursor. A cursor can drift out of sync with reality
+# after a partial write or a manual delete; the data cannot.
+
+DEFAULT_BACKFILL_SLEEP_SECS = 90
+DEFAULT_MAX_WEEKS = 4
+
+
+def completed_weeks(count: int, ref: date | None = None,
+                    until: date | None = None) -> list[tuple[date, date]]:
+    """`count` completed Sun-Sat weeks, newest first.
+
+    Never includes the in-progress week: each entry is derived from
+    week_bounds(), which by construction returns only closed weeks.
+    """
+    out: list[tuple[date, date]] = []
+    cursor = ref or date.today()
+    for _ in range(max(0, count)):
+        start, end = week_bounds(cursor)
+        if until and end < until:
+            break
+        out.append((start, end))
+        cursor = start          # next iteration lands on the week before
+    return out
+
+
+def weeks_in_range(start: date, end: date) -> list[tuple[date, date]]:
+    """Completed weeks whose end falls within [start, end], newest first."""
+    out: list[tuple[date, date]] = []
+    cursor = end + timedelta(days=1)
+    while True:
+        ws, we = week_bounds(cursor)
+        if we < start:
+            break
+        if we <= end:
+            out.append((ws, we))
+        cursor = ws
+        if len(out) > 260:      # five years — a guard, not a real limit
+            break
+    return out
+
+
+def stored_week_ends() -> set[str]:
+    """as_of dates already present, so a re-run skips work instead of spending quota."""
+    from src.db import get_client
+
+    found: set[str] = set()
+    client = get_client()
+    for table, col in (("keyword_organic_rank", "as_of"), ("sqp_weekly", "week_end")):
+        try:
+            offset = 0
+            while True:
+                page = (client.table(table).select(col)
+                        .range(offset, offset + 999).execute().data) or []
+                for r in page:
+                    if r.get(col):
+                        found.add(str(r[col]))
+                if len(page) < 1000:
+                    break
+                offset += 1000
+        except Exception:
+            continue        # table absent — nothing stored, nothing to skip
+    return found
+
+
+def backfill(max_weeks: int = DEFAULT_MAX_WEEKS,
+             from_date: date | None = None, to_date: date | None = None,
+             sleep_secs: int = DEFAULT_BACKFILL_SLEEP_SECS,
+             resume: bool = True, dry_run: bool = False,
+             asins: list[str] | None = None,
+             on_progress=None) -> dict:
+    """Walk completed weeks backward, one report request at a time.
+
+    Stops immediately on QuotaExceeded — retrying is what turns one rate limit
+    into a lockout, and the weeks already written are not lost.
+    """
+    import time as _time
+
+    from src.amazon_ads.organic_rank import load_config, upsert_ranks
+
+    say = on_progress or (lambda _m: None)
+    cfg = load_config()
+    auto = cfg.get("sqp_auto") or {}
+    resolution = resolve_asins(
+        asins if asins is not None else (auto.get("asins") or []))
+    use_asins = resolution["asins"]
+
+    if from_date or to_date:
+        # `to` is clamped to the last complete week: an in-progress week is
+        # never requestable and asking for it just wastes a report slot.
+        _, last_complete = week_bounds(date.today())
+        hi = min(to_date or last_complete, last_complete)
+        lo = from_date or (hi - timedelta(days=7 * max_weeks))
+        candidates = weeks_in_range(lo, hi)
+    else:
+        candidates = completed_weeks(max_weeks * 4)   # room to skip stored weeks
+
+    already = stored_week_ends() if resume else set()
+    todo = [(s, e) for s, e in candidates if e.isoformat() not in already]
+    skipped = [e.isoformat() for _, e in candidates if e.isoformat() in already]
+    planned = todo[:max_weeks]
+
+    result = {
+        "planned": [(s.isoformat(), e.isoformat()) for s, e in planned],
+        "skipped_existing": skipped,
+        "asins": use_asins, "asin_resolution": resolution,
+        "weeks_done": [], "weeks_failed": [], "rows_written": 0,
+        "weekly_written": 0, "quota_exceeded": False, "dry_run": dry_run,
+        "sleep_secs": sleep_secs,
+    }
+
+    if dry_run or not planned:
+        return result
+
+    for i, (ws, we) in enumerate(planned, 1):
+        if i > 1:
+            say(f"    sleeping {sleep_secs}s before the next report request "
+                f"(SQP quota is tight)")
+            _time.sleep(sleep_secs)
+
+        say(f"  week {i}/{len(planned)}: {ws} → {we}")
+        try:
+            r = fetch_sqp(use_asins, period="WEEK", ref=we + timedelta(days=1))
+        except BrandAnalyticsRoleError:
+            raise
+        except Exception as e:
+            result["weeks_failed"].append({"week_end": we.isoformat(),
+                                           "error": str(e)[:200]})
+            say(f"    failed: {str(e)[:140]}")
+            continue
+
+        if any("QuotaExceeded" in str(x) for x in (r.get("errors") or [])):
+            result["quota_exceeded"] = True
+            result["resume_hint"] = (
+                f"QuotaExceeded at week {ws}→{we}. {len(result['weeks_done'])} "
+                f"week(s) written this run. Wait for the quota window to reset "
+                f"(hours, not minutes), then re-run the same command — completed "
+                f"weeks are skipped automatically.")
+            say(f"    QUOTA EXCEEDED — stopping cleanly. {result['resume_hint']}")
+            break
+
+        if not r.get("rows"):
+            result["weeks_failed"].append({"week_end": we.isoformat(),
+                                           "error": "no rows returned"})
+            say("    no rows for this week")
+            continue
+
+        written = upsert_ranks(r["rows"])
+        weekly = _upsert_weekly(r.get("weekly") or [])
+        result["rows_written"] += written
+        result["weekly_written"] += weekly
+        result["weeks_done"].append({"week_start": ws.isoformat(),
+                                     "week_end": we.isoformat(),
+                                     "rows": written, "weekly": weekly})
+        say(f"    {written} rank row(s), {weekly} weekly row(s)")
+
+    return result

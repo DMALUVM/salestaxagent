@@ -758,6 +758,99 @@ def ads_actions_cmd(target_acos, days):
                       "target_basis": target_basis, "days": days})
 
 
+@cli.command("ads-spend-audit")
+@click.option("--days", default=7, show_default=True, help="Closed days to audit")
+@click.option("--expect-spend", default=None, type=float,
+              help="Seller Central console total for the same window")
+def ads_spend_audit_cmd(days, expect_spend):
+    """Reconcile 7D spend: by day, by ad product, and placement vs total.
+
+    Three numbers should agree: the /ppc header, the placement panel, and the
+    console. This prints all three inputs so a gap is attributable instead of
+    mysterious.
+    """
+    from collections import defaultdict
+
+    from src.db import get_client
+    from src.rules import amazon_as_of, window_start
+
+    client = get_client()
+    asof = amazon_as_of()
+    start = window_start(asof, days)
+
+    def page(table, cols):
+        rows, offset = [], 0
+        while True:
+            p = (client.table(table).select(cols)
+                 .gte("date", str(start)).lte("date", str(asof))
+                 .order("date").range(offset, offset + 999).execute().data) or []
+            rows.extend(p)
+            if len(p) < 1000:
+                break
+            offset += 1000
+        return rows
+
+    click.echo(f"Ads spend audit — {days} closed day(s) {start} → {asof}")
+    click.echo("  as-of rule: yesterday in America/Los_Angeles. Today is still "
+               "accruing and is deliberately excluded from every window.")
+
+    camp = page("ads_campaigns_daily", "date,campaign_type,spend,clicks")
+    total = sum(float(r["spend"] or 0) for r in camp)
+
+    by_type = defaultdict(float)
+    for r in camp:
+        by_type[(r.get("campaign_type") or "SP").upper()] += float(r["spend"] or 0)
+    by_day = defaultdict(float)
+    for r in camp:
+        by_day[r["date"]] += float(r["spend"] or 0)
+
+    click.echo(f"\n  ads_campaigns_daily TOTAL: ${total:,.2f}  ({len(camp)} rows)")
+    click.echo("  by day:")
+    for d in sorted(by_day):
+        click.echo(f"    {d}  ${by_day[d]:>9,.2f}")
+    click.echo("  by ad product:")
+    for t in ("SP", "SB", "SD"):
+        v = by_type.get(t)
+        click.echo(f"    {t}  " + (f"${v:>9,.2f}" if v is not None
+                                   else "        —   (no rows stored)"))
+
+    try:
+        pl = page("ads_placement_daily", "date,placement,spend")
+        pl_total = sum(float(r["spend"] or 0) for r in pl)
+        click.echo(f"\n  ads_placement_daily TOTAL: ${pl_total:,.2f}  ({len(pl)} rows)")
+        by_pl = defaultdict(float)
+        for r in pl:
+            by_pl[r.get("placement") or "Unknown"] += float(r["spend"] or 0)
+        for k, v in sorted(by_pl.items(), key=lambda x: -x[1]):
+            click.echo(f"    {k:<28} ${v:>9,.2f}")
+        diff = total - pl_total
+        if abs(diff) < 0.01:
+            click.echo("    placement sum == campaign total ✓")
+        else:
+            click.echo(f"    UNALLOCATED: ${diff:,.2f} — placements do not sum to "
+                       f"the campaign total. Placement data is Sponsored Products "
+                       f"only, so SB/SD spend can never appear here.")
+    except Exception as e:
+        click.echo(f"\n  placement table unavailable: {str(e)[:120]}")
+
+    if expect_spend is not None:
+        gap = total - float(expect_spend)
+        pct = abs(gap) / float(expect_spend) * 100 if expect_spend else 0
+        click.echo(f"\n  console  : ${float(expect_spend):,.2f}")
+        click.echo(f"  agent    : ${total:,.2f}")
+        click.echo(f"  gap      : ${gap:+,.2f}  ({pct:.1f}%)")
+        missing = [t for t in ("SB", "SD") if t not in by_type]
+        if missing and gap < 0:
+            click.echo(f"  LIKELY CAUSE: no {'/'.join(missing)} rows stored. The "
+                       f"console total spans Sponsored Products + Brands + "
+                       f"Display; this agent has only "
+                       f"{'/'.join(sorted(by_type))}. Run "
+                       f"`ads-sync --days {days} --campaigns-only` and check "
+                       f"whether the SB/SD reports complete.")
+
+    click.echo("\n  Monitoring aid — Amazon remains the source of truth for spend.")
+
+
 @cli.command("ads-reconcile")
 @click.option("--date", "target_date", default=None,
               help="Day to reconcile (YYYY-MM-DD). Defaults to the LA as-of day.")
@@ -1380,13 +1473,18 @@ def brand_share_cmd(weeks, opportunities):
                f"({series[0].week_start} → {series[-1].week_start})")
     click.echo("")
     click.echo(f"  {'week':<12}{'branded':>9}{'non-brand':>11}{'mix':>7}"
-               f"{'b.share':>9}{'nb.share':>10}")
+               f"{'nb.share*':>11}{'nb.share(all)':>15}")
     for w in series:
         mix = f"{w.branded_mix:.0%}" if w.branded_mix is not None else "—"
-        bs = f"{w.branded.share:.1%}" if w.branded.share is not None else "—"
+        nsp = (f"{w.non_branded.share_present:.2%}"
+               if w.non_branded.share_present is not None else "—")
         ns = f"{w.non_branded.share:.2%}" if w.non_branded.share is not None else "—"
         click.echo(f"  {w.week_start:<12}{w.branded.purchases:>9,}"
-                   f"{w.non_branded.purchases:>11,}{mix:>7}{bs:>9}{ns:>10}")
+                   f"{w.non_branded.purchases:>11,}{mix:>7}{nsp:>11}{ns:>15}")
+    click.echo("    * share on queries where we actually appeared "
+               "(impression share > 0). The (all) column includes every query "
+               "our ASINs touched — dominated by huge terms we have no presence "
+               "in, so it understates performance.")
 
     click.echo("")
     for c in callouts(series):
@@ -1462,6 +1560,78 @@ def sqp_sync_cmd(period, asins, dry_run):
                    + (f"  click_share={cs:.0%}" if cs is not None else ""))
     if dry_run and r["rows"]:
         click.echo("\n  Re-run with --apply to write.")
+
+
+@cli.command("sqp-backfill")
+@click.option("--max-weeks", default=4, show_default=True,
+              help="Weeks per invocation. Deliberately small — SQP quota is tight.")
+@click.option("--from", "from_date", default=None, help="Earliest week end (YYYY-MM-DD)")
+@click.option("--to", "to_date", default=None,
+              help="Latest week end (YYYY-MM-DD). Clamped to the last COMPLETE week.")
+@click.option("--sleep", "sleep_secs", default=90, show_default=True,
+              help="Seconds between report requests")
+@click.option("--resume/--no-resume", default=True, show_default=True,
+              help="Skip weeks that already have rows")
+@click.option("--dry-run/--apply", default=True, help="Dry run by default")
+@click.option("--refresh-actions", is_flag=True,
+              help="Rebuild ads recommendations once at the end (not per week)")
+def sqp_backfill_cmd(max_weeks, from_date, to_date, sleep_secs, resume,
+                     dry_run, refresh_actions):
+    """Backfill completed SQP weeks so brand-share trends can form.
+
+    Walks Sunday-Saturday weeks backward, ONE report request at a time, with a
+    sleep between them. Brand Analytics quota is tight: this is a
+    few-weeks-per-day job, not an instant history load.
+    """
+    from datetime import date as _date
+
+    from src.amazon_sp.sqp import BrandAnalyticsRoleError, backfill
+
+    lo = _date.fromisoformat(from_date) if from_date else None
+    hi = _date.fromisoformat(to_date) if to_date else None
+
+    try:
+        r = backfill(max_weeks=max_weeks, from_date=lo, to_date=hi,
+                     sleep_secs=sleep_secs, resume=resume, dry_run=dry_run,
+                     on_progress=click.echo)
+    except BrandAnalyticsRoleError as e:
+        raise click.ClickException(str(e))
+
+    res = r["asin_resolution"]
+    click.echo(f"\n{'DRY RUN — ' if dry_run else ''}SQP backfill")
+    click.echo(f"  asins           : {len(r['asins'])} [{res.get('basis')}]")
+    if res.get("basis") != "config":
+        click.echo(f"    ⚠ {res.get('note')}")
+    click.echo(f"  already stored  : {len(r['skipped_existing'])} week(s) skipped "
+               f"{sorted(r['skipped_existing'])[-3:]}")
+    click.echo(f"  planned         : {len(r['planned'])} week(s)")
+    for ws, we in r["planned"]:
+        click.echo(f"    {ws} → {we}")
+
+    if not dry_run:
+        click.echo(f"  written         : {len(r['weeks_done'])} week(s), "
+                   f"{r['rows_written']} rank row(s), "
+                   f"{r['weekly_written']} weekly row(s)")
+        for w in r["weeks_done"]:
+            click.echo(f"    {w['week_start']} → {w['week_end']}: "
+                       f"{w['rows']} ranks, {w['weekly']} weekly")
+        for w in r["weeks_failed"]:
+            click.echo(f"    ✗ {w['week_end']}: {w['error'][:120]}")
+        if r["quota_exceeded"]:
+            click.echo(f"\n  ⚠ {r['resume_hint']}")
+
+    if dry_run and r["planned"]:
+        click.echo(f"\n  Re-run with --apply to fetch these "
+                   f"({sleep_secs}s between requests, "
+                   f"~{len(r['planned']) * sleep_secs // 60}min).")
+        click.echo("  Recommended cadence: 4 weeks/day until caught up.")
+
+    if refresh_actions and not dry_run and r["weeks_done"]:
+        click.echo("\n  Rebuilding ads recommendations so the gate sees new ranks…")
+        try:
+            _run_ads_actions()
+        except Exception as e:
+            click.echo(f"  refresh failed: {str(e)[:160]}")
 
 
 @cli.command("sqp-status")

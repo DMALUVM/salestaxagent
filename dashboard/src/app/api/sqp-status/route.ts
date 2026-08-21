@@ -57,6 +57,12 @@ export async function GET() {
       bySource[s] = (bySource[s] ?? 0) + 1;
       if (r.asin) asins.add(String(r.asin));
     }
+    // Backfill cursor, derived from the data rather than a stored pointer —
+    // a cursor drifts after a partial write; the rows cannot.
+    const weekEnds = [...new Set(rows.map((r) => String(r.as_of)).filter(Boolean))]
+      .sort()
+      .reverse();
+
     const newest = rows.length ? String(rows[0].as_of) : null;
     const staleAfter = Number((out.gating as { staleAfterDays?: number })?.staleAfterDays ?? 14);
     const ageDays = newest
@@ -68,6 +74,9 @@ export async function GET() {
     out.bySource = bySource;
     out.asins = [...asins].sort();
     out.newestAsOf = newest;
+    out.weeksStored = weekEnds.length;
+    out.weekEnds = weekEnds.slice(0, 20);
+    out.oldestAsOf = weekEnds.length ? weekEnds[weekEnds.length - 1] : null;
     out.ageDays = ageDays;
     out.stale = ageDays === null ? true : ageDays > staleAfter;
     return Response.json(out);

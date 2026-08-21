@@ -92,7 +92,7 @@ export async function GET() {
     // panel surface it so a Sponsored Brands line is never mistaken for a
     // Sponsored Products one.
     const CAMPAIGN_COLS =
-      "date,campaign_name,campaign_type,spend,sales_14d,orders_14d,clicks,impressions";
+      "date,campaign_id,campaign_name,campaign_type,spend,sales_14d,orders_14d,clicks,impressions";
     let allCampaignRows: Array<Record<string, unknown>> = [];
     try {
       let offset = 0;
@@ -100,6 +100,7 @@ export async function GET() {
       while (true) {
         const r = await sb.from("ads_campaigns_daily").select(CAMPAIGN_COLS)
           .order("date", { ascending: true })
+          .order("campaign_id", { ascending: true })   // full PK — see placement note
           .range(offset, offset + pageSize - 1);
         const page = r.data ?? [];
         allCampaignRows = allCampaignRows.concat(page);
@@ -355,6 +356,42 @@ export async function GET() {
       RANGE_KEYS.map((k) => [k, typesFor(cutoffs[k], kpiByRange[k].kpis.spend)])
     ) as Record<RangeKey, ReturnType<typeof typesFor>>;
 
+    // Spend reconciliation per range: which ad products contributed, and
+    // whether the placement rows account for the whole campaign total.
+    // Placement data is Sponsored Products only, so SB/SD spend can never
+    // appear there — that difference is reported as `unallocated` rather than
+    // left as an unexplained mismatch between two panels on the same page.
+    const spendScopeByRange = Object.fromEntries(
+      RANGE_KEYS.map((k) => {
+        const from = cutoffs[k];
+        const total = kpiByRange[k].kpis.spend;
+        let placementSpend = 0;
+        for (const r of placementRows) {
+          const d = String(r.date ?? "");
+          if (!d || d < from || d > asOf) continue;
+          placementSpend += Number(r.spend ?? 0);
+        }
+        const present = new Set(
+          allCampaignRows
+            .filter((c) => {
+              const d = String(c.date ?? "");
+              return d >= from && d <= asOf;
+            })
+            .map((c) => campaignTypeOf(c)),
+        );
+        return [k, {
+          total,
+          placementSpend,
+          unallocated: Math.round((total - placementSpend) * 100) / 100,
+          productsPresent: ["SP", "SB", "SD"].filter((t) => present.has(t)),
+          productsMissing: ["SP", "SB", "SD"].filter((t) => !present.has(t)),
+        }];
+      }),
+    ) as Record<RangeKey, {
+      total: number; placementSpend: number; unallocated: number;
+      productsPresent: string[]; productsMissing: string[];
+    }>;
+
     // ── Placement rows (optional table) ──
     // Fetched once over the widest window, then aggregated per range in memory
     // — one query, four buckets, identical bounds.
@@ -364,9 +401,19 @@ export async function GET() {
       let offset = 0;
       const pageSize = 1000;
       while (true) {
+        // ORDER BY the full primary key, not just date. Range pagination
+        // without a deterministic order lets Postgres return rows in any
+        // sequence between requests, so a page boundary silently drops and
+        // duplicates rows. That is what made the placement panel sum to ~$1,960
+        // against a $2,800.73 header off identical underlying data. `date`
+        // alone is not enough: ~350 placement rows share each date, so a page
+        // boundary lands mid-date where the order is still undefined.
         const { data, error } = await sb.from("ads_placement_daily")
-          .select("date,placement,spend,sales_14d,orders_14d,clicks,impressions")
+          .select("date,campaign_id,placement,spend,sales_14d,orders_14d,clicks,impressions")
           .gte("date", cutoffs["90d"]).lte("date", asOf)
+          .order("date", { ascending: true })
+          .order("campaign_id", { ascending: true })
+          .order("placement", { ascending: true })
           .range(offset, offset + pageSize - 1);
         if (error) throw error;
         placementsAvailable = true;
@@ -508,7 +555,8 @@ export async function GET() {
         storageAvailable: strategy.storageAvailable,
         updatedAt: strategy.updatedAt,
       },
-      rolesByRange, adTypesByRange, placementsByRange, placementsAvailable,
+      rolesByRange, adTypesByRange, spendScopeByRange,
+      placementsByRange, placementsAvailable,
       searchTerms, recommendations,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
       targetAcos, targetAcosAsOf,
@@ -517,7 +565,8 @@ export async function GET() {
     return Response.json({
       kpi7: null, kpi14: null, kpi30: null, kpi90: null,
       dailySeries: [], cutoffs: null, campaigns: [],
-      rolesByRange: null, adTypesByRange: null, placementsByRange: null, placementsAvailable: false,
+      rolesByRange: null, adTypesByRange: null, spendScopeByRange: null,
+      placementsByRange: null, placementsAvailable: false,
       strategy: null,
       searchTerms: [], recommendations: [],
       asOf: null, today: null, adsThrough: null,
@@ -560,6 +609,8 @@ export async function POST(request: Request) {
           .select(TERM_COLS)
           .gte("date", cutoff)
           .order("date", { ascending: true })
+          .order("search_term", { ascending: true })
+          .order("campaign_id", { ascending: true })
           .range(offset, offset + pageSize - 1);
         if (error) {
           return Response.json({ ok: false, error: `Could not read search terms: ${error.message}` }, { status: 500 });
