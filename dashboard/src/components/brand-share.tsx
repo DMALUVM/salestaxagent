@@ -120,23 +120,33 @@ export function BrandShare() {
               <p className="text-[10px] uppercase text-muted-foreground mb-1">
                 Branded mix by week
               </p>
-              <div className="flex items-end gap-1" style={{ height: 64 }}>
-                {weeks.map((w) => (
-                  <div
-                    key={w.week_start}
-                    className="flex-1 rounded-t bg-muted"
-                    style={{ height: "100%" }}
-                    title={`${w.week_start}: mix ${pct(w.brandedMix)} · branded share ${pct(w.brandedShare)} · non-brand share ${pct(w.nonBrandedShare, 1)}`}
-                  >
+              {/* Each column is its own positioning context and clips its fill.
+                  The fill is anchored to the bottom with `absolute bottom-0`,
+                  NOT offset with a percentage margin: percentage margins resolve
+                  against the containing block's WIDTH, not its height. At ~300px
+                  per column a 3% mix produced marginTop ≈ 290px inside a 64px
+                  box, so the bar escaped the chart and painted over the
+                  opportunities table below. overflow-hidden is the second belt:
+                  nothing in this chart can ever render outside its own column. */}
+              <div className="flex items-end gap-1 overflow-hidden" style={{ height: 64 }}>
+                {weeks.map((w) => {
+                  const fillPct = Math.max(
+                    0,
+                    Math.min(100, ((w.brandedMix ?? 0) / maxMix) * 100),
+                  );
+                  return (
                     <div
-                      className="w-full rounded-t bg-[#2a78d6] dark:bg-[#3987e5]"
-                      style={{
-                        height: `${((w.brandedMix ?? 0) / maxMix) * 100}%`,
-                        marginTop: `${100 - ((w.brandedMix ?? 0) / maxMix) * 100}%`,
-                      }}
-                    />
-                  </div>
-                ))}
+                      key={w.week_start}
+                      className="relative h-full flex-1 overflow-hidden rounded-t bg-muted"
+                      title={`${w.week_start}: mix ${pct(w.brandedMix)} · branded share ${pct(w.brandedShare)} · non-brand share ${pct(w.nonBrandedShare, 1)}`}
+                    >
+                      <div
+                        className="absolute inset-x-0 bottom-0 rounded-t bg-[#2a78d6] dark:bg-[#3987e5]"
+                        style={{ height: `${fillPct}%` }}
+                      />
+                    </div>
+                  );
+                })}
               </div>
               <div className="mt-1 flex justify-between text-[9px] text-muted-foreground tabular-nums">
                 <span>{weeks[0]?.week_start}</span>
