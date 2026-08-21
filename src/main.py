@@ -1337,6 +1337,96 @@ def inventory_remap_fc_cmd(dry_run, recheck):
                f"nexus picks up any newly-covered states.")
 
 
+@cli.command("sqp-sync")
+@click.option("--period", type=click.Choice(["WEEK", "MONTH", "QUARTER"]), default=None)
+@click.option("--asin", "asins", multiple=True, help="Override configured ASINs")
+@click.option("--dry-run/--apply", default=True, help="Dry run by default")
+def sqp_sync_cmd(period, asins, dry_run):
+    """Pull Brand Analytics SQP via SP-API into keyword_organic_rank.
+
+    Debugging entry point — the scheduled weekly job is the primary path.
+    Requires Brand Registry + the Brand Analytics role on the SP-API app.
+    """
+    from src.amazon_sp.sqp import BrandAnalyticsRoleError, sync_sqp
+
+    try:
+        r = sync_sqp(asins=list(asins) or None, period=period, dry_run=dry_run)
+    except BrandAnalyticsRoleError as e:
+        raise click.ClickException(str(e))
+
+    click.echo(f"{'DRY RUN — ' if dry_run else ''}SQP sync via SP-API")
+    click.echo(f"  report type : GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT")
+    click.echo(f"  period      : {r['period']}  {r['start']} → {r['end']}")
+    if r.get("retried_previous_period"):
+        fa = r.get("first_attempt") or {}
+        click.echo(f"  retried     : latest period {fa.get('start')}→{fa.get('end')} "
+                   f"was empty (Amazon publishes ~24-48h after close)")
+    res = r.get("asin_resolution") or {}
+    click.echo(f"  asins       : {len(r.get('asins') or [])} in {r['batches']} "
+               f"batch(es) [{res.get('basis', '?')}]")
+    if res.get("note") and res.get("basis") != "config":
+        click.echo(f"    ⚠ {res['note']}")
+    click.echo(f"    requested : {', '.join((r.get('asins') or [])[:8])}"
+               + (" …" if len(r.get('asins') or []) > 8 else ""))
+    for d in r.get("diagnostics") or []:
+        click.echo(f"    batch {d['batch']}: report {d.get('report_id')} "
+                   f"{d.get('doc_bytes', 0):,}B keys={d.get('top_level_keys')} "
+                   f"records_key={d.get('had_records_key')} "
+                   f"parsed={d.get('records_parsed', 0)}")
+    click.echo(f"  parsed      : {r.get('parsed', 0)}  skipped: {r.get('skipped', 0)}")
+    click.echo(f"  unique keys : {len(r['rows'])}")
+    if not dry_run:
+        click.echo(f"  written     : {r.get('written', 0)}")
+    for w in r.get("warnings", []):
+        click.echo(f"  ⚠ {w}")
+    for e in r.get("errors", []):
+        click.echo(f"  ✗ {e}")
+    for row in r["rows"][:10]:
+        cs = (row.get("raw") or {}).get("click_share")
+        click.echo(f"    {row['keyword_normalized'][:44]:<45} band={row['organic_rank']}"
+                   + (f"  click_share={cs:.0%}" if cs is not None else ""))
+    if dry_run and r["rows"]:
+        click.echo("\n  Re-run with --apply to write.")
+
+
+@cli.command("sqp-status")
+def sqp_status_cmd():
+    """Freshness of the organic-rank data the PPC gate reads."""
+    from collections import Counter
+    from datetime import date as _date
+
+    from src.amazon_ads.organic_rank import fetch_ranks, load_config
+
+    cfg = load_config()
+    auto = cfg.get("sqp_auto") or {}
+    ranks = fetch_ranks()
+
+    click.echo("SQP / organic-rank status")
+    click.echo(f"  auto-sync enabled : {auto.get('enabled', False)}")
+    click.echo(f"  configured ASINs  : {', '.join(auto.get('asins') or []) or '(none)'}")
+    click.echo(f"  period            : {auto.get('report_period', 'WEEK')}")
+    sched = auto.get("schedule") or {}
+    if sched:
+        click.echo(f"  schedule          : {sched.get('day_of_week')} "
+                   f"{sched.get('hour', 0):02d}:{sched.get('minute', 0):02d} "
+                   f"{sched.get('timezone')}")
+    click.echo(f"  rank rows stored  : {len(ranks)}")
+    if not ranks:
+        click.echo("    (none — run `sqp-sync --apply`, or the migration is pending)")
+        return
+
+    by_source = Counter(str(r.get("source")) for r in ranks.values())
+    click.echo(f"  by source         : {dict(by_source)}")
+    dates = sorted(str(r.get("as_of") or "") for r in ranks.values() if r.get("as_of"))
+    if dates:
+        newest = dates[-1]
+        age = (_date.today() - _date.fromisoformat(newest)).days
+        stale_after = cfg["stale_after_days"]
+        flag = "STALE — gates as unknown" if age > stale_after else "fresh"
+        click.echo(f"  newest as_of      : {newest} ({age}d ago, {flag})")
+        click.echo(f"  oldest as_of      : {dates[0]}")
+
+
 @cli.command("sqp-import")
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--asin", default=None, help="ASIN when the export has no ASIN column")
@@ -3424,6 +3514,33 @@ def run():
             )
             click.echo("[Scheduler] Inventory ledger backfill weekly Sunday 04:00 (90d)")
 
+            # Weekly Brand Analytics SQP -> organic-rank gate. Monday 10:00
+            # Pacific, after Amazon publishes the prior Sun-Sat week.
+            _sqp_cfg = {}
+            try:
+                from src.amazon_ads.organic_rank import load_config as _rank_cfg
+                _sqp_cfg = (_rank_cfg().get("sqp_auto") or {})
+            except Exception:
+                pass
+            if _sqp_cfg.get("enabled"):
+                _sched = _sqp_cfg.get("schedule") or {}
+                scheduler.add_job(
+                    _run_sqp_sync,
+                    "cron",
+                    day_of_week=_sched.get("day_of_week", "mon"),
+                    hour=int(_sched.get("hour", 10)),
+                    minute=int(_sched.get("minute", 0)),
+                    timezone=_sched.get("timezone", "America/Los_Angeles"),
+                    id="sqp_sync",
+                    misfire_grace_time=21600,
+                    coalesce=True,
+                )
+                click.echo(f"[Scheduler] SQP sync weekly {_sched.get('day_of_week','mon')} "
+                           f"{int(_sched.get('hour',10)):02d}:"
+                           f"{int(_sched.get('minute',0)):02d} "
+                           f"{_sched.get('timezone','America/Los_Angeles')} "
+                           f"({len(_sqp_cfg.get('asins') or [])} ASINs)")
+
         scheduler.add_job(
             _run_source_monitoring,
             "cron",
@@ -4136,6 +4253,60 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
     elif lost_products:
         _ads_alert(f"Ads {label} sync partial — {'+'.join(lost_products)} missing",
                    message)
+
+
+def _run_sqp_sync():
+    """Weekly Brand Analytics SQP pull — feeds the PPC organic-rank gate.
+
+    Scheduled after Amazon publishes the prior Sunday-Saturday week. A missing
+    Brand Analytics role fails loudly rather than writing zero rows, because a
+    silent no-op is indistinguishable from "no data this week" and would leave
+    the gate permanently blind.
+    """
+    from src.amazon_sp.sqp import BrandAnalyticsRoleError, sync_sqp
+    from src.db import job_finish, job_start, log_ingestion
+
+    run_id = job_start("sqp_sync")
+    try:
+        r = sync_sqp()
+    except BrandAnalyticsRoleError as e:
+        print(f"[SQP] Role/permission problem: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        log_ingestion(filename="sqp_spapi", file_type="brand_analytics_sqp",
+                      rows_total=0, rows_inserted=0, status="failed",
+                      error_message=str(e)[:500])
+        _ads_alert("SQP sync blocked — Brand Analytics role", str(e))
+        return
+    except Exception as e:
+        print(f"[SQP] Failed: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        log_ingestion(filename="sqp_spapi", file_type="brand_analytics_sqp",
+                      rows_total=0, rows_inserted=0, status="failed",
+                      error_message=str(e)[:500])
+        return
+
+    written = r.get("written", 0)
+    msg = (f"{r['period']} {r['start']}→{r['end']}: {len(r['rows'])} keyword(s), "
+           f"{written} written, {len(r.get('asins') or [])} ASIN(s)")
+    if r.get("errors"):
+        msg += f", {len(r['errors'])} batch error(s)"
+    print(f"[SQP] {msg}")
+    log_ingestion(filename=f"sqp_spapi_{r['start']}_{r['end']}",
+                  file_type="brand_analytics_sqp",
+                  rows_total=r.get("parsed", 0), rows_inserted=written,
+                  status="success" if not r.get("errors") else "partial",
+                  warnings=r.get("warnings") or None)
+    job_finish(run_id, "partial" if r.get("errors") else "success", msg)
+
+    # Fresh ranks only reach the plan when recommendations are rebuilt.
+    from src.amazon_ads.organic_rank import load_config
+    if written and (load_config().get("sqp_auto") or {}).get(
+            "on_success_refresh_ads_actions", False):
+        try:
+            _run_ads_actions()
+            print("[SQP] Rebuilt ads recommendations so the gate sees new ranks")
+        except Exception as e:
+            print(f"[SQP] Recommendation refresh failed: {e}")
 
 
 def _run_ads_campaigns_sync():

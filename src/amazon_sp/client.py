@@ -56,14 +56,22 @@ def create_report(
     report_type: str,
     start: date,
     end: date,
+    report_options: dict | None = None,
 ) -> str:
-    """Create a report request.  Returns the reportId."""
+    """Create a report request.  Returns the reportId.
+
+    `report_options` maps to SP-API's `reportOptions`. Brand Analytics reports
+    need it (reportPeriod, asin); the order and inventory reports do not pass
+    it and are unaffected.
+    """
     body = {
         "reportType": report_type,
         "dataStartTime": datetime.combine(start, datetime.min.time()).isoformat() + "Z",
         "dataEndTime": datetime.combine(end, datetime.max.time().replace(microsecond=0)).isoformat() + "Z",
         "marketplaceIds": [_marketplace_id()],
     }
+    if report_options:
+        body["reportOptions"] = report_options
 
     resp = httpx.post(
         f"{BASE_URL}{REPORTS_PATH}/reports",
@@ -188,12 +196,14 @@ def request_and_download(
     end: date,
     timeout: int = DEFAULT_TIMEOUT_SECS,
     on_poll: callable | None = None,
+    report_options: dict | None = None,
 ) -> str:
     """Create a report, wait for it, and download.
 
-    Returns the report content as a string (TSV).
+    Returns the report content as a string (TSV for the flat-file reports,
+    JSON for Brand Analytics).
     """
-    report_id = create_report(report_type, start, end)
+    report_id = create_report(report_type, start, end, report_options=report_options)
 
     doc_id = wait_for_report(report_id, timeout=timeout, on_poll=on_poll)
 

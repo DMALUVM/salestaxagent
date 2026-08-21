@@ -140,7 +140,41 @@
       "dr dave",
       "dr. dave"
     ],
-    "default_asin": "B0CLHTF8YN",
-    "_default_asin_comment": "Search-term rows carry no ASIN, so rank is joined on this ASIN unless the action names one. Set to the primary ASIN; add per-campaign mapping later if campaigns diverge by product."
+    "default_asin": "B0CLHTKY3V",
+    "_default_asin_comment": "Search-term rows carry no ASIN, so rank is joined on this ASIN unless the action names one. Set to the primary ASIN; add per-campaign mapping later if campaigns diverge by product.",
+    "sqp_auto": {
+      "_comment": "Automated Brand Analytics Search Query Performance pull via SP-API (GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT). Requires Brand Registry and the Brand Analytics role on the existing SP-API app — adding the role requires RE-AUTHORIZING the app. SQP reports SHARE, not SERP position; rank is a derived band. Not available through the Advertising API.",
+      "enabled": true,
+      "asins": [
+        "B0CLHTKY3V",
+        "B0CLHVLG2F",
+        "B0CLHVCPL5",
+        "B0CLHV3V5C",
+        "B0CLHYY3BB",
+        "B0CLHSC2WC",
+        "B0CLHSGG49",
+        "B0CLF5B27Y",
+        "B0CLHRCZYR",
+        "B0CLF4XDCP",
+        "B0F4992FTZ",
+        "B0CXJLR2Y3",
+        "B0CV6TDHWS",
+        "B0CLF5FFTC",
+        "B0CLF5XDPC",
+        "B0F4DN5951",
+        "B0F4DMF2CJ"
+      ],
+      "report_period": "WEEK",
+      "schedule": {
+        "day_of_week": "mon",
+        "hour": 10,
+        "minute": 0,
+        "timezone": "America/Los_Angeles",
+        "_comment": "Monday 10:00 Pacific — after Amazon publishes the prior Sunday-Saturday week."
+      },
+      "max_asins_per_request_chars": 200,
+      "on_success_refresh_ads_actions": true,
+      "_asins_comment": "Real child ASINs, taken from inventory_events (the catalog of record here — sku_costs.asin is unpopulated and there is no products table). The previous values were parent-ASIN title overrides from asin_titles.json that appear in no table; SP-API accepted them and returned an empty report. resolve_asins() re-validates this list against live data on every run and falls back to the catalog if it goes stale."
+    }
   }
 }

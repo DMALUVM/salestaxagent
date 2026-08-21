@@ -382,6 +382,111 @@ check `launchctl list` before investigating Amazon.
 
 ---
 
+## Organic Rank for PPC (Brand Analytics SQP)
+
+The PPC action plan will not raise bids hard on queries we already win
+organically. Rank comes from **Brand Analytics Search Query Performance**,
+pulled automatically each week over SP-API.
+
+**The Advertising API does not publish organic rank.** It has no organic signal
+at all. SQP is a **Reports API** report on the SP-API side:
+`GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT`.
+
+### What SQP actually gives us
+
+SQP reports **click share and impression share** per query — not a SERP
+position. So rank here is a derived **band**, never a measured position:
+
+| Click share | Band recorded | Gate tier |
+|---|---|---|
+| ≥ 40% | 1 | top-3: cap increases at +8% |
+| ≥ 15% | 5 | positions 4–7: cap at +12% |
+| < 15% | 99 | full plan increase allowed |
+
+Click share is used rather than impression share because it reflects where
+shoppers actually went — closer to "would we have won this click anyway" than
+"we were shown". A query with no share data yields **no row**, not a guess.
+
+This is a **cannibalization guard, not incrementality**. It says we may already
+get a click for free; it cannot say a given ad click was wasted. Only a holdout
+test can.
+
+### ASINs — the thing that silently breaks this
+
+SQP is requested per ASIN. SP-API accepts ASINs it does not recognise and
+returns an **empty report**, which is indistinguishable from "quiet week"
+unless someone checks. That happened here: the shipped defaults were parent-ASIN
+title overrides from `asin_titles.json` that appear in no table, and the first
+live run returned zero rows despite valid auth and the role being granted.
+
+`resolve_asins()` now validates the configured list against `inventory_events`
+(the catalog of record — `sku_costs.asin` is unpopulated and there is no
+products table) on every run, and falls back to the most active real ASINs with
+a loud warning if none of the configured ones are recognised. `sqp-sync` prints
+which ASINs were requested and on what basis (`config` / `catalog_fallback`).
+
+### Publish lag
+
+Amazon publishes SQP roughly **24–48 hours** after a period closes. If the most
+recent complete week returns nothing, the sync retries the **previous** complete
+period once and reports which period actually supplied the data. An empty week
+is therefore never mistaken for a broken pipeline.
+
+### Report quota
+
+SQP report requests are tightly rate-limited. Three ad-hoc `sqp-sync` runs in
+quick succession returned `QuotaExceeded`. The weekly schedule sits well inside
+the limit; **ad-hoc re-runs are what exhaust it** — so use `--dry-run` sparingly
+and prefer the *Sync SQP now* button only when you actually need fresh data.
+
+A quota error is detected explicitly and reported as a rate limit, not as an
+empty period, and it suppresses the previous-period retry (retrying would spend
+the quota that just ran out).
+
+### Permissions checklist
+
+1. Seller Central → **Apps & Services → Develop Apps** → your existing SP-API app
+2. **Edit app** → add the **Brand Analytics** role (alongside existing roles)
+3. **Brand Registry** must be active for the brand
+4. **Re-authorize the app.** An existing refresh token does *not* gain new roles
+   — this is the step people miss
+5. Test: `python -m src.main sqp-sync --dry-run`
+
+A missing role fails loudly with these steps printed. It never silently writes
+zero rows: that would look identical to "no data this week" and would leave the
+gate permanently blind.
+
+### Schedule
+
+Weekly, **Monday 10:00 America/Los_Angeles** — after Amazon publishes the prior
+Sunday–Saturday week. `dataStartTime`/`dataEndTime` are aligned to complete
+period boundaries; an in-progress week is never requested. ASINs are batched to
+respect SP-API's 200-character `reportOptions.asin` limit (18 per request).
+
+Configure in `config/ads_strategy.json` → `organic_rank_gating.sqp_auto`
+(`enabled`, `asins`, `report_period`, `schedule`, `on_success_refresh_ads_actions`).
+
+With `on_success_refresh_ads_actions: true` the job rebuilds recommendations
+after a successful pull, so fresh ranks reach the plan immediately. Otherwise
+the next `ads-actions` run picks them up.
+
+### Checking it without a terminal
+
+The **/ppc** page has an *Organic rank data (Brand Analytics SQP)* card showing
+last sync date, age, keyword count, sources, ASINs covered, and the schedule —
+plus a **Sync SQP now** button. Rank older than `stale_after_days` (14) is
+badged **stale** and the gate treats it as *unknown*, holding high bids for a
+manual check rather than raising on old data.
+
+PPC action rows show a badge: *High cannibalization risk (org #N)*, *Rank check
+needed*, or *Rank unknown*. Badges appear on bid **increases** only.
+
+CLI equivalents (debugging): `sqp-status`, `sqp-sync [--period WEEK] [--apply]`,
+`rank-set "<keyword>" <rank>`, `sqp-import <csv>` for a manual CSV.
+
+
+---
+
 ## Running the System
 
 ### CLI Commands

@@ -9,6 +9,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
+import { rankBadgeOf } from "@/lib/ppc-actions";
+import { SqpStatus } from "@/components/sqp-status";
 import { isConfigured } from "@/lib/supabase";
 import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy, Settings2 } from "lucide-react";
 import {
@@ -779,6 +781,8 @@ export default function PPCPage() {
             </Card>
           </div>
 
+          <SqpStatus />
+
           {/* Spend by ad product — the KPI cards above are SP+SB+SD combined,
               which is what the Amazon Ads console totals. This says which
               products those totals came from, so a mismatch is traceable to a
@@ -1134,6 +1138,28 @@ export default function PPCPage() {
                             <Badge variant="outline" className={`text-[10px] whitespace-nowrap ${ACTION_STYLES[at]}`}>
                               {ACTION_LABELS[at]}
                             </Badge>
+                            {/* Organic-rank gate. Only ever present on bid
+                                increases — decreases and negatives carry no
+                                rank fields, so rankBadgeOf returns null. */}
+                            {(() => {
+                              const rb = rankBadgeOf(r);
+                              if (!rb) return null;
+                              const tone =
+                                rb.tone === "danger"
+                                  ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900"
+                                  : rb.tone === "warn"
+                                  ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900"
+                                  : "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900/60 dark:text-slate-400 dark:border-slate-700";
+                              return (
+                                <Badge
+                                  variant="outline"
+                                  className={`mt-1 block text-[9px] whitespace-normal ${tone}`}
+                                  title={rb.title}
+                                >
+                                  {rb.label}
+                                </Badge>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell className="text-xs">
                             {/* Fixed-width block: a table cell would otherwise

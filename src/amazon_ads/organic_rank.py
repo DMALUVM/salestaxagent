@@ -80,6 +80,8 @@ def load_config() -> dict:
         "stale_after_days": int(cfg.get("stale_after_days", 14)),
         "brand_tokens": [normalize_keyword(t) for t in (cfg.get("brand_tokens") or [])],
         "default_asin": cfg.get("default_asin") or "",
+        # Automated SQP pull settings; consumed by src/amazon_sp/sqp.py.
+        "sqp_auto": cfg.get("sqp_auto") or {},
     }
 
 
