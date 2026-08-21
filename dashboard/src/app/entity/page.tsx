@@ -6,6 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/loading";
 import { getSupabase } from "@/lib/supabase";
+import {
+  filterObligations, HORIZON_LABELS, SCOPE_LABELS,
+  type HorizonKey, type ScopeKey,
+} from "@/lib/entity-filters";
 
 /**
  * Entity & compliance — obligations that exist because of what the ENTITY is
@@ -38,10 +42,10 @@ interface Payload {
   available: boolean;
   setupHint: string | null;
   error: string | null;
-  overdue?: ObligationRow[];
-  upcoming?: ObligationRow[];
-  needsDate?: ObligationRow[];
-  settled?: ObligationRow[];
+  obligations?: ObligationRow[];
+  registered?: string[];
+  homeState?: string | null;
+  foreignStates?: string[];
   today?: string;
 }
 
@@ -176,6 +180,10 @@ function ObligationCard({
 export default function EntityPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
+  // 12 months by default: an annual filing still appears well before it is due,
+  // while next year's copy of the same filing stays out of the way.
+  const [horizon, setHorizon] = useState<HorizonKey>("12m");
+  const [scope, setScope] = useState<ScopeKey>("all");
 
   function load() {
     setLoading(true);
@@ -191,10 +199,17 @@ export default function EntityPage() {
   if (loading) return <LoadingState />;
 
   const today = data?.today ?? new Date().toISOString().slice(0, 10);
-  const overdue = data?.overdue ?? [];
-  const upcoming = data?.upcoming ?? [];
-  const needsDate = data?.needsDate ?? [];
-  const settled = data?.settled ?? [];
+
+  // Bucketing happens here, not in the API, so the horizon/scope controls and
+  // the counts can never disagree — they read the same pure function.
+  const filtered = filterObligations(data?.obligations ?? [], today, {
+    horizon,
+    scope,
+    registered: new Set(data?.registered ?? []),
+    homeState: data?.homeState ?? null,
+    foreignStates: new Set(data?.foreignStates ?? []),
+  });
+  const { overdue, upcoming, needsDate, settled, hiddenByHorizon } = filtered;
 
   return (
     <div className="space-y-6">
@@ -222,6 +237,55 @@ export default function EntityPage() {
 
       {data?.available && (
         <>
+          {/* Filters. Horizon keeps far-future planning rows out of the way;
+              scope selects which states to look at. Counts below react to both. */}
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] uppercase text-muted-foreground mr-1">Horizon</span>
+              {(["12m", "24m", "all"] as const).map((h) => (
+                <Button
+                  key={h}
+                  variant={horizon === h ? "default" : "outline"}
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setHorizon(h)}
+                >
+                  {HORIZON_LABELS[h]}
+                </Button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] uppercase text-muted-foreground mr-1">States</span>
+              {(["all", "registered", "home_foreign"] as const).map((sc) => (
+                <Button
+                  key={sc}
+                  variant={scope === sc ? "default" : "outline"}
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setScope(sc)}
+                  title={
+                    sc === "registered"
+                      ? "Sales-tax registered states, plus your home state and anywhere you are foreign-qualified — those never drop out."
+                      : sc === "home_foreign"
+                      ? "Only your home state and states you are foreign-qualified in."
+                      : "Every state with a tracked entity obligation."
+                  }
+                >
+                  {SCOPE_LABELS[sc]}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {hiddenByHorizon > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {hiddenByHorizon} further obligation
+              {hiddenByHorizon > 1 ? "s are" : " is"} scheduled beyond{" "}
+              {HORIZON_LABELS[horizon].toLowerCase()} — still tracked, just not
+              shown. Switch the horizon to see {hiddenByHorizon > 1 ? "them" : "it"}.
+            </p>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-4">
             {[
               ["Overdue", overdue.length, "text-red-600 dark:text-red-400"],
@@ -331,6 +395,9 @@ export default function EntityPage() {
       )}
 
       <p className="text-[10px] text-muted-foreground">
+        Entity obligations follow where the LLC is formed or foreign-qualified,
+        not where it is registered to collect sales tax — registering for sales
+        tax in a state does not create an annual report there.{" "}
         Monitoring aid — not legal or tax advice. Confidence describes how
         well-established each rule is; confirm anything material with a CPA.
         Contested positions (such as whether FBA inventory creates a California

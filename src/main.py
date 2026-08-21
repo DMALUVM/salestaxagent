@@ -1134,11 +1134,221 @@ def _entity_line(o) -> str:
             f"due {due:<12} {when:<14} [{o.confidence}]{amt}")
 
 
+@cli.command("inventory-health")
+@click.option("--unknown-limit", default=20, help="How many unknown FC codes to list")
+def inventory_health_cmd(unknown_limit):
+    """Freshness and coverage of the FBA inventory ledger.
+
+    Physical nexus — and therefore which states to register in — is driven by
+    where inventory has been held. A ledger that stopped updating, or an FC
+    code with no state mapping, both look like "no nexus" rather than an error.
+    """
+    from datetime import datetime, timezone
+    from src.db import fetch_all, get_client
+    from src.inventory.ledger_health import build_health
+
+    client = get_client()
+    events, offset = [], 0
+    while True:
+        page = (client.table("inventory_events")
+                .select("event_date,fc_code,state_code,source_file")
+                .range(offset, offset + 999).execute().data) or []
+        events.extend(page)
+        if len(page) < 1000:
+            break
+        offset += 1000
+
+    h = build_health(events, fetch_all("job_runs"), datetime.now(timezone.utc))
+
+    icon = {"ok": "OK", "stale": "STALE", "critical": "CRITICAL"}[h.status]
+    click.echo(f"FBA inventory ledger — {icon}")
+    if h.last_success_at:
+        click.echo(f"  last successful sync : {h.last_success_at[:19]} "
+                   f"({h.hours_since_success:.1f}h ago, {h.last_success_status})")
+    else:
+        click.echo("  last successful sync : none on record")
+    click.echo(f"  latest event_date    : {h.date_max}")
+    click.echo(f"  earliest event_date  : {h.date_min}")
+    click.echo(f"  total events         : {h.total_events:,}")
+    click.echo(f"  distinct states      : {h.distinct_states}")
+    click.echo(f"  events by year       : "
+               + ", ".join(f"{y} {n:,}" for y, n in h.events_by_year.items()))
+    click.echo(f"  sources              : "
+               + ", ".join(f"{k} {v:,}" for k, v in list(h.sources.items())[:3]))
+    click.echo(f"  states               : {', '.join(h.states)}")
+
+    if h.unknown_fcs:
+        click.echo("")
+        click.echo(f"  UNMAPPED FC CODES: {len(h.unknown_fcs)} distinct, "
+                   f"{h.unknown_event_count:,} event(s)")
+        click.echo("  These have NO state, so the physical-nexus engine cannot see them.")
+        click.echo("  Look each code up in Seller Central (Inventory > Shipments shows the")
+        click.echo("  destination address) and add it to config/fc_codes.json, then run:")
+        click.echo("    python -m src.main inventory-remap-fc --apply")
+        click.echo("")
+        click.echo(f"    {'code':<9}{'events':>7}  {'first seen':<12}{'last seen':<12}")
+        for u in h.unknown_fcs[:unknown_limit]:
+            click.echo(f"    {u.fc_code:<9}{u.events:>7}  {u.first_seen:<12}{u.last_seen:<12}")
+        if len(h.unknown_fcs) > unknown_limit:
+            click.echo(f"    +{len(h.unknown_fcs) - unknown_limit} more")
+
+    # States with inventory that the nexus engine does NOT count. The user's
+    # registration criterion is "states with Amazon inventory since 2024", so
+    # the difference between those two sets is exactly what needs to be visible
+    # — not silently reconciled. The reason comes from config/state_rules.json;
+    # nothing here decides it.
+    try:
+        from src.config import load_state_rules
+        from src.engines.physical_nexus import evaluate_physical_nexus
+
+        rules = load_state_rules().get("states", {})
+        nexus_states = set(evaluate_physical_nexus().get("nexus_states") or [])
+        gap = [st for st in h.states if st not in nexus_states]
+        if gap:
+            click.echo("")
+            click.echo(f"  INVENTORY BUT NOT COUNTED AS PHYSICAL NEXUS: {len(gap)} state(s)")
+            click.echo("  You have stored inventory here, but state_rules says FBA stock")
+            click.echo("  alone does not create nexus (or the state has no sales tax).")
+            click.echo("  Worth a CPA conversation if you are registering on inventory history.")
+            for st in gap:
+                r = rules.get(st, {})
+                why = ("no state sales tax" if not r.get("has_sales_tax", True)
+                       else f"fba_inventory_creates_nexus = {r.get('fba_inventory_creates_nexus')}")
+                click.echo(f"    {st}: {why}")
+    except Exception as e:
+        click.echo(f"  (could not compare against physical nexus: {str(e)[:80]})")
+
+    if h.is_stale:
+        click.echo("")
+        click.echo("  ⚠ The ledger is stale. Check that the scheduler is running:")
+        click.echo("    launchctl list | grep tallowbourn      # launchd agent")
+        click.echo("    python -m src.main jobs                 # recent job outcomes")
+
+
+@cli.command("inventory-remap-fc")
+@click.option("--dry-run/--apply", default=True, help="Dry run by default")
+@click.option("--recheck", is_flag=True,
+              help="Also CORRECT rows whose stored state disagrees with the "
+                   "current map. Use after fixing a wrong mapping — the default "
+                   "pass only fills in states that are missing.")
+def inventory_remap_fc_cmd(dry_run, recheck):
+    """Re-resolve state_code on stored events after updating fc_codes.json.
+
+    state_code is written at parse time, so adding a code to config/fc_codes.json
+    does NOT retroactively fix events already stored — they keep a null state and
+    stay invisible to physical nexus. This backfills them.
+
+    Only fills in states that are currently missing; it never overwrites or
+    deletes an existing mapping.
+    """
+    from src.db import get_client, log_audit
+    from src.mappers.fc_to_state import fc_to_state
+
+    client = get_client()
+    rows, offset = [], 0
+    while True:
+        page = (client.table("inventory_events").select("id,fc_code,state_code")
+                .is_("state_code", "null")
+                .range(offset, offset + 999).execute().data) or []
+        rows.extend(page)
+        if len(page) < 1000:
+            break
+        offset += 1000
+
+    fixable, still_unknown = {}, {}
+    for r in rows:
+        fc = r.get("fc_code")
+        if not fc:
+            continue
+        state = fc_to_state(fc)
+        if state:
+            fixable.setdefault(fc, []).append(r["id"])
+        else:
+            still_unknown[fc] = still_unknown.get(fc, 0) + 1
+
+    # Rows whose stored state contradicts the map. These exist when a mapping
+    # was wrong and has since been corrected — the fill-in pass cannot see them
+    # because they already have a (wrong) state.
+    mismatched: dict[str, list] = {}
+    if recheck:
+        allrows, offset = [], 0
+        while True:
+            page = (client.table("inventory_events").select("id,fc_code,state_code")
+                    .not_.is_("state_code", "null")
+                    .range(offset, offset + 999).execute().data) or []
+            allrows.extend(page)
+            if len(page) < 1000:
+                break
+            offset += 1000
+        for r in allrows:
+            fc, cur = r.get("fc_code"), r.get("state_code")
+            if not fc:
+                continue
+            want = fc_to_state(fc)
+            if want and cur and want != cur:
+                mismatched.setdefault(f"{fc}:{cur}->{want}", []).append(r["id"])
+
+    total = sum(len(v) for v in fixable.values())
+    click.echo(f"{'DRY RUN — ' if dry_run else ''}events with no state: {len(rows):,}")
+    click.echo(f"  now resolvable from fc_codes.json: {total:,} "
+               f"across {len(fixable)} code(s)")
+    for fc, ids in sorted(fixable.items(), key=lambda kv: -len(kv[1])):
+        click.echo(f"    {fc} → {fc_to_state(fc)}  ({len(ids):,} events)")
+    if still_unknown:
+        click.echo(f"  still unmapped: {sum(still_unknown.values()):,} event(s) "
+                   f"across {len(still_unknown)} code(s): "
+                   f"{', '.join(sorted(still_unknown)[:12])}")
+
+    if mismatched:
+        n = sum(len(v) for v in mismatched.values())
+        click.echo(f"  MISMATCHED against the current map: {n:,} event(s)")
+        for key, ids in sorted(mismatched.items(), key=lambda kv: -len(kv[1])):
+            click.echo(f"    {key}  ({len(ids):,} events)")
+
+    if dry_run or not (total or mismatched):
+        if dry_run and (total or mismatched):
+            click.echo("\n  Re-run with --apply to write these.")
+        return
+
+    updated = 0
+    for fc, ids in fixable.items():
+        state = fc_to_state(fc)
+        for i in range(0, len(ids), 200):
+            batch = ids[i:i + 200]
+            client.table("inventory_events").update(
+                {"state_code": state}).in_("id", batch).execute()
+            updated += len(batch)
+    corrected = 0
+    for key, ids in mismatched.items():
+        want = key.split("->")[-1]
+        for i in range(0, len(ids), 200):
+            batch = ids[i:i + 200]
+            client.table("inventory_events").update(
+                {"state_code": want}).in_("id", batch).execute()
+            corrected += len(batch)
+    if corrected:
+        click.echo(f"  Corrected {corrected:,} mismatched event(s).")
+
+    log_audit(action="inventory_remap_fc", category="ingestion",
+              details={"events_updated": updated, "events_corrected": corrected,
+                       "codes": sorted(fixable),
+                       "mismatched": sorted(mismatched)})
+    click.echo(f"\n  Updated {updated:,} event(s). Re-run `analyze` so physical "
+               f"nexus picks up any newly-covered states.")
+
+
 @cli.command("entity-audit")
 @click.option("--year", default=None, type=int, help="Limit to one tax year")
+@click.option("--horizon", type=click.Choice(["12m", "24m", "all"]), default="12m",
+              help="How far ahead to list (default 12m). Overdue is always shown.")
+@click.option("--scope", type=click.Choice(["all", "registered", "home_foreign"]),
+              default="all",
+              help="all = every tracked state; registered = sales-tax registered "
+                   "PLUS home and foreign-qualified; home_foreign = home and "
+                   "foreign-qualified only.")
 @click.option("--show-sources/--no-show-sources", default=False,
               help="Print the official source behind each obligation")
-def entity_audit_cmd(year, show_sources):
+def entity_audit_cmd(year, horizon, scope, show_sources):
     """Entity, franchise and foreign-qualification obligations — not sales tax.
 
     Driven by config/entity_profile.json plus the sourced rules in
@@ -1161,14 +1371,30 @@ def entity_audit_cmd(year, show_sources):
             "No config/entity_profile.json — cannot tell which entity "
             "obligations apply.")
 
+    # Horizon + scope use the same pure functions the dashboard does.
+    from src.compliance.entity_filters import filter_view
+    from src.db import fetch_all as _fa
+    registered = {n["state_code"] for n in _fa("nexus_status")
+                  if n.get("is_registered") is True}
+    foreign = {str(e.get("state", "")).upper()
+               for e in (profile.get("foreign_qualified") or [])}
+    v = {**v, **filter_view(v, today, horizon=horizon, scope=scope,
+                            registered=registered,
+                            home_state=str(profile.get("home_state") or "") or None,
+                            foreign_states=foreign)}
+
     fq = ", ".join(e.get("state", "?") for e in profile.get("foreign_qualified") or [])
     click.echo(f"Entity & compliance obligations — {today}")
     click.echo(f"  profile: {profile.get('entity_type', '?')} · home "
                f"{profile.get('home_state', '?')} · foreign-qualified "
                f"{fq or '(none)'}")
+    click.echo(f"  filters: horizon {horizon} · scope {scope}")
     click.echo(f"  overdue {len(v['overdue'])} · upcoming {len(v['upcoming'])} · "
                f"needs profile data {len(v['undated'])} · "
                f"review-only {len(v['review'])} · settled {len(v['settled'])}")
+    if v.get("hidden_by_horizon"):
+        click.echo(f"  ({v['hidden_by_horizon']} further obligation(s) beyond the "
+                   f"{horizon} horizon — use --horizon all to see them)")
 
     if v["overdue"]:
         click.echo("\n  OVERDUE (entity — NOT sales tax):")
@@ -2901,7 +3127,22 @@ def run():
                 minute=0,
                 id="spapi_refresh",
             )
-            click.echo("[Scheduler] SP-API refresh daily at 06:00")
+            click.echo("[Scheduler] SP-API refresh daily at 06:00 "
+                       "(orders 7d, inventory ledger 14d)")
+
+            # Weekly deeper ledger re-pull. Sunday 04:00 keeps it clear of the
+            # 06:00 daily refresh and of the ads jobs at 05:00-05:30.
+            scheduler.add_job(
+                _run_inventory_ledger_backfill,
+                "cron",
+                day_of_week="sun",
+                hour=4,
+                minute=0,
+                id="inventory_ledger_backfill",
+                misfire_grace_time=7200,
+                coalesce=True,
+            )
+            click.echo("[Scheduler] Inventory ledger backfill weekly Sunday 04:00 (90d)")
 
         scheduler.add_job(
             _run_source_monitoring,
@@ -3261,10 +3502,19 @@ def _run_spapi_refresh():
     from src.amazon_sp.reports import fetch_orders, fetch_inventory
     from src.db import log_ingestion, job_start, job_finish
 
+    from src.rules import SPAPI_INVENTORY_LEDGER_DAYS
+
     run_id = job_start("spapi_refresh")
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=7)
+    # The inventory ledger gets its own, wider window. It drives physical nexus
+    # and therefore registration decisions, and Amazon restates ledger rows for
+    # several days after the fact — a 7-day window silently missed those. The
+    # write is an upsert on (source_file, event_date, fc_code, asin, event_type,
+    # quantity), so re-pulling a wider range corrects rows instead of
+    # duplicating them, and never removes anything older than the window.
+    inv_start = end - timedelta(days=SPAPI_INVENTORY_LEDGER_DAYS)
     errors = []
     try:
         orders = fetch_orders(start, end)
@@ -3289,10 +3539,18 @@ def _run_spapi_refresh():
             error_message=str(e)[:500],
         )
     try:
-        inv = fetch_inventory(start, end)
+        inv = fetch_inventory(inv_start, end)
         inserted = inv.get("rows_inserted", 0)
-        print(f"[SP-API] {ts} Inventory: {inserted} rows, "
+        unknown = inv.get("unknown_fcs") or []
+        print(f"[SP-API] {ts} Inventory ({inv_start}→{end}): {inserted} rows, "
               f"states: {inv.get('states_found', [])}")
+        if unknown:
+            # Never fatal: an unmapped FC is a config gap, not a sync failure.
+            # It is surfaced because those events carry no state and are
+            # invisible to the physical-nexus engine until the code is mapped.
+            print(f"[SP-API] {ts} Inventory: {len(unknown)} unmapped FC code(s): "
+                  f"{', '.join(unknown[:10])} — add to config/fc_codes.json, "
+                  f"then `inventory-remap-fc --apply`")
         log_ingestion(
             filename=f"spapi_inventory_{ts}",
             file_type="amazon_inventory",
@@ -3450,6 +3708,39 @@ def _run_daily_digest():
     except Exception as e:
         print(f"[Digest] Error: {e}")
         job_finish(run_id, "fail", str(e)[:500])
+
+
+def _run_inventory_ledger_backfill():
+    """Weekly deeper inventory-ledger re-pull.
+
+    Amazon settles some ledger rows after the daily window has already moved
+    past them. This re-pulls a wider range so those land. It is an UPSERT on the
+    ledger's natural key — it corrects and adds, and cannot remove events older
+    than the window, which is what protects the 2024/2025 history the
+    physical-nexus engine reads.
+    """
+    from datetime import date, timedelta
+    from src.db import job_start, job_finish
+    from src.amazon_sp.reports import fetch_inventory
+    from src.rules import SPAPI_INVENTORY_BACKFILL_DAYS
+
+    run_id = job_start("inventory_ledger_backfill")
+    end = date.today() - timedelta(days=1)
+    start = end - timedelta(days=SPAPI_INVENTORY_BACKFILL_DAYS)
+    try:
+        r = fetch_inventory(start, end)
+    except Exception as e:
+        print(f"[Inventory Ledger] Backfill failed: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        return
+
+    unknown = r.get("unknown_fcs") or []
+    msg = (f"{SPAPI_INVENTORY_BACKFILL_DAYS}d ledger: {r.get('rows_inserted', 0)} rows, "
+           f"{len(r.get('states_found') or [])} states")
+    if unknown:
+        msg += f", {len(unknown)} unmapped FC"
+    print(f"[Inventory Ledger] {msg}")
+    job_finish(run_id, "success", msg)
 
 
 def _run_inventory_sync():

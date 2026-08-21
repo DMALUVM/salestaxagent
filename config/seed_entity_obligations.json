@@ -6,12 +6,14 @@
       "home_state": "the profile's home_state matches this state",
       "foreign_qualified": "the state appears in profile.foreign_qualified",
       "sales_tax_registered": "nexus_status.is_registered is true for this state",
-      "user_confirmed": "only when enabled_obligations['XX:type'] is explicitly true — never scheduled automatically"
+      "user_confirmed": "only when enabled_obligations['XX:type'] is explicitly true — never scheduled automatically",
+      "wildcard_state": "state_code '*' is a fallback applied to every foreign_qualified state that has no specific rule of the same obligation_type"
     },
     "due_rule_kinds": {
       "fixed_month_day": "same calendar date every year (uses month/day)",
       "months_after_year_end": "N months after fiscal year end, on a given day",
-      "anniversary": "anniversary of a profile date (formation_date or qualified_date)"
+      "anniversary": "anniversary of a profile date (formation_date or qualified_date)",
+      "biennial_frequency": "frequency 'biennial' generates only in years matching the anchor date's parity"
     },
     "last_updated": "2026-08-20"
   },
@@ -214,6 +216,104 @@
         "url": "https://tax.nv.gov/commerce-tax/"
       },
       "notes": "Never auto-scheduled. Nevada's commerce tax is an annual gross-receipts tax with a $4M threshold and must not be turned into quarterly sales-tax dues.",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "DE",
+      "obligation_type": "franchise_tax",
+      "form_code": "LLC/LP/GP Annual Tax",
+      "title": "Delaware annual LLC tax",
+      "applies_when": "foreign_qualified",
+      "also_applies_when": "home_state",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "fixed_month_day",
+        "month": 6,
+        "day": 1
+      },
+      "due_rule_text": "June 1 each year, for the prior year.",
+      "amount_estimate": 300,
+      "amount_note": "$300 annual tax. Delaware does NOT require an annual report from an LLC — the tax is the whole obligation. Late payment draws a $200 penalty plus 1.5%/month interest. One Division of Corporations page mentions a $400 figure; confirm the current amount when paying.",
+      "confidence": "high",
+      "source": {
+        "authority": "Delaware Division of Corporations",
+        "citation": "LLC/LP/GP Franchise Tax Instructions",
+        "url": "https://corp.delaware.gov/alt-entitytaxinstructions/"
+      },
+      "notes": "Applies to all domestic AND foreign LLCs formed or registered in Delaware. Despite the 'franchise tax' name this is a flat annual tax, not income-based.",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "FL",
+      "obligation_type": "entity_annual",
+      "form_code": "Annual Report (Sunbiz)",
+      "title": "Florida LLC annual report",
+      "applies_when": "foreign_qualified",
+      "also_applies_when": "home_state",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "fixed_month_day",
+        "month": 5,
+        "day": 1
+      },
+      "due_rule_text": "Filing window opens January 1; due by May 1.",
+      "amount_estimate": 138.75,
+      "amount_note": "$138.75 if filed between January 1 and May 1. A $400 late fee applies after May 1 and is not waivable.",
+      "confidence": "high",
+      "source": {
+        "authority": "Florida Department of State, Division of Corporations",
+        "citation": "File Annual Report — Sunbiz",
+        "url": "https://dos.fl.gov/sunbiz/manage-business/efile/annual-report/"
+      },
+      "notes": "Required of domestic and foreign LLCs registered in Florida to keep 'active' status. The first report is due in the year following registration.",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "CA",
+      "obligation_type": "entity_annual",
+      "form_code": "LLC-12 (Statement of Information)",
+      "title": "California Statement of Information (biennial)",
+      "applies_when": "foreign_qualified",
+      "also_applies_when": "home_state",
+      "frequency": "biennial",
+      "due_rule": {
+        "kind": "anniversary",
+        "anchor": "qualified_date"
+      },
+      "due_rule_text": "Within 90 days of first registering, then every 2 years by the end of the calendar MONTH of the original registration date. The engine dates it to the registration day within that month; the state's deadline is the month end, so treat this as the earliest date, not the last.",
+      "amount_estimate": null,
+      "amount_note": "Filing fee not verified here — check the Secretary of State fee schedule before paying.",
+      "confidence": "medium",
+      "confidence_note": "The biennial cadence and month-end rule are confirmed by the Secretary of State. The exact day within the month and the fee are not, so this is medium rather than high.",
+      "source": {
+        "authority": "California Secretary of State",
+        "citation": "Statements of Information — filing tips (Form LLC-12)",
+        "url": "https://www.sos.ca.gov/business-programs/business-entities/statements"
+      },
+      "notes": "Entirely separate from the FTB $800 franchise tax, which stays review-only. This is a Secretary of State registration filing and applies only once the LLC is actually qualified in California.",
+      "last_reviewed": "2026-08-20"
+    },
+    {
+      "state_code": "*",
+      "obligation_type": "entity_annual",
+      "form_code": "Annual report (verify form name)",
+      "title": "Foreign-qualification annual report — generic",
+      "applies_when": "foreign_qualified",
+      "frequency": "annual",
+      "due_rule": {
+        "kind": "anniversary",
+        "anchor": "qualified_date"
+      },
+      "due_rule_text": "PLACEHOLDER: dated to the qualification anniversary because most states use one. Many do not — some use a fixed calendar date, some are biennial. VERIFY with that state's Secretary of State and add a specific rule.",
+      "amount_estimate": null,
+      "confidence": "low",
+      "confidence_note": "Deliberately low. This is a reminder that a foreign-qualified state almost certainly has SOME annual obligation, not a claim about what it is or when it is due. It exists so adding a state to foreign_qualified never silently tracks nothing.",
+      "source": {
+        "authority": "(none — generic placeholder)",
+        "citation": "No official source; replace with a state-specific rule",
+        "url": "https://www.nass.org/business-services/corporate-registration"
+      },
+      "notes": "Applies only to foreign-qualified states with no specific rule in this file. When you verify a state, add a proper entry above and this fallback stops applying to it automatically.",
       "last_reviewed": "2026-08-20"
     }
   ]

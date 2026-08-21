@@ -1,4 +1,38 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import { getServerSupabase } from "@/lib/supabase-server";
+
+/**
+ * Home state + foreign-qualified states from config/entity_profile.json.
+ *
+ * Read from disk rather than duplicated in the database: the profile is the
+ * single source of truth for where the entity is placed, and a copy would
+ * drift. The dashboard runs from `dashboard/`, so the config sits one level up.
+ * A missing or malformed file is not fatal — scope simply degrades to "all".
+ */
+async function readEntityProfile(): Promise<{
+  homeState: string | null;
+  foreignStates: string[];
+}> {
+  const candidates = [
+    path.join(process.cwd(), "..", "config", "entity_profile.json"),
+    path.join(process.cwd(), "config", "entity_profile.json"),
+  ];
+  for (const p of candidates) {
+    try {
+      const raw = await readFile(p, "utf8");
+      const j = JSON.parse(raw);
+      const foreign = Array.isArray(j.foreign_qualified)
+        ? j.foreign_qualified
+            .map((e: { state?: string }) => String(e?.state ?? "").toUpperCase())
+            .filter(Boolean)
+        : [];
+      return { homeState: j.home_state ? String(j.home_state) : null, foreignStates: foreign };
+    } catch { /* try the next path */ }
+  }
+  return { homeState: null, foreignStates: [] };
+}
 
 /**
  * GET /api/entity-obligations — entity, franchise and foreign-qualification
@@ -24,6 +58,7 @@ export async function GET() {
       const missing = /compliance_obligations/.test(error.message ?? "");
       return Response.json({
         obligations: [],
+        registered: [], homeState: null, foreignStates: [],
         available: false,
         setupHint: missing
           ? "Run supabase/migration_entity_obligations.sql, then `python -m src.main entity-calendar --apply`."
@@ -34,6 +69,19 @@ export async function GET() {
 
     const today = new Date().toISOString().slice(0, 10);
     const rows = data ?? [];
+
+    // Scope inputs. Registration comes from nexus_status — the same source the
+    // sales-tax calendar uses — so "Registered for sales tax" means exactly
+    // what it means everywhere else in the app.
+    let registered: string[] = [];
+    try {
+      const r = await sb.from("nexus_status").select("state_code,is_registered");
+      registered = (r.data ?? [])
+        .filter((n) => n.is_registered === true)
+        .map((n) => String(n.state_code));
+    } catch { /* scope filter degrades to "all" */ }
+
+    const { homeState, foreignStates } = await readEntityProfile();
 
     const open = rows.filter((r) => r.status === "open");
     const overdue = open.filter((r) => r.due_date && r.due_date < today);
@@ -46,10 +94,15 @@ export async function GET() {
     return Response.json({
       obligations: rows,
       available: true,
+      registered,
+      homeState,
+      foreignStates,
       overdue,
       upcoming,
       needsDate,
       settled,
+      // Unfiltered counts. The page recomputes these under the selected
+      // horizon/scope via lib/entity-filters.
       counts: {
         overdue: overdue.length,
         upcoming: upcoming.length,
@@ -60,7 +113,8 @@ export async function GET() {
     });
   } catch (e) {
     return Response.json({
-      obligations: [], available: false, setupHint: null,
+      obligations: [], registered: [], homeState: null, foreignStates: [],
+      available: false, setupHint: null,
       error: e instanceof Error ? e.message : "unknown error",
     });
   }

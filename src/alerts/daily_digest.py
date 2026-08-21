@@ -68,6 +68,7 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
     # any state whose last_filed_through was old. Now the digest renders the
     # same registration-gated sections everything else uses.
     from src.alerts.digest_sections import build_sections, render_sections
+    from src.inventory.ledger_health import current_warning as _inventory_warning
 
     parts: list[str] = []
     parts.append(f"<b>Daily Digest -- {month_label}</b>")
@@ -93,6 +94,7 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
             fetch_all("franchise_tax_flags"),
             ref,
             entity_view=entity_view,
+            inventory_warning=_inventory_warning(),
         )
         parts.extend(render_sections(sections, ref))
     except Exception:

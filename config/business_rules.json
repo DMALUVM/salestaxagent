@@ -2,8 +2,15 @@
   "amazon": {
     "timezone": "America/Los_Angeles",
     "date_field": "purchase-date",
-    "include_statuses": ["pending", "unshipped", "partiallyshipped", "shipped"],
-    "exclude_statuses": ["cancelled"],
+    "include_statuses": [
+      "pending",
+      "unshipped",
+      "partiallyshipped",
+      "shipped"
+    ],
+    "exclude_statuses": [
+      "cancelled"
+    ],
     "pulse_source": "amazon_spapi",
     "price_field": "item-price"
   },
@@ -11,7 +18,11 @@
     "timezone": "America/New_York"
   },
   "spapi": {
-    "max_chunk_days": 30
+    "max_chunk_days": 30,
+    "inventory_ledger_days": 14,
+    "inventory_ledger_backfill_days": 90,
+    "//inventory_ledger_days": "Daily inventory-ledger window. Physical nexus depends on this feed, so the window is wider than strictly needed: Amazon can restate ledger rows for several days, and a wider window re-upserts them rather than missing them. Upsert-only — a narrow or wide window never deletes older events.",
+    "//inventory_ledger_backfill_days": "Weekly deeper re-pull, for ledger rows Amazon settled after the daily window had moved on. Also upsert-only."
   },
   "ads": {
     "max_report_days": 31,
@@ -28,6 +39,6 @@
     "contribution_formula": "payout - cogs - ad_spend",
     "finances_label": "Amazon Payout (before COGS)",
     "default_referral_pct": 0.15,
-    "default_fba_fee_per_unit": 3.50
+    "default_fba_fee_per_unit": 3.5
   }
 }

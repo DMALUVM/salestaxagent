@@ -17,9 +17,15 @@
       "Then run: python -m src.main entity-calendar --apply"
     ],
     "2_add_another_foreign_state": [
-      "Append to foreign_qualified: {\"state\": \"XX\", \"qualified_date\": \"YYYY-MM-DD\"}",
-      "Any rule in config/seed_entity_obligations.json whose applies_when is",
-      "'foreign_qualified' then starts tracking for that state. No code change needed.",
+      "foreign_qualified is a LIST — add as many states as you are qualified in:",
+      "    {\"state\": \"FL\", \"qualified_date\": \"2026-03-01\"}",
+      "Verified state rules exist for MD, OK, DE, FL, CA (Statement of Information)",
+      "and KY. Any other state falls back to a generic low-confidence annual-report",
+      "placeholder so a qualified state never silently tracks nothing — replace it",
+      "with a verified rule in config/seed_entity_obligations.json when you can.",
+      "IMPORTANT: registering for SALES TAX in a state does NOT put it here.",
+      "Entity annual reports follow foreign QUALIFICATION with the Secretary of",
+      "State, which is a separate filing. Only add states you actually qualified in.",
       "Then run: python -m src.main entity-calendar --apply"
     ],
     "3_enable_CA_TX_KY_after_a_CPA_confirms": [
@@ -47,6 +53,12 @@
       "(home state, where it is qualified, what a CPA has confirmed) so the rules in",
       "config/seed_entity_obligations.json can be applied to the right states.",
       "Monitoring aid — not legal or tax advice."
+    ],
+    "6_planned_sales_tax_registration": [
+      "planned_sales_tax_registration records where you INTEND to register for sales",
+      "tax. It is informational only: it never creates an entity obligation, because",
+      "sales-tax registration does not create one. Use \"all\" or a list of codes.",
+      "Sales-tax periods themselves live in filing_calendar, not here."
     ]
   },
   "home_state": "MD",
@@ -64,6 +76,8 @@
       "annual_due_month_day": null
     }
   ],
+  "//planned_sales_tax_registration": "Where you plan to register for SALES TAX. Informational only — it does NOT create entity obligations, since those follow foreign qualification with the Secretary of State, not sales-tax registration. Use \"all\" or a list like [\"CA\", \"FL\"].",
+  "planned_sales_tax_registration": "all",
   "//enabled_obligations": "Explicit overrides, keyed 'STATE:obligation_type'. true forces tracking even when the rules would not schedule it (e.g. the user confirms a CA doing-business position). false suppresses it permanently. Anything absent follows the rules.",
   "enabled_obligations": {},
   "//remote_seller": "Channels that create the FBA/remote-seller 'doing business' exposure some states assert. Used only to raise review flags — never to schedule a fee on its own.",

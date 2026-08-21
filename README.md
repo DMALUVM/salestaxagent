@@ -15,6 +15,7 @@
 3. [Data You Need to Gather (Do This First)](#data-you-need-to-gather)
 4. [Setup Instructions](#setup-instructions)
 5. [Running the System](#running-the-system)
+5b. [FBA Inventory Feed (Physical Nexus)](#fba-inventory-feed-physical-nexus)
 6. [Intelligence Layer](#intelligence-layer)
 7. [Dashboard](#dashboard)
 8. [Weekly / Monthly Maintenance Rhythm](#maintenance-rhythm)
@@ -269,6 +270,118 @@ job table.
 
 ---
 
+## FBA Inventory Feed (Physical Nexus)
+
+**This feed decides which states you register in.** Physical nexus is computed
+from `inventory_events` — every fulfilment centre that has held your stock, and
+when. If the feed stalls, or an FC code has no state mapping, the result is not
+an error message: it is a state quietly missing from your nexus list. Treat
+inventory freshness as a compliance control, not a data-plumbing detail.
+
+### What runs, and when
+
+| Job | Cadence | Window | Notes |
+|---|---|---|---|
+| `spapi_refresh` | daily 06:00 (America/New_York) | orders 7d, **inventory ledger 14d** | soft-fails: an inventory error never blocks orders or the sales-tax digest |
+| `inventory_ledger_backfill` | Sunday 04:00 | **90d** | catches ledger rows Amazon settled after the daily window moved on |
+| `inventory_sync` | daily 10:30 | current stock | FBA/AWD/restock/velocity — *not* the ledger, and not nexus input |
+
+Both ledger jobs write with an **UPSERT** on
+`(source_file, event_date, fc_code, asin, event_type, quantity)`. They add and
+correct; they never delete. Re-pulling any window — 14 days or 90 — cannot
+remove the 2024/2025 history the nexus engine reads. There is a test pinning
+this (`tests/test_ledger_health.py::TestHistoryIsNeverTruncated`).
+
+Window sizes live in `config/business_rules.json` under `spapi`:
+`inventory_ledger_days` (14) and `inventory_ledger_backfill_days` (90).
+
+### Routine check — no terminal needed most days
+
+The daily Telegram digest prints **one line** if the ledger has not synced
+successfully in 36 hours, and escalates past 72. A healthy feed prints nothing:
+a warning that appears every morning is one nobody reads on the morning it
+matters.
+
+When you do want detail:
+
+```bash
+python -m src.main inventory-health
+```
+
+Shows last successful sync, latest `event_date`, total events, distinct states,
+events by year, and any unmapped FC codes with their event counts and date
+ranges.
+
+### Unmapped FC codes — the silent gap
+
+`state_code` is resolved **at parse time** from `config/fc_codes.json`. Two
+consequences:
+
+1. An FC code that is not in that file produces an event with **no state**,
+   invisible to the physical-nexus engine. You could be storing inventory in a
+   state and see no nexus for it.
+2. Adding the code later does **not** retroactively fix stored rows.
+
+So the fix is two steps:
+
+**Never infer the state from the letters in the code.** Two worked examples
+from the 2026-08-20 mapping pass:
+
+- `XMD5` is in **Greencastle, Pennsylvania** — not Maryland.
+- `XCH2` is in **Garden City, Georgia** — not Chicago.
+- `ABE2/ABE3/ABE4` are in **Pennsylvania**; only `ABE8` (Florence NJ) is New
+  Jersey. The whole family had been mapped to NJ, misattributing 365 events.
+
+The `S` prefix is inconsistent too: `SAZ`/`SCA`/`SCO` encode states, but
+`SAT`/`SBD`/`SBN`/`SCK` are airport codes. Published directories also contain
+errors — one listed `SYS3` as "NC" with a Tennessee ZIP. **Always check the ZIP
+against the state**, and prefer leaving a code unmapped over guessing.
+
+```bash
+# 1. Find the state. Seller Central > Inventory > Shipments shows the
+#    destination address for each FC. Verify the ZIP matches the state.
+# 2. Add "CODE": "XX" to config/fc_codes.json AND mirror it into
+#    dashboard/src/lib/parsers/fc-codes-data.json, then backfill stored rows:
+python -m src.main inventory-remap-fc --dry-run   # shows what would change
+python -m src.main inventory-remap-fc --apply
+python -m src.main analyze                        # pick up any new states
+
+# If you CORRECTED a mapping that was already wrong, the fill-in pass cannot
+# see those rows (they already have a state). Use --recheck to fix them:
+python -m src.main inventory-remap-fc --recheck --dry-run
+python -m src.main inventory-remap-fc --recheck --apply
+```
+
+`inventory-remap-fc` only fills in states that are currently missing. It never
+overwrites an existing mapping and never deletes a row.
+
+### Keeping the scheduler alive on the Mac Mini
+
+The jobs above only run while the agent process is running. Two ways:
+
+```bash
+# Foreground / ad-hoc — stops when the terminal closes:
+python -m src.main run
+
+# Persistent, survives reboot (this is the one you want):
+launchctl load -w ~/Library/LaunchAgents/com.tallowbourn.salestax.plist
+launchctl list | grep tallowbourn      # confirm it is loaded
+```
+
+Check it is actually working:
+
+```bash
+python -m src.main jobs               # recent job outcomes
+python -m src.main inventory-health   # freshness of this specific feed
+tail -f logs/agent.out.log
+```
+
+If `inventory-health` reports STALE, the scheduler is almost always the cause —
+check `launchctl list` before investigating Amazon.
+
+
+---
+
 ## Running the System
 
 ### CLI Commands
@@ -298,6 +411,12 @@ python -m src.main export-csv --table sales_by_sku --start 2026-01-01
 
 # SP-API: pull Amazon orders + inventory
 python -m src.main spapi-refresh --days 30
+
+# FBA inventory feed health (drives physical nexus — see section above)
+python -m src.main inventory-health
+
+# Backfill state_code after adding codes to config/fc_codes.json
+python -m src.main inventory-remap-fc --apply
 
 # Amazon Ads: sync campaigns + search terms
 #   campaigns  chunk at <=30 days; search terms chunk at 7 days (much heavier)

@@ -268,3 +268,96 @@ class TestCalendarOverlap:
                     "period_label": "2026", "due_date": "2027-01-20",
                     "status": "not_required"}]
         assert find_calendar_overlap([self._ob()], filings) == []
+
+
+class TestRemoteSellerRelevance:
+    """Only filings a remote seller can actually owe.
+
+    A remote seller registers for SALES TAX in many states but is rarely
+    foreign-qualified in them. Entity annual reports follow qualification, not
+    sales-tax registration, so every state rule here must stay dormant until
+    the profile places the entity there.
+    """
+
+    def test_state_rules_do_not_fire_without_qualification(self):
+        """DE/FL/CA-SOI are templates: inert until the user qualifies there."""
+        profile = {"home_state": "MD", "foreign_qualified": [{"state": "OK"}],
+                   "enabled_obligations": {}}
+        # Registered for sales tax essentially everywhere — the planned state.
+        everywhere = {"DE", "FL", "CA", "KY", "TX", "NV", "HI", "MD", "OK"}
+        scheduled, _ = build_obligations(profile, load_rules(), everywhere,
+                                         [2026], TODAY)
+        states = {o.state_code for o in scheduled}
+        assert "DE" not in states, "Delaware fired on sales-tax registration alone"
+        assert "FL" not in states
+        assert {"MD", "OK"} <= states
+
+    def test_qualifying_in_a_state_activates_its_rule_with_no_code_change(self):
+        profile = {"home_state": "MD",
+                   "foreign_qualified": [{"state": "FL"}],
+                   "enabled_obligations": {}}
+        scheduled, _ = build_obligations(profile, load_rules(), set(), [2026], TODAY)
+        fl = [o for o in scheduled if o.state_code == "FL"]
+        assert len(fl) == 1
+        assert fl[0].due_date == date(2026, 5, 1)
+
+
+class TestWildcardFallback:
+    def test_wildcard_covers_a_state_with_no_specific_rule(self):
+        profile = {"home_state": "MD",
+                   "foreign_qualified": [{"state": "WY", "qualified_date": "2024-03-10"}],
+                   "enabled_obligations": {}}
+        scheduled, _ = build_obligations(profile, load_rules(), set(), [2026], TODAY)
+        wy = [o for o in scheduled if o.state_code == "WY"]
+        assert len(wy) == 1
+        assert wy[0].confidence == "low"       # honest about being a placeholder
+        assert wy[0].due_date == date(2026, 3, 10)
+
+    def test_wildcard_does_not_duplicate_a_specific_rule(self):
+        """OK's real Annual Certificate must not be shadowed by the placeholder.
+
+        The two carry different obligation_types (foreign_llc_report vs
+        entity_annual) but describe the same annual registration filing.
+        """
+        profile = {"home_state": "MD",
+                   "foreign_qualified": [{"state": "OK", "qualified_date": "2025-02-25"}],
+                   "enabled_obligations": {}}
+        scheduled, _ = build_obligations(profile, load_rules(), set(), [2026], TODAY)
+        ok = [o for o in scheduled if o.state_code == "OK"]
+        assert len(ok) == 1
+        assert ok[0].form_code == "Annual Certificate"
+
+    def test_wildcard_never_applies_to_the_home_state(self):
+        profile = {"home_state": "MD", "foreign_qualified": [], "enabled_obligations": {}}
+        scheduled, _ = build_obligations(profile, load_rules(), set(), [2026], TODAY)
+        md = [o for o in scheduled if o.state_code == "MD"]
+        assert len(md) == 1 and md[0].form_code == "Form 1"
+
+
+class TestBiennial:
+    PROFILE = {"home_state": "MD",
+               "foreign_qualified": [{"state": "CA", "qualified_date": "2025-06-10"}],
+               "enabled_obligations": {}}
+
+    def test_biennial_generates_only_every_other_year(self):
+        scheduled, _ = build_obligations(self.PROFILE, load_rules(), set(),
+                                         [2025, 2026, 2027, 2028], TODAY)
+        years = sorted(o.period_label for o in scheduled
+                       if o.state_code == "CA" and o.obligation_type == "entity_annual")
+        assert years == ["2025", "2027"]
+
+    def test_biennial_without_an_anchor_generates_nothing(self):
+        """No qualification date → no invented cycle."""
+        p = {**self.PROFILE, "foreign_qualified": [{"state": "CA"}]}
+        scheduled, _ = build_obligations(p, load_rules(), set(), [2026, 2027], TODAY)
+        assert [o for o in scheduled
+                if o.state_code == "CA" and o.obligation_type == "entity_annual"] == []
+
+    def test_ca_statement_of_information_is_not_the_franchise_tax(self):
+        """Two different CA obligations: SOI is scheduled, $800 stays review-only."""
+        scheduled, review = build_obligations(self.PROFILE, load_rules(), set(),
+                                              [2025], TODAY)
+        types = {o.obligation_type for o in scheduled if o.state_code == "CA"}
+        assert types == {"entity_annual"}
+        assert any(r["state_code"] == "CA" and r["obligation_type"] == "franchise_tax"
+                   for r in review)

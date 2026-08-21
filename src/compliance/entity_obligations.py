@@ -146,6 +146,20 @@ def compute_due_date(rule: dict, year: int, profile: dict,
     return DueDateResult(None, f"unrecognised due_rule kind: {kind!r}")
 
 
+def _biennial_anchor_year(rule: dict, profile: dict,
+                          entry: dict | None) -> int | None:
+    """Year the biennial cycle counts from, or None if unknown."""
+    due = rule.get("due_rule") or {}
+    field = due.get("anchor", "formation_date")
+    raw = (entry or {}).get(field) or profile.get(field)
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(str(raw)).year
+    except ValueError:
+        return None
+
+
 # ── Applicability ───────────────────────────────────────────────
 
 @dataclass
@@ -246,6 +260,35 @@ def build_obligations(profile: dict, rules: list[dict],
     scheduled: list[Obligation] = []
     review: list[dict] = []
 
+    # A rule with state_code "*" is a fallback: it applies to every
+    # foreign-qualified state that has no specific rule of the same obligation
+    # type. That is what makes adding a state data-only — the user appends to
+    # foreign_qualified and the generic annual-report obligation appears,
+    # honestly tagged as needing verification against that state's SOS.
+    # Match on the FAMILY, not the exact obligation_type. Oklahoma's real rule
+    # is typed foreign_llc_report and the generic fallback is entity_annual,
+    # but they describe the same annual registration filing — keying on the
+    # exact type let the placeholder duplicate a rule that was already precise,
+    # and even re-raised a period the user had marked filed.
+    REGISTRATION_FAMILY = {"entity_annual", "foreign_llc_report"}
+
+    def _family(t: str) -> str:
+        return "registration" if t in REGISTRATION_FAMILY else t
+
+    concrete = {(r.get("state_code"), _family(r.get("obligation_type", "")))
+                for r in rules if r.get("state_code") != "*"}
+    expanded: list[dict] = []
+    for rule in rules:
+        if rule.get("state_code") != "*":
+            expanded.append(rule)
+            continue
+        for entry in profile.get("foreign_qualified") or []:
+            sc = str(entry.get("state", "")).upper()
+            if not sc or (sc, _family(rule.get("obligation_type", ""))) in concrete:
+                continue
+            expanded.append({**rule, "state_code": sc})
+    rules = expanded
+
     for rule in rules:
         state = rule.get("state_code", "")
         app = evaluate_applicability(rule, profile, registered_states)
@@ -272,6 +315,13 @@ def build_obligations(profile: dict, rules: list[dict],
 
         entry = _foreign_entry(profile, state)
         for year in years:
+            # Biennial filings exist only in every other year. Generating one
+            # per year would invent deadlines that are not owed; the parity is
+            # taken from the anchor date the cycle actually runs on.
+            if rule.get("frequency") == "biennial":
+                anchor = _biennial_anchor_year(rule, profile, entry)
+                if anchor is None or (year - anchor) % 2 != 0:
+                    continue
             res = compute_due_date(rule, year, profile, entry)
             ob = Obligation(
                 state_code=state,

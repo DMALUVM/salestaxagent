@@ -38,6 +38,11 @@ SHOPIFY_TZ: ZoneInfo = ZoneInfo(SHOPIFY_TZ_NAME)
 
 # ── SP-API ────────────────────────────────────────────────
 SPAPI_MAX_CHUNK_DAYS: int = _RULES["spapi"]["max_chunk_days"]
+# Inventory ledger windows. This feed drives physical nexus, so it is pulled on
+# a wider window than the orders report and re-pulled weekly — both upsert-only.
+SPAPI_INVENTORY_LEDGER_DAYS: int = _RULES["spapi"].get("inventory_ledger_days", 14)
+SPAPI_INVENTORY_BACKFILL_DAYS: int = _RULES["spapi"].get(
+    "inventory_ledger_backfill_days", 90)
 
 # ── Ads ───────────────────────────────────────────────────
 ADS_MAX_REPORT_DAYS: int = _RULES["ads"]["max_report_days"]
