@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 /**
  * This week's decisions, in order.
@@ -52,15 +53,61 @@ function parse(text: string): { items: Item[]; cadence: string[]; header: string
 
 export function PpcPlaybook() {
   const [state, setState] = useState<{ text: string; error?: string } | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/ppc-playbook")
-      .then((r) => r.json())
-      .then((d) => setState({ text: d.text ?? "", error: d.available ? undefined : (d.hint ?? d.error) }))
-      .catch(() => setState({ text: "", error: "Could not load the playbook." }));
-  }, []);
+  /**
+   * Loaded ON DEMAND, never at render.
+   *
+   * This route shells out to the Python CLI. Fetching it from a mount effect
+   * meant every /ppc page view spawned a subprocess — which cannot work on a
+   * serverless deploy where the venv does not exist, and turned an optional
+   * panel into a page-load dependency. The page must render fully without it.
+   */
+  async function load() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/ppc-playbook");
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        // A gateway timeout or platform error page is HTML; calling .json()
+        // on it throws and would take the whole page down with it.
+        throw new Error(`Unexpected ${res.status} response from the playbook route.`);
+      }
+      const d = await res.json();
+      setState({ text: d.text ?? "", error: d.available ? undefined : (d.hint ?? d.error) });
+    } catch (e) {
+      setState({ text: "", error: e instanceof Error ? e.message : "Could not load the playbook." });
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  if (!state) return null;
+  if (!state) {
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-sm font-medium">
+              This week&apos;s playbook
+              <span className="ml-2 font-normal text-muted-foreground">
+                waste first, growth last
+              </span>
+            </CardTitle>
+            <Button variant="outline" size="sm" className="text-xs"
+                    disabled={busy} onClick={load}>
+              {busy ? "Building…" : "Build playbook"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-[10px] text-muted-foreground">
+            Reads live KPIs on the agent and orders this week&apos;s decisions —
+            waste before growth. Built on demand so the page never waits on it.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
   const { items, cadence, header } = parse(state.text);
 
   return (

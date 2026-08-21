@@ -514,9 +514,22 @@ export default function PPCPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const d = await fetch("/api/ppc").then((r) => r.json());
-      setData(d);
-    } catch { /* */ }
+      const res = await fetch("/api/ppc");
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        // A platform error page or gateway timeout is HTML. Calling .json() on
+        // it throws, and with no data set the page cannot distinguish that from
+        // an empty account — so surface it as a load failure instead.
+        setData({ fatalError: `Unexpected ${res.status} response from /api/ppc.` } as PPCData);
+        setLoading(false);
+        return;
+      }
+      setData(await res.json());
+    } catch (e) {
+      setData({
+        fatalError: e instanceof Error ? e.message : "Could not reach /api/ppc.",
+      } as PPCData);
+    }
     setLoading(false);
   }, []);
 

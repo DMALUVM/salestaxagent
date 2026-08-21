@@ -1,10 +1,4 @@
-import { execFile } from "node:child_process";
-import path from "node:path";
-import { promisify } from "node:util";
-
 import { getServerSupabase } from "@/lib/supabase-server";
-
-const run = promisify(execFile);
 
 /**
  * GET /api/brand-share — branded vs non-branded weekly rollups.

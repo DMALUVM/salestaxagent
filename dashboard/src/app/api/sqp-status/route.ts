@@ -1,10 +1,6 @@
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
 
 import { getServerSupabase } from "@/lib/supabase-server";
-
-const run = promisify(execFile);
 
 /**
  * GET /api/sqp-status — freshness of the organic-rank data the PPC gate reads.

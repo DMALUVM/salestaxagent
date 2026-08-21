@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,20 +85,37 @@ export function RegistrationPlan() {
   const [rows, setRows] = useState<PlanRow[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [tab, setTab] = useState<Tab>("register_now");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/registration-plan")
-      .then((r) => r.json())
-      .then((d) => {
-        if (!d.available) setErr(d.hint ?? d.error ?? "Plan unavailable.");
-        setRows(d.rows ?? []);
-        setCounts(d.counts ?? {});
-      })
-      .catch(() => setErr("Could not load the registration plan."))
-      .finally(() => setLoading(false));
-  }, []);
+  /**
+   * Loaded ON DEMAND. This route shells out to the Python CLI, so fetching it
+   * from a mount effect spawned a subprocess on every page view — impossible on
+   * a serverless deploy where the venv does not exist, and it made an optional
+   * panel a hard dependency of the page rendering at all.
+   */
+  async function load() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/registration-plan");
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        throw new Error(`Unexpected ${res.status} response from the plan route.`);
+      }
+      const d = await res.json();
+      if (!d.available) setErr(d.hint ?? d.error ?? "Plan unavailable.");
+      setRows(d.rows ?? []);
+      setCounts(d.counts ?? {});
+      setLoaded(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not load the registration plan.");
+      setLoaded(true);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const shown = rows.filter((r) => r.recommended_action === tab);
   const compact = tab === "already_registered" || tab === "no_sales_tax";
@@ -115,6 +132,17 @@ export function RegistrationPlan() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {!loaded && !loading && (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Ranks every state from live inventory and sales. Built on demand so
+              the page never waits on it.
+            </p>
+            <Button variant="outline" size="sm" className="text-xs" onClick={load}>
+              Build registration plan
+            </Button>
+          </div>
+        )}
         {loading && <p className="text-xs text-muted-foreground">Building plan…</p>}
         {err && (
           <p className="text-xs text-amber-700 dark:text-amber-400">{err}</p>
