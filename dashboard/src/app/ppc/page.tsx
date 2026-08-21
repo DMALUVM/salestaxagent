@@ -12,6 +12,7 @@ import { LoadingState } from "@/components/loading";
 import { rankBadgeOf } from "@/lib/ppc-actions";
 import { SqpStatus } from "@/components/sqp-status";
 import { BrandShare } from "@/components/brand-share";
+import { PpcPlaybook } from "@/components/ppc-playbook";
 import { isConfigured } from "@/lib/supabase";
 import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy, Settings2 } from "lucide-react";
 import {
@@ -116,6 +117,9 @@ interface PPCData {
   /** One bucket per range — the server owns the bounds for both panels. */
   rolesByRange: Record<Range, RoleBucket> | null;
   adTypesByRange: Record<Range, AdTypeAgg[]> | null;
+  /** Per-table load failures. Non-empty means "broken", not "no data". */
+  loadErrors?: string[];
+  fatalError?: string | null;
   spendScopeByRange: Record<Range, {
     total: number; placementSpend: number; unallocated: number;
     productsPresent: string[]; productsMissing: string[];
@@ -706,7 +710,26 @@ export default function PPCPage() {
         onSaved={(msg) => { setNotice(msg); loadData(); }}
       />
 
-      {!hasData ? (
+      {/* A failed load is NOT an empty account. Showing the sync prompt when a
+          query errored sends the operator to re-run a sync that already worked,
+          while the real fault stays invisible. */}
+      {!hasData && (data?.fatalError || (data?.loadErrors?.length ?? 0) > 0) ? (
+        <Card className="border-red-200 dark:border-red-900">
+          <CardContent className="py-8 text-center">
+            <p className="text-sm font-medium text-red-700 dark:text-red-300">
+              Could not load Ads data
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              This is a load failure, not an empty account — do not re-run the
+              sync until it is resolved.
+            </p>
+            <pre className="mt-3 whitespace-pre-wrap rounded bg-muted p-2 text-left text-[10px]">
+              {data?.fatalError ?? ""}
+              {(data?.loadErrors ?? []).join("\n")}
+            </pre>
+          </CardContent>
+        </Card>
+      ) : !hasData ? (
         <Card>
           <CardContent className="py-12 text-center">
             <Target className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
@@ -786,6 +809,8 @@ export default function PPCPage() {
               </CardContent>
             </Card>
           </div>
+
+          <PpcPlaybook />
 
           <BrandShare />
 

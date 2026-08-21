@@ -93,21 +93,34 @@ export async function GET() {
     // Sponsored Products one.
     const CAMPAIGN_COLS =
       "date,campaign_id,campaign_name,campaign_type,spend,sales_14d,orders_14d,clicks,impressions";
+    // Errors encountered while loading. An empty page must mean "the database
+    // has no rows", never "a query failed" — conflating the two is what turned
+    // a runtime bug into a confident "No Ads data yet" on a table with 12,000
+    // rows in it.
+    const loadErrors: string[] = [];
+
     let allCampaignRows: Array<Record<string, unknown>> = [];
     try {
       let offset = 0;
       const pageSize = 1000;
       while (true) {
         const r = await sb.from("ads_campaigns_daily").select(CAMPAIGN_COLS)
+          // Bounded to the widest window the page can show. The unbounded
+          // version paged the entire table (12k+ rows, 13 sequential requests)
+          // for data no range could display.
+          .gte("date", cutoffs["90d"])
           .order("date", { ascending: true })
           .order("campaign_id", { ascending: true })   // full PK — see placement note
           .range(offset, offset + pageSize - 1);
+        if (r.error) throw new Error(r.error.message);
         const page = r.data ?? [];
         allCampaignRows = allCampaignRows.concat(page);
         if (page.length < pageSize) break;
         offset += pageSize;
       }
-    } catch { /* table may not exist */ }
+    } catch (e) {
+      loadErrors.push(`ads_campaigns_daily: ${e instanceof Error ? e.message : String(e)}`);
+    }
 
     // ── Amazon sales per day from sales_daily (drives TACOS, KPI + daily) ──
     //    Bounded to the widest window (90d) and paginated. This is a date
@@ -122,6 +135,7 @@ export async function GET() {
           .gte("sale_date", cutoffs["90d"])
           .order("sale_date", { ascending: true })
           .range(offset, offset + pageSize - 1);
+        if (r.error) throw new Error(r.error.message);
         const page = r.data ?? [];
         for (const row of page) {
           const d = String(row.sale_date ?? "");
@@ -130,7 +144,11 @@ export async function GET() {
         if (page.length < pageSize) break;
         offset += pageSize;
       }
-    } catch { /* */ }
+    } catch (e) {
+      // TACOS divides by these. A silent failure would render every TACOS as
+      // 0% rather than as unavailable.
+      loadErrors.push(`sales_daily: ${e instanceof Error ? e.message : String(e)}`);
+    }
 
     // ── Build daily series from campaign rows (server-side rollup) ──
     const dailyMap = new Map<string, DailyBase>();
@@ -356,42 +374,6 @@ export async function GET() {
       RANGE_KEYS.map((k) => [k, typesFor(cutoffs[k], kpiByRange[k].kpis.spend)])
     ) as Record<RangeKey, ReturnType<typeof typesFor>>;
 
-    // Spend reconciliation per range: which ad products contributed, and
-    // whether the placement rows account for the whole campaign total.
-    // Placement data is Sponsored Products only, so SB/SD spend can never
-    // appear there — that difference is reported as `unallocated` rather than
-    // left as an unexplained mismatch between two panels on the same page.
-    const spendScopeByRange = Object.fromEntries(
-      RANGE_KEYS.map((k) => {
-        const from = cutoffs[k];
-        const total = kpiByRange[k].kpis.spend;
-        let placementSpend = 0;
-        for (const r of placementRows) {
-          const d = String(r.date ?? "");
-          if (!d || d < from || d > asOf) continue;
-          placementSpend += Number(r.spend ?? 0);
-        }
-        const present = new Set(
-          allCampaignRows
-            .filter((c) => {
-              const d = String(c.date ?? "");
-              return d >= from && d <= asOf;
-            })
-            .map((c) => campaignTypeOf(c)),
-        );
-        return [k, {
-          total,
-          placementSpend,
-          unallocated: Math.round((total - placementSpend) * 100) / 100,
-          productsPresent: ["SP", "SB", "SD"].filter((t) => present.has(t)),
-          productsMissing: ["SP", "SB", "SD"].filter((t) => !present.has(t)),
-        }];
-      }),
-    ) as Record<RangeKey, {
-      total: number; placementSpend: number; unallocated: number;
-      productsPresent: string[]; productsMissing: string[];
-    }>;
-
     // ── Placement rows (optional table) ──
     // Fetched once over the widest window, then aggregated per range in memory
     // — one query, four buckets, identical bounds.
@@ -422,11 +404,15 @@ export async function GET() {
         if (page.length < pageSize) break;
         offset += pageSize;
       }
-    } catch {
-      // Table absent until migration_ads_placement.sql is run — a setup state,
-      // not an error. The page shows its prompt instead.
+    } catch (e) {
+      // A genuinely absent table is a setup state; anything else is a fault and
+      // must be reported rather than rendered as "no placement data".
+      const msg = e instanceof Error ? e.message : String(e);
       placementsAvailable = false;
       placementRows = [];
+      if (!/ads_placement_daily/.test(msg) || !/does not exist|schema cache/.test(msg)) {
+        loadErrors.push(`ads_placement_daily: ${msg}`);
+      }
     }
 
     function placementsFor(from: string) {
@@ -463,6 +449,42 @@ export async function GET() {
       })).sort((a, b) => b.spend - a.spend);
     }
 
+    // Spend reconciliation per range: which ad products contributed, and
+    // whether the placement rows account for the whole campaign total.
+    // Placement data is Sponsored Products only, so SB/SD spend can never
+    // appear there — that difference is reported as `unallocated` rather than
+    // left as an unexplained mismatch between two panels on the same page.
+    const spendScopeByRange = Object.fromEntries(
+      RANGE_KEYS.map((k) => {
+        const from = cutoffs[k];
+        const total = kpiByRange[k].kpis.spend;
+        let placementSpend = 0;
+        for (const r of placementRows) {
+          const d = String(r.date ?? "");
+          if (!d || d < from || d > asOf) continue;
+          placementSpend += Number(r.spend ?? 0);
+        }
+        const present = new Set(
+          allCampaignRows
+            .filter((c) => {
+              const d = String(c.date ?? "");
+              return d >= from && d <= asOf;
+            })
+            .map((c) => campaignTypeOf(c)),
+        );
+        return [k, {
+          total,
+          placementSpend,
+          unallocated: Math.round((total - placementSpend) * 100) / 100,
+          productsPresent: ["SP", "SB", "SD"].filter((t) => present.has(t)),
+          productsMissing: ["SP", "SB", "SD"].filter((t) => !present.has(t)),
+        }];
+      }),
+    ) as Record<RangeKey, {
+      total: number; placementSpend: number; unallocated: number;
+      productsPresent: string[]; productsMissing: string[];
+    }>;
+
     const placementsByRange = Object.fromEntries(
       RANGE_KEYS.map((k) => [k, placementsFor(cutoffs[k])])
     ) as Record<RangeKey, ReturnType<typeof placementsFor>>;
@@ -486,6 +508,7 @@ export async function GET() {
           .eq("status", "open")
           .order("impact_estimate", { ascending: false })
           .range(offset, offset + pageSize - 1);
+        if (r.error) throw new Error(r.error.message);
         const page = r.data ?? [];
         recommendations = recommendations.concat(page);
         if (page.length < pageSize) break;
@@ -555,14 +578,19 @@ export async function GET() {
         storageAvailable: strategy.storageAvailable,
         updatedAt: strategy.updatedAt,
       },
+      loadErrors,
       rolesByRange, adTypesByRange, spendScopeByRange,
       placementsByRange, placementsAvailable,
       searchTerms, recommendations,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
       targetAcos, targetAcosAsOf,
     });
-  } catch {
+  } catch (e) {
+    // The whole route failed. Say so — the page must not present this as an
+    // empty account.
     return Response.json({
+      fatalError: e instanceof Error ? e.message : "unknown error",
+      loadErrors: [],
       kpi7: null, kpi14: null, kpi30: null, kpi90: null,
       dailySeries: [], cutoffs: null, campaigns: [],
       rolesByRange: null, adTypesByRange: null, spendScopeByRange: null,

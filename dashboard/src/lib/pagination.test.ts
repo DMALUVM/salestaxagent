@@ -68,3 +68,51 @@ test("the campaign query selects campaign_id for its tiebreaker", () => {
   assert.ok(src.includes('"date,campaign_id,campaign_name'),
     "CAMPAIGN_COLS must include campaign_id");
 });
+
+/**
+ * A failed query must never render as an empty account.
+ *
+ * Live regression: `spendScopeByRange` iterated `placementRows` ~30 lines
+ * BEFORE its `let` declaration. Object.fromEntries(...map(...)) runs its
+ * callback immediately, so it hit the temporal dead zone and threw
+ * ReferenceError. The outer catch swallowed it into the all-null payload and
+ * /ppc showed "No Ads data yet" against a table holding 12,000 rows.
+ *
+ * tsc cannot catch this: use-before-declaration inside a callback is not
+ * statically provable, so it compiled clean and failed only at runtime.
+ */
+test("declarations precede the code that reads them", () => {
+  const declAt = (name: string) => src.indexOf(`let ${name}`);
+  const readAt = (name: string) => {
+    const m = new RegExp(`for \\\\(const \\\\w+ of ${name}\\\\)`).exec(src);
+    return m ? m.index : -1;
+  };
+  for (const name of ["placementRows", "allCampaignRows"]) {
+    const d = declAt(name);
+    const r = readAt(name);
+    if (d === -1 || r === -1) continue;
+    assert.ok(d < r, `${name} is read at ${r} but declared at ${d} — temporal dead zone`);
+  }
+});
+
+test("paginated fetches check the error field", () => {
+  const stmts = statementsWithRange(src);
+  const checked = (src.match(/if \(r\.error\)|if \(error\)/g) ?? []).length;
+  assert.ok(
+    checked >= stmts.length - 1,
+    `${stmts.length} paginated queries but only ${checked} error checks — an ` +
+    `unchecked query returns null data and looks identical to "no rows"`,
+  );
+});
+
+test("the route reports load failures instead of silently emptying", () => {
+  assert.ok(src.includes("loadErrors"), "route should collect per-table load errors");
+  assert.ok(src.includes("fatalError"), "route should report a whole-route failure");
+});
+
+test("the campaign fetch is bounded by date", () => {
+  const stmts = statementsWithRange(src).filter((s) => s.includes("CAMPAIGN_COLS"));
+  assert.equal(stmts.length, 1);
+  assert.ok(stmts[0].includes('.gte("date"'),
+    "campaign fetch must be date-bounded, not a full-table scan");
+});
