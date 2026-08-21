@@ -21,7 +21,7 @@ import {
 import {
   ACTION_LABELS, ACTION_STYLES, actionTypeOf, doThisOf, whyOf,
   suggestedBidOf, matchTypesOf, adGroupsOf,
-  buildPlanMarkdown, buildGrokPrompt, type RecLike,
+  buildPlanMarkdown, type RecLike,
 } from "@/lib/ppc-actions";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
@@ -511,6 +511,12 @@ export default function PPCPage() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [targetsOpen, setTargetsOpen] = useState(false);
+  // Belongs to copyGrokPrompt() far below, but every hook lives in this block.
+  // It previously sat next to its function, which put it AFTER the `loading`
+  // early return: the loading render called N hooks and the loaded render
+  // N+1, which is React error #310. Hooks first, derive second, return third —
+  // no exceptions, however far the state is from the code that uses it.
+  const [exporting, setExporting] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -705,7 +711,6 @@ export default function PPCPage() {
    * and what has actually been learned so far — never reached the model, so it
    * reasoned about a fraction of the evidence.
    */
-  const [exporting, setExporting] = useState(false);
   async function copyGrokPrompt() {
     setExporting(true);
     try {
