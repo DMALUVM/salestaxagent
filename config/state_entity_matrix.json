@@ -1,0 +1,440 @@
+{
+  "_metadata": {
+    "description": "Per-jurisdiction matrix of NON-sales-tax obligations relevant to a remote ecommerce seller (FBA + Shopify): gross-receipts and business-activity taxes, entity franchise taxes, and qualification-driven annual reports. Sales-tax returns are NOT in scope — those live in filing_calendar.",
+    "disclaimer": "Monitoring aid only. Not legal or tax advice.",
+    "status_values": {
+      "verified_applies": "An obligation was verified against an official source. See obligations[].",
+      "verified_none": "Verified that no non-sales-tax obligation arises for a remote seller. NOT USED YET — no state has been affirmatively cleared.",
+      "not_researched": "No verification performed. MUST NOT be read as 'nothing required'."
+    },
+    "trigger_values": {
+      "qualification": "Arises only from registering the entity with the Secretary of State (foreign qualification or domestic formation). Sales-tax registration alone NEVER creates one.",
+      "inventory / property nexus": "Can arise from holding inventory in the state, e.g. FBA stock.",
+      "economic": "Arises from crossing a revenue/activity threshold, independent of physical presence.",
+      "sales-tax registration": "Arises because the seller is registered to collect in that state."
+    },
+    "mode_values": {
+      "schedulable": "Follows from a fact in entity_profile.json; gets real due dates.",
+      "review_only": "Turns on a contested legal position; never auto-scheduled. Enable via enabled_obligations after a CPA confirms."
+    },
+    "important": "PL 86-272 protects only against net-income taxes. It does NOT protect against gross-receipts or business-activity taxes such as WA B&O, OH CAT, OR CAT, TX franchise or DE GRT — which is why those appear here for remote sellers with no offices or staff in the state.",
+    "last_updated": "2026-08-20"
+  },
+  "jurisdictions": {
+    "AL": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "AK": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "AZ": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "AR": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "CA": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "LLC annual franchise tax ($800 minimum)",
+          "trigger": "inventory / doing business",
+          "confidence": "high",
+          "source_url": "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html",
+          "mode": "review_only",
+          "note": "FTB treats FBA inventory storage as 'doing business'; OTA has sustained it. Administered by FTB, not CDTFA — a sales-tax registration does not address it.",
+          "rule_ref": "seed_entity_obligations:CA:franchise_tax"
+        },
+        {
+          "status": "verified_applies",
+          "name": "Statement of Information (LLC-12)",
+          "trigger": "qualification",
+          "confidence": "medium",
+          "source_url": "https://www.sos.ca.gov/business-programs/business-entities/statements",
+          "mode": "schedulable",
+          "note": "Biennial. Only once actually foreign-qualified in CA.",
+          "rule_ref": "seed_entity_obligations:CA:entity_annual"
+        }
+      ]
+    },
+    "CO": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "CT": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "DE": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "Gross Receipts Tax + business license",
+          "trigger": "inventory / property nexus",
+          "confidence": "high",
+          "source_url": "https://revenue.delaware.gov/business-tax-forms/doing-business-in-delaware/step-4-gross-receipts-taxes/",
+          "mode": "review_only",
+          "note": "DE has no sales tax but taxes the SELLER's gross receipts. Nexus is created by property in DE including inventory and warehouses. A retail/wholesale licence is also required.",
+          "rule_ref": "matrix_only"
+        },
+        {
+          "status": "verified_applies",
+          "name": "LLC annual tax ($300)",
+          "trigger": "qualification",
+          "confidence": "high",
+          "source_url": "https://corp.delaware.gov/alt-entitytaxinstructions/",
+          "mode": "schedulable",
+          "note": "Flat $300 due June 1; no annual report required for LLCs. Only once formed or registered in DE.",
+          "rule_ref": "seed_entity_obligations:DE:franchise_tax"
+        }
+      ]
+    },
+    "DC": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "FL": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "Annual Report (Sunbiz)",
+          "trigger": "qualification",
+          "confidence": "high",
+          "source_url": "https://dos.fl.gov/sunbiz/manage-business/efile/annual-report/",
+          "mode": "schedulable",
+          "note": "May 1, $138.75; $400 non-waivable late fee. Only once foreign-qualified in FL.",
+          "rule_ref": "seed_entity_obligations:FL:entity_annual"
+        }
+      ]
+    },
+    "GA": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "HI": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "General Excise Tax annual return (G-49)",
+          "trigger": "sales-tax registration",
+          "confidence": "high",
+          "source_url": "https://tax.hawaii.gov/geninfo/get/",
+          "mode": "schedulable",
+          "note": "GET is a tax on the business, not the buyer. G-45 periodics live in filing_calendar; the G-49 annual reconciliation is tracked as an entity obligation.",
+          "rule_ref": "seed_entity_obligations:HI:get_excise"
+        }
+      ]
+    },
+    "ID": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "IL": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "IN": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "IA": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "KS": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "KY": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "Limited Liability Entity Tax (LLET, $175 min)",
+          "trigger": "economic / doing business",
+          "confidence": "medium",
+          "source_url": "https://revenue.ky.gov/Business/Corporation-Income-and-Limited-Liability-Entity-Tax/Pages/default.aspx",
+          "mode": "review_only",
+          "note": "$175 minimum is confirmed; whether a remote/FBA seller is 'doing business' for LLET is not settled here.",
+          "rule_ref": "seed_entity_obligations:KY:franchise_tax"
+        },
+        {
+          "status": "verified_applies",
+          "name": "Secretary of State annual report",
+          "trigger": "qualification",
+          "confidence": "high",
+          "source_url": "https://www.sos.ky.gov/bus/business-filings/Pages/Annual-Reports.aspx",
+          "mode": "schedulable",
+          "note": "June 30, $15. Requires KY entity registration — sales-tax registration alone does NOT create it.",
+          "rule_ref": "seed_entity_obligations:KY:entity_annual"
+        }
+      ]
+    },
+    "LA": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "ME": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "MD": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "Annual Report + Business Personal Property Return (Form 1)",
+          "trigger": "qualification",
+          "confidence": "high",
+          "source_url": "https://dat.maryland.gov/SDAT%20Forms/PPR_Forms/2025_Form1_Instructions.pdf",
+          "mode": "schedulable",
+          "note": "April 15, $300. Home state — domestic LLC.",
+          "rule_ref": "seed_entity_obligations:MD:entity_annual"
+        }
+      ]
+    },
+    "MA": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "MI": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "MN": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "MS": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "MO": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "MT": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "NE": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "NV": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "Commerce Tax",
+          "trigger": "economic (> $4M NV gross revenue)",
+          "confidence": "low",
+          "source_url": "https://tax.nv.gov/commerce-tax/",
+          "mode": "review_only",
+          "note": "High threshold — most remote sellers are below it. Listed to keep NV out of the sales-tax calendar as a phantom quarterly, not to assert a filing is owed.",
+          "rule_ref": "seed_entity_obligations:NV:franchise_tax"
+        }
+      ]
+    },
+    "NH": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "NJ": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "NM": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "NY": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "NC": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "ND": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "OH": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "Commercial Activity Tax (CAT)",
+          "trigger": "economic",
+          "confidence": "medium",
+          "source_url": "https://tax.ohio.gov/business/ohio-business-taxes/commercial-activity-tax",
+          "mode": "review_only",
+          "note": "Gross-receipts tax with a bright-line economic threshold; confirm the current threshold and exclusion amount before filing.",
+          "rule_ref": "seed_franchise_rules:OH"
+        }
+      ]
+    },
+    "OK": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "LLC Annual Certificate",
+          "trigger": "qualification",
+          "confidence": "high",
+          "source_url": "https://www.sos.ok.gov/forms/Llcannualcertificate.PDF",
+          "mode": "schedulable",
+          "note": "$25 on the registration anniversary. OK franchise tax was repealed for periods after 2023 — verify before assuming any separate franchise filing.",
+          "rule_ref": "seed_entity_obligations:OK:foreign_llc_report"
+        }
+      ]
+    },
+    "OR": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "Corporate Activity Tax (CAT)",
+          "trigger": "economic",
+          "confidence": "high",
+          "source_url": "https://www.oregon.gov/dor/programs/businesses/pages/corporate-activity-tax.aspx",
+          "mode": "review_only",
+          "note": "Registration required within 30 days of exceeding $750,000 Oregon commercial activity; tax ($250 + 0.57%) applies above $1M. Registration duty starts BELOW the tax threshold.",
+          "rule_ref": "matrix_only"
+        }
+      ]
+    },
+    "PA": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "RI": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "SC": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "SD": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "TN": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "Franchise & excise tax",
+          "trigger": "economic / inventory",
+          "confidence": "medium",
+          "source_url": "https://www.tn.gov/revenue/taxes/franchise---excise-tax.html",
+          "mode": "review_only",
+          "note": "Applies to entities doing business in TN; FBA inventory is a common trigger.",
+          "rule_ref": "seed_franchise_rules:TN"
+        }
+      ]
+    },
+    "TX": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "Franchise tax report + Public Information Report",
+          "trigger": "economic / inventory",
+          "confidence": "medium",
+          "source_url": "https://comptroller.texas.gov/taxes/franchise/",
+          "mode": "review_only",
+          "note": "May 15 date is high confidence; whether this entity has a filing requirement depends on Comptroller registration / nexus.",
+          "rule_ref": "seed_entity_obligations:TX:franchise_tax"
+        }
+      ]
+    },
+    "UT": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "VT": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "VA": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "WA": {
+      "status": "verified_applies",
+      "obligations": [
+        {
+          "status": "verified_applies",
+          "name": "Business & Occupation (B&O) tax",
+          "trigger": "economic / inventory",
+          "confidence": "high",
+          "source_url": "https://dor.wa.gov/taxes-rates/business-occupation-tax",
+          "mode": "review_only",
+          "note": "Gross-receipts tax on the privilege of doing business; FBA inventory is a common trigger. PL 86-272 does not protect against gross-receipts taxes.",
+          "rule_ref": "seed_franchise_rules:WA"
+        }
+      ]
+    },
+    "WV": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "WI": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    },
+    "WY": {
+      "status": "not_researched",
+      "obligations": [],
+      "note": "Not yet researched. This is NOT a finding of 'nothing required' — it means no verification has been done for this state."
+    }
+  }
+}

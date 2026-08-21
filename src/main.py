@@ -1337,6 +1337,56 @@ def inventory_remap_fc_cmd(dry_run, recheck):
                f"nexus picks up any newly-covered states.")
 
 
+@cli.command("entity-matrix")
+@click.option("--status", type=click.Choice(["all", "verified_applies",
+              "verified_none", "not_researched"]), default="all")
+@click.option("--exposure-only", is_flag=True,
+              help="Only obligations a remote seller can owe WITHOUT "
+                   "foreign-qualifying (drops qualification-driven reports)")
+def entity_matrix_cmd(status, exposure_only):
+    """50 states + DC: non-sales-tax obligations for a remote ecommerce seller.
+
+    `not_researched` means no verification has been done — it is NOT a finding
+    that nothing is required.
+    """
+    from src.compliance.state_matrix import (
+        counts, load_matrix, obligations, remote_seller_exposure,
+        states_with_status,
+    )
+
+    m = load_matrix()
+    c = counts(m)
+    click.echo("Entity / business-activity matrix — 50 states + DC")
+    click.echo(f"  jurisdictions   : {c['jurisdictions']}")
+    for st in ("verified_applies", "verified_none", "not_researched"):
+        click.echo(f"  {st:<16}: {c['by_status'][st]}")
+    click.echo(f"  obligations     : {c['obligations']} "
+               f"({c['by_mode'].get('schedulable', 0)} schedulable, "
+               f"{c['by_mode'].get('review_only', 0)} review-only)")
+    click.echo(f"  by trigger      : {c['by_trigger']}")
+
+    obs = remote_seller_exposure(m) if exposure_only else obligations(m)
+    if status in ("all", "verified_applies") and obs:
+        label = ("Remote-seller exposure (no qualification needed)"
+                 if exposure_only else "verified_applies")
+        click.echo(f"\n  {label}:")
+        click.echo(f"    {'st':<4}{'obligation':<44}{'trigger':<28}"
+                   f"{'conf':<8}{'mode'}")
+        for o in sorted(obs, key=lambda x: (x.state_code, x.name)):
+            click.echo(f"    {o.state_code:<4}{o.name[:43]:<44}{o.trigger[:27]:<28}"
+                       f"{o.confidence:<8}{o.mode}")
+
+    if status in ("all", "not_researched"):
+        nr = states_with_status("not_researched", m)
+        click.echo(f"\n  not_researched ({len(nr)}) — NOT a finding of 'none':")
+        click.echo("    " + ", ".join(nr))
+
+    none_states = states_with_status("verified_none", m)
+    click.echo(f"\n  verified_none ({len(none_states)}): "
+               f"{', '.join(none_states) if none_states else 'none yet — no state has been affirmatively cleared'}")
+    click.echo("\n  Monitoring aid — not legal or tax advice.")
+
+
 @cli.command("entity-audit")
 @click.option("--year", default=None, type=int, help="Limit to one tax year")
 @click.option("--horizon", type=click.Choice(["12m", "24m", "all"]), default="12m",
@@ -1477,7 +1527,8 @@ def entity_calendar_cmd(year, dry_run):
     """
     from datetime import date as _date
     from src.compliance.entity_obligations import (
-        build_obligations, load_profile, load_rules, sync_obligations,
+        build_obligations, load_profile, load_rules, prune_disabled,
+        sync_obligations,
     )
     from src.db import fetch_all
 
@@ -1492,11 +1543,22 @@ def entity_calendar_cmd(year, dry_run):
     if r.get("skipped"):
         raise click.ClickException(r["skipped"])
 
+    # Reconcile the other direction: an obligation turned back off must stop
+    # appearing as scheduled. Settled periods are never removed.
+    pruned = prune_disabled(scheduled, dry_run=dry_run)
+
     verb = "would write" if r["dry_run"] else "wrote"
     click.echo(f"{'DRY RUN — ' if r['dry_run'] else ''}{verb} "
                f"{r['would_write'] if r['dry_run'] else r['written']} obligation row(s) "
                f"for {years}")
     click.echo(f"  settled periods preserved: {r['settled_preserved']}")
+    if pruned["removed"]:
+        click.echo(f"  {'would remove' if dry_run else 'removed'} "
+                   f"{pruned['removed']} row(s) for obligations no longer enabled: "
+                   f"{', '.join(pruned['rows'][:4])}")
+    if pruned["kept_settled"]:
+        click.echo(f"  kept {pruned['kept_settled']} settled row(s) for "
+                   f"no-longer-tracked obligations (filing records are never deleted)")
     click.echo(f"  review-only (not written, needs confirmation): {len(review)}")
     for o in scheduled:
         due = o.due_date.isoformat() if o.due_date else "no date"

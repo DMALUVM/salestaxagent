@@ -361,3 +361,64 @@ class TestBiennial:
         assert types == {"entity_annual"}
         assert any(r["state_code"] == "CA" and r["obligation_type"] == "franchise_tax"
                    for r in review)
+
+
+class TestPruneDisabled:
+    """Turning a contested obligation off must stop it looking scheduled."""
+
+    def _stored(self, state, otype, label, status="open"):
+        return {"id": f"{state}-{label}", "state_code": state,
+                "obligation_type": otype, "period_label": label,
+                "form_code": "F", "status": status}
+
+    def test_rows_for_a_disabled_obligation_are_removed(self, monkeypatch):
+        import src.compliance.entity_obligations as eo
+
+        stored = [self._stored("CA", "franchise_tax", "2026"),
+                  self._stored("MD", "entity_annual", "2026")]
+        deleted = []
+
+        class FakeQ:
+            def delete(self):
+                return self
+
+            def eq(self, col, val):
+                deleted.append(val)
+                return self
+
+            def execute(self):
+                return type("R", (), {"data": []})()
+
+        monkeypatch.setattr(eo, "fetch_stored", lambda: stored)
+        monkeypatch.setattr(eo, "log_audit", lambda **k: None, raising=False)
+        monkeypatch.setattr(
+            "src.db.get_client",
+            lambda: type("C", (), {"table": lambda self, t: FakeQ()})())
+        monkeypatch.setattr("src.db.log_audit", lambda **k: None)
+
+        md = Obligation(
+            state_code="MD", obligation_type="entity_annual", form_code="Form 1",
+            title="", frequency="annual", period_label="2026",
+            due_date=date(2026, 4, 15), due_rule_text="", status="open",
+            confidence="high", source_authority="", source_citation="",
+            source_url="", amount_estimate=None, notes="", basis="",
+            scheduled=True, last_reviewed="")
+
+        r = eo.prune_disabled([md])
+        assert r["removed"] == 1
+        assert deleted == ["CA-2026"]
+
+    def test_settled_rows_survive_being_disabled(self, monkeypatch):
+        """A filing you actually made is a record, not a schedule entry."""
+        import src.compliance.entity_obligations as eo
+
+        stored = [self._stored("CA", "franchise_tax", "2026", status="filed")]
+        monkeypatch.setattr(eo, "fetch_stored", lambda: stored)
+        r = eo.prune_disabled([], dry_run=True)
+        assert r["removed"] == 0
+        assert r["kept_settled"] == 1
+
+    def test_nothing_to_prune_is_a_no_op(self, monkeypatch):
+        import src.compliance.entity_obligations as eo
+        monkeypatch.setattr(eo, "fetch_stored", lambda: [])
+        assert eo.prune_disabled([])["removed"] == 0

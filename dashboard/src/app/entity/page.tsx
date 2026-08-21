@@ -5,11 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/loading";
+import { StateMatrix } from "@/components/state-matrix";
 import { getSupabase } from "@/lib/supabase";
 import {
-  filterObligations, HORIZON_LABELS, SCOPE_LABELS,
-  type HorizonKey, type ScopeKey,
+  filterObligations, HORIZON_LABELS, SCOPE_DESCRIPTIONS, SCOPE_LABELS,
+  scopeStates, type HorizonKey, type ScopeKey,
 } from "@/lib/entity-filters";
+import { filterReviewItems, type ReviewItem } from "@/lib/entity-review";
 
 /**
  * Entity & compliance — obligations that exist because of what the ENTITY is
@@ -46,6 +48,7 @@ interface Payload {
   registered?: string[];
   homeState?: string | null;
   foreignStates?: string[];
+  review?: ReviewItem[];
   today?: string;
 }
 
@@ -177,6 +180,123 @@ function ObligationCard({
   );
 }
 
+/**
+ * A contested obligation. Always rendered — never dated, never scheduled, and
+ * never hidden by the horizon filter. An obligation the user has not decided
+ * about is the one most likely to be missed.
+ */
+function ReviewCard({ item, onChanged }: { item: ReviewItem; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function toggle(enable: boolean) {
+    if (enable && !window.confirm(
+      `Start tracking ${item.state_code} ${item.form_code} as a scheduled obligation?\n\n` +
+      `Only do this once a CPA has confirmed it applies to your entity. ` +
+      `This writes enabled_obligations["${item.enable_key}"] and re-applies the ` +
+      `entity calendar.`,
+    )) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/entity-enable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: item.enable_key, enabled: enable }),
+      });
+      const d = await res.json();
+      if (!d.ok) setMsg(d.error ?? "Failed.");
+      else if (d.hint) setMsg(d.hint);
+      else onChanged();
+      if (d.ok && !d.hint) onChanged();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Request failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold">{item.state_code}</span>
+            <span className="text-sm">{item.form_code}</span>
+            <Badge variant="outline" className="text-[9px]">
+              {TYPE_LABELS[item.obligation_type] ?? item.obligation_type}
+            </Badge>
+            <Badge
+              variant="outline"
+              className={`text-[9px] ${CONFIDENCE_STYLES[item.confidence] ?? ""}`}
+              title="How well established the rule itself is — separate from whether it applies to you"
+            >
+              {item.confidence} confidence
+            </Badge>
+            {item.enabled && (
+              <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900">
+                enabled — now scheduled
+              </Badge>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">{item.title}</p>
+        </div>
+        <div className="text-right shrink-0">
+          {item.amount_estimate ? (
+            <p className="text-sm font-semibold tabular-nums">
+              ~${Number(item.amount_estimate).toLocaleString()}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">amount varies</p>
+          )}
+          <p className="text-[10px] text-muted-foreground">{item.frequency}</p>
+        </div>
+      </div>
+
+      {item.confidence_note && (
+        <p className="mt-2 text-[10px] text-amber-700 dark:text-amber-400">
+          <span className="font-medium">Why it is not scheduled:</span>{" "}
+          {item.confidence_note}
+        </p>
+      )}
+      {item.due_rule_text && (
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          <span className="font-medium">If it applies, due:</span> {item.due_rule_text}
+        </p>
+      )}
+      {item.amount_note && (
+        <p className="mt-1 text-[10px] text-muted-foreground">{item.amount_note}</p>
+      )}
+      {item.source_url && (
+        <p className="mt-1 text-[10px]">
+          <a href={item.source_url} target="_blank" rel="noopener noreferrer"
+             className="text-blue-600 hover:underline dark:text-blue-400">
+            {item.source_authority} — {item.source_citation}
+          </a>
+        </p>
+      )}
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {item.enabled ? (
+          <Button variant="outline" size="sm" className="text-xs" disabled={busy}
+                  onClick={() => toggle(false)}>
+            {busy ? "…" : "Stop tracking (back to review)"}
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" className="text-xs" disabled={busy}
+                  onClick={() => toggle(true)}>
+            {busy ? "…" : "CPA confirmed — start tracking"}
+          </Button>
+        )}
+        <code className="text-[9px] text-muted-foreground">
+          enabled_obligations[&quot;{item.enable_key}&quot;]
+        </code>
+      </div>
+      {msg && <p className="mt-2 text-[10px] text-amber-700 dark:text-amber-400">{msg}</p>}
+    </div>
+  );
+}
+
 export default function EntityPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -210,6 +330,18 @@ export default function EntityPage() {
     foreignStates: new Set(data?.foreignStates ?? []),
   });
   const { overdue, upcoming, needsDate, settled, hiddenByHorizon } = filtered;
+
+  // Review items are scope-filtered but NEVER horizon-filtered: they carry no
+  // due date, so a "next 12 months" window has nothing to test them against.
+  // Filtering them by date is what made CA/KY/TX/NV invisible.
+  const allowedStates = scopeStates(
+    scope,
+    new Set(data?.registered ?? []),
+    data?.homeState ?? null,
+    new Set(data?.foreignStates ?? []),
+  );
+  const review = filterReviewItems(data?.review ?? [], allowedStates);
+  const reviewPending = review.filter((r) => !r.enabled);
 
   return (
     <div className="space-y-6">
@@ -263,13 +395,7 @@ export default function EntityPage() {
                   size="sm"
                   className="text-xs"
                   onClick={() => setScope(sc)}
-                  title={
-                    sc === "registered"
-                      ? "Sales-tax registered states, plus your home state and anywhere you are foreign-qualified — those never drop out."
-                      : sc === "home_foreign"
-                      ? "Only your home state and states you are foreign-qualified in."
-                      : "Every state with a tracked entity obligation."
-                  }
+                  title={SCOPE_DESCRIPTIONS[sc]}
                 >
                   {SCOPE_LABELS[sc]}
                 </Button>
@@ -291,6 +417,7 @@ export default function EntityPage() {
               ["Overdue", overdue.length, "text-red-600 dark:text-red-400"],
               ["Upcoming", upcoming.length, ""],
               ["Needs a date", needsDate.length, ""],
+              ["Review with CPA", reviewPending.length, "text-amber-600 dark:text-amber-400"],
               ["Settled", settled.length, "text-muted-foreground"],
             ].map(([label, n, cls]) => (
               <Card key={String(label)}>
@@ -352,6 +479,35 @@ export default function EntityPage() {
             </Card>
           )}
 
+          {/* Always rendered when any contested rule exists — including when the
+              list is empty, so "nothing to review" is a visible statement
+              rather than an absent section. */}
+          {review.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Review with a CPA
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    {reviewPending.length} undecided
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  These are <span className="font-medium">not scheduled and not
+                  overdue</span>. Each one is a real filing with a known rule, but
+                  whether it applies turns on a legal position about your entity —
+                  typically whether FBA inventory or economic presence counts as
+                  &ldquo;doing business&rdquo; in that state. They have no due date
+                  here, and the horizon filter never hides them.
+                </p>
+                {review.map((r) => (
+                  <ReviewCard key={r.enable_key} item={r} onChanged={load} />
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
           {settled.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
@@ -393,6 +549,8 @@ export default function EntityPage() {
           )}
         </>
       )}
+
+      <StateMatrix />
 
       <p className="text-[10px] text-muted-foreground">
         Entity obligations follow where the LLC is formed or foreign-qualified,

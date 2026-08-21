@@ -569,3 +569,50 @@ def find_calendar_overlap(obligations: list[Obligation],
                 "entity_due": match.due_date.isoformat() if match.due_date else None,
             })
     return out
+
+
+def prune_disabled(scheduled: list[Obligation], dry_run: bool = False) -> dict:
+    """Remove stored rows for obligations that no longer apply.
+
+    When a contested obligation is turned back off — a CPA said California's
+    $800 does not apply after all — the rule reverts to review-only, but rows
+    already written stay behind and keep rendering as live upcoming filings.
+    That presents a position the user has explicitly withdrawn as a real
+    obligation, which is worse than never having scheduled it.
+
+    Only UNSETTLED rows are removed. A period the user marked filed or
+    not_required is a record of something they did; it survives, so turning an
+    obligation off can never erase evidence of a filing.
+    """
+    from src.db import get_client, log_audit
+
+    stored = fetch_stored()
+    if not stored:
+        return {"removed": 0, "kept_settled": 0, "rows": []}
+
+    live = {(o.state_code, o.obligation_type) for o in scheduled}
+    stale, kept = [], 0
+    for r in stored:
+        key = (r.get("state_code"), r.get("obligation_type"))
+        if key in live:
+            continue
+        if str(r.get("status") or "") in SETTLED_STATUSES:
+            kept += 1          # user decision — never deleted
+            continue
+        stale.append(r)
+
+    if stale and not dry_run:
+        client = get_client()
+        for r in stale:
+            client.table(TABLE).delete().eq("id", r["id"]).execute()
+        log_audit(action="prune_entity_obligations", category="compliance",
+                  details={"removed": len(stale),
+                           "keys": sorted({f"{r['state_code']}:{r['obligation_type']}"
+                                           for r in stale})})
+
+    return {
+        "removed": len(stale),
+        "kept_settled": kept,
+        "rows": [f"{r['state_code']} {r.get('form_code')} {r['period_label']}"
+                 for r in stale],
+    }

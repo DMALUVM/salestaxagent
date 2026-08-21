@@ -33,10 +33,26 @@ export const HORIZON_LABELS: Record<HorizonKey, string> = {
   all: "All open",
 };
 
+/** Short button labels. The tooltips in the UI carry the precise set algebra. */
 export const SCOPE_LABELS: Record<ScopeKey, string> = {
-  all: "All states",
-  registered: "Registered for sales tax",
-  home_foreign: "Home + foreign-qualified",
+  all: "All (incl. review-only)",
+  registered: "Registered ∪ home ∪ foreign",
+  home_foreign: "Home + foreign only",
+};
+
+/** The exact rule each scope applies — shown on hover so the label can stay short. */
+export const SCOPE_DESCRIPTIONS: Record<ScopeKey, string> = {
+  all:
+    "Every state with a tracked entity obligation, including contested " +
+    "review-only items (CA $800, KY LLET, TX franchise, NV commerce).",
+  registered:
+    "Sales-tax registered states UNION your home state UNION every state you " +
+    "are foreign-qualified in. The union means MD and OK never drop out just " +
+    "because they are not sales-tax registrations.",
+  home_foreign:
+    "Only your home state and states you are foreign-qualified in — where " +
+    "Secretary-of-State annual reports actually arise. Sales-tax registration " +
+    "alone never creates one.",
 };
 
 export function horizonDays(key: HorizonKey | null | undefined): number | null {

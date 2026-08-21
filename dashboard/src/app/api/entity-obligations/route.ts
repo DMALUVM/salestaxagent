@@ -2,6 +2,24 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { getServerSupabase } from "@/lib/supabase-server";
+import { buildReviewItems, type ReviewItem } from "@/lib/entity-review";
+
+/** Repo root, relative to the dashboard's working directory. */
+function repoPaths(file: string): string[] {
+  return [
+    path.join(process.cwd(), "..", "config", file),
+    path.join(process.cwd(), "config", file),
+  ];
+}
+
+async function readJson(file: string): Promise<Record<string, unknown> | null> {
+  for (const p of repoPaths(file)) {
+    try {
+      return JSON.parse(await readFile(p, "utf8"));
+    } catch { /* try the next path */ }
+  }
+  return null;
+}
 
 /**
  * Home state + foreign-qualified states from config/entity_profile.json.
@@ -14,24 +32,32 @@ import { getServerSupabase } from "@/lib/supabase-server";
 async function readEntityProfile(): Promise<{
   homeState: string | null;
   foreignStates: string[];
+  profile: Record<string, unknown>;
 }> {
-  const candidates = [
-    path.join(process.cwd(), "..", "config", "entity_profile.json"),
-    path.join(process.cwd(), "config", "entity_profile.json"),
-  ];
-  for (const p of candidates) {
-    try {
-      const raw = await readFile(p, "utf8");
-      const j = JSON.parse(raw);
-      const foreign = Array.isArray(j.foreign_qualified)
-        ? j.foreign_qualified
-            .map((e: { state?: string }) => String(e?.state ?? "").toUpperCase())
-            .filter(Boolean)
-        : [];
-      return { homeState: j.home_state ? String(j.home_state) : null, foreignStates: foreign };
-    } catch { /* try the next path */ }
-  }
-  return { homeState: null, foreignStates: [] };
+  const j = await readJson("entity_profile.json");
+  if (!j) return { homeState: null, foreignStates: [], profile: {} };
+  const fq = j.foreign_qualified;
+  const foreign = Array.isArray(fq)
+    ? fq.map((e: { state?: string }) => String(e?.state ?? "").toUpperCase()).filter(Boolean)
+    : [];
+  return {
+    homeState: j.home_state ? String(j.home_state) : null,
+    foreignStates: foreign,
+    profile: j,
+  };
+}
+
+/**
+ * Contested obligations, read from the same rule file the Python engine uses.
+ *
+ * These live only in config — they are deliberately never written to
+ * compliance_obligations, because writing them would make them look scheduled.
+ * That is exactly why the page could not see them before.
+ */
+async function readReviewItems(profile: Record<string, unknown>): Promise<ReviewItem[]> {
+  const j = await readJson("seed_entity_obligations.json");
+  const rules = Array.isArray(j?.obligations) ? j!.obligations : [];
+  return buildReviewItems(rules as never[], profile as never);
 }
 
 /**
@@ -46,6 +72,12 @@ async function readEntityProfile(): Promise<{
  */
 export async function GET() {
   try {
+    // Profile and review items come from config, not the database, so they are
+    // read first: a missing migration must not also hide the contested
+    // obligations, which are the ones most likely to be overlooked.
+    const { homeState, foreignStates, profile } = await readEntityProfile();
+    const review = await readReviewItems(profile);
+
     const sb = getServerSupabase();
     const { data, error } = await sb
       .from("compliance_obligations")
@@ -58,7 +90,7 @@ export async function GET() {
       const missing = /compliance_obligations/.test(error.message ?? "");
       return Response.json({
         obligations: [],
-        registered: [], homeState: null, foreignStates: [],
+        registered: [], homeState, foreignStates, review,
         available: false,
         setupHint: missing
           ? "Run supabase/migration_entity_obligations.sql, then `python -m src.main entity-calendar --apply`."
@@ -81,8 +113,6 @@ export async function GET() {
         .map((n) => String(n.state_code));
     } catch { /* scope filter degrades to "all" */ }
 
-    const { homeState, foreignStates } = await readEntityProfile();
-
     const open = rows.filter((r) => r.status === "open");
     const overdue = open.filter((r) => r.due_date && r.due_date < today);
     const upcoming = open.filter((r) => r.due_date && r.due_date >= today);
@@ -97,6 +127,7 @@ export async function GET() {
       registered,
       homeState,
       foreignStates,
+      review,
       overdue,
       upcoming,
       needsDate,
@@ -114,7 +145,7 @@ export async function GET() {
   } catch (e) {
     return Response.json({
       obligations: [], registered: [], homeState: null, foreignStates: [],
-      available: false, setupHint: null,
+      review: [], available: false, setupHint: null,
       error: e instanceof Error ? e.message : "unknown error",
     });
   }
