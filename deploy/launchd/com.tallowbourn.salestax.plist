@@ -1,14 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Mac Mini agent: folder watcher + APScheduler cron jobs.
+  Mac Mini agent: folder watcher + APScheduler cron jobs + heartbeat.
 
-  Label matches the job already installed at
+  Label matches the job installed at
   ~/Library/LaunchAgents/com.tallowbourn.salestax.plist — keep them identical so
-  `launchctl` manages one job, not two.
+  `launchctl` manages one job, not two. They HAD drifted: the installed copy was
+  missing -u (logs appeared in 4KB bursts, hours late) and this copy was missing
+  ThrottleInterval and the venv on PATH. This file is the reconciled union.
 
   RunAtLoad + KeepAlive means the agent starts at login and is restarted if it
-  ever exits, so the daily syncs survive a reboot with no terminal.
+  ever exits, so every scheduled job survives a reboot with no terminal.
+
+  Liveness has two independent signals, and they detect different failures:
+    - the heartbeat file (logs/heartbeat.json), stamped every 5 minutes, catches
+      a process that is ALIVE but whose job threads have wedged;
+    - the absence of the 08:10 Telegram check-in catches a process that is DEAD,
+      because a dead scheduler cannot report on itself.
+  A missing morning message is therefore itself an alarm.
 -->
 <plist version="1.0">
 <dict>
@@ -31,9 +40,16 @@
 
     <key>EnvironmentVariables</key>
     <dict>
+        <!-- The venv bin comes first so any subprocess resolves the project
+             interpreter rather than the system one. -->
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin</string>
+        <string>/Users/maloney_assistant/sales-tax-agent/.venv/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <!-- Set to 0 to mute the daily Telegram check-in without stopping the
+             health CHECK itself (faults are still logged and visible via
+             `health-ping --dry-run`). -->
+        <key>HEALTH_TELEGRAM</key>
         <string>1</string>
     </dict>
 
@@ -48,5 +64,9 @@
 
     <key>StandardErrorPath</key>
     <string>/Users/maloney_assistant/sales-tax-agent/logs/agent.err.log</string>
+
+    <!-- Don't respawn faster than every 10s if it is crash-looping. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
 </dict>
 </plist>

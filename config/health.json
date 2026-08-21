@@ -1,0 +1,38 @@
+{
+  "_doc": "Daily health check-in. Thresholds and schedule for `health-ping`. Edit here, not in code — src/health.py is the only reader.",
+
+  "schedule": {
+    "hour": 8,
+    "minute": 10,
+    "timezone": "America/New_York",
+    "_doc": "Runs after the 08:00 daily analysis and 08:05 digest so the check-in reports on this morning's jobs rather than yesterday's. Timezone is the agent timezone; Amazon day boundaries stay on America/Los_Angeles regardless."
+  },
+
+  "heartbeat": {
+    "interval_minutes": 5,
+    "stale_after_minutes": 20,
+    "path": "logs/heartbeat.json",
+    "_doc": "The scheduler stamps this file every interval_minutes. It detects a WEDGED scheduler — a live process whose job threads have stopped. It cannot detect a dead process, because a dead scheduler also sends no check-in: total silence is that signal, and the operator should treat a missing morning message as a fault in itself."
+  },
+
+  "thresholds": {
+    "ads_sync_stale_hours": 26,
+    "_doc_ads_sync": "26h, not 24h: the ads sync runs daily at 05:00, so a 24h limit would flag a merely late run every time one slipped by minutes.",
+    "ads_data_stale_days": 2,
+    "_doc_ads_data": "Days between the newest ads_campaigns_daily row and the last closed Amazon day. Amazon reporting lags, so 1 day is normal.",
+    "sqp_stale_days": 10,
+    "_doc_sqp": "SQP is weekly and published ~7 days in arrears, so anything under 10 days is current. Over that means the Monday sync is failing.",
+    "auth_failure_lookback_hours": 48
+  },
+
+  "scoreboard": {
+    "window_days": 7,
+    "_doc": "Complete (closed) Amazon days, America/Los_Angeles, compared against the equally-sized window immediately before."
+  },
+
+  "debounce": {
+    "routine_per_calendar_day": 1,
+    "repeat_warning_after_hours": 24,
+    "_doc": "One routine message per calendar day. A warning repeats only after repeat_warning_after_hours, UNLESS the fault set changes or severity rises — a new or worsening problem is never suppressed by a debounce window."
+  }
+}

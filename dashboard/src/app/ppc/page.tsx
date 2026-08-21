@@ -507,7 +507,13 @@ export default function PPCPage() {
   const [range, setRange] = useState<Range>("7d");
   const [generating, setGenerating] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [targetAcos, setTargetAcos] = useState(30);
+  // null = "not overridden by the operator". The effective value is derived
+  // below from the API's break-even so the input, the Generate button and the
+  // exported plan all use the account's real break-even rather than a flat 30
+  // that no longer matches what the engine applies (currently 36.9%).
+  // Derived, not synced via an effect: an effect here would add a hook and a
+  // render, and the value is a pure function of state we already have.
+  const [targetAcosOverride, setTargetAcosOverride] = useState<number | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [targetsOpen, setTargetsOpen] = useState(false);
@@ -619,6 +625,10 @@ export default function PPCPage() {
     </div>
   );
   if (loading) return <LoadingState />;
+
+  // Operator override wins; otherwise the break-even the actions run recorded.
+  const targetAcos = targetAcosOverride ?? data?.targetAcos ?? 30;
+  const setTargetAcos = setTargetAcosOverride;
 
   const kpi = range === "7d" ? data?.kpi7 : range === "14d" ? data?.kpi14 : range === "30d" ? data?.kpi30 : data?.kpi90;
   const kpiDays = range === "7d" ? data?.kpi7Days : range === "14d" ? data?.kpi14Days : range === "30d" ? data?.kpi30Days : data?.kpi90Days;

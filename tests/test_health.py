@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -284,3 +285,80 @@ def test_config_thresholds_are_all_present():
                 "auth_failure_lookback_hours"):
         assert key in t, f"missing threshold {key}"
     assert health.CONFIG["debounce"]["routine_per_calendar_day"] == 1
+
+
+# ── audit regressions ────────────────────────────────────────────────────
+
+def test_auth_check_queries_a_column_that_exists():
+    """The column is `message`; `error_message` does not exist on job_runs.
+
+    Selecting a missing column makes PostgREST raise, and the except that
+    wrapped it swallowed the error — so the auth-failure check silently never
+    ran, and reported healthy precisely because it was broken. Pinned by name
+    because the failure is invisible at runtime.
+    """
+    src = (Path(health.__file__)).read_text()
+    auth = src[src.index("Auth failures, by NAME only"):]
+    auth = auth[: auth.index("except Exception")]
+    # Comments are stripped: the block documents the bug by name, so a naive
+    # search finds "error_message" in the prose explaining why it is gone.
+    code = "\n".join(ln for ln in auth.splitlines()
+                     if not ln.strip().startswith("#"))
+    assert "error_message" not in code, (
+        "job_runs has no error_message column — use `message`")
+    assert '"job_name,status,message,started_at"' in code
+
+
+def test_a_check_that_cannot_run_is_reported_not_swallowed():
+    facts = healthy_facts(check_errors=["auth-failure check: boom"])
+    h = health.evaluate(facts)
+    keys = [f.key for f in h.faults]
+    assert "check_broken" in keys, (
+        "a check that errored must surface; silence reads as 'passed'")
+
+
+def test_failed_jobs_are_reported_by_name_only():
+    """Inherited from the retired digest — the only place a broken job showed."""
+    facts = healthy_facts(failed_jobs=["inventory_sync", "ads_sync"])
+    h = health.evaluate(facts)
+    fault = next(f for f in h.faults if f.key == "failed_jobs")
+    assert "inventory_sync" in fault.text and "ads_sync" in fault.text
+    assert "Traceback" not in fault.text and len(fault.text) < 160
+
+
+def test_mtd_line_survived_the_digest_retirement():
+    facts = healthy_facts(mtd={"amazon": 25032.95, "shopify": 5072.34},
+                          mtd_start="2026-08-01")
+    msg = health.format_message(facts, health.evaluate(facts))
+    assert "MTD from 2026-08-01" in msg
+    assert "$25,033" in msg and "$5,072" in msg
+    assert "total $30,105" in msg
+
+
+def test_ping_stays_glanceable_with_the_merged_content():
+    facts = healthy_facts(mtd={"amazon": 25032.95, "shopify": 5072.34},
+                          mtd_start="2026-08-01")
+    msg = health.format_message(facts, health.evaluate(facts))
+    assert len(msg.splitlines()) <= 14, msg
+    assert len(msg) < 900, f"{len(msg)} chars is no longer a glance"
+
+
+def test_an_import_error_is_not_reported_as_an_auth_failure():
+    """The first live run flagged inventory_sync as an auth failure.
+
+    Its ImportError names `auth_headers_with_retry`, and the matcher keyed on
+    the bare substring "auth". Credential rejection and a broken import are
+    different faults with different fixes; conflating them sends the operator
+    to re-authorise an app that is fine.
+    """
+    src = (Path(health.__file__)).read_text()
+    blk = src[src.index("Auth failures, by NAME only"):]
+    blk = blk[: blk.index("except Exception")]
+    code = "\n".join(ln for ln in blk.splitlines()
+                     if not ln.strip().startswith("#"))
+    assert '"cannot import name"' in code, "import errors must be excluded"
+    for loose in ('"auth"', '"token"'):
+        assert loose not in code, (
+            f"{loose} matches `auth_headers_with_retry` and any token refresh log")
+    for tight in ('"401"', '"unauthorized"', '"invalid_grant"'):
+        assert tight in code

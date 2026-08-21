@@ -13,3 +13,11 @@ build/
 .pytest_cache/
 .vercel
 .env*
+
+# Agent runtime state, not source. The heartbeat is a liveness stamp and the
+# health state is a debounce ledger — both are machine-local and meaningless
+# in another checkout, and committing them would make one machine's "already
+# alerted today" suppress another's first alert.
+logs/heartbeat.json
+logs/heartbeat.tmp
+logs/health_state.json

@@ -1510,13 +1510,26 @@ def brand_share_cmd(weeks, opportunities):
 
     client = get_client()
     try:
-        rows, offset = [], 0
+        # ORDER BY reaches `id`: hundreds of rows share each week_start, so
+        # ordering by the date alone leaves page boundaries undefined and rows
+        # silently drop and duplicate across the 17 pages this table needs.
+        # Ascending with an `id` tiebreak. Two bugs lived in the old version:
+        # ordering by week_start alone left page boundaries undefined across 25
+        # pages, and a `len(rows) > 20000` cap combined with DESC ordering
+        # silently dropped the OLDEST rows once the table outgrew it. The SQP
+        # backfill pushed it past 24,000 rows and the CLI quietly lost the three
+        # earliest weeks — reporting 30 while the dashboard and brief said 33.
+        MAX_ROWS = 200_000
+        rows, offset, truncated = [], 0, False
         while True:
             page = (client.table("sqp_weekly").select("*")
-                    .order("week_start", desc=True)
+                    .order("week_start").order("id")
                     .range(offset, offset + 999).execute().data) or []
             rows.extend(page)
-            if len(page) < 1000 or len(rows) > 20000:
+            if len(page) < 1000:
+                break
+            if len(rows) >= MAX_ROWS:
+                truncated = True     # never silent — see the warning below
                 break
             offset += 1000
     except Exception as e:
@@ -1531,10 +1544,21 @@ def brand_share_cmd(weeks, opportunities):
                    "(and apply migration_sqp_weekly.sql).")
         return
 
-    series = rollup_weeks(rows)[-weeks:]
+    all_weeks = rollup_weeks(rows)
+    series = all_weeks[-weeks:]
     click.echo("Branded market share — automated tracker")
-    click.echo(f"  weeks stored : {len(series)}  "
-               f"({series[0].week_start} → {series[-1].week_start})")
+    if truncated:
+        click.echo(f"  WARNING: stopped at {len(rows):,} rows — the history "
+                   f"below is incomplete.")
+    # "weeks stored" used to print len(series) — the --weeks DISPLAY cap, not
+    # the stored count. It read 15 while the dashboard and the PPC brief both
+    # reported 33 from the same table, so three surfaces disagreed about the
+    # size of the history. Show both, and say which is which.
+    click.echo(f"  weeks stored : {len(all_weeks)}  "
+               f"({all_weeks[0].week_start} → {all_weeks[-1].week_start})")
+    if len(series) < len(all_weeks):
+        click.echo(f"  showing      : last {len(series)} "
+                   f"(--weeks {len(all_weeks)} for all)")
     click.echo("")
     click.echo(f"  {'week':<12}{'branded':>9}{'non-brand':>11}{'mix':>7}"
                f"{'nb.share*':>11}{'nb.share(all)':>15}")
@@ -4164,15 +4188,41 @@ def run():
         )
         click.echo("[Scheduler] CPA exports daily at 06:30")
 
-        # Morning digest at 08:05 (after daily analysis)
+        # daily_digest is NOT scheduled.
+        #
+        # It rendered the same registration-aware sections as the 08:00 daily
+        # summary — both call digest_sections.build_sections — and fired five
+        # minutes after it. Three Telegram messages landed every morning
+        # (08:00 tax summary, 08:05 near-identical digest, 08:10 health), which
+        # is how a monitor gets muted, and a muted monitor is worse than none.
+        #
+        # Its two unique pieces — MTD sales by channel, and the 24h failed-job
+        # list — were NOT in the 08:00 summary, so they moved into the 08:10
+        # health check-in rather than being dropped. The failed-job list in
+        # particular was the only place a broken inventory_sync was reported.
+        # The module is kept and still runs on demand: `python -m src.main digest`.
+        click.echo("[Scheduler] Daily digest: on demand only (was 08:05 — "
+                   "duplicated the 08:00 summary)")
+
+        # Publish the PPC brief at 07:30, after ads sync (05:00-05:30), the
+        # actions rebuild (06:00) and the outcome snapshots (07:00) — so the
+        # stored copy reflects the same day's queue.
+        #
+        # Without this the dashboard's stored fallback only ever held whatever
+        # the operator last published by hand, which is exactly the weekly
+        # terminal step this system is supposed to remove. It also keeps the
+        # stored brief on the current format version.
         scheduler.add_job(
-            _run_daily_digest,
+            _run_ppc_export_publish,
             "cron",
-            hour=8,
-            minute=5,
-            id="daily_digest",
+            hour=7,
+            minute=30,
+            id="ppc_export_publish",
+            misfire_grace_time=3600,
+            coalesce=True,
         )
-        click.echo("[Scheduler] Daily digest at 08:05")
+        click.echo("[Scheduler] PPC brief publish daily at 07:30 "
+                   "(feeds the dashboard Download/Copy buttons)")
 
         # Inventory sync daily at 06:30 (after SP-API refresh)
         if settings.amazon_sp_enabled:
@@ -4234,7 +4284,7 @@ def run():
                 misfire_grace_time=3600,
                 coalesce=True,
             )
-            click.echo("[Scheduler] Ads actions daily at 06:00 (7d, target ACOS 30%)")
+            click.echo("[Scheduler] Ads actions daily at 06:00 (7d, break-even target from account_target_acos — sole owner of the queue)")
 
             scheduler.add_job(
                 _run_ads_campaigns_backfill,
@@ -4632,13 +4682,17 @@ def _run_spapi_refresh():
             camps = ads_result.get("campaigns", {})
             print(f"[Ads] {ts} Campaigns: {camps.get('rows', 0)} rows, "
                   f"${camps.get('total_spend', 0):,.0f} spend")
-            # Generate action recommendations after sync
-            try:
-                from src.amazon_ads.actions_engine import generate_recommendations
-                recs = generate_recommendations(target_acos=30)
-                print(f"[Ads] {ts} Actions: {len(recs)} recommendations generated")
-            except Exception as e2:
-                print(f"[Ads] {ts} Actions error: {e2}")
+            # Recommendations are NOT regenerated here.
+            #
+            # This job and `ads_actions` are both scheduled at 06:00. This one
+            # used to call generate_recommendations(target_acos=30) — a flat 30%
+            # — while ads_actions calls it with account_target_acos(), currently
+            # 36.9%. Two writers, same minute, different break-even: whichever
+            # finished last decided what the Actions tab, the PPC brief's P0/P1
+            # tables and the health check-in's P0 count all reported. A term
+            # profitable at 36.9% was cut or kept depending on a race.
+            #
+            # `ads_actions` (06:00) is the single owner of the queue.
         else:
             print(f"[Ads] {ts} Not configured (skip)")
     except Exception as e:
@@ -4690,6 +4744,38 @@ def _run_source_monitoring():
                 pass
     except Exception as e:
         print(f"[Source Monitor] Error: {e}")
+
+
+def _run_ppc_export_publish():
+    """07:30 — build the PPC Command Brief and store it for the dashboard.
+
+    Publishing is the only reason this runs on a timer. The brief itself is
+    always built live when the operator asks for it; this copy exists so the
+    dashboard's Copy/Download buttons work from Vercel, where there is no
+    Python interpreter. It is never sent to Telegram.
+    """
+    from src.db import job_start, job_finish
+
+    run_id = job_start("ppc_export_publish")
+    try:
+        from src.amazon_ads.export_brief import (build_brief, build_prompt,
+                                                 gather, grade_window,
+                                                 publish_brief)
+        d = gather(days=7)
+        brief = build_brief(d)
+        res = publish_brief(d, brief, build_prompt(brief))
+        grade = grade_window(d)
+        if res.get("published"):
+            print(f"[PPC export] Published — grade {grade.score:.0f}/100 "
+                  f"({grade.letter})")
+            job_finish(run_id, "success",
+                       f"score {grade.score:.0f} {grade.letter}")
+        else:
+            print(f"[PPC export] NOT published: {res.get('error')}")
+            job_finish(run_id, "partial", str(res.get("error"))[:200])
+    except Exception as e:
+        print(f"[PPC export] FAILED: {e}")
+        job_finish(run_id, "fail", str(e)[:200])
 
 
 def _run_health_ping():
