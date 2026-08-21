@@ -1,0 +1,35 @@
+{
+  "_metadata": {
+    "description": "Brand-term rules for classifying SQP search queries as branded vs non-branded. Mirrors the BRAND TERMS sheet of the manual Branded Market Share Tracker.",
+    "matching": "Case-insensitive, whitespace-collapsed. `phrases` match as whole-word sequences (word-boundary anchored), `tokens` match a single whole token. Neither uses naive substring matching — 'tallow' and 'dave' are generic on their own and must never classify a query as branded.",
+    "last_updated": "2026-08-21"
+  },
+  "phrases": [
+    "tallow bourne",
+    "tallow bourn",
+    "dr dave",
+    "dr daves",
+    "dr dave s",
+    "dr. dave",
+    "dr. daves",
+    "dr. dave's",
+    "doctor dave",
+    "primal essence",
+    "dr dave primal essence",
+    "dr daves primal essence",
+    "dr dave's primal essence"
+  ],
+  "tokens": [
+    "tallowbourn",
+    "tallowbourne",
+    "tallowborn",
+    "tallowbourns",
+    "tallowbournes"
+  ],
+  "_deliberately_excluded": {
+    "tallow": "generic product category — 'beef tallow lip balm' is a non-brand query",
+    "dave": "generic given name; only branded in the 'dr dave' phrase",
+    "essence": "generic; only branded in the 'primal essence' phrase",
+    "primal": "generic; only branded in the 'primal essence' phrase"
+  }
+}

@@ -378,7 +378,7 @@ class TestUpsertShape:
         assert row["source"] == SOURCE
         assert row["organic_rank"] == 1
 
-    def test_missing_table_is_reported_not_raised(self, monkeypatch):
+    def test_a_write_failure_is_reported_not_raised(self, monkeypatch):
         import src.amazon_sp.sqp as sqp
 
         monkeypatch.setattr(sqp, "fetch_sqp",
@@ -393,11 +393,16 @@ class TestUpsertShape:
                             lambda: {"sqp_auto": {}})
 
         def boom(rows):
-            raise RuntimeError("relation keyword_organic_rank does not exist")
+            from src.amazon_ads.organic_rank import RankSchemaError
+            raise RankSchemaError(
+                "keyword_organic_rank does not exist — run "
+                "supabase/migration_organic_rank.sql")
 
         monkeypatch.setattr("src.amazon_ads.organic_rank.upsert_ranks", boom)
+        monkeypatch.setattr(sqp, "_upsert_weekly", lambda rows: 0)
         r = sqp.sync_sqp(dry_run=False)
         assert r["written"] == 0
+        # The real message is surfaced, not a guess about what went wrong.
         assert any("migration_organic_rank.sql" in e for e in r["errors"])
 
 
@@ -450,3 +455,72 @@ class TestApiErrorDocuments:
         doc = json.dumps({"errors": [{"code": "InvalidInput", "message": "bad asin"}]})
         r = parse_sqp_json(doc, as_of=AS_OF)
         assert r.api_error_codes == ["InvalidInput"]
+
+
+class TestSchemaErrorReporting:
+    """A rejected write must never be reported as a missing table.
+
+    Live bug: the CHECK on `source` predated the 'sqp_spapi' value, so every
+    automated row was rejected with 23514. The caller matched on the table name
+    appearing in the error and reported "table missing", which sent the operator
+    looking for a schema gap that did not exist while 623 good rows were dropped.
+    """
+
+    def test_constraint_violation_is_not_called_a_missing_table(self, monkeypatch):
+        import src.amazon_ads.organic_rank as orank
+
+        def boom(table, rows, on_conflict=None):
+            raise RuntimeError(
+                'new row for relation "keyword_organic_rank" violates check '
+                'constraint "keyword_organic_rank_source_check"')
+
+        monkeypatch.setattr("src.db.upsert_rows", boom)
+        monkeypatch.setattr(orank, "table_exists", lambda: True)
+        with pytest.raises(orank.RankSchemaError) as exc:
+            orank.upsert_ranks([{"asin": "A", "keyword_normalized": "k",
+                                 "source": "manual", "as_of": "2026-08-15"}])
+        assert "not a missing table" in str(exc.value)
+
+    def test_a_genuinely_missing_table_still_says_so(self, monkeypatch):
+        import src.amazon_ads.organic_rank as orank
+
+        def boom(table, rows, on_conflict=None):
+            raise RuntimeError('relation "keyword_organic_rank" does not exist')
+
+        monkeypatch.setattr("src.db.upsert_rows", boom)
+        monkeypatch.setattr(orank, "table_exists", lambda: False)
+        with pytest.raises(orank.RankSchemaError) as exc:
+            orank.upsert_ranks([{"asin": "A", "keyword_normalized": "k"}])
+        assert "does not exist" in str(exc.value)
+        assert "migration_organic_rank.sql" in str(exc.value)
+
+    def test_sqp_spapi_falls_back_to_sqp_when_the_check_is_old(self, monkeypatch):
+        """Works before the widening migration; warns rather than dropping rows."""
+        import src.amazon_ads.organic_rank as orank
+
+        attempts = []
+
+        def flaky(table, rows, on_conflict=None):
+            attempts.append([r["source"] for r in rows])
+            if attempts[-1][0] == "sqp_spapi":
+                raise RuntimeError("violates check constraint "
+                                   '"keyword_organic_rank_source_check"')
+            return len(rows)
+
+        monkeypatch.setattr("src.db.upsert_rows", flaky)
+        monkeypatch.setattr(orank, "table_exists", lambda: True)
+        n = orank.upsert_ranks([{"asin": "A", "keyword_normalized": "k",
+                                 "source": "sqp_spapi", "as_of": "2026-08-15"}])
+        assert n == 1
+        assert attempts == [["sqp_spapi"], ["sqp"]]
+
+    def test_table_exists_treats_unknown_errors_as_present(self, monkeypatch):
+        """Only 'does not exist'/'schema cache' mean absent."""
+        import src.amazon_ads.organic_rank as orank
+
+        class C:
+            def table(self, *a):
+                raise RuntimeError("permission denied")
+
+        monkeypatch.setattr("src.db.get_client", lambda: C())
+        assert orank.table_exists() is True

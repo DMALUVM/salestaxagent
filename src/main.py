@@ -1337,6 +1337,81 @@ def inventory_remap_fc_cmd(dry_run, recheck):
                f"nexus picks up any newly-covered states.")
 
 
+@cli.command("brand-share")
+@click.option("--weeks", default=15, help="Weeks of trend to show")
+@click.option("--opportunities", default=15, help="Top non-brand opportunities")
+def brand_share_cmd(weeks, opportunities):
+    """Branded vs non-branded market share — the automated tracker DASHBOARD.
+
+    Reads sqp_weekly (populated by sqp-sync). SP-API SQP is the ASIN view, so
+    denominators cover queries our ASINs appeared in — not full Brand View
+    category coverage.
+    """
+    from src.amazon_ads.brand_rollup import callouts, rollup_weeks, top_opportunities
+    from src.amazon_ads.organic_rank import fetch_ranks
+    from src.db import get_client
+
+    client = get_client()
+    try:
+        rows, offset = [], 0
+        while True:
+            page = (client.table("sqp_weekly").select("*")
+                    .order("week_start", desc=True)
+                    .range(offset, offset + 999).execute().data) or []
+            rows.extend(page)
+            if len(page) < 1000 or len(rows) > 20000:
+                break
+            offset += 1000
+    except Exception as e:
+        if "sqp_weekly" in str(e):
+            raise click.ClickException(
+                "sqp_weekly table missing — run supabase/migration_sqp_weekly.sql, "
+                "then `sqp-sync --apply`.")
+        raise
+
+    if not rows:
+        click.echo("No SQP weeks stored yet. Run `sqp-sync --apply` "
+                   "(and apply migration_sqp_weekly.sql).")
+        return
+
+    series = rollup_weeks(rows)[-weeks:]
+    click.echo("Branded market share — automated tracker")
+    click.echo(f"  weeks stored : {len(series)}  "
+               f"({series[0].week_start} → {series[-1].week_start})")
+    click.echo("")
+    click.echo(f"  {'week':<12}{'branded':>9}{'non-brand':>11}{'mix':>7}"
+               f"{'b.share':>9}{'nb.share':>10}")
+    for w in series:
+        mix = f"{w.branded_mix:.0%}" if w.branded_mix is not None else "—"
+        bs = f"{w.branded.share:.1%}" if w.branded.share is not None else "—"
+        ns = f"{w.non_branded.share:.2%}" if w.non_branded.share is not None else "—"
+        click.echo(f"  {w.week_start:<12}{w.branded.purchases:>9,}"
+                   f"{w.non_branded.purchases:>11,}{mix:>7}{bs:>9}{ns:>10}")
+
+    click.echo("")
+    for c in callouts(series):
+        click.echo(f"  • {c}")
+
+    ranks = {}
+    try:
+        ranks = {k[1]: v for k, v in fetch_ranks().items()}
+    except Exception:
+        pass
+    opps = top_opportunities(rows, ranks=ranks, limit=opportunities)
+    if opps:
+        click.echo("")
+        click.echo("  Top non-brand opportunities (market demand we are not capturing):")
+        click.echo(f"    {'query':<44}{'market':>8}{'ours':>7}{'share':>8}{'band':>6}")
+        for o in opps:
+            band = str(o.rank_band) if o.rank_band is not None else "-"
+            click.echo(f"    {o.query[:43]:<44}{o.market_purchases:>8,}"
+                       f"{o.our_purchases:>7,}{o.share:>7.1%}{band:>6}")
+
+    click.echo("\n  Scope: SP-API SQP is the ASIN view — denominators cover queries "
+               "our ASINs appeared in, not the full category. Trend is reliable; "
+               "the absolute level is not Brand View parity.")
+
+
 @cli.command("sqp-sync")
 @click.option("--period", type=click.Choice(["WEEK", "MONTH", "QUARTER"]), default=None)
 @click.option("--asin", "asins", multiple=True, help="Override configured ASINs")

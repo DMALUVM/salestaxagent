@@ -199,6 +199,16 @@ def _num(value) -> float | None:
         return None
 
 
+def _count(node: dict, *paths: str) -> int | None:
+    """Pull a funnel count, tolerating the field names SQP has shipped."""
+    for p in paths:
+        if p in node:
+            v = _num(node[p])
+            if v is not None:
+                return int(v)
+    return None
+
+
 def _share(node: dict, *paths: str) -> float | None:
     """Pull a share value, tolerating the several shapes SQP has shipped."""
     for p in paths:
@@ -222,10 +232,13 @@ class SQPParse:
     doc_bytes: int = 0
     # Non-empty when the document was an SP-API error payload rather than data.
     api_error_codes: list[str] = field(default_factory=list)
+    # Full per-query funnel rows for sqp_weekly (branded share tracker).
+    weekly: list[dict] = field(default_factory=list)
 
 
-def parse_sqp_json(content: str, as_of: date,
-                   default_asin: str = "") -> SQPParse:
+def parse_sqp_json(content: str, as_of: date, default_asin: str = "",
+                   week_start: date | None = None,
+                   period: str = "WEEK") -> SQPParse:
     """Parse the SQP JSON document into keyword_organic_rank rows.
 
     The report nests query records under `dataByAsin` (or `dataByDepartment`
@@ -303,6 +316,37 @@ def parse_sqp_json(content: str, as_of: date,
             continue
         out.derived_from_share += 1
 
+        # Full funnel for the branded market-share rollups. Kept separately
+        # from the rank row: the gate needs one band, the tracker needs counts
+        # and market denominators.
+        from src.amazon_ads.brand_terms import classify
+
+        cls = classify(query)
+        sq_node = rec.get("searchQueryData") or {}
+        purch_node = rec.get("purchaseData") or rec.get("asinPurchaseData") or {}
+        out.weekly.append({
+            "asin": asin,
+            "search_query": str(query).strip(),
+            "query_normalized": kw,
+            "week_start": week_start.isoformat() if week_start else as_of.isoformat(),
+            "week_end": as_of.isoformat(),
+            "report_period": period,
+            "is_branded": cls["branded"],
+            "brand_rule": cls["matched_rule"],
+            "total_impressions": _count(imp_node, "totalQueryImpressionCount",
+                                        "totalImpressionCount"),
+            "total_clicks": _count(click_node, "totalClickCount"),
+            "total_purchases": _count(purch_node, "totalPurchaseCount"),
+            "search_query_volume": _count(sq_node, "searchQueryVolume"),
+            "asin_impressions": _count(imp_node, "asinImpressionCount"),
+            "asin_clicks": _count(click_node, "asinClickCount"),
+            "asin_purchases": _count(purch_node, "asinPurchaseCount"),
+            "impression_share": imp_share,
+            "click_share": click_share,
+            "purchase_share": _share(purch_node, "purchaseShare", "asinPurchaseShare"),
+            "source": SOURCE,
+        })
+
         out.rows.append({
             "asin": asin,
             "keyword_normalized": kw,
@@ -367,6 +411,7 @@ def fetch_sqp(asins: list[str], period: str = "WEEK",
     errors: list[str] = []
     warnings: list[str] = []
     diagnostics: list[dict] = []
+    all_weekly: list[dict] = []
     parsed = skipped = 0
 
     for i, batch in enumerate(batches, 1):
@@ -389,8 +434,9 @@ def fetch_sqp(asins: list[str], period: str = "WEEK",
             log.warning("SQP batch %d failed: %s", i, msg[:200])
             continue
 
-        res = parse_sqp_json(content, as_of=end,
+        res = parse_sqp_json(content, as_of=end, week_start=start, period=p,
                              default_asin=batch[0] if len(batch) == 1 else "")
+        all_weekly.extend(res.weekly)
         if diagnostics:
             diagnostics[-1].update({"top_level_keys": res.top_level_keys,
                                     "had_records_key": res.had_records_key,
@@ -418,6 +464,7 @@ def fetch_sqp(asins: list[str], period: str = "WEEK",
             "start": start.isoformat(), "end": end.isoformat(),
             "batches": len(batches), "parsed": parsed, "skipped": skipped,
             "errors": errors, "warnings": warnings, "diagnostics": diagnostics,
+            "weekly": all_weekly,
             "asins_requested": [a for b in batches for a in b]}
 
 
@@ -484,14 +531,40 @@ def sync_sqp(asins: list[str] | None = None, period: str | None = None,
         result["written"] = 0
         return result
 
+    result["weekly_written"] = _upsert_weekly(result.get("weekly") or [])
+
     try:
         result["written"] = upsert_ranks(result["rows"])
     except Exception as e:
-        if "keyword_organic_rank" in str(e):
-            result["written"] = 0
-            result["errors"].append(
-                "keyword_organic_rank table missing — run "
-                "supabase/migration_organic_rank.sql, then re-run sqp-sync")
-            return result
-        raise
+        # upsert_ranks already separates "missing table" from "rejected write",
+        # so the message here is the real one rather than a guess.
+        result["written"] = 0
+        result["errors"].append(str(e)[:400])
+        return result
     return result
+
+
+def _upsert_weekly(rows: list[dict]) -> int:
+    """Persist the per-query funnel. A missing table is a setup step, not a failure.
+
+    The rank gate does not depend on this table, so the sync must still write
+    ranks when only the tracker migration is outstanding.
+    """
+    from src.db import upsert_rows
+
+    if not rows:
+        return 0
+    # Dedupe on the natural key: two ASINs can surface the same query, and one
+    # request cannot send two rows with the same conflict target.
+    seen: dict[tuple, dict] = {}
+    for r in rows:
+        seen[(r["asin"], r["query_normalized"], r["week_start"], r["source"])] = r
+    try:
+        return upsert_rows("sqp_weekly", list(seen.values()),
+                           on_conflict="asin,query_normalized,week_start,source")
+    except Exception as e:
+        if "sqp_weekly" in str(e):
+            log.info("sqp_weekly missing — run supabase/migration_sqp_weekly.sql "
+                     "to enable the branded market-share tracker")
+            return 0
+        raise

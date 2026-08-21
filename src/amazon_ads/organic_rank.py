@@ -85,17 +85,36 @@ def load_config() -> dict:
     }
 
 
-def is_branded(keyword: str, brand_tokens: list[str]) -> bool:
-    """Does the query contain a brand token?
+def is_branded(keyword: str, brand_tokens: list[str] | None = None) -> bool:
+    """Does the query name our brand?
 
     Branded head terms are the worst cannibalization case — we almost always
     rank #1 for our own name — so they are treated as rank 1–3 until rank data
     says otherwise, rather than waiting for an SQP export to prove it.
+
+    Delegates to src/amazon_ads/brand_terms.py so the PPC gate and the branded
+    market-share tracker cannot disagree about what "branded" means. The old
+    behaviour here was a naive substring test, which classified "beef tallow
+    lip balm" as branded because "tallow" is inside "tallowbourn" — capping
+    bids on exactly the generic head terms we want to win. `brand_tokens` is
+    still accepted for callers that pass an explicit list (tests, overrides).
     """
     k = normalize_keyword(keyword)
     if not k:
         return False
-    return any(tok and tok in k for tok in brand_tokens)
+
+    if brand_tokens:
+        # Explicit list: whole-word match, never substring.
+        from src.amazon_ads.brand_terms import BrandRules, normalize as _bn
+
+        toks = {_bn(t) for t in brand_tokens if _bn(t)}
+        rules = BrandRules(
+            phrases=tuple(sorted((t for t in toks if " " in t), key=lambda s: -len(s))),
+            tokens=frozenset(t for t in toks if " " not in t))
+        return rules.match(keyword) is not None
+
+    from src.amazon_ads.brand_terms import is_branded as _shared
+    return _shared(keyword)
 
 
 @dataclass
@@ -271,14 +290,76 @@ def lookup(ranks: dict, keyword: str, asin: str, cfg: dict,
     return build_rank_info(row, keyword, cfg, today or date.today())
 
 
+class RankSchemaError(RuntimeError):
+    """The table exists but rejected the rows — constraint or column mismatch."""
+
+
+def table_exists() -> bool:
+    """Cheap existence probe. A rejected WRITE is not a missing table."""
+    from src.db import get_client
+
+    try:
+        get_client().table(TABLE).select("id").limit(1).execute()
+        return True
+    except Exception as e:
+        if "does not exist" in str(e) or "schema cache" in str(e):
+            return False
+        # Anything else means the table is there and something else is wrong.
+        return True
+
+
+# Values the live CHECK constraint accepts before
+# supabase/migration_organic_rank_source.sql widens it.
+_LEGACY_SOURCES = {"sqp", "manual", "helium", "other"}
+_SOURCE_FALLBACK = {"sqp_spapi": "sqp"}
+
+
 def upsert_ranks(rows: list[dict]) -> int:
-    """Write rank rows, keyed on (asin, keyword_normalized, source, as_of)."""
+    """Write rank rows, keyed on (asin, keyword_normalized, source, as_of).
+
+    Distinguishes a missing table from a rejected write. The two used to be
+    conflated: any error mentioning the table name was reported as "table
+    missing", so a CHECK-constraint violation on `source` looked like a schema
+    gap and 623 perfectly good rows silently became `written: 0`.
+    """
     from src.db import upsert_rows
 
     if not rows:
         return 0
-    return upsert_rows(TABLE, rows,
-                       on_conflict="asin,keyword_normalized,source,as_of")
+
+    def _write(payload: list[dict]) -> int:
+        return upsert_rows(TABLE, payload,
+                           on_conflict="asin,keyword_normalized,source,as_of")
+
+    try:
+        return _write(rows)
+    except Exception as e:
+        msg = str(e)
+
+        if not table_exists():
+            raise RankSchemaError(
+                f"{TABLE} does not exist — run supabase/migration_organic_rank.sql"
+            ) from e
+
+        # The known, fixable case: the CHECK predates the sqp_spapi source.
+        if "source_check" in msg or "23514" in msg:
+            fallback = [r for r in rows
+                        if str(r.get("source")) in _SOURCE_FALLBACK]
+            if fallback:
+                mapped = [{**r, "source": _SOURCE_FALLBACK[str(r["source"])]}
+                          for r in rows]
+                log.warning(
+                    "%s CHECK rejects source=%s — writing as '%s' for now. Run "
+                    "supabase/migration_organic_rank_source.sql to record the "
+                    "true source.", TABLE,
+                    sorted({str(r.get("source")) for r in fallback}),
+                    _SOURCE_FALLBACK[str(fallback[0]["source"])])
+                return _write(mapped)
+
+        raise RankSchemaError(
+            f"{TABLE} rejected the write ({msg[:220]}). The table exists — this "
+            f"is a constraint or column mismatch, not a missing table."
+        ) from e
 
 
 # ── External tracker interface (stub) ───────────────────────────

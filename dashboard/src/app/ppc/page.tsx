@@ -11,6 +11,7 @@ import {
 import { LoadingState } from "@/components/loading";
 import { rankBadgeOf } from "@/lib/ppc-actions";
 import { SqpStatus } from "@/components/sqp-status";
+import { BrandShare } from "@/components/brand-share";
 import { isConfigured } from "@/lib/supabase";
 import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy, Settings2 } from "lucide-react";
 import {
@@ -780,6 +781,8 @@ export default function PPCPage() {
               </CardContent>
             </Card>
           </div>
+
+          <BrandShare />
 
           <SqpStatus />
 

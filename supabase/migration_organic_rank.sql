@@ -25,7 +25,10 @@ create table if not exists keyword_organic_rank (
     organic_rank              int,
     page                      int,
 
-    source                    text not null check (source in ('sqp','manual','helium','other')),
+    -- 'sqp' = hand-imported Brand Analytics CSV, 'sqp_spapi' = automated
+    -- SP-API pull. Omitting sqp_spapi here rejected every automated row with
+    -- a 23514 CHECK violation; see migration_organic_rank_source.sql.
+    source                    text not null check (source in ('sqp','sqp_spapi','manual','helium','other')),
     as_of                     date not null,
 
     -- SQP reports share-of-clicks, not rank. Kept when present because it is
