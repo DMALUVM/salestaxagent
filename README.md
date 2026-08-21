@@ -486,6 +486,61 @@ A quota error is detected explicitly and reported as a rate limit, not as an
 empty period, and it suppresses the previous-period retry (retrying would spend
 the quota that just ran out).
 
+### Brand rename (2025-10-31)
+
+The brand was renamed **"Dr. Dave's Primal Essence" → "Tallowbourn"** around
+2025-10-31, on the **same ASINs**. Both eras' terms classify as **branded**, so:
+
+- **mix and share stay continuous** across the boundary — treating only the new
+  name as brand would render the rename as a brand-demand collapse followed by a
+  surge of "non-brand" purchases that were never non-brand
+- **bid caps apply to legacy searches too** — someone searching the old name is
+  still brand demand we already own
+
+Term list (`config/brand_terms.json`, whole-word/phrase matching):
+
+| Era | Terms |
+|---|---|
+| current | tallowbourn, tallowbourne, tallowborn, tallowbourns, tallowbournes, tallow bourne, tallow bourn |
+| legacy | dr dave, dr daves, dr dave's, dr. dave, dr. daves, dr. dave's, doctor dave, primal essence, dr dave('s) primal essence |
+
+Deliberately **excluded** as generic: `tallow`, `dave`, `primal`, `essence` on
+their own. `beef tallow lip balm` is a non-brand category query; only the phrase
+`primal essence` is branded, not `primal` or `essence` alone. A false positive
+here would cap bids on exactly the head terms we want to win.
+
+**After editing the term list**, stored rows keep their old classification —
+`is_branded` is written at ingest. Refresh with:
+
+```bash
+python -m src.main brand-reclassify            # dry run: shows the flips
+python -m src.main brand-reclassify --apply
+python -m src.main brand-share                 # corrected mix
+python -m src.main ads-actions                 # bid caps pick up new brand terms
+```
+
+No Amazon calls, so it costs no SQP quota.
+
+### Weekly PPC cadence
+
+```bash
+python -m src.main ppc-playbook
+```
+
+Prints this week's decisions in order, with the live figures behind each. Also
+rendered on **/ppc** as *This week's playbook*.
+
+1. **Monday 10:00 America/Los_Angeles** — SQP auto-sync runs (after Amazon
+   publishes the prior Sun–Sat week)
+2. `ads-actions` — rebuild recommendations so the rank gate sees fresh bands
+3. **P0 first**: negatives and high-ACOS placement cuts (Detail Page is usually
+   the biggest lever). Recovered budget, reversible, immediate
+4. **P2 next**: non-brand raises that passed *both* the ACOS rules and the rank
+   gate
+5. **Leave `needs_rank_check` manual** — above the high-bid threshold with no
+   rank on file; raising blind is what the gate exists to prevent
+6. **Never scale brand terms as a growth lever** — cap and move on
+
 ### Multi-week backfill (for trends)
 
 The weekly job only moves forward. Branded-vs-non-branded trends and rank-band

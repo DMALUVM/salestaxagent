@@ -97,3 +97,47 @@ def classify(query: str, rules: BrandRules | None = None) -> dict:
     hit = r.match(query)
     return {"query": query, "normalized": normalize(query),
             "branded": hit is not None, "matched_rule": hit}
+
+
+# ── Brand rename history ────────────────────────────────────────
+#
+# The brand was renamed around 2025-10-31 ("Dr. Dave's Primal Essence" ->
+# "Tallowbourn") on the SAME ASINs. Both eras' terms count as branded, so mix
+# and share stay continuous across the boundary: treating only the current name
+# as brand would render the rename as a collapse in brand demand followed by a
+# surge in "non-brand" purchases that were never non-brand.
+
+@lru_cache(maxsize=1)
+def brand_history(path: str | None = None) -> dict:
+    p = Path(path) if path else CONFIG_PATH
+    try:
+        return json.loads(p.read_text()).get("brand_history") or {}
+    except FileNotFoundError:
+        return {}
+
+
+def era_of(query: str) -> str | None:
+    """'current' | 'legacy' | None — which brand era a branded query belongs to.
+
+    Attribution only; both eras gate identically. Useful for reading a mix
+    trend across the rename without mistaking it for a demand shift.
+    """
+    hist = brand_history()
+    eras = hist.get("eras") or {}
+    q = normalize(query)
+    if not q:
+        return None
+    parts = q.split(" ")
+    for era in ("current", "legacy"):
+        for term in eras.get(era) or []:
+            t = normalize(term)
+            if not t:
+                continue
+            tp = t.split(" ")
+            n = len(tp)
+            if n == 1:
+                if t in set(parts):
+                    return era
+            elif any(parts[i:i + n] == tp for i in range(len(parts) - n + 1)):
+                return era
+    return None

@@ -225,3 +225,60 @@ class TestBrandGateInteraction:
         from src.amazon_ads.organic_rank import is_branded as gate_branded
         assert not gate_branded("beef tallow lip balm", ["tallowbourn"])
         assert gate_branded("tallowbourn balm", ["tallowbourn"])
+
+
+class TestBrandRename:
+    """The 2025-10-31 rename must not read as a brand-demand collapse.
+
+    Same ASINs; 'Dr. Dave's Primal Essence' became 'Tallowbourn'. If only the
+    current name counted as brand, mix would crater at the boundary and the
+    legacy queries would be misfiled as non-brand growth.
+    """
+
+    @pytest.mark.parametrize("q", [
+        "tallowbourn lip balm", "tallowbourne", "tallowborn balm",
+    ])
+    def test_current_era_is_branded(self, q):
+        assert is_branded(q)
+
+    @pytest.mark.parametrize("q", [
+        "dr dave's primal essence tallow balm", "dr daves primal essence",
+        "dr. dave's", "primal essence", "doctor dave",
+    ])
+    def test_legacy_era_is_still_branded(self, q):
+        assert is_branded(q), q
+
+    @pytest.mark.parametrize("q", [
+        "beef tallow lip balm", "tallow", "dave", "primal", "essence",
+    ])
+    def test_generics_stay_non_brand_across_both_eras(self, q):
+        assert not is_branded(q), q
+
+    def test_era_attribution(self):
+        from src.amazon_ads.brand_terms import era_of
+        assert era_of("tallowbourn lip balm") == "current"
+        assert era_of("dr dave's primal essence") == "legacy"
+        assert era_of("primal essence") == "legacy"
+        assert era_of("beef tallow lip balm") is None
+
+    def test_rename_metadata_is_recorded(self):
+        from src.amazon_ads.brand_terms import brand_history
+        h = brand_history()
+        assert h["renamed_on"] == "2025-10-31"
+        assert "Primal Essence" in h["previous_brand"]
+        assert h["current_brand"] == "Tallowbourn"
+
+    def test_both_eras_gate_bids_identically(self):
+        """A legacy-brand query must be capped exactly like the new name."""
+        from datetime import date
+
+        from src.amazon_ads.organic_rank import (
+            POLICY_CAPPED, apply_rank_policy, build_rank_info,
+        )
+        cfg = {"enabled": True, "high_bid_threshold": 2.30,
+               "rank_1_3_max_increase_pct": 8, "rank_4_7_max_increase_pct": 12,
+               "stale_after_days": 14, "brand_tokens": []}
+        for q in ("tallowbourn lip balm", "dr dave's primal essence"):
+            info = build_rank_info(None, q, cfg, date(2026, 8, 21))
+            assert info.branded is True, q
+            assert apply_rank_policy(1.00, 1.15, info, cfg).policy == POLICY_CAPPED, q

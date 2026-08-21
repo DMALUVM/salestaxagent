@@ -1430,6 +1430,70 @@ def inventory_remap_fc_cmd(dry_run, recheck):
                f"nexus picks up any newly-covered states.")
 
 
+@cli.command("brand-reclassify")
+@click.option("--dry-run/--apply", default=True, help="Dry run by default")
+def brand_reclassify_cmd(dry_run):
+    """Re-apply brand rules to stored SQP rows after editing brand_terms.json.
+
+    `is_branded` is written at ingest time, so changing the term list does not
+    retroactively fix history — the 2025-10-31 rename in particular would leave
+    legacy 'Dr. Dave's Primal Essence' weeks misfiled as non-brand. This
+    recomputes stored rows; it never re-fetches from Amazon, so it costs no quota.
+    """
+    from src.amazon_ads.brand_terms import classify
+    from src.db import get_client
+
+    client = get_client()
+    rows, offset = [], 0
+    try:
+        while True:
+            page = (client.table("sqp_weekly")
+                    .select("id,query_normalized,is_branded,brand_rule,week_start")
+                    .order("week_start").order("query_normalized")
+                    .range(offset, offset + 999).execute().data) or []
+            rows.extend(page)
+            if len(page) < 1000:
+                break
+            offset += 1000
+    except Exception as e:
+        raise click.ClickException(f"sqp_weekly unavailable: {str(e)[:140]}")
+
+    changes = []
+    for r in rows:
+        c = classify(r.get("query_normalized") or "")
+        if bool(r.get("is_branded")) != c["branded"] or \
+                (r.get("brand_rule") or None) != c["matched_rule"]:
+            changes.append({"id": r["id"], "query": r.get("query_normalized"),
+                            "was": bool(r.get("is_branded")),
+                            "now": c["branded"], "rule": c["matched_rule"],
+                            "week": r.get("week_start")})
+
+    click.echo(f"{'DRY RUN — ' if dry_run else ''}brand reclassification")
+    click.echo(f"  rows scanned : {len(rows):,}")
+    click.echo(f"  changes      : {len(changes):,}")
+    flips = [c for c in changes if c["was"] != c["now"]]
+    gained = [c for c in flips if c["now"]]
+    lost = [c for c in flips if not c["now"]]
+    click.echo(f"    now branded    : {len(gained)}")
+    click.echo(f"    now non-brand  : {len(lost)}")
+    for c in (gained + lost)[:12]:
+        click.echo(f"    {c['week']}  {str(c['query'])[:40]:<41} "
+                   f"{c['was']} -> {c['now']}  ({c['rule']})")
+
+    if dry_run or not changes:
+        if dry_run and changes:
+            click.echo("\n  Re-run with --apply to write, then `brand-share`.")
+        return
+
+    for c in changes:
+        client.table("sqp_weekly").update(
+            {"is_branded": c["now"], "brand_rule": c["rule"]}
+        ).eq("id", c["id"]).execute()
+    click.echo(f"\n  Updated {len(changes):,} row(s). Run `brand-share` to see "
+               f"the corrected mix, and `ads-actions` so bid caps pick up any "
+               f"newly-branded terms.")
+
+
 @cli.command("brand-share")
 @click.option("--weeks", default=15, help="Weeks of trend to show")
 @click.option("--opportunities", default=15, help="Top non-brand opportunities")
@@ -1742,6 +1806,106 @@ def rank_set_cmd(keyword, rank, asin, as_of, page):
     n = upsert_ranks([row])
     click.echo(f"recorded: {row['asin']} \"{row['keyword_normalized']}\" "
                f"rank {rank} as_of {row['as_of']} ({n} row)")
+
+
+@cli.command("ppc-playbook")
+@click.option("--range", "rng", type=click.Choice(["7d", "14d", "30d"]), default="7d")
+def ppc_playbook_cmd(rng):
+    """What to do this week, in order — waste first, growth last.
+
+    Reads live KPIs. Every figure is queried at call time; nothing is hardcoded.
+    """
+    import json as _json
+    from collections import defaultdict
+
+    from src.amazon_ads.playbook import WEEKLY_CADENCE, build_playbook
+    from src.db import fetch_all, get_client
+    from src.rules import amazon_as_of, window_start
+
+    days = int(rng.rstrip("d"))
+    asof = amazon_as_of()
+    start = window_start(asof, days)
+    client = get_client()
+
+    try:
+        from src.amazon_ads.strategy import account_target_acos
+        target_acos, _basis = account_target_acos()
+        target_acos = float(target_acos)
+    except Exception:
+        target_acos = 30.0
+
+    # Queued recommendations (rank-gate fields live in evidence).
+    recs = []
+    for r in fetch_all("ads_recommendations"):
+        ev = r.get("evidence")
+        if isinstance(ev, str):
+            try:
+                ev = _json.loads(ev)
+            except ValueError:
+                ev = {}
+        recs.append({**r, "evidence": ev or {}})
+
+    # Placement rollup for the same closed-day window as the KPIs.
+    pl_agg: dict[str, dict] = defaultdict(lambda: {"spend": 0.0, "sales": 0.0})
+    try:
+        offset = 0
+        while True:
+            page = (client.table("ads_placement_daily")
+                    .select("date,campaign_id,placement,spend,sales_14d")
+                    .gte("date", str(start)).lte("date", str(asof))
+                    .order("date").order("campaign_id").order("placement")
+                    .range(offset, offset + 999).execute().data) or []
+            for row in page:
+                e = pl_agg[str(row.get("placement") or "Unknown")]
+                e["spend"] += float(row.get("spend") or 0)
+                e["sales"] += float(row.get("sales_14d") or 0)
+            if len(page) < 1000:
+                break
+            offset += 1000
+    except Exception as e:
+        click.echo(f"  (placement data unavailable: {str(e)[:90]})")
+    placements = [{"placement": k, **v} for k, v in pl_agg.items()]
+
+    # Role shares come from the same strategy config the dashboard reads.
+    roles = []
+    try:
+        from src.amazon_ads.strategy import role_rollup
+
+        camp_rows, offset = [], 0
+        while True:
+            page = (client.table("ads_campaigns_daily")
+                    .select("date,campaign_id,campaign_name,spend,sales_14d,"
+                            "orders_14d,clicks")
+                    .gte("date", str(start)).lte("date", str(asof))
+                    .order("date").order("campaign_id")
+                    .range(offset, offset + 999).execute().data) or []
+            camp_rows.extend(page)
+            if len(page) < 1000:
+                break
+            offset += 1000
+        roles = role_rollup(camp_rows)
+    except Exception as e:
+        log.debug("role rollup unavailable: %s", e)
+
+    actions = build_playbook(target_acos, recs, placements, roles)
+
+    click.echo(f"PPC playbook — {days} closed day(s) {start} → {asof}")
+    click.echo(f"  break-even target ACOS: {target_acos:.1f}%")
+    click.echo(f"  queued recommendations: {len(recs)}")
+    if not actions:
+        click.echo("\n  Nothing actionable right now.")
+    for a in actions:
+        click.echo("")
+        click.echo(f"  [{a.priority}] {a.title}"
+                   + (f"   (~{a.impact:,.0f} at stake)" if a.impact else ""))
+        click.echo(f"       WHY : {a.why}")
+        click.echo(f"       DO  : {a.do}")
+
+    click.echo("\n  Weekly cadence:")
+    for line in WEEKLY_CADENCE:
+        click.echo(f"    • {line}")
+    click.echo("\n  SQP note: multi-week ASIN-view SQP drives TREND and the rank "
+               "gate. It is not Brand View / full category parity.")
 
 
 @cli.command("ppc-plan")
