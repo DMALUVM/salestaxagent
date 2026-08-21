@@ -1337,6 +1337,67 @@ def inventory_remap_fc_cmd(dry_run, recheck):
                f"nexus picks up any newly-covered states.")
 
 
+@cli.command("registration-plan")
+@click.option("--csv", "csv_path", default=None, help="Write the full plan to CSV")
+@click.option("--action", type=click.Choice(["all", "register_now", "review_contested",
+              "monitor", "already_registered", "no_sales_tax"]), default="all")
+def registration_plan_cmd(csv_path, action):
+    """Ranked, auditable sales-tax registration plan from live data.
+
+    Sales tax only. Entity and business-activity taxes (CA $800, WA B&O, OR CAT)
+    never drive a registration recommendation here — see `entity-matrix`.
+    """
+    import csv as _csv
+
+    from src.exports.registration_plan import (
+        build_rows, counts_by_action, to_csv_rows,
+    )
+
+    rows = build_rows()
+    counts = counts_by_action(rows)
+
+    click.echo("Sales-tax registration plan — live data")
+    for a in ("register_now", "review_contested", "monitor",
+              "already_registered", "no_sales_tax"):
+        click.echo(f"  {a:<20}: {counts.get(a, 0)}")
+    click.echo(f"  {'TOTAL':<20}: {len(rows)}")
+
+    residual = next((r.residual_risk for r in rows if r.residual_risk), "")
+    if residual:
+        click.echo(f"\n  ⚠ residual risk: {residual}")
+
+    shown = [r for r in rows if action == "all" or r.decision.action == action]
+    groups: dict[str, list] = {}
+    for r in shown:
+        groups.setdefault(r.decision.action, []).append(r)
+
+    for a in ("register_now", "review_contested", "monitor",
+              "already_registered", "no_sales_tax"):
+        grp = groups.get(a)
+        if not grp:
+            continue
+        click.echo(f"\n  {a.upper().replace('_', ' ')} ({len(grp)}):")
+        if a in ("already_registered", "no_sales_tax"):
+            click.echo("    " + ", ".join(r.facts.state_code for r in grp))
+            continue
+        for r in grp:
+            f, d = r.facts, r.decision
+            click.echo(f"    {f.state_code}  phys={d.physical_nexus:<9} "
+                       f"econ={d.economic_nexus:<16} "
+                       f"sales=${f.total_relevant_sales:>10,.0f}  [{d.confidence}]")
+            click.echo(f"        {d.reason}")
+            if r.entity_note:
+                click.echo(f"        ({r.entity_note})")
+
+    if csv_path:
+        with open(csv_path, "w", newline="") as fh:
+            _csv.writer(fh).writerows(to_csv_rows(rows))
+        click.echo(f"\n  CSV written: {csv_path} ({len(rows)} rows)")
+
+    click.echo("\n  Monitoring aid — not legal or tax advice. Confirm positions "
+               "with a CPA before registering.")
+
+
 @cli.command("entity-matrix")
 @click.option("--status", type=click.Choice(["all", "verified_applies",
               "verified_none", "not_researched"]), default="all")

@@ -118,6 +118,7 @@ def send_daily_summary(
 
     from src.alerts.digest_sections import build_sections, render_sections
     from src.inventory.ledger_health import current_warning as _inventory_warning
+    from src.exports.registration_plan import digest_line as _registration_line
     from src.db import fetch_all
 
     parts: list[str] = []
@@ -140,6 +141,7 @@ def send_daily_summary(
             econ_approaching=econ_approaching,
             entity_view=entity_view,
             inventory_warning=_inventory_warning(),
+            registration_line=_registration_line(),
         )
         body = render_sections(sections, today)
         action_needed = len(sections.action_needed_states)

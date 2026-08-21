@@ -9,6 +9,7 @@ import { Disclaimer } from "@/components/disclaimer";
 import { FrequencyBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { RegistrationPlan } from "@/components/registration-plan";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -365,6 +366,10 @@ export default function NexusRegistrationsPage() {
             onChange={(e) => setSearch(e.target.value)} className="pl-8" />
         </div>
       </div>
+
+      {/* Ranked plan from the Python decision engine — the auditable version of
+          the per-state cards below, with reasons and confidence on every row. */}
+      <RegistrationPlan />
 
       {/* Summary strip */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">

@@ -63,6 +63,10 @@ class DigestSections:
     # be made on top of.
     inventory_warning: str | None = None
 
+    # One-line registration summary. Counts only — the auditable plan lives on
+    # /registrations and in `registration-plan`.
+    registration_line: str | None = None
+
     # Entity / franchise / foreign-qualification obligations. A separate bucket
     # from `overdue`/`upcoming` above, which are sales-tax returns only — an
     # entity fee must never render as an overdue sales-tax remittance.
@@ -98,7 +102,8 @@ def build_sections(nexus_rows: list[dict], filing_rows: list[dict],
                    econ_approaching: list[str] | None = None,
                    upcoming_within_days: int = 45,
                    entity_view: dict | None = None,
-                   inventory_warning: str | None = None) -> DigestSections:
+                   inventory_warning: str | None = None,
+                   registration_line: str | None = None) -> DigestSections:
     """Assemble the digest sections from raw table rows."""
     s = DigestSections()
     approaching = set(econ_approaching or [])
@@ -147,6 +152,7 @@ def build_sections(nexus_rows: list[dict], filing_rows: list[dict],
         s.entity_needs_profile = list(entity_view.get("undated") or [])
 
     s.inventory_warning = inventory_warning
+    s.registration_line = registration_line
 
     open_flags = [f for f in franchise_flags if f.get("status") == "open"]
     s.critical_flags = [f for f in open_flags if f.get("severity") == "critical"]
@@ -192,6 +198,9 @@ def render_sections(s: DigestSections, today: date) -> list[str]:
     if s.inventory_warning:
         parts.append("")
         parts.append(s.inventory_warning)
+
+    if s.registration_line:
+        parts.append(s.registration_line)
 
     # ── Entity & other filings — explicitly NOT sales tax ──
     if s.entity_overdue or s.entity_upcoming or s.entity_needs_profile:

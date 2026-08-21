@@ -69,6 +69,7 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
     # same registration-gated sections everything else uses.
     from src.alerts.digest_sections import build_sections, render_sections
     from src.inventory.ledger_health import current_warning as _inventory_warning
+    from src.exports.registration_plan import digest_line as _registration_line
 
     parts: list[str] = []
     parts.append(f"<b>Daily Digest -- {month_label}</b>")
@@ -95,6 +96,7 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
             ref,
             entity_view=entity_view,
             inventory_warning=_inventory_warning(),
+            registration_line=_registration_line(),
         )
         parts.extend(render_sections(sections, ref))
     except Exception:
