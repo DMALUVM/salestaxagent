@@ -3,6 +3,21 @@ into the sales_daily table with correct timezone-aware day boundaries.
 
 Shopify uses America/New_York for day boundaries.
 Amazon uses America/Los_Angeles for day boundaries.
+
+DAY BOUNDARIES — canonical, and deliberately NOT uniform:
+
+  Amazon  -> America/Los_Angeles   (business rule 1, config/business_rules.json)
+  Shopify -> America/New_York      (the store's own reporting timezone)
+
+Amazon MUST stay Pacific. Seller Central buckets orders by Pacific day, and any
+other timezone makes every reconciliation, the pulse-audit tool and the tax
+figures disagree with Amazon's own reports. Moving Amazon to Eastern would shift
+every day boundary by three hours and silently restate history.
+
+The two channels therefore use different day definitions. That is a real,
+documented asymmetry rather than an oversight: each channel is bucketed the way
+its own source system reports it, so each column reconciles against its origin.
+A single cross-channel timezone would make at least one of them unreconcilable.
 """
 from __future__ import annotations
 
@@ -334,6 +349,65 @@ def fetch_daily(start: date, end: date) -> list[dict]:
 # ── Auto-sync from SP-API / Shopify API ──────────────────
 
 
+def _write_daily_guarded(rows: list[dict], job: str,
+                         allow_decrease: bool = False) -> dict:
+    """Upsert daily totals, refusing writes that would shrink a closed day.
+
+    Every writer to sales_daily goes through here. The guard is the reason a
+    partial pull can no longer silently replace a complete day; the provenance
+    fields are the reason the next such incident is diagnosable at all — before
+    this, `updated_at` had no trigger and never moved, so nothing recorded which
+    job last touched a day.
+    """
+    from datetime import datetime, timezone
+
+    from src.sales_guard import guard_rows
+
+    if not rows:
+        return {"rows_upserted": 0, "days": 0, "blocked": [], "reasons": []}
+
+    days = sorted({str(r["sale_date"]) for r in rows})
+    channels = sorted({str(r["channel"]) for r in rows})
+    client = get_client()
+    existing = (client.table("sales_daily").select("*")
+                .gte("sale_date", days[0]).lte("sale_date", days[-1])
+                .in_("channel", channels).execute().data) or []
+
+    res = guard_rows(rows, existing, date.today(),
+                     allow_decrease=allow_decrease, job=job)
+
+    stamped = []
+    for r in res.to_write:
+        stamped.append({**r,
+                        "written_by": job,
+                        "last_written_at": datetime.now(timezone.utc).isoformat()})
+
+    count = 0
+    if stamped:
+        try:
+            count = upsert_rows("sales_daily", stamped, on_conflict="sale_date,channel")
+        except Exception as e:
+            # The provenance/completeness columns need
+            # supabase/migration_sales_provenance.sql. Until it is run the guard
+            # still works — only the audit trail is missing, which must not be
+            # a reason to skip writing correct data.
+            if "column" in str(e).lower():
+                log.warning("sales_daily provenance columns missing — run "
+                            "supabase/migration_sales_provenance.sql (guard still active)")
+                plain = [{k: v for k, v in r.items()
+                          if k not in ("written_by", "last_written_at", "is_complete")}
+                         for r in res.to_write]
+                count = upsert_rows("sales_daily", plain, on_conflict="sale_date,channel")
+            else:
+                raise
+
+    for reason in res.reasons:
+        log.warning("[%s] %s", job, reason)
+
+    return {"rows_upserted": count, "days": len(res.to_write),
+            "blocked": res.blocked_days, "reasons": res.reasons}
+
+
 def sync_amazon_daily(days: int = 7) -> dict:
     """Fetch Amazon SP-API orders report and aggregate into sales_daily.
 
@@ -424,13 +498,16 @@ def sync_amazon_daily(days: int = 7) -> dict:
         return {"rows_upserted": 0, "days": 0, "total_gross": 0,
                 "dropped_partial_days": sorted(partial_leading)}
 
-    count = upsert_rows("sales_daily", rows, on_conflict="sale_date,channel")
+    written = _write_daily_guarded(rows, job="sync_amazon_daily")
     total_gross = sum(r["gross_sales"] for r in rows)
 
     return {
-        "rows_upserted": count,
-        "days": len(rows),
+        "rows_upserted": written["rows_upserted"],
+        "days": written["days"],
         "total_gross": round(total_gross, 2),
+        "blocked_days": written["blocked"],
+        "guard_reasons": written["reasons"],
+        "dropped_partial_days": sorted(partial_leading),
     }
 
 
@@ -499,5 +576,6 @@ def sync_shopify_daily(days: int = 7) -> dict:
     if not rows:
         return {"rows_upserted": 0, "days": 0}
 
-    count = upsert_rows("sales_daily", rows, on_conflict="sale_date,channel")
-    return {"rows_upserted": count, "days": len(rows)}
+    written = _write_daily_guarded(rows, job="sync_shopify_daily")
+    return {"rows_upserted": written["rows_upserted"], "days": written["days"],
+            "blocked_days": written["blocked"], "guard_reasons": written["reasons"]}

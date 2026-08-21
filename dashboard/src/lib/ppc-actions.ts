@@ -241,3 +241,49 @@ export function buildGrokPrompt(planMarkdown: string, ctx: PlanContext): string 
     planMarkdown,
   ].join("\n");
 }
+
+/**
+ * Organic-rank gating badge for a recommendation.
+ *
+ * Rank comes from Brand Analytics SQP or a manual check — never from the Ads
+ * API, which does not expose organic position. Returns null when the action is
+ * not a rank-gated bid increase, so decreases and negatives never show a badge.
+ */
+export interface RankBadge {
+  label: string;
+  tone: "danger" | "warn" | "muted";
+  title: string;
+}
+
+export function rankBadgeOf(rec: RecLike): RankBadge | null {
+  const ev = parseEvidence(rec);
+  if (!ev || ev.action_type !== "increase_bid") return null;
+
+  const policy = String(ev.rank_policy_applied ?? "");
+  const rank = ev.organic_rank as number | null | undefined;
+  const note = String(ev.rank_note ?? "");
+
+  if (ev.needs_rank_check === true || policy === "needs_rank_check") {
+    return {
+      label: "Rank check needed",
+      tone: "warn",
+      title: note || "Organic rank unknown and the proposed bid is above the review threshold. Not auto-applied.",
+    };
+  }
+  if (policy === "capped" || policy === "hold") {
+    const where = typeof rank === "number" ? `#${rank}` : "brand term";
+    return {
+      label: `High cannibalization risk (org ${where})`,
+      tone: "danger",
+      title: note || "We already win this query organically — increase restrained.",
+    };
+  }
+  if (policy === "rank_unknown_allowed") {
+    return {
+      label: "Rank unknown",
+      tone: "muted",
+      title: note || "No organic rank on file, but the bid is below the review threshold.",
+    };
+  }
+  return null;
+}

@@ -223,7 +223,12 @@ def generate_recommendations(
                     "spend": round(e["spend"], 2), "orders": e["orders"],
                     "clicks": e["clicks"], "sales": round(e["sales"], 2),
                     "acos": round(acos, 2), "cpc": round(cpc, 2),
-                    "suggested_bid": new_bid, "target_acos": target_acos,
+                    # No rank fields here on purpose: this is a bid DECREASE.
+                    # The organic-rank gate restrains increases only — cutting
+                    # spend on a query we already rank for is the right move,
+                    # never something to hold back.
+                    "suggested_bid": new_bid,
+                    "target_acos": target_acos,
                     "match_types": match_types, "ad_groups": ad_groups,
                     "window": window,
                 },
@@ -244,16 +249,37 @@ def generate_recommendations(
         from src.amazon_ads.search_terms import run_loop
         from src.amazon_ads.strategy import THRESHOLDS as _TH
 
+        from src.amazon_ads.organic_rank import (
+            apply_rank_policy, fetch_ranks, load_config, lookup,
+            POLICY_NEEDS_CHECK,
+        )
+
         loop = run_loop(target_acos=target_acos)
         bump = float(_TH["scale"]["bid_increase_pct"])
+
+        # Organic-rank gate. Amazon's Ads API does not expose SERP rank, so this
+        # reads whatever SQP/manual data exists; an absent table simply means
+        # every keyword gates as "unknown" and the plan still runs.
+        rank_cfg = load_config()
+        rank_asin = rank_cfg.get("default_asin") or ""
+        ranks = fetch_ranks() if rank_cfg.get("enabled", True) else {}
+
         for w in loop["winners"]:
             if "exact" not in w["match_types"]:
                 continue  # harvest first; bid up once it is an exact keyword
             cpc = w["cpc"]
             if cpc <= 0:
                 continue
-            new_bid = round(max(cpc * (1 + bump), MIN_BID), 2)
+            proposed_bid = round(max(cpc * (1 + bump), MIN_BID), 2)
             kw = w["keyword"] or w["search_term"]
+
+            # Gate the INCREASE only. Negatives, pauses and bid cuts elsewhere
+            # in this engine never consult rank — a query we already rank #1
+            # for is a better candidate for cutting paid spend, not a worse one.
+            info = lookup(ranks, kw, rank_asin, rank_cfg)
+            gate = apply_rank_policy(cpc, proposed_bid, info, rank_cfg)
+            new_bid = gate.allowed_bid
+
             long_note = ""
             if w.get("long"):
                 long_note = (f" Confirmed over {loop['meta']['long_window'][0]}→"
@@ -261,7 +287,7 @@ def generate_recommendations(
                              f"ACOS {w['long']['acos']}%.")
             recs.append(_make_rec(
                 type="INCREASE_BID",
-                priority="P1",
+                priority="P2" if gate.needs_manual_check else "P1",
                 impact=w["sales"],
                 entity_type="keyword",
                 entity_name=kw,
@@ -276,7 +302,19 @@ def generate_recommendations(
                     "spend": round(w["spend"], 2), "orders": w["orders"],
                     "clicks": w["clicks"], "sales": round(w["sales"], 2),
                     "acos": round(w["acos"], 2), "cpc": round(cpc, 2),
-                    "suggested_bid": new_bid, "target_acos": target_acos,
+                    "suggested_bid": new_bid,
+                    "proposed_bid_before_rank_gate": proposed_bid,
+                    "organic_rank": info.rank,
+                    "organic_rank_effective": info.effective_rank,
+                    "rank_source": info.source,
+                    "rank_as_of": info.as_of,
+                    "rank_stale": info.stale,
+                    "rank_branded": info.branded,
+                    "rank_policy_applied": gate.policy,
+                    "cannibalization_risk": gate.risk,
+                    "rank_note": gate.note,
+                    "needs_rank_check": gate.needs_manual_check,
+                    "target_acos": target_acos,
                     "scale_bar": w["scale_bar"], "role": w["role"],
                     "match_types": sorted(w["match_types"]),
                     "ad_groups": sorted(w["ad_group_names"]),
@@ -285,10 +323,18 @@ def generate_recommendations(
                     "long": w.get("long"),
                     "window": window,
                 },
-                action=(f'Raise the bid on "{kw}" in campaign "{w["campaign_name"]}" from '
-                        f"about {_usd(cpc)} to {_usd(new_bid)} (+{bump * 100:.0f}%) to take "
-                        f"more of this traffic while it converts under target.{long_note} "
-                        f"Re-check ACOS in 7 days."),
+                action=(
+                    (f'CHECK ORGANIC RANK before raising "{kw}" in campaign '
+                     f'"{w["campaign_name"]}". The plan wanted {_usd(cpc)} → '
+                     f"{_usd(proposed_bid)}, but rank is unknown and that is at or "
+                     f"above the {_usd(rank_cfg['high_bid_threshold'])} review "
+                     f"threshold. Confirm we do not already rank top-3 organically, "
+                     f"then raise manually.{long_note}")
+                    if gate.needs_manual_check else
+                    (f'Raise the bid on "{kw}" in campaign "{w["campaign_name"]}" from '
+                     f"about {_usd(cpc)} to {_usd(new_bid)} to take more of this "
+                     f"traffic while it converts under target. {gate.note}.{long_note} "
+                     f"Re-check ACOS in 7 days.")),
             ))
     except Exception:
         log.exception("Winner scaling skipped — search-term loop unavailable")

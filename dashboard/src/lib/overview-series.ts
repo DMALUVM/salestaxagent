@@ -18,6 +18,8 @@ import { normalizeChannel, SHOPIFY, AMAZON } from "./channels";
  */
 
 export interface SalesDailyRow {
+  /** False when the writing job did not cover the whole day. */
+  is_complete?: boolean | null;
   sale_date: string;
   channel: string;
   gross_sales: number | string | null;
@@ -31,6 +33,12 @@ export interface SeriesPoint {
   total: number;
   /** False when no sales_daily row exists for this date at all. */
   hasData: boolean;
+  /**
+   * False while the day is still in progress, so the chart can mark it rather
+   * than presenting a part-day as a final figure. Today is always incomplete;
+   * closed days are complete unless a writer flagged otherwise.
+   */
+  isComplete: boolean;
 }
 
 /** YYYY-MM-DD in the viewer's local timezone (never UTC — see page.tsx). */
@@ -54,15 +62,19 @@ export function buildLast30Series(
   now: Date = new Date(),
   days: number = SERIES_DAYS,
 ): SeriesPoint[] {
-  const dailyMap = new Map<string, { shopify: number; amazon: number }>();
+  const dailyMap = new Map<string,
+    { shopify: number; amazon: number; isComplete: boolean }>();
   for (const row of rows ?? []) {
     if (!row?.sale_date) continue;
     const ch = normalizeChannel(row.channel);
     let entry = dailyMap.get(row.sale_date);
     if (!entry) {
-      entry = { shopify: 0, amazon: 0 };
+      entry = { shopify: 0, amazon: 0, isComplete: true };
       dailyMap.set(row.sale_date, entry);
     }
+    // A day is only complete if EVERY channel's row for it is complete: a
+    // finished Amazon pull does not make the day final if Shopify was partial.
+    if (row.is_complete === false) entry.isComplete = false;
     if (ch === SHOPIFY) entry.shopify += Number(row.gross_sales ?? 0);
     else if (ch === AMAZON) entry.amazon += Number(row.gross_sales ?? 0);
   }
@@ -81,6 +93,10 @@ export function buildLast30Series(
       amazon,
       total: shopify + amazon,
       hasData: entry !== undefined,
+      // Written by the sync: false when that run did not cover the whole day.
+      // A day with no row at all is not "incomplete", it is absent — that is
+      // what hasData already says.
+      isComplete: entry?.isComplete ?? true,
     });
   }
   return out;

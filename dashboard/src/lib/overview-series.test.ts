@@ -141,3 +141,33 @@ test("string gross_sales values are coerced, not concatenated", () => {
   ];
   assert.equal(buildLast30Series(rows, NOW).at(-1)!.amazon, 300.75);
 });
+
+test("completeness: a day is complete by default", () => {
+    const rows = [{ sale_date: "2026-08-13", channel: "amazon", gross_sales: 100 }];
+    const s = buildLast30Series(rows, new Date(2026, 7, 21));
+    assert.equal(s.find((p) => p.date === "2026-08-13")?.isComplete, true);
+  });
+
+test("completeness: a partial row marks the whole day incomplete", () => {
+    const rows = [
+      { sale_date: "2026-08-13", channel: "amazon", gross_sales: 100, is_complete: false },
+    ];
+    const s = buildLast30Series(rows, new Date(2026, 7, 21));
+    assert.equal(s.find((p) => p.date === "2026-08-13")?.isComplete, false);
+  });
+
+test("completeness: one partial channel makes the day incomplete", () => {
+    const rows = [
+      { sale_date: "2026-08-13", channel: "amazon", gross_sales: 3073, is_complete: true },
+      { sale_date: "2026-08-13", channel: "shopify", gross_sales: 80, is_complete: false },
+    ];
+    const s = buildLast30Series(rows, new Date(2026, 7, 21));
+    assert.equal(s.find((p) => p.date === "2026-08-13")?.isComplete, false);
+  });
+
+test("completeness: a missing day is absent, not incomplete", () => {
+    const s = buildLast30Series([], new Date(2026, 7, 21));
+    const p = s.find((x) => x.date === "2026-08-13");
+    assert.equal(p?.hasData, false);
+    assert.equal(p?.isComplete, true);
+  });

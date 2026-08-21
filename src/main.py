@@ -1337,6 +1337,163 @@ def inventory_remap_fc_cmd(dry_run, recheck):
                f"nexus picks up any newly-covered states.")
 
 
+@cli.command("sqp-import")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--asin", default=None, help="ASIN when the export has no ASIN column")
+@click.option("--as-of", default=None, help="Reporting date (YYYY-MM-DD)")
+@click.option("--dry-run/--apply", default=True, help="Dry run by default")
+def sqp_import_cmd(path, asin, as_of, dry_run):
+    """Import Brand Analytics Search Query Performance for organic-rank gating.
+
+    SQP is the official Amazon signal. It reports click SHARE, not SERP
+    position, so rows without an explicit rank column get a coarse rank BAND
+    derived from share — recorded as a band, never as a measured position.
+    """
+    from datetime import date as _date
+
+    from src.amazon_ads.organic_rank import load_config
+    from src.amazon_ads.sqp_import import import_sqp
+
+    cfg = load_config()
+    ref = _date.fromisoformat(as_of) if as_of else None
+    r = import_sqp(path, default_asin=asin or cfg["default_asin"],
+                   as_of=ref, dry_run=dry_run)
+
+    click.echo(f"{'DRY RUN — ' if dry_run else ''}SQP import: {path}")
+    click.echo(f"  columns matched : {r.get('columns')}")
+    click.echo(f"  parsed          : {r['parsed']}")
+    click.echo(f"  skipped         : {r['skipped']} (no query or no rank evidence)")
+    click.echo(f"  unique keywords : {len(r['rows'])}")
+    if not dry_run:
+        click.echo(f"  written         : {r.get('written', 0)}")
+    for w in r.get("warnings", []):
+        click.echo(f"  ⚠ {w}")
+    for row in r["rows"][:10]:
+        share = row.get("impression_share_organic")
+        click.echo(f"    {row['keyword_normalized'][:44]:<45} rank={row['organic_rank']}"
+                   + (f"  share={share:.0%}" if share is not None else ""))
+    if dry_run and r["rows"]:
+        click.echo("\n  Re-run with --apply to write.")
+
+
+@cli.command("rank-set")
+@click.argument("keyword")
+@click.argument("rank", type=int)
+@click.option("--asin", default=None, help="Defaults to config default_asin")
+@click.option("--as-of", default=None, help="YYYY-MM-DD (default today)")
+@click.option("--page", default=None, type=int)
+def rank_set_cmd(keyword, rank, asin, as_of, page):
+    """Manually record our organic rank for a query.
+
+    A manual row and a weekly SQP row can coexist; the freshest wins at read
+    time. Use this when you have checked the SERP yourself.
+    """
+    from datetime import date as _date
+
+    from src.amazon_ads.organic_rank import (
+        load_config, normalize_keyword, upsert_ranks,
+    )
+
+    cfg = load_config()
+    row = {
+        "asin": asin or cfg["default_asin"] or "",
+        "keyword_normalized": normalize_keyword(keyword),
+        "keyword_raw": keyword,
+        "organic_rank": rank,
+        "page": page if page is not None else (1 if rank <= 48 else 2),
+        "source": "manual",
+        "as_of": as_of or _date.today().isoformat(),
+    }
+    n = upsert_ranks([row])
+    click.echo(f"recorded: {row['asin']} \"{row['keyword_normalized']}\" "
+               f"rank {rank} as_of {row['as_of']} ({n} row)")
+
+
+@cli.command("ppc-plan")
+@click.option("--only-needs-rank-check", is_flag=True,
+              help="Show only actions held for a manual organic-rank check")
+def ppc_plan_cmd(only_needs_rank_check):
+    """PPC action plan with organic-rank gating applied to bid increases.
+
+    Rank comes from Brand Analytics SQP or manual entry — never from the Ads
+    API, which does not expose it. This is a cannibalization guard, not an
+    incrementality measurement.
+    """
+    import json as _json
+
+    from src.amazon_ads.organic_rank import load_config
+    from src.db import fetch_all
+
+    cfg = load_config()
+    # Read the queue rather than regenerating it: generate_recommendations()
+    # replaces ads_recommendations as a side effect, and a command that only
+    # prints the plan must not rewrite it. Run `ads-actions` to refresh.
+    raw = fetch_all("ads_recommendations")
+    recs = []
+    for r in raw:
+        ev = r.get("evidence")
+        if isinstance(ev, str):
+            try:
+                ev = _json.loads(ev)
+            except ValueError:
+                ev = {}
+        recs.append({**r, "evidence": ev or {}})
+    bids = [r for r in recs if (r.get("evidence") or {}).get("action_type") == "increase_bid"]
+
+    summary = {"raises_full": 0, "raises_capped": 0, "holds_rank": 0,
+               "needs_rank_check": 0, "rank_unknown_allowed": 0, "gating_disabled": 0}
+    for r in bids:
+        pol = (r.get("evidence") or {}).get("rank_policy_applied") or ""
+        key = {"full_increase": "raises_full", "capped": "raises_capped",
+               "hold": "holds_rank", "needs_rank_check": "needs_rank_check",
+               "rank_unknown_allowed": "rank_unknown_allowed",
+               "gating_disabled": "gating_disabled"}.get(pol)
+        if key:
+            summary[key] += 1
+
+    click.echo("PPC plan — organic-rank gated (queued actions; "
+               "run `ads-actions` to regenerate)")
+    click.echo(f"  gating enabled   : {cfg['enabled']} "
+               f"(high-bid threshold {_usd_or(cfg['high_bid_threshold'])}, "
+               f"stale after {cfg['stale_after_days']}d)")
+    click.echo(f"  total actions    : {len(recs)}")
+    click.echo(f"  bid increases    : {len(bids)}")
+    for k in ("raises_full", "raises_capped", "holds_rank", "needs_rank_check",
+              "rank_unknown_allowed", "gating_disabled"):
+        if summary[k]:
+            click.echo(f"    {k:<22}: {summary[k]}")
+
+    shown = [r for r in bids
+             if not only_needs_rank_check
+             or (r.get("evidence") or {}).get("needs_rank_check")]
+    if shown:
+        click.echo("")
+        click.echo(f"    {'keyword':<40}{'cur':>7}{'plan':>8}{'final':>8}"
+                   f"{'rank':>6}  {'risk':<8}policy")
+        for r in sorted(shown, key=lambda x: -float(x.get("impact") or 0))[:40]:
+            e = r.get("evidence") or {}
+            rank = e.get("organic_rank")
+            rank_s = str(rank) if rank is not None else ("brand" if e.get("rank_branded") else "?")
+            click.echo(f"    {str(r.get('entity_name'))[:39]:<40}"
+                       f"{float(e.get('cpc') or 0):>7.2f}"
+                       f"{float(e.get('proposed_bid_before_rank_gate') or 0):>8.2f}"
+                       f"{float(e.get('suggested_bid') or 0):>8.2f}"
+                       f"{rank_s:>6}  {str(e.get('cannibalization_risk')):<8}"
+                       f"{e.get('rank_policy_applied')}")
+
+    click.echo("\n  Rank source: Brand Analytics SQP / manual. The Ads API does "
+               "not provide organic rank.")
+    click.echo("  This is a cannibalization guard, not proof of incrementality.")
+    click.echo("  needs_rank_check actions are never auto-applied.")
+
+
+def _usd_or(v) -> str:
+    try:
+        return f"${float(v):,.2f}"
+    except (TypeError, ValueError):
+        return str(v)
+
+
 @cli.command("registration-plan")
 @click.option("--csv", "csv_path", default=None, help="Write the full plan to CSV")
 @click.option("--action", type=click.Choice(["all", "register_now", "review_contested",

@@ -1,8 +1,12 @@
 {
   "_comment": "PPC strategy configuration. Campaign roles are matched by regex against the campaign name, first match wins, evaluated in the order listed. Thresholds drive the scale/cut rules in src/amazon_ads/search_terms.py. Edit here rather than in code.",
-
   "roles": {
-    "order": ["defense", "ranking", "profit", "discovery"],
+    "order": [
+      "defense",
+      "ranking",
+      "profit",
+      "discovery"
+    ],
     "labels": {
       "discovery": "Discovery",
       "profit": "Profit",
@@ -16,27 +20,59 @@
       "defense": "Protects own listings and brand terms from competitor conquesting."
     },
     "patterns": {
-      "defense": ["asin defense", "\\bdefense\\b", "\\bbrand(ed)?\\b", "competitor defense"],
-      "ranking": ["asin offense", "\\boffense\\b", "\\brank(ing)?\\b", "\\blaunch\\b", "hero kw"],
-      "profit": ["\\bexact\\b", "\\bpm\\b", "harvest"],
-      "discovery": ["\\bauto\\b", "\\bbroad\\b", "\\bphrase\\b", "loose match", "catch all", "discovery", "research"]
+      "defense": [
+        "asin defense",
+        "\\bdefense\\b",
+        "\\bbrand(ed)?\\b",
+        "competitor defense"
+      ],
+      "ranking": [
+        "asin offense",
+        "\\boffense\\b",
+        "\\brank(ing)?\\b",
+        "\\blaunch\\b",
+        "hero kw"
+      ],
+      "profit": [
+        "\\bexact\\b",
+        "\\bpm\\b",
+        "harvest"
+      ],
+      "discovery": [
+        "\\bauto\\b",
+        "\\bbroad\\b",
+        "\\bphrase\\b",
+        "loose match",
+        "catch all",
+        "discovery",
+        "research"
+      ]
     },
     "default": "discovery",
-
     "targets": {
       "_comment": "Optional target bands for each role's share of ad spend in the selected window, as percentages. Used for a visual hint only — nothing enforces or auto-adjusts budgets. Set a role to null to opt it out of the hint.",
-      "discovery": { "min": 15, "max": 30 },
-      "profit": { "min": 45, "max": 70 },
-      "ranking": { "min": 5, "max": 20 },
-      "defense": { "min": 2, "max": 10 }
+      "discovery": {
+        "min": 15,
+        "max": 30
+      },
+      "profit": {
+        "min": 45,
+        "max": 70
+      },
+      "ranking": {
+        "min": 5,
+        "max": 20
+      },
+      "defense": {
+        "min": 2,
+        "max": 10
+      }
     }
   },
-
   "thresholds": {
     "_comment": "Scale/cut rules. acos values are percentages. Windows end at the LA closed-day as-of.",
     "target_acos_fallback": 30.0,
     "breakeven_safety_margin": 0.9,
-
     "cut": {
       "min_spend_zero_orders": 5.0,
       "acos_multiple_of_breakeven": 1.5,
@@ -56,34 +92,55 @@
     "placement": {
       "_comment": "Top of Search modifier recommendations. Compares TOS against the other on-Amazon placements for the SAME campaign over a closed-day window. Recommendation only — nothing is ever written to Amazon.",
       "lookback_days": 14,
-      "compare_placements": ["Other on-Amazon", "Detail Page on-Amazon"],
+      "compare_placements": [
+        "Other on-Amazon",
+        "Detail Page on-Amazon"
+      ],
       "tos_placement": "Top of Search on-Amazon",
       "include_off_amazon": false,
       "account_rollup_only": false,
-
       "min_clicks": 25,
       "min_benchmark_clicks": 25,
       "min_spend": 10.0,
-
       "tos_acos_advantage_pct": 0.85,
       "tos_acos_penalty_pct": 1.25,
-
       "modifier_step_pct": 15,
       "max_modifier_pct": 100,
       "decrease_step_pct": 15
     }
   },
-
   "windows": {
     "_comment": "Search-term loop windows, in days, inclusive and ending on the LA as-of date.",
     "short_days": 14,
     "long_days": 60
   },
-
   "learning": {
     "_comment": "Action decision log and outcome snapshots. Observation only — no model is trained and no bid is ever written from this data.",
-    "snapshot_offsets_days": [7, 14, 30],
-    "snapshot_statuses": ["applied", "dismissed"],
+    "snapshot_offsets_days": [
+      7,
+      14,
+      30
+    ],
+    "snapshot_statuses": [
+      "applied",
+      "dismissed"
+    ],
     "baseline_lookback_days": 14
+  },
+  "organic_rank_gating": {
+    "_comment": "Do not bid aggressively on queries we already own organically. Amazon's Ads API does NOT expose organic SERP rank — rank here comes from Brand Analytics Search Query Performance, a manual override, or an external tracker. This is a cannibalization GUARD, not an incrementality measurement: it says 'we may already get this click for free', not 'this ad click was wasted'.",
+    "enabled": true,
+    "high_bid_threshold": 2.3,
+    "rank_1_3_max_increase_pct": 8,
+    "rank_4_7_max_increase_pct": 12,
+    "stale_after_days": 14,
+    "brand_tokens": [
+      "tallowbourn",
+      "tallowbourne",
+      "dr dave",
+      "dr. dave"
+    ],
+    "default_asin": "B0CLHTF8YN",
+    "_default_asin_comment": "Search-term rows carry no ASIN, so rank is joined on this ASIN unless the action names one. Set to the primary ASIN; add per-campaign mapping later if campaigns diverge by product."
   }
 }
