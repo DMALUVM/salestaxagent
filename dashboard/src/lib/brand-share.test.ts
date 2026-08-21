@@ -99,3 +99,57 @@ test("chart geometry stays clipped and bottom-anchored", () => {
 test("no Python subprocess on mount", () => {
   assert.doesNotMatch(routeCode, /child_process|execFile|spawn/);
 });
+
+test("every bar has a hover tooltip carrying the week's figures", () => {
+  for (const field of ["Branded mix", "Branded purchases", "Non-brand purchases",
+                       "Total", "Non-brand share"]) {
+    assert.ok(componentCode.includes(field), `tooltip is missing "${field}"`);
+  }
+  assert.ok(componentCode.includes("onMouseEnter"), "bars must respond to hover");
+  assert.ok(componentCode.includes("week_end"), "tooltip must date the week");
+});
+
+test("the tooltip is reachable without a mouse", () => {
+  assert.ok(componentCode.includes("tabIndex"), "bars must be focusable");
+  assert.ok(componentCode.includes("onFocus") && componentCode.includes("onBlur"));
+  assert.ok(componentCode.includes("aria-label"),
+    "the figures exist only in the tooltip, so each bar needs its own label");
+});
+
+/**
+ * The tooltip must not live inside the bar row.
+ *
+ * That row is `overflow-hidden` — the belt that stops a fill escaping its 64px
+ * box and painting over the opportunities table. Anything rendered inside it is
+ * clipped by the same rule, so the tooltip would be sliced off at 64px.
+ */
+test("the tooltip escapes the clipped bar row", () => {
+  const rowAt = componentCode.indexOf('style={{ height: 64 }}');
+  const tipAt = componentCode.indexOf("pointer-events-none absolute top-full");
+  assert.ok(rowAt > -1 && tipAt > -1, "expected both the bar row and the tooltip");
+  assert.ok(tipAt > rowAt, "tooltip must be a sibling after the bar row");
+  const row = componentCode.slice(rowAt, tipAt);
+  assert.ok(row.includes("overflow-hidden"), "the bar row keeps its clipping");
+  assert.ok(!componentCode.slice(rowAt, tipAt).includes("w-52"),
+    "tooltip must sit outside the overflow-hidden row, not within it");
+});
+
+test("no per-bar printed labels — they do not fit at 24+ weeks", () => {
+  // ~15px per column at 24 weeks. A "4.7%" label per bar overflows its column,
+  // which is how the previous chart bug started. Hover carries the number.
+  // aria-label legitimately formats a percentage — it is an attribute read by
+  // screen readers, not a text node competing for 15px of column width. Only a
+  // rendered child counts, so attribute values are stripped first.
+  const bars = componentCode
+    .slice(componentCode.indexOf("columns.map"), componentCode.indexOf("pointer-events-none"))
+    .replace(/aria-label=\{[\s\S]*?\n\s*\}/g, "");
+  assert.doesNotMatch(bars, />\s*\{pct\(/,
+    "no percentage text rendered inside the bar columns");
+  assert.doesNotMatch(bars, /%<\//, "no literal % label inside the bar columns");
+});
+
+test("the interpretation note is present", () => {
+  for (const phrase of ["ASIN-level SQP", "defend", "organic-rank", "off-category"]) {
+    assert.ok(componentCode.includes(phrase), `note is missing "${phrase}"`);
+  }
+});

@@ -77,6 +77,11 @@ function toColumns(weeks: Week[]): Column[] {
 
 export function BrandShare() {
   const [d, setD] = useState<Payload | null>(null);
+  // Index of the hovered/focused column. Declared here with every other hook,
+  // above the early return below — a useState placed next to the chart markup
+  // would change the hook count between the null and loaded renders, which is
+  // React error #310. See src/lib/hooks-order.test.ts.
+  const [hover, setHover] = useState<number | null>(null);
 
   useEffect(() => {
     fetch("/api/brand-share").then((r) => r.json()).then(setD).catch(() => setD(null));
@@ -174,39 +179,128 @@ export function BrandShare() {
                   box, so the bar escaped the chart and painted over the
                   opportunities table below. overflow-hidden is the second belt:
                   nothing in this chart can ever render outside its own column. */}
-              <div className="flex items-end gap-px overflow-hidden" style={{ height: 64 }}>
-                {columns.map((c) => {
-                  const w = c.week;
-                  const fillPct = Math.max(
-                    0,
-                    Math.min(100, ((w?.brandedMix ?? 0) / maxMix) * 100),
-                  );
-                  return (
-                    <div
-                      key={c.week_start}
-                      className={`relative h-full flex-1 overflow-hidden rounded-t ${
-                        w ? "bg-muted" : "bg-transparent border-b border-dashed border-muted"
-                      }`}
-                      title={
-                        w
-                          ? `${w.week_start} → ${w.week_end ?? "?"}: mix ${pct(w.brandedMix)} · branded share ${pct(w.brandedShare)} · non-brand share ${pct(w.nonBrandedShare, 1)}`
-                          : `${c.week_start}: no SQP data stored for this week`
-                      }
-                    >
-                      {w && (
-                        <div
-                          className="absolute inset-x-0 bottom-0 rounded-t bg-[#2a78d6] dark:bg-[#3987e5]"
-                          style={{ height: `${fillPct}%` }}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
+              {/* `relative` wrapper, not the bar row itself: the bar row keeps
+                  overflow-hidden, so a tooltip rendered inside it would be
+                  clipped by the same 64px box that clips the fills. */}
+              <div className="relative" onMouseLeave={() => setHover(null)}>
+                <div className="flex items-end gap-px overflow-hidden" style={{ height: 64 }}>
+                  {columns.map((c, i) => {
+                    const w = c.week;
+                    const fillPct = Math.max(
+                      0,
+                      Math.min(100, ((w?.brandedMix ?? 0) / maxMix) * 100),
+                    );
+                    const on = hover === i;
+                    return (
+                      <div
+                        key={c.week_start}
+                        // Focusable so the series is reachable without a mouse;
+                        // the tooltip is the only place these numbers appear.
+                        tabIndex={0}
+                        onMouseEnter={() => setHover(i)}
+                        onFocus={() => setHover(i)}
+                        onBlur={() => setHover(null)}
+                        aria-label={
+                          w
+                            ? `Week ${w.week_start} to ${w.week_end ?? "?"}: branded mix ${pct(w.brandedMix, 1)}, ${w.brandedPurchases} branded and ${w.nonBrandedPurchases} non-brand purchases`
+                            : `${c.week_start}: no SQP data stored for this week`
+                        }
+                        className={`relative h-full flex-1 overflow-hidden rounded-t outline-none ${
+                          w
+                            ? on ? "bg-muted-foreground/25" : "bg-muted"
+                            : "bg-transparent border-b border-dashed border-muted"
+                        }`}
+                      >
+                        {w && (
+                          <div
+                            className={`absolute inset-x-0 bottom-0 rounded-t ${
+                              on
+                                ? "bg-[#1a5fb4] dark:bg-[#5ba3f5]"
+                                : "bg-[#2a78d6] dark:bg-[#3987e5]"
+                            }`}
+                            style={{ height: `${fillPct}%` }}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Hover card. At 24+ weeks each column is ~15px wide, so a
+                    printed % label on every bar would not fit and stacking one
+                    on the hovered bar alone would still overflow its column —
+                    the figures live here instead. */}
+                {hover !== null && columns[hover] && (
+                  <div
+                    className="pointer-events-none absolute top-full z-20 mt-1 w-52 -translate-x-1/2 rounded-md border bg-popover p-2 text-[10px] shadow-md"
+                    style={{
+                      // Centred on the column, but never closer to either edge
+                      // than half the tooltip's own width — w-52 is 208px, so
+                      // the centre is clamped to [104px, 100% - 104px]. A
+                      // percentage-only clamp cannot know the tooltip's width
+                      // and left it overhanging the card by ~7px at both ends.
+                      left: `clamp(104px, ${((hover + 0.5) / columns.length) * 100}%, calc(100% - 104px))`,
+                    }}
+                  >
+                    {columns[hover].week ? (
+                      (() => {
+                        const w = columns[hover].week!;
+                        return (
+                          <>
+                            <p className="font-medium tabular-nums">
+                              {w.week_start} → {w.week_end ?? "?"}
+                            </p>
+                            <p className="mt-1 flex justify-between">
+                              <span className="text-muted-foreground">Branded mix</span>
+                              <span className="font-semibold tabular-nums">{pct(w.brandedMix, 1)}</span>
+                            </p>
+                            <p className="flex justify-between">
+                              <span className="text-muted-foreground">Branded purchases</span>
+                              <span className="tabular-nums">{w.brandedPurchases.toLocaleString()}</span>
+                            </p>
+                            <p className="flex justify-between">
+                              <span className="text-muted-foreground">Non-brand purchases</span>
+                              <span className="tabular-nums">{w.nonBrandedPurchases.toLocaleString()}</span>
+                            </p>
+                            <p className="flex justify-between border-t pt-0.5 mt-0.5">
+                              <span className="text-muted-foreground">Total</span>
+                              <span className="tabular-nums">{w.totalPurchases.toLocaleString()}</span>
+                            </p>
+                            {w.nonBrandedShare !== null && w.nonBrandedShare !== undefined && (
+                              <p className="flex justify-between">
+                                <span className="text-muted-foreground">Non-brand share</span>
+                                <span className="tabular-nums">{pct(w.nonBrandedShare, 2)}</span>
+                              </p>
+                            )}
+                            {w.brandedShare !== null && w.brandedShare !== undefined && (
+                              <p className="flex justify-between">
+                                <span className="text-muted-foreground">Branded share</span>
+                                <span className="tabular-nums">{pct(w.brandedShare)}</span>
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()
+                    ) : (
+                      <p className="text-muted-foreground">
+                        {columns[hover].week_start}: no SQP data stored for this week
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="mt-1 flex justify-between text-[9px] text-muted-foreground tabular-nums">
                 <span>{weeks[0]?.week_start}</span>
                 <span>{latest?.week_end ?? latest?.week_start}</span>
               </div>
+              <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                ASIN-level SQP — denominators cover only queries our ASINs
+                appeared in, so this is category-relative, not full category.
+                Brand terms are a <span className="font-medium">defend</span> line
+                (cap the bid, never scale); growth comes from non-brand terms that
+                clear the organic-rank and ACOS gates. Opportunity queries our
+                ASINs merely brushed against are off-category noise, not targets.
+              </p>
             </div>
 
             {d.opportunities?.length > 0 && (
