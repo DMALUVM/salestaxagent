@@ -7,6 +7,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
+import { ShopifyCustomers } from "@/components/shopify-customers";
 import { isConfigured } from "@/lib/supabase";
 import { Shield, DollarSign, AlertTriangle, ChevronRight } from "lucide-react";
 
@@ -312,6 +313,11 @@ export default function ProfitPage() {
           </div>
         </>
       )}
+
+      {/* Customer economics. Shopify only — the card states why Amazon cannot
+          have person-level metrics rather than leaving the absence unexplained.
+          Loads on demand: it aggregates every stored order. */}
+      <ShopifyCustomers />
     </div>
   );
 }

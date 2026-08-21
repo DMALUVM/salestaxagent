@@ -1894,6 +1894,130 @@ def ads_mark_cmd(rec_ids, priority, rec_type, status, dry_run):
     click.echo("  Next week's `ppc-export` will include what actually happened.")
 
 
+@cli.command("shopify-backfill")
+@click.option("--since", default=None, help="YYYY-MM-DD; omit for full history")
+@click.option("--with-email", is_flag=True,
+              help="Also store the raw email (default: hash only)")
+@click.option("--max-pages", default=None, type=int, help="Stop early (testing)")
+def shopify_backfill_cmd(since, with_email, max_pages):
+    """Store every Shopify order so AOV / LTV / repeat / cohorts become possible.
+
+    Idempotent: each page is upserted on order_id as it arrives, so re-running
+    is safe and a interrupted run resumes by simply being run again.
+    """
+    from datetime import date as _date
+
+    from src.shopify_backfill import backfill
+
+    since_d = _date.fromisoformat(since) if since else None
+    click.echo(f"Shopify order backfill — {'since ' + since if since else 'FULL history'}")
+    if with_email:
+        click.echo("  --with-email: raw addresses WILL be stored. No metric here "
+                   "needs them; the hash alone answers repeat/LTV/cohort.")
+    r = backfill(since=since_d, with_email=with_email, max_pages=max_pages,
+                 progress=click.echo)
+    if r.get("error"):
+        raise click.ClickException(r["error"])
+    click.echo(f"\n  {r['written']:,} order(s) upserted over {r['pages']} page(s)")
+    if r.get("first_date"):
+        click.echo(f"  range: {r['first_date']} → {r['last_date']}")
+    if r.get("skipped"):
+        click.echo(f"  skipped (no id or no date): {r['skipped']}")
+    click.echo("  Next: python -m src.main shopify-metrics")
+
+
+@cli.command("shopify-metrics")
+@click.option("--months", default=12, help="Cohort months to show")
+@click.option("--since", default=None,
+              help="YYYY-MM-DD; scope every figure to orders on/after this date")
+def shopify_metrics_cmd(months, since):
+    """AOV, LTV, repeat rate and cohorts. Shopify only — see the Amazon note."""
+    from src import shopify_metrics as M
+    from src.shopify_backfill import load_orders
+
+    try:
+        rows = load_orders()
+    except Exception as e:
+        if "shopify_orders" in str(e):
+            raise click.ClickException(
+                "Table shopify_orders is missing — run "
+                "supabase/migration_shopify_orders.sql, then `shopify-backfill`.")
+        raise
+    if not rows:
+        click.echo("No stored Shopify orders. Run `shopify-backfill` first.")
+        return
+
+    scope = ""
+    if since:
+        rows = [r for r in rows if str(r["order_date"]) >= since]
+        scope = f"  (scoped to orders on/after {since})"
+        if not rows:
+            click.echo(f"No orders on/after {since}.")
+            return
+
+    s = M.summarise(rows)
+    click.echo("Shopify customer metrics" + scope)
+    click.echo(f"  history {s.first_order_date} → {s.last_order_date}   "
+               f"{s.orders:,} orders · {s.customers:,} customers · "
+               f"${s.revenue:,.0f} net revenue")
+    click.echo("")
+    click.echo(f"  \033[1m{s.interpretation()}\033[0m")
+    click.echo("")
+
+    click.echo("  ORDER VALUE                    mean      median")
+    click.echo(f"    net merchandise        {s.aov:>10,.2f}  {s.aov_median:>10,.2f}   "
+               f"(after discounts, before tax/shipping, less refunds)")
+    if s.aov_paid is not None:
+        click.echo(f"    total paid             {s.aov_paid:>10,.2f}  "
+                   f"{s.aov_paid_median:>10,.2f}   "
+                   f"(incl. tax + shipping — matches Shopify Admin AOV)")
+    click.echo("")
+
+    click.echo("  LIFETIME VALUE                 mean      median")
+    click.echo(f"    all customers          {s.ltv_mean:>10,.2f}  {s.ltv_median:>10,.2f}   "
+               f"median = typical customer ever (most buy once)")
+    if s.ltv_mean_repeat is not None:
+        click.echo(f"    repeaters (2+ orders)  {s.ltv_mean_repeat:>10,.2f}  "
+                   f"{s.ltv_median_repeat:>10,.2f}   "
+                   f"the customers worth acquiring more of")
+    click.echo("")
+
+    click.echo("  REPEAT BEHAVIOUR")
+    click.echo(f"    repeat rate            {s.repeat_rate:>10.1%}   "
+               f"({s.repeat_customers:,} of {s.customers:,})")
+    if s.orders_per_repeater is not None:
+        click.echo(f"    orders per repeater    {s.orders_per_repeater:>10.2f}")
+        click.echo(f"    revenue from repeaters {s.revenue_from_repeaters_pct:>9.1f}%   "
+                   f"(${s.revenue_from_repeaters:,.0f})")
+    click.echo(f"    orders per customer    {s.orders_per_customer:>10.2f}")
+    click.echo("")
+
+    click.echo("  ORDER VALUE BY YEAR")
+    click.echo(f"    {'year':<7}{'orders':>8}{'net AOV':>10}{'paid AOV':>10}"
+               f"{'net median':>12}{'revenue':>12}")
+    for y in M.by_year(rows):
+        click.echo(f"    {y['year']:<7}{y['orders']:>8,}{y['aov']:>10,.2f}"
+                   f"{y['aovPaid']:>10,.2f}{y['aovMedian']:>12,.2f}"
+                   f"{y['revenue']:>12,.0f}")
+    click.echo("")
+
+    click.echo("  LTV BY ACQUISITION COHORT (revenue per customer within N days "
+               "of their own first order)")
+    click.echo(f"    {'cohort':<9}{'cust':>6}{'day 90':>10}{'day 365':>10}")
+    for c in M.cohort_ltv_at_days(rows)[-months:]:
+        d90 = f"{c['day90']:>10,.2f}" if c["day90"] is not None else f"{'—':>10}"
+        d365 = f"{c['day365']:>10,.2f}" if c["day365"] is not None else f"{'—':>10}"
+        click.echo(f"    {c['cohort']:<9}{c['customers']:>6}{d90}{d365}")
+    click.echo("    '—' = that window has not fully elapsed for this cohort yet.")
+    click.echo("")
+
+    note = M.amazon_identity_note()
+    click.echo("\n  Amazon: person-level metrics are NOT available.")
+    for w in note["why"]:
+        click.echo(f"    - {w}")
+    click.echo(f"    {note['doNotDo']}")
+
+
 @cli.command("health-ping")
 @click.option("--send", is_flag=True, help="Actually deliver to Telegram")
 @click.option("--dry-run", "dry", is_flag=True, default=False,
@@ -4415,8 +4539,34 @@ def _run_shopify_poll():
                 rows_inserted=inserted,
                 status="success",
             )
+            # Also store the orders THEMSELVES, incrementally.
+            #
+            # fetch_shopify_orders_api aggregates into (state, channel, month)
+            # buckets and discards the orders, which is why no person-level
+            # metric existed. A 7-day re-pull is upserted on order_id, so it is
+            # idempotent and catches late edits (refunds, cancellations) without
+            # re-walking three years of history every two hours.
+            stored = 0
+            try:
+                from datetime import date as _date, timedelta as _td
+
+                from src.shopify_backfill import backfill
+                r2 = backfill(since=_date.today() - _td(days=7),
+                              progress=lambda _m: None)
+                if r2.get("error"):
+                    print(f"[Shopify Poll] order store skipped: {r2['error'][:120]}")
+                else:
+                    stored = r2.get("written", 0)
+                    print(f"[Shopify Poll] {ts} stored {stored} order row(s)")
+            except Exception as e2:
+                # Never fail the tax-relevant aggregate because the analytics
+                # side-table had a problem.
+                print(f"[Shopify Poll] order store failed (aggregates unaffected): "
+                      f"{str(e2)[:120]}")
+
             job_finish(run_id, "success", f"{orders} orders, {inserted} rows",
-                       {"orders": orders, "rows_inserted": inserted})
+                       {"orders": orders, "rows_inserted": inserted,
+                        "orders_stored": stored})
             return  # success — done
         except Exception as e:
             last_err = e
