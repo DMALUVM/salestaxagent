@@ -683,14 +683,35 @@ export default function PPCPage() {
     setNotice({ kind: "success", text: `Downloaded ${a.download} — ${recs.length} actions.` });
   }
 
+  /**
+   * Copy the FULL account brief, not just the action list.
+   *
+   * The old export carried the recommendations, four KPIs and a target ACOS.
+   * Everything else the system knows — placement economics, brand mix, the
+   * organic-rank gate, multi-campaign term overlap, the break-even derivation,
+   * and what has actually been learned so far — never reached the model, so it
+   * reasoned about a fraction of the evidence.
+   */
+  const [exporting, setExporting] = useState(false);
   async function copyGrokPrompt() {
-    const ctx = planContext();
-    const prompt = buildGrokPrompt(buildPlanMarkdown(recs as RecLike[], ctx), ctx);
+    setExporting(true);
     try {
-      await navigator.clipboard.writeText(prompt);
-      setNotice({ kind: "success", text: "Grok prompt copied — paste it into Grok for a 7-day execution checklist." });
+      const r = await fetch(`/api/ppc-export?days=${rangeDays}`).then((x) => x.json());
+      if (!r.available) {
+        setNotice({ kind: "error", text: r.hint ?? r.error ?? "Could not build the brief." });
+        return;
+      }
+      await navigator.clipboard.writeText(r.text);
+      setNotice({
+        kind: "success",
+        text: `Full account brief copied (${Math.round(r.chars / 1000)}k chars) — ` +
+              `economics, placement, brand mix, rank gate, term overlap, actions, ` +
+              `and known gaps. Paste into any AI.`,
+      });
     } catch (e) {
-      setNotice({ kind: "error", text: `Could not copy to clipboard: ${e instanceof Error ? e.message : String(e)}` });
+      setNotice({ kind: "error", text: `Could not copy: ${e instanceof Error ? e.message : String(e)}` });
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -1169,9 +1190,11 @@ export default function PPCPage() {
                   <Download className="mr-1 h-3 w-3" />
                   Export plan (.md)
                 </Button>
-                <Button variant="outline" size="sm" onClick={copyGrokPrompt} disabled={!recs.length}>
+                <Button variant="outline" size="sm" onClick={copyGrokPrompt}
+                        disabled={exporting}
+                        title="Full account brief: economics, placement, brand mix, organic-rank gate, term overlap, every action with its reasoning, and the known gaps">
                   <ClipboardCopy className="mr-1 h-3 w-3" />
-                  Copy Grok prompt
+                  {exporting ? "Building brief…" : "Copy full AI brief"}
                 </Button>
               </div>
             )}

@@ -1808,6 +1808,95 @@ def rank_set_cmd(keyword, rank, asin, as_of, page):
                f"rank {rank} as_of {row['as_of']} ({n} row)")
 
 
+@cli.command("ads-mark")
+@click.option("--id", "rec_ids", multiple=True, help="Recommendation id(s)")
+@click.option("--priority", default=None, help="Mark every open action at this priority (P0/P1/...)")
+@click.option("--type", "rec_type", default=None, help="Mark every open action of this type")
+@click.option("--status", type=click.Choice(["applied", "dismissed"]), default="applied")
+@click.option("--dry-run/--apply", default=True, help="Dry run by default")
+def ads_mark_cmd(rec_ids, priority, rec_type, status, dry_run):
+    """Record which recommendations you actioned — this is what closes the loop.
+
+    Until an action is marked, the outcome snapshot has no before/after to
+    measure, so the system stays rules-based and never learns which advice
+    worked. Marking a batch after applying it in Seller Central is the whole
+    cost of making next week's brief evidence-weighted.
+    """
+    from src.amazon_ads.learning import mark_decision
+    from src.db import fetch_all, get_client
+
+    recs = [r for r in fetch_all("ads_recommendations")
+            if str(r.get("status") or "open") == "open"]
+    if rec_ids:
+        chosen = [r for r in recs if str(r.get("id")) in set(rec_ids)]
+    elif priority:
+        chosen = [r for r in recs
+                  if str(r.get("priority") or "").upper() == priority.upper()]
+    elif rec_type:
+        chosen = [r for r in recs
+                  if str(r.get("type") or "").upper() == rec_type.upper()]
+    else:
+        raise click.UsageError("Pass --id, --priority or --type to select actions.")
+
+    if not chosen:
+        click.echo("No open recommendations match that selection.")
+        return
+
+    click.echo(f"{'DRY RUN — ' if dry_run else ''}marking {len(chosen)} "
+               f"recommendation(s) as {status}:")
+    for r in chosen[:25]:
+        click.echo(f"  [{r.get('priority')}] {r.get('type'):<22} "
+                   f"{str(r.get('entity_name'))[:44]}")
+    if len(chosen) > 25:
+        click.echo(f"  +{len(chosen) - 25} more")
+
+    if dry_run:
+        click.echo("\n  Re-run with --apply to record them.")
+        return
+
+    client = get_client()
+    marked = linked = 0
+    for r in chosen:
+        client.table("ads_recommendations").update(
+            {"status": status}).eq("id", r["id"]).execute()
+        marked += 1
+        if r.get("decision_id") and mark_decision(str(r["decision_id"]), status):
+            linked += 1
+
+    click.echo(f"\n  Marked {marked} recommendation(s); {linked} mirrored onto "
+               f"the decision log.")
+    click.echo("  Outcomes are snapshotted at the 7/14/30-day horizons by the "
+               "nightly `ads-outcomes` job — nothing further to do now.")
+    click.echo("  Next week's `ppc-export` will include what actually happened.")
+
+
+@cli.command("ppc-export")
+@click.option("--days", default=7, show_default=True, help="Closed days to cover")
+@click.option("--out", "out_path", default=None, help="Write to a file")
+@click.option("--brief-only", is_flag=True, help="Omit the AI instruction wrapper")
+def ppc_export_cmd(days, out_path, brief_only):
+    """Full paste-ready PPC brief: economics, placement, brand, rank, actions.
+
+    Everything the system knows, with provenance and explicit gaps, wrapped in
+    instructions that keep the model inside the evidence.
+    """
+    from src.amazon_ads.export_brief import build_brief, build_prompt, gather
+
+    d = gather(days=days)
+    brief = build_brief(d)
+    text = brief if brief_only else build_prompt(brief)
+
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write(text + "\n")
+        click.echo(f"Wrote {len(text):,} chars to {out_path}")
+        click.echo(f"  sections: economics, placement, brand mix, rank gate, "
+                   f"term overlap, {len(d['recs'])} actions, learning ledger, "
+                   f"{len(d['gaps'])} known gap(s)")
+    else:
+        click.echo(text)
+
+
 @cli.command("ppc-playbook")
 @click.option("--range", "rng", type=click.Choice(["7d", "14d", "30d"]), default="7d")
 def ppc_playbook_cmd(rng):
