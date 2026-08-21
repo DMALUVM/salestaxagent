@@ -31,15 +31,16 @@ def base(**kw):
 class TestCompleteness:
     def test_every_major_section_is_present(self):
         b = build_brief(base())
-        for heading in ("Account economics", "Placement economics",
-                        "Organic rank", "Recommended actions",
-                        "What the system has learned"):
+        for heading in ("Data freshness", "Performance grade",
+                        "Account economics", "Placement economics",
+                        "Organic rank gate", "Action plan",
+                        "Learning ledger", "Questions for the PPC manager"):
             assert heading in b, heading
 
     def test_break_even_is_explained_not_just_stated(self):
         b = build_brief(base())
         assert "36.9%" in b and "COGS" in b
-        assert "Above this a sale loses money" in b
+        assert "a sale loses money" in b
 
     def test_ad_product_split_is_itemised(self):
         b = build_brief(base())
@@ -59,7 +60,7 @@ class TestCompleteness:
                             "cannibalization_risk": "low", "organic_rank": 99}}
         b = build_brief(base(recs=[rec]))
         assert "converts under target" in b
-        assert "Rank gate:" in b and "full_increase" in b
+        assert "Organic rank gate" in b and "full_increase" in b
 
     def test_multi_campaign_overlap_is_surfaced(self):
         terms = {"chapstick": {"term": "chapstick", "spend": 251.22, "sales": 685.51,
@@ -67,7 +68,7 @@ class TestCompleteness:
                                "campaigns": {"1": {"name": "A", "spend": 242.19},
                                              "2": {"name": "B", "spend": 9.03}}}}
         b = build_brief(base(terms=terms))
-        assert "multiple campaigns" in b
+        assert "more than one campaign" in b
         assert "bidding against itself" in b
 
 
@@ -75,8 +76,8 @@ class TestHonesty:
     def test_rank_is_described_as_a_band_not_a_position(self):
         b = build_brief(base())
         assert "BAND" in b
-        assert "not a measured SERP position" in b
-        assert "Ads API publishes no organic rank" in b
+        assert "not a measured serp position" in b.lower()
+        assert "publishes no organic rank" in b  # Advertising API, however phrased
 
     def test_sqp_scope_gap_is_stated_with_the_brand_data(self):
         weeks = [{"week_start": "2026-08-09", "branded_purchases": 12,
@@ -84,11 +85,11 @@ class TestHonesty:
                   "non_branded_share_present": 0.0026}]
         b = build_brief(base(brand_weeks=weeks))
         assert "not Brand View parity" in b
-        assert "Trend is reliable" in b
+        assert "trend is reliable" in b.lower()
 
     def test_unallocated_spend_is_explained_not_hidden(self):
         b = build_brief(base())
-        assert "Sponsored Products only" in b
+        assert "sponsored products only" in b.lower()
         assert "expected, not missing data" in b
 
     def test_gaps_are_rendered_as_constraints(self):
@@ -106,8 +107,8 @@ class TestHonesty:
 class TestLearningLedger:
     def test_an_empty_loop_is_reported_as_not_yet_learning(self):
         b = build_brief(base())
-        assert "loop is not closed yet" in b
-        assert "rules-based only" in b
+        assert "loop is not closed" in b
+        assert "RULES-BASED ONLY" in b
 
     def test_it_names_the_command_that_closes_the_loop(self):
         b = build_brief(base())
@@ -116,13 +117,13 @@ class TestLearningLedger:
     def test_measured_outcomes_are_summarised_when_present(self):
         b = build_brief(base(outcomes=[{"action_type": "NEGATE_SEARCH_TERM"}],
                              applied_count=3))
-        assert "Measured outcomes by action type" in b
-        assert "NEGATE_SEARCH_TERM 1" in b
+        assert "Outcomes measured" in b
+        assert "NEGATE_SEARCH_TERM" in b
 
     def test_outcomes_are_labelled_observational(self):
         b = build_brief(base(outcomes=[{"action_type": "X"}]))
         assert "Observational, not causal" in b
-        assert "not a holdout test" in b
+        assert "no holdout" in b
 
 
 class TestPrompt:
@@ -134,11 +135,11 @@ class TestPrompt:
 
     def test_the_standing_constraints_are_restated(self):
         p = build_prompt("BRIEF")
-        assert "Brand terms are defended, never scaled" in p
-        assert "do not tell me to raise them blind" in p
+        assert "defend line, never a growth lever" in p
+        assert "stay held" in p and "do not recommend raising" in p
 
     def test_it_asks_what_data_would_improve_next_week(self):
-        assert "improve this analysis next week" in build_prompt("BRIEF")
+        assert "Data gaps to close" in build_prompt("BRIEF")
 
     def test_the_brief_is_embedded(self):
         assert "BRIEF" in build_prompt("BRIEF")

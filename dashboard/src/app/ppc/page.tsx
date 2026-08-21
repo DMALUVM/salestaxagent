@@ -721,10 +721,17 @@ export default function PPCPage() {
       }
       await navigator.clipboard.writeText(r.text);
       setNotice({
-        kind: "success",
-        text: `Full account brief copied (${Math.round(r.chars / 1000)}k chars) — ` +
-              `economics, placement, brand mix, rank gate, term overlap, actions, ` +
-              `and known gaps. Paste into any AI.`,
+        // A cached brief must never be presented as current — the grade in it
+        // is a graded WINDOW, and pasting a stale one into an AI would have it
+        // advise on last week's account with this week's confidence.
+        kind: r.source === "published" ? "error" : "success",
+        text: r.source === "published"
+          ? `Copied the STORED brief (${Math.round(r.chars / 1000)}k chars, grade ` +
+            `${r.score ?? "—"}/100). ${r.staleness ?? ""} Rebuild it live with ` +
+            `\`ppc-export --publish\` on the agent before acting on it.`
+          : `Live brief copied (${Math.round(r.chars / 1000)}k chars) — graded window, ` +
+            `economics, placement, brand mix, rank gate, term overlap, action plan, ` +
+            `manager questions and known gaps. Paste into any AI.`,
       });
     } catch (e) {
       setNotice({ kind: "error", text: `Could not copy: ${e instanceof Error ? e.message : String(e)}` });

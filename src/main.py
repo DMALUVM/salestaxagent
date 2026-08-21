@@ -1874,27 +1874,45 @@ def ads_mark_cmd(rec_ids, priority, rec_type, status, dry_run):
 @click.option("--days", default=7, show_default=True, help="Closed days to cover")
 @click.option("--out", "out_path", default=None, help="Write to a file")
 @click.option("--brief-only", is_flag=True, help="Omit the AI instruction wrapper")
-def ppc_export_cmd(days, out_path, brief_only):
-    """Full paste-ready PPC brief: economics, placement, brand, rank, actions.
+@click.option("--publish", is_flag=True,
+              help="Also store it so the dashboard button works without Python")
+def ppc_export_cmd(days, out_path, brief_only, publish):
+    """Full paste-ready PPC Command Brief, with a graded prior window.
 
     Everything the system knows, with provenance and explicit gaps, wrapped in
-    instructions that keep the model inside the evidence.
+    hard rules that keep the receiving model inside the evidence.
     """
-    from src.amazon_ads.export_brief import build_brief, build_prompt, gather
+    from src.amazon_ads.export_brief import (build_brief, build_prompt, gather,
+                                             grade_window, publish_brief)
 
     d = gather(days=days)
     brief = build_brief(d)
-    text = brief if brief_only else build_prompt(brief)
+    prompt = build_prompt(brief)
+    text = brief if brief_only else prompt
+    grade = grade_window(d)
 
     if out_path:
         with open(out_path, "w") as f:
             f.write(text + "\n")
         click.echo(f"Wrote {len(text):,} chars to {out_path}")
-        click.echo(f"  sections: economics, placement, brand mix, rank gate, "
-                   f"term overlap, {len(d['recs'])} actions, learning ledger, "
-                   f"{len(d['gaps'])} known gap(s)")
-    else:
+    elif not publish:
         click.echo(text)
+
+    if out_path or publish:
+        click.echo(f"  grade: {grade.score:.0f}/100 ({grade.letter}) "
+                   f"formula {grade.formula_version}"
+                   + (f", dropped {', '.join(grade.dropped)}" if grade.dropped else ""))
+        click.echo(f"  window: {d['start']} → {d['as_of']} vs "
+                   f"{d.get('prior_start')} → {d.get('prior_end')}")
+        click.echo(f"  {len(d['recs'])} recommendation(s), {len(d['gaps'])} known gap(s)")
+
+    if publish:
+        res = publish_brief(d, brief, prompt)
+        if res.get("published"):
+            click.echo(f"  published to ppc_briefs — the dashboard 'Copy full AI "
+                       f"brief' button can now serve it without Python.")
+        else:
+            click.echo(f"  NOT published: {res.get('error')}", err=True)
 
 
 @cli.command("ppc-playbook")
