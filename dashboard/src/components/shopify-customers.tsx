@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,10 +8,14 @@ import { Button } from "@/components/ui/button";
 /**
  * Shopify customer economics — read-only.
  *
- * Loads on demand rather than on mount: the route aggregates every stored order
- * (14k rows), which is not something a page should do just because someone
- * opened it. See src/lib/render-safety.test.ts for why mount-fetches of heavy
- * routes are treated as a hazard here.
+ * Loads on mount.
+ *
+ * It was click-to-load, which was the wrong call: the card sat at the 91% mark
+ * of /profit showing a "Load" button and no numbers, so the panel looked
+ * missing in production even though the deploy, the env and the API were all
+ * healthy. A metric nobody can see without hunting for a button is not shipped.
+ * The route is a pure Supabase aggregate — render-safety only forbids
+ * mount-fetching routes that shell out to Python, which this does not.
  *
  * Every definition is shown beside the numbers. These metrics are easy to quote
  * and easy to misread — a repeat rate means nothing without knowing how a
@@ -61,6 +65,8 @@ export function ShopifyCustomers() {
   const [busy, setBusy] = useState(false);
   const [showDefs, setShowDefs] = useState(false);
 
+  useEffect(() => { load(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
   async function load() {
     setBusy(true);
     try {
@@ -98,29 +104,52 @@ export function ShopifyCustomers() {
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={load} disabled={busy}>
-              {busy ? "Loading…" : d ? "Refresh" : "Load"}
+              {busy ? "Loading…" : "Refresh"}
             </Button>
           </div>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-3">
-        {!d && (
-          <p className="text-xs text-muted-foreground">
-            Aggregates every stored Shopify order. Loaded on demand so opening
-            the page never triggers it. <span className="font-medium">Shopify
-            only</span> — Amazon does not expose a customer identity.
-          </p>
+        {!d && busy && (
+          <div className="space-y-2" aria-busy="true">
+            <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="h-20 animate-pulse rounded-md bg-muted" />
+              <div className="h-20 animate-pulse rounded-md bg-muted" />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Aggregating {"~"}14k Shopify orders…
+            </p>
+          </div>
         )}
 
+        {/* An error must look like an error, and must say what to DO about it.
+            A blank card is indistinguishable from a store with no customers. */}
         {d && !d.available && (
-          <p className="text-xs text-amber-700 dark:text-amber-400">
-            {d.setupHint ?? d.error ?? "Could not load."}
-          </p>
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3">
+            <p className="text-xs font-medium text-destructive">
+              Customer metrics could not load
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {d.setupHint ?? d.error ?? "Unknown error."}
+            </p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={load}
+                    disabled={busy}>
+              Try again
+            </Button>
+          </div>
         )}
 
         {d?.available && d.empty && (
-          <p className="text-xs text-muted-foreground">{d.setupHint}</p>
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+              No Shopify orders stored yet
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {d.setupHint ?? "Run the backfill on the agent."}
+            </p>
+          </div>
         )}
 
         {s && (

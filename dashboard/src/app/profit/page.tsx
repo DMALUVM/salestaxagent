@@ -113,6 +113,13 @@ export default function ProfitPage() {
         </p>
       </div>
 
+      {/* Customer economics sits ABOVE the daily P&L, not below it.
+          At the bottom it started at the 91% mark of the page — present, but
+          only findable by scrolling past everything else, which is why it read
+          as "missing in production". Shopify only; the card states why Amazon
+          cannot have person-level metrics rather than leaving that unexplained. */}
+      <ShopifyCustomers />
+
       {!hasData ? (
         <Card>
           <CardContent className="py-12 text-center">
@@ -314,10 +321,6 @@ export default function ProfitPage() {
         </>
       )}
 
-      {/* Customer economics. Shopify only — the card states why Amazon cannot
-          have person-level metrics rather than leaving the absence unexplained.
-          Loads on demand: it aggregates every stored order. */}
-      <ShopifyCustomers />
     </div>
   );
 }

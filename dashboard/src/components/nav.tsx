@@ -48,7 +48,10 @@ const primaryLinks: NavItem[] = [
 ];
 
 const monitorLinks: NavItem[] = [
-  { href: "/profit", label: "Contribution P&L", icon: DollarSign },
+  // Label names customers explicitly: the LTV/AOV panel lives on this
+  // page, and "Contribution P&L" alone gave an operator hunting for LTV
+  // no reason to click it.
+  { href: "/profit", label: "P&L + Customer LTV", icon: DollarSign },
   { href: "/costs", label: "COGS", icon: DollarSign },
   { href: "/amazon", label: "Amazon Ops", icon: TrendingUp },
   { href: "/ppc", label: "Amazon PPC", icon: TrendingUp },
