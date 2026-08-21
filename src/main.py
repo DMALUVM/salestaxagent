@@ -1870,13 +1870,44 @@ def ads_mark_cmd(rec_ids, priority, rec_type, status, dry_run):
     click.echo("  Next week's `ppc-export` will include what actually happened.")
 
 
+@cli.command("health-ping")
+@click.option("--send", is_flag=True, help="Actually deliver to Telegram")
+@click.option("--dry-run", "dry", is_flag=True, default=False,
+              help="Print the message and the send decision, deliver nothing")
+def health_ping_cmd(send, dry):
+    """Daily agent health check-in — one short message, or silence.
+
+    Debug aid only; the scheduler runs this itself once a day. --dry-run never
+    touches Telegram, so it works with TELEGRAM_* unset.
+    """
+    from src.health import run_health_ping
+
+    if send and dry:
+        raise click.UsageError("--send and --dry-run are mutually exclusive.")
+    r = run_health_ping(send=send)
+
+    click.echo(r["message"])
+    click.echo("")
+    click.echo(f"  severity:   {r['severity']}")
+    click.echo(f"  would send: {r['would_send']} ({r['reason']})")
+    if r["muted"]:
+        click.echo("  MUTED by HEALTH_TELEGRAM=0 — nothing will be delivered.")
+    if send:
+        click.echo(f"  sent:       {r['sent']}"
+                   + (f" — {r['error']}" if r.get("error") else ""))
+    elif not dry:
+        click.echo("  (nothing delivered; pass --send to deliver)")
+
+
 @cli.command("ppc-export")
 @click.option("--days", default=7, show_default=True, help="Closed days to cover")
 @click.option("--out", "out_path", default=None, help="Write to a file")
 @click.option("--brief-only", is_flag=True, help="Omit the AI instruction wrapper")
 @click.option("--publish", is_flag=True,
               help="Also store it so the dashboard button works without Python")
-def ppc_export_cmd(days, out_path, brief_only, publish):
+@click.option("--emit-json", "emit_json", is_flag=True,
+              help="Print a JSON envelope (metadata + markdown) instead of the brief")
+def ppc_export_cmd(days, out_path, brief_only, publish, emit_json):
     """Full paste-ready PPC Command Brief, with a graded prior window.
 
     Everything the system knows, with provenance and explicit gaps, wrapped in
@@ -1890,6 +1921,26 @@ def ppc_export_cmd(days, out_path, brief_only, publish):
     prompt = build_prompt(brief)
     text = brief if brief_only else prompt
     grade = grade_window(d)
+
+    if emit_json:
+        # Structured envelope for the dashboard. The alternative was having the
+        # API route regex the as-of date back out of the rendered markdown to
+        # name the download file — parsing prose that this same command wrote
+        # is a self-inflicted coupling, and it breaks the moment a heading is
+        # reworded.
+        import json as _json
+        click.echo(_json.dumps({
+            "as_of": d["as_of"], "window_start": d["start"], "days": d["days"],
+            "prior_start": d.get("prior_start"), "prior_end": d.get("prior_end"),
+            "score": round(grade.score, 1), "letter": grade.letter,
+            "formula_version": grade.formula_version,
+            "brief_md": brief, "prompt_md": prompt, "chars": len(prompt),
+        }))
+        if publish:
+            res = publish_brief(d, brief, prompt)
+            if not res.get("published"):
+                click.echo(f"NOT published: {res.get('error')}", err=True)
+        return
 
     if out_path:
         with open(out_path, "w") as f:
@@ -3975,6 +4026,42 @@ def run():
         scheduler = BlockingScheduler(timezone=AGENT_TZ)
         click.echo(f"[Scheduler] Timezone: {AGENT_TZ_NAME}")
 
+        # ── Liveness, before anything else ──
+        # The heartbeat is a local file stamped on a short interval. It detects
+        # a WEDGED scheduler: a process that is alive while its job threads have
+        # stopped. It cannot detect a dead process — a dead scheduler also sends
+        # no morning check-in, so silence is that signal, and a missing 08:10
+        # message is itself the alarm.
+        from src.health import CONFIG as _HEALTH, write_heartbeat
+
+        write_heartbeat()                      # stamp immediately on startup
+        scheduler.add_job(
+            write_heartbeat,
+            "interval",
+            minutes=int(_HEALTH["heartbeat"]["interval_minutes"]),
+            id="heartbeat",
+            coalesce=True,
+            max_instances=1,
+        )
+        click.echo(f"[Scheduler] Heartbeat every "
+                   f"{_HEALTH['heartbeat']['interval_minutes']}m "
+                   f"-> {_HEALTH['heartbeat']['path']}")
+
+        _hs = _HEALTH["schedule"]
+        scheduler.add_job(
+            _run_health_ping,
+            "cron",
+            hour=int(_hs["hour"]),
+            minute=int(_hs["minute"]),
+            timezone=_hs["timezone"],
+            id="health_ping",
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
+        click.echo(f"[Scheduler] Health check-in daily at {int(_hs['hour']):02d}:"
+                   f"{int(_hs['minute']):02d} {_hs['timezone']} "
+                   f"(one message/day; HEALTH_TELEGRAM=0 mutes)")
+
         from src.config import settings
 
         if settings.shopify_enabled:
@@ -4603,6 +4690,31 @@ def _run_source_monitoring():
                 pass
     except Exception as e:
         print(f"[Source Monitor] Error: {e}")
+
+
+def _run_health_ping():
+    """Daily agent health check-in.
+
+    Wrapped in job_start/job_finish like every other job, but note the ordering
+    problem it creates: this run appears in job_runs, so the health check is
+    itself part of the history it reports on. That is fine — it never reads its
+    own job name — but it is why the check-in reports ADS job freshness
+    specifically rather than "last job of any kind".
+    """
+    from src.db import job_start, job_finish
+    run_id = job_start("health_ping")
+    try:
+        from src.health import run_health_ping
+        r = run_health_ping(send=True)
+        state = ("healthy" if r["healthy"] else f"faults: {'; '.join(r['faults'])}")
+        if r["sent"]:
+            print(f"[Health] Sent — {state}")
+        else:
+            print(f"[Health] Not sent ({r['reason']}) — {state}")
+        job_finish(run_id, "success", f"{r['severity']}; sent={r['sent']}")
+    except Exception as e:
+        print(f"[Health] FAILED: {e}")
+        job_finish(run_id, "fail", str(e)[:200])
 
 
 def _run_daily_digest():

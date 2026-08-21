@@ -700,14 +700,42 @@ def build_brief(d: dict) -> str:
         A(f"{len(plan)} action(s), P0 first. Rank-blocked raises are deliberately "
           f"absent — they are listed in section 5 instead.")
         A("")
-        for i, a in enumerate(plan, 1):
-            A(f"### {i}. [{a['priority']}] {a['title']}")
+        # Two tables rather than a run of headed blocks. The operator works this
+        # section top-down in Campaign Manager, and a table keeps the campaign id
+        # and ad group on the same line as the step — a heading-per-action pushes
+        # them apart and they get lost on the way to Seller Central.
+        head = ("| # | Type | Term | Campaign | Campaign ID | Ad group | "
+                "Seller Central step | Evidence |")
+        rule = "| ---: | --- | --- | --- | --- | --- | --- | --- |"
+
+        for label, want, blurb in (
+            ("P0 — stop the bleeding (do first)", ("P0",),
+             "Negatives and pauses. Reversible, immediate, and recovered budget "
+             "rather than a trade-off."),
+            ("P1 — raises and placement modifiers", ("P1", "P2", "P3"),
+             "Only raises that cleared BOTH the ACOS rules and the organic-rank "
+             "gate. Anything the gate is holding is in section 5, not here."),
+        ):
+            rows = [a for a in plan if a["priority"] in want]
+            A(f"### {label}")
             A("")
-            A(f"- **Where:** {a['where']}")
-            A(f"- **Do:** {a['do']}")
-            A(f"- **Evidence:** {a['evidence']}")
-            A(f"- **Why:** {a['why']}")
-            A(f"- **Risk if ignored:** {a['risk']}")
+            if not rows:
+                A(NO_DATA)
+                A("")
+                continue
+            A(blurb)
+            A("")
+            A(head)
+            A(rule)
+            for i, a in enumerate(rows, 1):
+                A(f"| {i} | {a['type']} | `{a['term']}` | {a['campaign']} | "
+                  f"`{a['campaign_id']}` | {a['ad_group']} | {a['step']} | "
+                  f"{a['evidence']} |")
+            A("")
+            A("Why / risk, in the same order:")
+            A("")
+            for i, a in enumerate(rows, 1):
+                A(f"{i}. **{a['term']}** — {a['why']} _Risk if ignored: {a['risk']}_")
             A("")
 
     # ── 8. Learning ledger ──
@@ -750,10 +778,16 @@ def build_brief(d: dict) -> str:
     # ── 9. Questions for the manager ──
     A("## 9. Questions for the PPC manager")
     A("")
-    A("These cover what the data cannot answer. They are questions, not claims — "
-      "do not answer them from this brief.")
+    A("Execution questions for the person running the account. Every one cites a "
+      "campaign, term_key or figure from the tables above. They are questions, "
+      "not claims — do not answer them from this brief.")
     A("")
-    for q in _manager_questions(d, grade):
+    questions = _manager_questions(d, grade)
+    if not questions:
+        # Padding to a minimum count would mean emitting exactly the ungrounded,
+        # generic questions the policy exists to prevent.
+        A(NO_DATA)
+    for q in questions:
         A(f"- {q}")
     A("")
 
@@ -761,10 +795,13 @@ def build_brief(d: dict) -> str:
     A("## 10. Known gaps")
     A("")
     if d.get("gaps"):
-        A("State these as limits rather than reasoning past them:")
+        A("State these as limits rather than reasoning past them. Ranked by how "
+          "much each one would change the advice above if closed.")
         A("")
-        for g in d["gaps"]:
-            A(f"- {g}")
+        A("| # | Gap | What it blocks |")
+        A("| ---: | --- | --- |")
+        for i, g in enumerate(_ranked_gaps(d), 1):
+            A(f"| {i} | {_cell(g['gap'])} | {_cell(g['blocks'])} |")
     else:
         A("_None recorded for this window._")
     A("")
@@ -801,7 +838,15 @@ def _action_plan(d: dict, limit: int) -> list[dict]:
 
         cid = e.get("campaign_id") or r.get("campaign_id") or "—"
         cname = r.get("campaign_name") or e.get("campaign_name") or "unknown campaign"
-        ag = e.get("ad_group_name") or e.get("ad_group_id")
+        # The ad group lives in evidence["ad_groups"] (names) with the id on the
+        # row itself — neither is `ad_group_name`, which is what an earlier
+        # version looked for, so every row rendered "—" while the step text
+        # right beside it named the group correctly.
+        groups = e.get("ad_groups")
+        if isinstance(groups, str):
+            groups = [groups]
+        ag = ", ".join(str(g) for g in groups) if groups else (
+            r.get("ad_group_id") or e.get("ad_group_id"))
         where = f"Campaign **{cname}** (`{cid}`)"
         if ag:
             where += f" › ad group {ag}"
@@ -825,13 +870,82 @@ def _action_plan(d: dict, limit: int) -> list[dict]:
         out.append({
             "priority": str(r.get("priority") or "P3"),
             "title": f"{typ.replace('_', ' ').title()} — {r.get('entity_name')}",
+            # Table fields. Pipes are escaped and newlines flattened: a campaign
+            # name containing "|" would otherwise split the row into extra
+            # columns and silently corrupt every cell after it.
+            "type": _cell(typ.replace("_", " ").title()),
+            "term": _cell(r.get("entity_name")),
+            "campaign": _cell(cname),
+            "campaign_id": _cell(cid),
+            "ad_group": _cell(ag or "—"),
+            "step": _cell(_step_text(r.get("suggested_action"), cname)),
             "where": where,
             "do": r.get("suggested_action") or "—",
-            "evidence": ", ".join(ev_bits) if ev_bits else "no evidence snapshot stored",
+            "evidence": _cell(", ".join(ev_bits) if ev_bits
+                              else "no evidence snapshot stored"),
             "why": e.get("why") or "—",
             "risk": risk,
         })
     return out
+
+
+def _step_text(action: str | None, campaign: str) -> str:
+    """The instruction alone, without the columns beside it.
+
+    The stored suggested_action is a full sentence that repeats the campaign
+    name and restates the spend. In a table that has its own Campaign and
+    Evidence columns, both are noise that push the actual verb off-screen — so
+    the campaign name is stripped and the trailing evidence sentence dropped.
+    The instruction itself is never reworded.
+    """
+    if not action:
+        return "—"
+    s = str(action).strip()
+    if campaign and campaign in s:
+        s = s.replace(f'campaign "{campaign}"', "this campaign")
+        s = s.replace(f'in "{campaign}"', "here")
+        s = s.replace(campaign, "this campaign")
+    # Drop the "It has spent $X with N orders..." restatement of the evidence
+    # column, keeping any sentence that carries an instruction.
+    keep = [p for p in s.split(". ")
+            if not p.strip().lower().startswith(("it has spent", "confirmed over"))]
+    return ". ".join(keep).strip() or s
+
+
+def _ranked_gaps(d: dict) -> list[dict]:
+    """Gaps ordered by how much closing one would change the advice.
+
+    The ordering is the opinion. An unclosed learning loop outranks a thin SQP
+    history because it makes EVERY recommendation rules-only rather than merely
+    reducing confidence in one section.
+    """
+    def rank(g: str) -> int:
+        low = g.lower()
+        if "outcome" in low or "applied" in low:
+            return 0        # nothing here is evidence-weighted until this closes
+        if "rank" in low:
+            return 1        # gates every bid increase
+        if "sb" in low or "sd" in low:
+            return 2        # understates account spend
+        if "sqp" in low:
+            return 3        # weakens trend, not the actions
+        return 4
+
+    blocks = {
+        0: "Every recommendation stays rules-based; no before/after exists.",
+        1: "All bid increases gate as 'rank unknown' and are held.",
+        2: "Account spend reads low against Seller Central totals.",
+        3: "Brand-mix trend is not yet reliable.",
+        4: "Reduces confidence in the section it belongs to.",
+    }
+    ordered = sorted(d.get("gaps") or [], key=rank)
+    return [{"gap": g, "blocks": blocks[rank(g)]} for g in ordered]
+
+
+def _cell(v) -> str:
+    """Make a value safe inside a markdown table cell."""
+    s = "—" if v is None else str(v)
+    return s.replace("|", "\\|").replace("\n", " ").strip() or "—"
 
 
 def _risk_for(typ: str, e: dict) -> str:
@@ -864,46 +978,154 @@ def _risk_for(typ: str, e: dict) -> str:
 
 
 def _manager_questions(d: dict, grade) -> list[str]:
-    """Questions a human manager can answer and the data cannot.
+    """Questions for the PPC MANAGER — execution, grounded in this brief.
 
-    Deliberately non-numeric: every one asks for context, constraint or intent.
-    Asking the manager to confirm a figure already in the brief would invite the
-    model to treat the answer as new evidence.
+    Every question names a campaign, a term_key or a figure that appears in a
+    table above it. That constraint is the whole design: an ungrounded question
+    ("what is our budget ceiling?") invites the receiving model to treat the
+    answer as new evidence and reason past the data it was given. It is also
+    the wrong question for this person — a PPC manager executes structure,
+    negation, modifiers and bid holds; they do not set budget, pricing,
+    inventory or creative.
+
+    Config carries the banned-keyword list, and a test asserts the generated
+    questions contain none of them.
     """
-    qs: list[str] = [
-        "What is the monthly ad budget ceiling, and is it a hard cap or a target? "
-        "The plan below cuts waste before funding growth, which frees budget "
-        "rather than requesting it.",
-        "Which SKUs are supply-constrained in the next 60 days? Scaling spend on "
-        "a SKU that will stock out wastes the spend and damages rank.",
-        "Are there brand guidelines that forbid bidding on specific competitor or "
-        "category terms, regardless of what the economics say?",
-        "What seasonality should we expect in the next 8 weeks, and has any "
-        "promotion, coupon or Lightning Deal been scheduled that would distort "
-        "attributed sales?",
-        "Is there new creative or A+ content planned? Placement ACOS is partly a "
-        "conversion-rate problem, and no bid change fixes a listing that does not "
-        "convert.",
-        "What price changes are planned? Break-even ACOS is derived from current "
-        "COGS and fees, so a price move re-bases every target in this brief.",
-    ]
-    if (d.get("non_brand_rank_eligible") or {}).get("terms", 0) == 0:
-        qs.append("We have no non-brand terms with a usable organic rank band. Is "
-                  "there a rank-tracking source you trust that we could feed in, "
-                  "given the Ads API does not publish organic position?")
+    from src.amazon_ads.brief_score import CONFIG
+
+    policy = CONFIG["question_policy"]
+    terms = d.get("terms") or {}
+    qs: list[str] = []
+
+    # ── structure: campaigns that keep spending with nothing to show ──
+    waste_terms = sorted((v for v in terms.values() if v["orders"] == 0 and v["spend"] > 0),
+                         key=lambda v: -v["spend"])
+    camp_waste: dict[str, dict] = {}
+    for v in waste_terms:
+        for cid, c in v["campaigns"].items():
+            e = camp_waste.setdefault(cid, {"name": c["name"], "spend": 0.0, "terms": 0})
+            e["spend"] += c["spend"]
+            e["terms"] += 1
+    worst = sorted(camp_waste.values(), key=lambda c: -c["spend"])[:2]
+    for c in worst:
+        if c["spend"] <= 0:
+            continue
+        qs.append(
+            f"Campaign **{c['name']}** carries {_money(c['spend'])} across "
+            f"{c['terms']} zero-order term(s) in this {d['days']}-day window. What is "
+            f"it structurally for, and what would have to be true for it to keep "
+            f"running next week?")
+
+    # ── structure: the same query bidding against itself ──
+    multi = sorted(((t, v) for t, v in terms.items() if len(v["campaigns"]) > 1),
+                   key=lambda kv: -kv[1]["spend"])[:2]
+    for t, v in multi:
+        # Ellipsis, not a bare cut: a campaign name silently truncated mid-word
+        # reads as the real name, and the operator searches Campaign Manager
+        # for something that does not exist.
+        ranked = sorted(v["campaigns"].values(), key=lambda c: -c["spend"])
+        shown = [c["name"] if len(c["name"]) <= 40 else c["name"][:39] + "…"
+                 for c in ranked[:3]]
+        names = ", ".join(shown) + (f", +{len(ranked) - 3} more"
+                                    if len(ranked) > 3 else "")
+        qs.append(
+            f"term_key `{t}` runs in {len(v['campaigns'])} campaigns ({names}) for "
+            f"{_money(v['spend'])} combined. Which one should own it, and what is "
+            f"blocking consolidation?")
+
+    # ── waste SLA ──
+    if waste_terms:
+        top = waste_terms[0]
+        total_waste = sum(v["spend"] for v in waste_terms)
+        qs.append(
+            f"`{top['term']}` spent {_money(top['spend'])} on {top['clicks']} clicks "
+            f"with zero orders, and zero-order terms total {_money(total_waste)} this "
+            f"window. What is our SLA from a term showing zero orders to a negative "
+            f"being live, and what is it today in practice?")
+        qs.append(
+            f"Who reviews the search-term report between the daily 05:30 sync and the "
+            f"next negation? {len(waste_terms)} terms totalling {_money(total_waste)} "
+            f"show zero orders this window — how many were already on last week's "
+            f"list?")
+
+    # ── placement modifiers ──
+    pl = d.get("placements") or {}
+    spend, sales = d["spend"], d["ad_sales"]
+    acct_acos = (spend / sales * 100) if sales else None
+    for name, v in list(pl.items())[:4]:
+        s, sl = float(v.get("spend") or 0), float(v.get("sales") or 0)
+        if s < 25:
+            continue
+        a = (s / sl * 100) if sl else None
+        if a is not None and acct_acos and a > acct_acos * 1.25:
+            qs.append(
+                f"**{name}** is running {a:.0f}% ACOS on {_money(s)} against an account "
+                f"ACOS of {acct_acos:.0f}%. What is the current modifier on the "
+                f"campaigns driving that spend, and why has it not been reduced?")
+            break
+
+    # ── rank-hold process ──
+    blocked = [r for r in d["recs"]
+               if _ev(r).get("needs_rank_check")
+               or _ev(r).get("rank_policy_applied") in ("capped", "hold")]
+    if blocked:
+        ex = blocked[0]
+        e = _ev(ex)
+        qs.append(
+            f"{len(blocked)} bid raise(s) are held by the rank gate — e.g. "
+            f"`{ex.get('entity_name')}` planned at "
+            f"{_money(e.get('proposed_bid_before_rank_gate'))} and held at "
+            f"{_money(e.get('suggested_bid'))}. Does your process hold rank-unknown "
+            f"high bids the same way, or are these being raised manually anyway?")
+
+    # ── marking discipline: the learning loop ──
     if not d.get("outcomes"):
-        qs.append("Who applies the changes in Seller Central, and can they run "
-                  "`ads-mark` afterwards? Without that, the system can never "
-                  "measure which recommendations actually worked.")
-    if grade.dropped:
-        qs.append(f"The grade dropped {', '.join(grade.dropped)} for lack of data. "
-                  f"Which of these matters most to you? That decides what we "
-                  f"instrument first.")
-    if any("SB" in g or "SD" in g for g in d.get("gaps", [])):
-        qs.append("Sponsored Brands / Display reporting is incomplete here. Do you "
-                  "have console-level totals for those products we can reconcile "
-                  "against?")
-    return qs
+        qs.append(
+            f"{len(d['recs'])} recommendations are on file and "
+            f"{d['applied_count']} are marked applied, so no before/after exists. Who "
+            f"runs `ads-mark` on the same day they change Seller Central, and what "
+            f"would make that reliable?")
+    else:
+        qs.append(
+            f"{len(d.get('outcomes') or [])} outcomes are recorded against "
+            f"{len(d['recs'])} recommendations. Are changes being marked the same day "
+            f"they are made, or batched later — the gap decides whether the "
+            f"before/after windows mean anything?")
+
+    # ── SP vs SB/SD review discipline ──
+    by_type = d.get("by_type") or {}
+    non_sp = {k: v for k, v in by_type.items() if k != "SP" and v.get("spend")}
+    if non_sp:
+        bits = ", ".join(
+            f"{k} {_money(v['spend'])} at "
+            f"{(v['spend'] / v['sales'] * 100) if v.get('sales') else 0:.0f}% ACOS"
+            for k, v in sorted(non_sp.items()))
+        qs.append(
+            f"{bits} this window, and Amazon publishes no search-term or placement "
+            f"breakdown for those products. What is your review cadence for SB/SD, "
+            f"and what do you look at instead?")
+    else:
+        qs.append(
+            "No SB or SD rows appear in this window at all. Are those campaigns "
+            "paused, or is the reporting not reaching us?")
+
+    # ── P0 backlog ──
+    p0 = [r for r in d["recs"]
+          if str(r.get("priority")) == "P0" and str(r.get("status") or "open") == "open"]
+    if p0:
+        qs.append(
+            f"{len(p0)} P0 actions are open. How many do you expect to apply this "
+            f"week, and which would you push back on?")
+
+    if d.get("rank_coverage_pct") is not None and d["rank_coverage_pct"] < 60:
+        qs.append(
+            f"Only {d['rank_coverage_pct']:.0f}% of non-brand terms carry an organic "
+            f"rank band, so the gate defaults to holding high bids. Is that hold "
+            f"costing us volume you would rather take?")
+
+    lo, hi = policy["min_questions"], policy["max_questions"]
+    return qs[:hi] if len(qs) >= lo else qs
+
 
 
 def build_prompt(brief: str) -> str:
@@ -955,11 +1177,19 @@ def publish_brief(d: dict, brief: str, prompt: str) -> dict:
     """
     from src.db import get_client
 
+    from src.amazon_ads.brief_score import CONFIG
+
     grade = grade_window(d)
+    # The section contract version rides along inside the grade blob rather than
+    # in its own column: the table already exists in production, and an additive
+    # jsonb key needs no DDL. Without it a cached brief can announce stale DATA
+    # while silently serving a layout that predates the current contract.
+    gd = grade.as_dict()
+    gd["format_version"] = CONFIG["format"]["version"]
     row = {
         "as_of": d["as_of"], "window_start": d["start"], "days": d["days"],
         "score": round(grade.score, 1), "letter": grade.letter,
-        "formula_version": grade.formula_version, "grade": grade.as_dict(),
+        "formula_version": grade.formula_version, "grade": gd,
         "brief_md": brief, "prompt_md": prompt, "chars": len(prompt),
     }
     try:

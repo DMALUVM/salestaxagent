@@ -517,6 +517,7 @@ export default function PPCPage() {
   // N+1, which is React error #310. Hooks first, derive second, return third —
   // no exceptions, however far the state is from the code that uses it.
   const [exporting, setExporting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -711,6 +712,56 @@ export default function PPCPage() {
    * and what has actually been learned so far — never reached the model, so it
    * reasoned about a fraction of the evidence.
    */
+  /**
+   * Download the brief as a file.
+   *
+   * Fetched rather than sent through a plain <a href>: a failure has to be
+   * readable. The route answers 503 with JSON when it can neither build live
+   * nor find a stored copy, and a bare link would have saved that JSON to disk
+   * as a .md the operator only discovers is broken after opening it.
+   */
+  async function downloadBrief() {
+    setDownloading(true);
+    try {
+      const res = await fetch(`/api/ppc-export?days=${rangeDays}&download=1`);
+      const ct = res.headers.get("content-type") ?? "";
+      if (!res.ok || !ct.includes("markdown")) {
+        const d = ct.includes("json") ? await res.json() : null;
+        setNotice({
+          kind: "error",
+          text: d?.hint ?? d?.error ?? `Could not build the brief (${res.status}).`,
+        });
+        return;
+      }
+      const source = res.headers.get("x-brief-source") ?? "live";
+      const match = /filename="([^"]+)"/.exec(
+        res.headers.get("content-disposition") ?? "");
+      const name = match?.[1] ?? "ppc-command-brief.md";
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setNotice({
+        kind: source === "published" ? "error" : "success",
+        text: source === "published"
+          ? `Downloaded ${name} — this is the STORED copy, not a live build. ` +
+            `Rebuild with \`ppc-export --publish\` on the agent before acting on it.`
+          : `Downloaded ${name} — live build.`,
+      });
+    } catch (e) {
+      setNotice({
+        kind: "error",
+        text: `Download failed: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   async function copyGrokPrompt() {
     setExporting(true);
     try {
@@ -1220,6 +1271,12 @@ export default function PPCPage() {
                         title="Full account brief: economics, placement, brand mix, organic-rank gate, term overlap, every action with its reasoning, and the known gaps">
                   <ClipboardCopy className="mr-1 h-3 w-3" />
                   {exporting ? "Building brief…" : "Copy full AI brief"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={downloadBrief}
+                        disabled={downloading}
+                        title="Download the same brief as a markdown file">
+                  <Download className="mr-1 h-3 w-3" />
+                  {downloading ? "Building…" : "Download brief"}
                 </Button>
               </div>
             )}

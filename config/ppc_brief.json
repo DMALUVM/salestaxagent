@@ -1,14 +1,13 @@
 {
   "_doc": "PPC Command Brief — grading formula and receiving-model constraints. Single source of truth for the weights; src/amazon_ads/brief_score.py is the only implementation. Changing a weight here changes the CLI, the dashboard and the tests together. Bump formula_version whenever a weight or breakpoint changes so week-over-week scores are never silently compared across formulas.",
   "formula_version": "1.0.0",
-
   "grade": {
     "components": {
       "acos_vs_breakeven": {
         "weight": 25,
         "label": "ACOS vs break-even",
-        "full_credit_at_ratio": 0.70,
-        "zero_credit_at_ratio": 1.50,
+        "full_credit_at_ratio": 0.7,
+        "zero_credit_at_ratio": 1.5,
         "_doc": "acos / break_even_acos. At or under 0.70 of break-even is full marks; at 1.5x break-even every incremental sale loses money at scale."
       },
       "tacos_vs_band": {
@@ -46,17 +45,16 @@
       "non_brand_efficiency": {
         "weight": 15,
         "label": "Non-brand efficiency where rank allows",
-        "full_credit_at_ratio": 0.70,
-        "zero_credit_at_ratio": 1.50,
+        "full_credit_at_ratio": 0.7,
+        "zero_credit_at_ratio": 1.5,
         "eligible_rank_min": 8,
         "_doc": "ACOS vs break-even restricted to non-brand terms whose organic rank band is eligible_rank_min or worse — i.e. where paid traffic is additive rather than cannibalising our own organic placement. Terms with unknown rank are excluded, not assumed."
       }
     },
-
     "completeness_modifier": {
       "_doc": "A small multiplier, never a component. Thin data should temper confidence in the score without inventing a performance result. Applied last: final = weighted x multiplier.",
-      "min_multiplier": 0.90,
-      "max_multiplier": 1.00,
+      "min_multiplier": 0.9,
+      "max_multiplier": 1.0,
       "signals": {
         "rank_coverage": {
           "weight": 40,
@@ -77,29 +75,120 @@
         }
       }
     },
-
     "letters": [
-      { "min": 90, "letter": "A", "reading": "Efficient and defended. Spend into what is working." },
-      { "min": 80, "letter": "B", "reading": "Healthy with a specific leak. Fix the P0 list and re-grade." },
-      { "min": 70, "letter": "C", "reading": "Break-even-ish. Waste is funding itself; cut before scaling." },
-      { "min": 60, "letter": "D", "reading": "Losing money on a meaningful share of spend. Stop the bleeding first." },
-      { "min": 0, "letter": "F", "reading": "Spend is not paying for itself. Cut placements and negatives before any raise." }
+      {
+        "min": 90,
+        "letter": "A",
+        "reading": "Efficient and defended. Spend into what is working."
+      },
+      {
+        "min": 80,
+        "letter": "B",
+        "reading": "Healthy with a specific leak. Fix the P0 list and re-grade."
+      },
+      {
+        "min": 70,
+        "letter": "C",
+        "reading": "Break-even-ish. Waste is funding itself; cut before scaling."
+      },
+      {
+        "min": 60,
+        "letter": "D",
+        "reading": "Losing money on a meaningful share of spend. Stop the bleeding first."
+      },
+      {
+        "min": 0,
+        "letter": "F",
+        "reading": "Spend is not paying for itself. Cut placements and negatives before any raise."
+      }
     ]
   },
-
   "action_plan": {
     "max_actions": 15,
     "_doc": "P0 first. Rank-blocked raises are never emitted as 'raise bid' — they appear in the held list instead."
   },
-
+  "question_policy": {
+    "_doc": "Section 9 asks a PPC MANAGER about execution, not a founder about strategy. Every question must cite a campaign name, term_key or metric that appears elsewhere in this brief — a question the brief cannot ground is a question the model will answer by inventing context.",
+    "min_questions": 8,
+    "max_questions": 12,
+    "allowed_themes": [
+      "campaign_structure",
+      "waste_sla",
+      "placement_modifiers",
+      "rank_hold_process",
+      "marking_discipline",
+      "ad_product_review"
+    ],
+    "banned_keywords": [
+      "budget ceiling",
+      "monthly budget",
+      "budget cap",
+      "stock",
+      "stockout",
+      "stock out",
+      "supply",
+      "inventory",
+      "seasonal",
+      "seasonality",
+      "lightning deal",
+      "coupon",
+      "promotion",
+      "a+ content",
+      "a plus content",
+      "creative roadmap",
+      "new creative",
+      "list price",
+      "price change",
+      "pricing",
+      "brand guideline",
+      "legal",
+      "trademark"
+    ],
+    "_doc_banned": "These are real questions, but not for a PPC manager and not answerable from this brief. Asking them invites the receiving model to treat the answer as new evidence and reason past the data."
+  },
+  "format": {
+    "version": "2.0.0",
+    "_doc_version": "Bumped whenever the SECTION CONTRACT changes (tables, section order, question policy) — separate from formula_version, which tracks the grade arithmetic. A stored brief carries the version it was rendered with, so a cached copy that predates the current contract can be identified rather than silently served as current.",
+    "_doc": "Tables are the contract, not a preference. A model handed prose re-summarises it; a model handed a table quotes the row. Every list of comparable things is a markdown table.",
+    "tables_required": [
+      "grade_components",
+      "economics",
+      "by_product",
+      "placement",
+      "waste",
+      "converters",
+      "multi_campaign",
+      "blocked_raises",
+      "brand_weeks",
+      "actions_p0",
+      "actions_p1",
+      "gaps"
+    ],
+    "action_columns": [
+      "#",
+      "type",
+      "term",
+      "campaign",
+      "campaign_id",
+      "ad group",
+      "Seller Central step",
+      "evidence"
+    ],
+    "max_waste_rows": 15,
+    "max_converter_rows": 15,
+    "max_multi_campaign_rows": 12,
+    "max_blocked_rows": 25
+  },
   "receiving_model_rules": [
     "Use ONLY this brief. Every number you cite must appear in it verbatim. If something is not here, say \"insufficient evidence\" — do not estimate, benchmark, or reason from general Amazon knowledge.",
     "Prefer the P0/P1 actions already listed. Do not invent campaigns, ad groups, search terms, or bid values that do not appear in this brief.",
     "Brand terms are a defend line, never a growth lever. Bids that this brief marks rank-capped, rank-unknown or held stay held — do not recommend raising them.",
     "Distinguish observation from proof. Before/after windows around a change are observational; say so, and never describe a correlation as a cause.",
-    "If a section says \"No data\", that is a finding to report, not a gap to fill with an assumption."
+    "If a section says \"No data\", that is a finding to report, not a gap to fill with an assumption.",
+    "Use markdown TABLES for anything comparable — grade components, economics, placement, waste, converters, multi-campaign terms, actions and gaps. Prose summaries of tabular data lose the row identity the operator needs to act.",
+    "Section B must be ordered checklist TABLES: P0 negatives first, then P1 raises and placement modifiers. Carry the campaign name, campaign id and ad group through to your output — an instruction without them cannot be executed in Seller Central.",
+    "Section D asks the PPC MANAGER about execution only: campaign structure, negation SLA, placement modifiers, rank-hold process, who marks applied actions, and SP vs SB/SD review. Do NOT ask about budget ceilings, inventory, seasonality, deals, creative, pricing or legal — none are in this brief and none are that person's remit."
   ],
-
   "required_output_sections": [
     "A. Grade interpretation",
     "B. Do this week — ordered checklist",

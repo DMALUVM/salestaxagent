@@ -252,11 +252,23 @@ def test_every_action_carries_a_campaign_and_a_risk():
 
 
 def test_manager_questions_are_questions_not_claims():
-    d = _empty_gathered()
-    qs = export_brief._manager_questions(d, compute_grade(**GOLDEN))
+    qs = export_brief._manager_questions(_populated(), compute_grade(**GOLDEN))
     assert 5 <= len(qs) <= 12, f"expected 5-12 questions, got {len(qs)}"
     for q in qs:
         assert "?" in q, f"not a question: {q}"
+
+
+def test_an_empty_brief_asks_few_questions_rather_than_generic_ones():
+    """With no data there is nothing to ask a manager ABOUT.
+
+    Padding to a minimum count would mean emitting exactly the ungrounded,
+    generic questions the policy exists to prevent.
+    """
+    qs = export_brief._manager_questions(_empty_gathered(), compute_grade(**GOLDEN))
+    assert len(qs) < CONFIG["question_policy"]["min_questions"]
+    blob = " ".join(qs).lower()
+    for banned in CONFIG["question_policy"]["banned_keywords"]:
+        assert banned not in blob
 
 
 def test_prompt_wrapper_carries_every_hard_rule_and_output_section():
@@ -310,3 +322,203 @@ def test_every_stored_action_type_has_a_specific_risk():
                 "NEGATE_SEARCH_TERM", "WASTED_SPEND_ROLLUP", "ADJUST_TOS_MODIFIER"):
         assert export_brief._risk_for(typ, {}) != generic, (
             f"{typ} has no specific risk line")
+
+
+# ── output format contract ───────────────────────────────────────────────
+
+def _populated() -> dict:
+    """A window with enough of everything to exercise every table."""
+    d = _empty_gathered()
+    d["by_type"] = {"SP": {"spend": 2800.0, "sales": 6830.0, "clicks": 1800},
+                    "SB": {"spend": 203.85, "sales": 662.84, "clicks": 100}}
+    d["spend"], d["ad_sales"], d["amazon_sales"] = 3010.34, 7520.84, 21965.40
+    d["prior"] = {"spend": 2802.38, "sales": 7515.67, "orders": 513, "clicks": 1963}
+    d["placements"] = {"Detail Page": {"spend": 426.68, "sales": 673.54, "clicks": 200}}
+    d["placement_spend"], d["unallocated"] = 426.68, 2583.66
+    d["terms"] = {
+        "waste term": {"term": "waste term", "spend": 28.96, "sales": 0.0,
+                       "orders": 0, "clicks": 20, "branded": False, "rank": None,
+                       "campaigns": {"1": {"name": "GG - Asin Offense", "spend": 28.96}}},
+        "good term": {"term": "good term", "spend": 213.20, "sales": 866.68,
+                      "orders": 59, "clicks": 150, "branded": False, "rank": 99,
+                      "campaigns": {"2": {"name": "SP KW Exact", "spend": 213.20}}},
+        "split term": {"term": "split term", "spend": 251.22, "sales": 300.0,
+                       "orders": 5, "clicks": 90, "branded": False, "rank": 5,
+                       "campaigns": {"3": {"name": "A" * 60, "spend": 200.0},
+                                     "4": {"name": "B camp", "spend": 51.22}}},
+    }
+    d["recs"] = [
+        {"priority": "P0", "type": "NEGATE_SEARCH_TERM", "entity_name": "waste term",
+         "status": "open", "impact_estimate": 28.96, "campaign_name": "GG - Asin Offense",
+         "ad_group_id": 999, "suggested_action": "In Campaign Manager, open campaign "
+         '"GG - Asin Offense" → Negative keywords. It has spent $28.96 with 0 orders.',
+         "evidence": {"campaign_id": "1", "spend": 28.96, "orders": 0,
+                      "ad_groups": ["Asin Offense"], "why": "zero orders"}},
+        {"priority": "P1", "type": "INCREASE_BID", "entity_name": "good term",
+         "status": "open", "impact_estimate": 40.0, "campaign_name": "SP KW Exact",
+         "suggested_action": "Raise the bid to $1.59.",
+         "evidence": {"campaign_id": "2", "spend": 213.2, "sales": 866.68,
+                      "orders": 59, "acos": 24.6, "organic_rank": 99,
+                      "rank_policy_applied": "full_increase", "ad_groups": ["Exact"],
+                      "why": "59 orders at 25% ACOS"}},
+        {"priority": "P2", "type": "INCREASE_BID", "entity_name": "held term",
+         "status": "open", "impact_estimate": 10.0, "campaign_name": "C",
+         "suggested_action": "Raise bid",
+         "evidence": {"campaign_id": "5", "needs_rank_check": True,
+                      "proposed_bid_before_rank_gate": 2.55, "suggested_bid": 2.22}},
+    ]
+    d["gaps"] = ["No SD rows for this window — Seller Central totals include it.",
+                 "No recorded outcomes yet. Until applied actions are marked…",
+                 "Only 2 week(s) of SQP stored — brand-mix trend is not reliable."]
+    d["rank_coverage_pct"] = 22.0
+    return d
+
+
+def _tables_in(section: str) -> int:
+    return sum(1 for ln in section.splitlines() if ln.strip().startswith("| ---"))
+
+
+def _section(brief: str, heading: str) -> str:
+    start = brief.index(heading)
+    nxt = brief.find("\n## ", start + 1)
+    return brief[start: nxt if nxt > -1 else len(brief)]
+
+
+def test_body_sections_appear_in_the_fixed_order():
+    brief = export_brief.build_brief(_populated())
+    order = ["## 0. Data freshness", "## 1. Performance grade",
+             "## 2. Account economics", "## 3. Placement economics",
+             "## 4. Search terms", "## 5. Organic rank gate",
+             "## 6. Branded vs non-branded", "## 7. Action plan",
+             "## 8. Learning ledger", "## 9. Questions for the PPC manager",
+             "## 10. Known gaps"]
+    positions = [brief.index(h) for h in order]
+    assert positions == sorted(positions), "sections are out of contract order"
+
+
+@pytest.mark.parametrize("heading", [
+    "## 0. Data freshness", "## 1. Performance grade", "## 2. Account economics",
+    "## 3. Placement economics", "## 4. Search terms", "## 5. Organic rank gate",
+    "## 7. Action plan", "## 10. Known gaps",
+])
+def test_each_section_renders_at_least_one_markdown_table(heading):
+    brief = export_brief.build_brief(_populated())
+    assert _tables_in(_section(brief, heading)) >= 1, f"{heading} has no table"
+
+
+def test_action_plan_is_two_tables_with_the_agreed_columns():
+    brief = export_brief.build_brief(_populated())
+    plan = _section(brief, "## 7. Action plan")
+    assert "### P0 — stop the bleeding" in plan
+    assert "### P1 — raises and placement modifiers" in plan
+    for col in ("| # |", "Type", "Term", "Campaign", "Campaign ID", "Ad group",
+                "Seller Central step", "Evidence"):
+        assert col in plan, f"action table missing column {col}"
+    assert _tables_in(plan) == 2, "expected exactly a P0 and a P1 table"
+
+
+def test_action_rows_carry_the_campaign_id_and_ad_group():
+    plan = export_brief._action_plan(_populated(), 15)
+    p0 = next(a for a in plan if a["priority"] == "P0")
+    assert p0["campaign_id"] == "1"
+    assert p0["ad_group"] == "Asin Offense", "ad group lives in evidence['ad_groups']"
+    assert "Negative keywords" in p0["step"]
+
+
+def test_table_cells_escape_pipes_so_a_row_cannot_be_corrupted():
+    """A campaign name containing '|' would otherwise add phantom columns."""
+    d = _populated()
+    d["recs"][0]["campaign_name"] = "SP | TBL | Exact"
+    row = export_brief._action_plan(d, 15)[0]
+    assert "\\|" in row["campaign"]
+    assert row["campaign"].count("|") == row["campaign"].count("\\|")
+
+
+def test_step_text_does_not_repeat_the_campaign_or_the_evidence():
+    plan = export_brief._action_plan(_populated(), 15)
+    step = next(a for a in plan if a["priority"] == "P0")["step"]
+    assert "GG - Asin Offense" not in step, "campaign has its own column"
+    assert "It has spent" not in step, "evidence has its own column"
+
+
+def test_gaps_are_a_ranked_table_with_the_loop_first():
+    d = _populated()
+    ranked = export_brief._ranked_gaps(d)
+    assert "outcomes" in ranked[0]["gap"].lower(), (
+        "an unclosed learning loop outranks a thin SQP history: it makes every "
+        "recommendation rules-only rather than weakening one section")
+    assert all(g["blocks"] for g in ranked)
+    assert _tables_in(_section(export_brief.build_brief(d), "## 10. Known gaps")) == 1
+
+
+# ── section 9 question policy ────────────────────────────────────────────
+
+def test_questions_are_within_the_allowed_count():
+    qs = export_brief._manager_questions(_populated(), compute_grade(**GOLDEN))
+    policy = CONFIG["question_policy"]
+    assert policy["min_questions"] <= len(qs) <= policy["max_questions"], len(qs)
+
+
+def test_questions_contain_no_banned_topics():
+    """These are real questions — but not for a PPC manager, and not in this brief.
+
+    Asking them invites the receiving model to treat the answer as new evidence
+    and reason past the data it was given.
+    """
+    qs = export_brief._manager_questions(_populated(), compute_grade(**GOLDEN))
+    blob = " ".join(qs).lower()
+    for banned in CONFIG["question_policy"]["banned_keywords"]:
+        assert banned not in blob, f"banned topic '{banned}' appeared in section 9"
+
+
+def test_questions_also_absent_from_the_rendered_section():
+    section = _section(export_brief.build_brief(_populated()),
+                       "## 9. Questions for the PPC manager").lower()
+    for banned in CONFIG["question_policy"]["banned_keywords"]:
+        assert banned not in section, f"banned topic '{banned}' rendered in section 9"
+
+
+def test_every_question_cites_something_from_this_brief():
+    """A question the brief cannot ground gets answered from imagination."""
+    d = _populated()
+    qs = export_brief._manager_questions(d, compute_grade(**GOLDEN))
+    campaigns = {c["name"] for t in d["terms"].values()
+                 for c in t["campaigns"].values()}
+    anchors = ({t for t in d["terms"]} | campaigns
+               | {"Detail Page", "ads-mark", "SB", "SD", "P0", "rank"})
+    for q in qs:
+        assert any(a[:20] in q for a in anchors) or "$" in q or "%" in q, (
+            f"question cites nothing from the brief: {q}")
+
+
+def test_questions_are_questions():
+    for q in export_brief._manager_questions(_populated(), compute_grade(**GOLDEN)):
+        assert q.rstrip().endswith("?"), f"not a question: {q}"
+
+
+def test_campaign_names_are_never_truncated_without_an_ellipsis():
+    """A silently cut name reads as real and is searched for in vain."""
+    qs = export_brief._manager_questions(_populated(), compute_grade(**GOLDEN))
+    long_name = "A" * 60
+    cited = [q for q in qs if "A" * 30 in q]
+    for q in cited:
+        assert long_name in q or "…" in q, f"name cut with no ellipsis: {q}"
+
+
+# ── wrapper additions ────────────────────────────────────────────────────
+
+def test_wrapper_demands_tables_and_checklist_sections():
+    p = export_brief.build_prompt("BODY")
+    low = p.lower()
+    assert "markdown tables" in low or "tables" in low
+    assert "ordered checklist" in low
+    assert "campaign id" in low, "Section B must carry ids through to the output"
+
+
+def test_wrapper_scopes_manager_questions_to_execution():
+    p = export_brief.build_prompt("BODY").lower()
+    assert "execution only" in p or "execution" in p
+    for banned in ("budget ceiling", "inventory", "seasonality", "creative"):
+        assert banned in p, (
+            "the wrapper must NAME the banned topics to suppress them; "
+            f"'{banned}' is not mentioned")
