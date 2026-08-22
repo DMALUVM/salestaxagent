@@ -16,6 +16,16 @@ function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDi
 function fmtI(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 function pct(n: number) { return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`; }
 
+/** Signed money: minus before the dollar, red for negatives — never green-as-positive. */
+function fmtMoney(n: number): string {
+  const abs = Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return n < 0 ? `\u2212$${abs}` : `$${abs}`;
+}
+function signColor(n: number): string {
+  if (n < 0) return "text-red-600 dark:text-red-400";
+  return "";
+}
+
 interface MonthRow {
   month: string; shipping: number; pick: number; order_fee: number;
   packaging: number; storage_shelf: number; storage_bin_med: number;
@@ -312,8 +322,8 @@ export default function TplCostsPage() {
                         <TableCell className="text-right tabular-nums">${fmt(m.packaging)}</TableCell>
                         <TableCell className="text-right tabular-nums">${fmt(storage)}</TableCell>
                         <TableCell className="text-right tabular-nums">${fmt(m.account_mgmt)}</TableCell>
-                        <TableCell className={`text-right tabular-nums ${m.adhoc < 0 ? "text-emerald-500" : ""}`}>
-                          ${fmt(m.adhoc)}
+                        <TableCell className={`text-right tabular-nums ${signColor(m.adhoc)}`}>
+                          {fmtMoney(m.adhoc)}
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-semibold">${fmt(m.total)}</TableCell>
                       </TableRow>
@@ -406,8 +416,8 @@ export default function TplCostsPage() {
                             {!filterMonth && <TableCell className="text-xs">{f.month}</TableCell>}
                             <TableCell className="text-sm">{f.fee_name}</TableCell>
                             <TableCell className="text-right tabular-nums">{fmtI(f.qty)}</TableCell>
-                            <TableCell className={`text-right tabular-nums ${f.amount < 0 ? "text-emerald-500" : ""}`}>
-                              ${fmt(f.amount)}
+                            <TableCell className={`text-right tabular-nums ${signColor(f.amount)}`}>
+                              {fmtMoney(f.amount)}
                             </TableCell>
                           </TableRow>
                         ))}

@@ -5,7 +5,14 @@ import { useSupabaseQuery } from "@/lib/hooks";
 import type { FilingEntry, NexusStatus } from "@/lib/types";
 import { FilingStatusBadge, FrequencyBadge } from "@/components/status-badge";
 import { LoadingState } from "@/components/loading";
+import { QueryError } from "@/components/query-error";
 import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
+import {
+  DUE_WINDOW_LABELS,
+  filterByDueWindow,
+  groupByDueMonth,
+  type DueWindow,
+} from "@/lib/filing-groups";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,7 +105,7 @@ function MarkCompleteDialog({
         onClick={() => setOpen(true)}
       >
         <Check className="mr-1 h-3 w-3" />
-        Filed
+        File with amount
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
@@ -199,7 +206,7 @@ function QuickMarkButton({
       disabled={busy}
     >
       <Check className="mr-1 h-3 w-3" />
-      {busy ? "..." : "Filed"}
+      {busy ? "..." : "Mark filed"}
     </Button>
   );
 }
@@ -392,6 +399,41 @@ function NotRequiredButton({
   );
 }
 
+function MonthGroupedFilings({
+  rows,
+  mode,
+  onRefetch,
+}: {
+  rows: FilingEntry[];
+  mode: "overdue" | "upcoming" | "completed";
+  onRefetch: () => void;
+}) {
+  const groups = groupByDueMonth(rows);
+  if (rows.length === 0) {
+    return <FilingTable rows={rows} mode={mode} onRefetch={onRefetch} />;
+  }
+  if (groups.length <= 1) {
+    return <FilingTable rows={rows} mode={mode} onRefetch={onRefetch} />;
+  }
+  return (
+    <div className="divide-y">
+      {groups.map((g, i) => (
+        <details key={g.key} open={i < 2} className="group">
+          <summary className="cursor-pointer list-none px-4 py-2.5 text-xs font-medium hover:bg-muted/50">
+            <span className="inline-flex items-center gap-2">
+              <span className="text-muted-foreground group-open:hidden">▸</span>
+              <span className="hidden text-muted-foreground group-open:inline">▾</span>
+              {g.label}
+              <Badge variant="outline" className="text-[10px]">{g.rows.length}</Badge>
+            </span>
+          </summary>
+          <FilingTable rows={g.rows} mode={mode} onRefetch={onRefetch} />
+        </details>
+      ))}
+    </div>
+  );
+}
+
 function FilingTable({
   rows,
   mode,
@@ -410,7 +452,7 @@ function FilingTable({
           mode === "overdue"
             ? "Nothing overdue. You're caught up!"
             : mode === "upcoming"
-            ? "No upcoming filings."
+            ? "No upcoming filings in this window."
             : "No completed filings yet."
         }
       />
@@ -428,7 +470,7 @@ function FilingTable({
             <TableHead className="w-20">Days</TableHead>
             <TableHead>Type</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead className="w-32" />
+            <TableHead className="w-56" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -515,14 +557,27 @@ export default function CalendarPage() {
   const {
     data: filings,
     loading,
+    error,
     refetch,
   } = useSupabaseQuery<FilingEntry>("filing_calendar", {
     orderBy: "due_date",
     ascending: true,
   });
-  const { data: nexusData, loading: l2 } = useSupabaseQuery<NexusStatus>("nexus_status");
+  const { data: nexusData, loading: l2, error: e2, refetch: refetchNexus } = useSupabaseQuery<NexusStatus>("nexus_status");
+  const [dueWindow, setDueWindow] = useState<DueWindow>("90d");
 
   if (loading || l2) return <LoadingState />;
+  if (error || e2) {
+    return (
+      <QueryError
+        message={error || e2}
+        onRetry={() => {
+          refetch();
+          refetchNexus();
+        }}
+      />
+    );
+  }
 
   // Eligibility comes from lib/filing-eligibility.ts, mirroring
   // src/calendar/eligibility.py, so this page, the Pulse chips, the Telegram
@@ -538,7 +593,8 @@ export default function CalendarPage() {
     today,
   );
   const overdue = cls.overdue;
-  const upcoming = cls.upcoming;
+  const upcomingAll = cls.upcoming;
+  const upcoming = filterByDueWindow(upcomingAll, today, dueWindow);
   const completed = filings.filter((f) => f.status === "filed");
   // Rows excluded for a reason other than "already settled" — shown so a
   // period that vanished from Overdue is explainable rather than mysterious.
@@ -547,7 +603,7 @@ export default function CalendarPage() {
   const defaultTab =
     overdue.length > 0
       ? "overdue"
-      : upcoming.length > 0
+      : upcomingAll.length > 0
       ? "upcoming"
       : "completed";
 
@@ -587,7 +643,7 @@ export default function CalendarPage() {
           <CardContent className="flex items-center gap-3 p-4">
             <Clock className="h-5 w-5 text-amber-500" />
             <div>
-              <p className="text-2xl font-semibold">{upcoming.length}</p>
+              <p className="text-2xl font-semibold">{upcomingAll.length}</p>
               <p className="text-xs text-muted-foreground">Upcoming</p>
             </div>
           </CardContent>
@@ -603,6 +659,26 @@ export default function CalendarPage() {
         </Card>
       </div>
 
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="mr-1 text-[10px] uppercase text-muted-foreground">Due window</span>
+        {(["30d", "90d", "all"] as DueWindow[]).map((w) => (
+          <Button
+            key={w}
+            variant={dueWindow === w ? "default" : "outline"}
+            size="sm"
+            className="text-xs"
+            onClick={() => setDueWindow(w)}
+          >
+            {DUE_WINDOW_LABELS[w]}
+          </Button>
+        ))}
+        {dueWindow !== "all" && upcomingAll.length !== upcoming.length && (
+          <span className="ml-2 text-xs text-muted-foreground">
+            Showing {upcoming.length} of {upcomingAll.length} upcoming
+          </span>
+        )}
+      </div>
+
       {/* Tabs */}
       <Tabs defaultValue={defaultTab}>
         <div className="flex items-center justify-between gap-4">
@@ -616,7 +692,7 @@ export default function CalendarPage() {
               </TabsTrigger>
             )}
             <TabsTrigger value="upcoming">
-              Upcoming ({upcoming.length})
+              Upcoming ({upcomingAll.length})
             </TabsTrigger>
             <TabsTrigger value="not_applicable">
               Not applicable ({notApplicable.length})
@@ -635,7 +711,7 @@ export default function CalendarPage() {
           <TabsContent value="overdue" className="mt-4">
             <Card>
               <CardContent className="p-0">
-                <FilingTable
+                <MonthGroupedFilings
                   rows={overdue}
                   mode="overdue"
                   onRefetch={refetch}
@@ -648,7 +724,7 @@ export default function CalendarPage() {
         <TabsContent value="upcoming" className="mt-4">
           <Card>
             <CardContent className="p-0">
-              <FilingTable
+              <MonthGroupedFilings
                 rows={upcoming}
                 mode="upcoming"
                 onRefetch={refetch}
@@ -704,7 +780,7 @@ export default function CalendarPage() {
         <TabsContent value="completed" className="mt-4">
           <Card>
             <CardContent className="p-0">
-              <FilingTable
+              <MonthGroupedFilings
                 rows={completed}
                 mode="completed"
                 onRefetch={refetch}
