@@ -19,6 +19,7 @@ import { buildLast30Series } from "@/lib/overview-series";
 import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
 import { agentToday } from "@/lib/as-of";
 import { LoadingState } from "@/components/loading";
+import { QueryError } from "@/components/query-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isConfigured } from "@/lib/supabase";
 import {
@@ -98,9 +99,9 @@ function yoyPct(cur: number, prev: number, hasPrev: boolean): number | null {
 
 export default function Pulse() {
   const configured = isConfigured();
-  const { data: salesDaily, loading: l1 } = useSalesDaily<SalesDaily>();
-  const { data: nexus, loading: l2 } = useSupabaseQuery<NexusStatus>("nexus_status");
-  const { data: filings, loading: l3 } = useSupabaseQuery<FilingEntry>("filing_calendar", {
+  const { data: salesDaily, loading: l1, error: e1, refetch: refetchSales } = useSalesDaily<SalesDaily>();
+  const { data: nexus, loading: l2, error: e2, refetch: refetchNexus } = useSupabaseQuery<NexusStatus>("nexus_status");
+  const { data: filings, loading: l3, error: e3, refetch: refetchFilings } = useSupabaseQuery<FilingEntry>("filing_calendar", {
     orderBy: "due_date",
     ascending: true,
   });
@@ -288,6 +289,18 @@ export default function Pulse() {
 
   if (!configured) return <SetupPrompt />;
   if (l1 || l2 || l3) return <LoadingState />;
+  if (e1 || e2 || e3) {
+    return (
+      <QueryError
+        message={e1 || e2 || e3}
+        onRetry={() => {
+          refetchSales();
+          refetchNexus();
+          refetchFilings();
+        }}
+      />
+    );
+  }
 
   // ── Channel-filtered accessor ──
   function pick(b: SalesBucket): { gross: number; orders: number } {
@@ -544,7 +557,7 @@ export default function Pulse() {
             <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Registered</p>
             <Link href="/registrations">
               <p className="mt-1 text-2xl font-semibold tabular-nums">
-                {(nexus ?? []).filter((n) => isRegistered(n)).length}
+                {(nexus ?? []).filter((n) => isRegistered(n.is_registered)).length}
               </p>
               <p className="text-xs text-muted-foreground">states</p>
             </Link>

@@ -3,6 +3,7 @@ import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar, MobileHeader } from "@/components/nav";
+import { DataFreshnessStrip } from "@/components/data-freshness-strip";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 const geistSans = Geist({
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <div className="flex min-h-full flex-1 flex-col overflow-hidden">
             <MobileHeader />
             <main className="flex-1 overflow-y-auto">
+              <DataFreshnessStrip />
               <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
                 {children}
               </div>

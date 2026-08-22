@@ -24,6 +24,7 @@ surfaces in the card as a visible failure state, not a blank panel.
 |---|---|---|
 | `/api/shopify-customers` | Supabase server creds + `shopify_orders` table | Visible error card naming the migration/backfill |
 | `/api/ppc` | Supabase server creds | Load-failure card |
+| `/api/data-freshness` | Supabase server creds | Layout strip hidden (fail-soft) |
 | `/api/ppc-export`, `/api/ppc-playbook`, `/api/registration-plan` | a Python venv **on the same machine** | JSON `{available:false}` — these cannot work on Vercel; `ppc-export` falls back to the stored `ppc_briefs` row |
 
 ## Verifying a deploy

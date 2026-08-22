@@ -7,6 +7,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
+import { QueryError } from "@/components/query-error";
+import { SectionNav } from "@/components/section-nav";
 import { ShopifyCustomers } from "@/components/shopify-customers";
 import { isConfigured } from "@/lib/supabase";
 import { Shield, DollarSign, AlertTriangle, ChevronRight } from "lucide-react";
@@ -32,18 +34,36 @@ export default function ProfitPage() {
   const [adsLagging, setAdsLagging] = useState(false);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  function loadPnl() {
+    setLoading(true);
+    setError(null);
+    fetch("/api/pnl")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) {
+          setError(String(d.error));
+          setLoading(false);
+          return;
+        }
+        setData(d.daily ?? []);
+        setAdsDateMax(d.adsDateMax ?? null);
+        setAsOf(d.asOf ?? null);
+        setTodayLA(d.today ?? null);
+        setLatestClosed(d.latestClosed ?? null);
+        setAdsLagging(Boolean(d.adsLagging));
+        setLoading(false);
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : String(e));
+        setLoading(false);
+      });
+  }
 
   useEffect(() => {
     if (!isConfigured()) { setLoading(false); return; }
-    fetch("/api/pnl").then((r) => r.json()).then((d) => {
-      setData(d.daily ?? []);
-      setAdsDateMax(d.adsDateMax ?? null);
-      setAsOf(d.asOf ?? null);
-      setTodayLA(d.today ?? null);
-      setLatestClosed(d.latestClosed ?? null);
-      setAdsLagging(Boolean(d.adsLagging));
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    loadPnl();
   }, []);
 
   const { latestDay, last7, last30, mtd } = useMemo(() => {
@@ -95,6 +115,7 @@ export default function ProfitPage() {
     </div>
   );
   if (loading) return <LoadingState />;
+  if (error) return <QueryError message={error} onRetry={loadPnl} />;
 
   const hasData = data.length > 0;
   const margin7 = last7.sales > 0 ? (last7.net / last7.sales) * 100 : 0;
@@ -113,12 +134,23 @@ export default function ProfitPage() {
         </p>
       </div>
 
+      <SectionNav
+        items={[
+          { id: "customers", label: "Customer LTV" },
+          { id: "windows", label: "Windows" },
+          { id: "waterfall", label: "Waterfall" },
+          { id: "daily", label: "Daily P&L" },
+        ]}
+      />
+
       {/* Customer economics sits ABOVE the daily P&L, not below it.
           At the bottom it started at the 91% mark of the page — present, but
           only findable by scrolling past everything else, which is why it read
           as "missing in production". Shopify only; the card states why Amazon
           cannot have person-level metrics rather than leaving that unexplained. */}
-      <ShopifyCustomers />
+      <div id="customers" className="scroll-mt-14">
+        <ShopifyCustomers />
+      </div>
 
       {!hasData ? (
         <Card>
@@ -144,7 +176,7 @@ export default function ProfitPage() {
           </p>
 
           {/* Net profit by window — all four from the same stored formula */}
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+          <div id="windows" className="scroll-mt-14 grid gap-3 grid-cols-2 sm:grid-cols-4">
             {[
               { label: "Net (latest closed day)", w: latestDay, sub: latestClosedDate ?? "" },
               { label: "Net (7d)", w: last7, sub: `${last7.days}d · ${margin7.toFixed(1)}% margin` },
@@ -181,7 +213,7 @@ export default function ProfitPage() {
           </div>
 
           {/* Waterfall breakdown */}
-          <Card>
+          <Card id="waterfall" className="scroll-mt-14">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium">
                 30-Day Contribution Waterfall
@@ -232,7 +264,7 @@ export default function ProfitPage() {
           </Card>
 
           {/* Daily table */}
-          <Card>
+          <Card id="daily" className="scroll-mt-14">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium">Daily P&L</CardTitle>
             </CardHeader>

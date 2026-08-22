@@ -9,6 +9,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
+import { SectionNav } from "@/components/section-nav";
 import { rankBadgeOf } from "@/lib/ppc-actions";
 import { SqpStatus } from "@/components/sqp-status";
 import { BrandShare } from "@/components/brand-share";
@@ -830,6 +831,15 @@ export default function PPCPage() {
         </div>
       </div>
 
+      <SectionNav
+        items={[
+          { id: "ppc-kpis", label: "KPIs" },
+          { id: "ppc-budget", label: "Budget" },
+          { id: "ppc-placement", label: "Placement" },
+          { id: "ppc-queue", label: "Actions" },
+        ]}
+      />
+
       {notice && <NoticeBanner notice={notice} onDismiss={() => setNotice(null)} />}
 
       {/* Saving refetches, so the strip, hints and quick-review row all pick up
@@ -858,6 +868,9 @@ export default function PPCPage() {
               {data?.fatalError ?? ""}
               {(data?.loadErrors ?? []).join("\n")}
             </pre>
+            <Button variant="outline" size="sm" className="mt-4" onClick={() => { setLoading(true); loadData(); }}>
+              Try again
+            </Button>
           </CardContent>
         </Card>
       ) : !hasData ? (
@@ -904,7 +917,7 @@ export default function PPCPage() {
           </div>
 
           {/* KPI strip */}
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-5">
+          <div id="ppc-kpis" className="scroll-mt-14 grid gap-3 grid-cols-2 sm:grid-cols-5">
             <Card>
               <CardContent className="p-4">
                 <p className="text-[10px] text-muted-foreground uppercase">Spend ({range})</p>
@@ -1019,7 +1032,7 @@ export default function PPCPage() {
 
           {/* Budget share by role */}
           {roles.length > 0 && (
-            <Card>
+            <Card id="ppc-budget" className="scroll-mt-14">
               <CardHeader className="pb-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <CardTitle className="text-sm font-medium">
@@ -1186,7 +1199,7 @@ export default function PPCPage() {
 
           {/* Placement performance */}
           {data?.placementsAvailable && (
-            <Card>
+            <Card id="ppc-placement" className="scroll-mt-14">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">
                   Placement
@@ -1259,7 +1272,7 @@ export default function PPCPage() {
           )}
 
           {/* Tab bar + plan export */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div id="ppc-queue" className="scroll-mt-14 flex flex-wrap items-center justify-between gap-2">
             <div className="flex gap-1">
               {(["actions", "search", "campaigns"] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)}

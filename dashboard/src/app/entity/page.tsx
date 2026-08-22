@@ -190,11 +190,11 @@ function ReviewCard({ item, onChanged }: { item: ReviewItem; onChanged: () => vo
   const [msg, setMsg] = useState<string | null>(null);
 
   async function toggle(enable: boolean) {
+    const label = item.title?.trim() || TYPE_LABELS[item.obligation_type] || item.form_code;
     if (enable && !window.confirm(
-      `Start tracking ${item.state_code} ${item.form_code} as a scheduled obligation?\n\n` +
+      `Start tracking ${item.state_code} ${label} as a scheduled obligation?\n\n` +
       `Only do this once a CPA has confirmed it applies to your entity. ` +
-      `This writes enabled_obligations["${item.enable_key}"] and re-applies the ` +
-      `entity calendar.`,
+      `This adds it to the entity calendar.`,
     )) return;
     setBusy(true);
     setMsg(null);
@@ -288,9 +288,6 @@ function ReviewCard({ item, onChanged }: { item: ReviewItem; onChanged: () => vo
             {busy ? "…" : "CPA confirmed — start tracking"}
           </Button>
         )}
-        <code className="text-[9px] text-muted-foreground">
-          enabled_obligations[&quot;{item.enable_key}&quot;]
-        </code>
       </div>
       {msg && <p className="mt-2 text-[10px] text-amber-700 dark:text-amber-400">{msg}</p>}
     </div>
@@ -560,7 +557,7 @@ export default function EntityPage() {
         well-established each rule is; confirm anything material with a CPA.
         Contested positions (such as whether FBA inventory creates a California
         &ldquo;doing business&rdquo; obligation) are not scheduled here until
-        confirmed in <code>config/entity_profile.json</code>.
+        a CPA confirms them.
       </p>
     </div>
   );

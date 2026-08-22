@@ -223,6 +223,20 @@ export function InboundPlannerView() {
 
       {loading && <LoadingState />}
 
+      {!loading && plans.length === 0 && !error && (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Calculator className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
+            <p className="text-sm font-medium">No inbound plan loaded</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+              Enter one or more SKUs and a coverage end date, then run Plan.
+              Ship qty is coverage minus on-hand (FBA + inbound + AWD + 3PL) —
+              a planning aid, not a purchase order.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {plans.length > 0 && (
         <>
           {/* Summary */}
