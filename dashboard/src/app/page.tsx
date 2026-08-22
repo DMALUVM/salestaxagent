@@ -17,6 +17,7 @@ import type {
 import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
 import { buildLast30Series } from "@/lib/overview-series";
 import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
+import { agentToday } from "@/lib/as-of";
 import { LoadingState } from "@/components/loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { isConfigured } from "@/lib/supabase";
@@ -139,6 +140,7 @@ export default function Pulse() {
   const [hoverDay, setHoverDay] = useState<number | null>(null);
 
   const todayStr = localDate(new Date());
+  const filingToday = agentToday();
 
   // ── Sales aggregation ──
   const sales = useMemo(() => {
@@ -255,7 +257,7 @@ export default function Pulse() {
     const cls = classifyFilings<FilingEntry & FilingRow>(
       (filings ?? []) as Array<FilingEntry & FilingRow>,
       (nexus ?? []) as unknown as NexusRow[],
-      todayStr,
+      filingToday,
     );
     const od = cls.overdue;
     const up = cls.upcoming;
@@ -272,7 +274,7 @@ export default function Pulse() {
     }
     // "sales-tax" is in the label on purpose: entity fees get their own line
     // below, and the two must never be read as the same kind of obligation.
-    if (od.length > 0) items.push({ label: `${od.length} overdue sales-tax filing${od.length > 1 ? "s" : ""}`, href: "/liability" });
+    if (od.length > 0) items.push({ label: `${od.length} overdue sales-tax filing${od.length > 1 ? "s" : ""}`, href: "/calendar" });
     if (entityOverdue > 0) items.push({ label: `${entityOverdue} overdue entity filing${entityOverdue > 1 ? "s" : ""}`, href: "/entity" });
     const dueSoon = up.filter((f) => f.days_until_due >= 0 && f.days_until_due <= 14);
     if (dueSoon.length > 0 && od.length === 0) {
@@ -282,7 +284,7 @@ export default function Pulse() {
       items.push({ label: `${r.state_code} — review with CPA`, href: "/registrations" });
 
     return { overdue: od, upcomingOpen: up, actionCount: ac + entityOverdue, nextFiling: nf, nextFilingDays: nfDays, criticalItems: items };
-  }, [filings, nexus, recs, todayStr, entityOverdue]);
+  }, [filings, nexus, recs, filingToday, entityOverdue]);
 
   if (!configured) return <SetupPrompt />;
   if (l1 || l2 || l3) return <LoadingState />;
@@ -503,22 +505,32 @@ export default function Pulse() {
 
       {/* ── Tax: Actions + Filing + Next Deadlines ── */}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        <Card className={actionCount > 0 ? "border-amber-500/40" : ""}>
+        <Card className={overdue.length > 0 ? "border-red-500/50" : actionCount > 0 ? "border-amber-500/40" : ""}>
           <CardContent className="p-4">
             <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Actions</p>
-            <Link href={overdue.length > 0 ? "/liability" : "/registrations"}>
-              <p className={`mt-1 text-2xl font-semibold tabular-nums ${actionCount > 0 ? "text-amber-500" : ""}`}>{actionCount}</p>
+            <Link href={overdue.length > 0 ? "/calendar" : "/registrations"}>
+              <p className={`mt-1 text-2xl font-semibold tabular-nums ${overdue.length > 0 ? "text-red-600 dark:text-red-400" : actionCount > 0 ? "text-amber-500" : ""}`}>{actionCount}</p>
               <p className="text-xs text-muted-foreground">
                 {overdue.length > 0 ? `${overdue.length} overdue` : actionCount > 0 ? "Needs attention" : "All clear"}
               </p>
             </Link>
           </CardContent>
         </Card>
-        <Card>
+        <Card className={overdue.length > 0 ? "border-red-500/50" : ""}>
           <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Next Filing</p>
-            {nextFiling ? (
-              <Link href="/filings" className="block">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              {overdue.length > 0 ? "Late Filing" : "Next Filing"}
+            </p>
+            {overdue.length > 0 ? (
+              <Link href="/calendar" className="block">
+                <p className="mt-1 text-2xl font-semibold tabular-nums text-red-600 dark:text-red-400">{overdue[0].state_code}</p>
+                <p className="text-xs text-red-600 dark:text-red-400">
+                  {overdue[0].days_overdue}d late &middot; {overdue[0].due_date.slice(5)}
+                  {overdue.length > 1 ? ` · +${overdue.length - 1} more` : ""}
+                </p>
+              </Link>
+            ) : nextFiling ? (
+              <Link href="/calendar" className="block">
                 <p className="mt-1 text-2xl font-semibold tabular-nums">{nextFiling.state_code}</p>
                 <p className="text-xs text-muted-foreground">{nextFilingDays}d &middot; {nextFiling.due_date.slice(5)}</p>
               </Link>
@@ -588,15 +600,15 @@ export default function Pulse() {
               <p className="text-sm text-muted-foreground">No upcoming deadlines.</p>
             ) : (
               <div className="space-y-2">
-                {overdue.slice(0, 2).map((f) => (
-                  <Link key={f.id} href="/filings">
+                {overdue.slice(0, 4).map((f) => (
+                  <Link key={f.id} href="/calendar">
                     <div className="flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm dark:border-red-900 dark:bg-red-950">
-                      <span className="font-medium text-red-700 dark:text-red-300">OVERDUE — {f.state_code} {f.period_label}</span>
-                      <span className="text-xs text-red-600 dark:text-red-400">{f.due_date}</span>
+                      <span className="font-medium text-red-700 dark:text-red-300">LATE — {f.state_code} {f.period_label}</span>
+                      <span className="text-xs text-red-600 dark:text-red-400">{f.days_overdue}d · {f.due_date}</span>
                     </div>
                   </Link>
                 ))}
-                {upcoming.filter((_, i) => i < 4 - Math.min(overdue.length, 2)).map((f) => {
+                {upcoming.filter((_, i) => i < 4 - Math.min(overdue.length, 4)).map((f) => {
                   const days = Math.ceil((new Date(f.due_date).getTime() - Date.now()) / 86400000);
                   return (
                     <div key={f.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">

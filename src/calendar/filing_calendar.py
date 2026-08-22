@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from src.db import fetch_all, upsert_rows, update_row, insert_rows, log_audit
+from src.db import fetch_all, upsert_rows, update_row, log_audit
 from src.config import settings
-from src.calendar.eligibility import SETTLED_STATUSES, classify_filings
+from src.calendar.eligibility import (
+    PRESERVED_STATUSES,
+    SETTLED_STATUSES,
+    _as_iso,
+    classify_filings,
+)
+from src.rules import agent_today
 
 
 def generate_filing_entries(state_code: str, frequency: str, year: int,
@@ -133,17 +139,16 @@ def populate_calendar_for_registered_states(year: int | None = None) -> dict:
     total_created = 0
     states_populated = set()
 
-    # Rows the user has already settled. The upsert below writes
-    # status="pending" on every generated period, so without this any period
-    # already marked filed or not_required would be silently reopened on the
-    # next nightly analyze — and reappear as an OVERDUE chip the user had
-    # already dealt with. Settled periods are dropped from the write entirely
-    # rather than written with their existing status, so this can never be the
-    # thing that changes a status.
+    # Rows whose status must survive the upsert. The generated entries all
+    # write status="pending", so without this a filed / not_required period
+    # would reopen as an OVERDUE chip, and a late row would flip back to
+    # pending the next night — the original bug that left due_date-past
+    # rows looking current. Preserved periods are dropped from the write
+    # entirely rather than rewritten with their existing status.
     settled_keys = {
         (r.get("state_code"), r.get("period_type"), r.get("period_label"))
         for r in fetch_all("filing_calendar")
-        if str(r.get("status") or "") in SETTLED_STATUSES
+        if str(r.get("status") or "") in PRESERVED_STATUSES
     }
     preserved = 0
 
@@ -216,7 +221,7 @@ def get_upcoming_deadlines(days_ahead: int | None = None) -> list[dict]:
     if days_ahead is None:
         days_ahead = settings.alert_days_before_deadline
 
-    today = date.today()
+    today = agent_today()
     cutoff = today + timedelta(days=days_ahead)
     cutoff_iso = cutoff.isoformat()
 
@@ -232,6 +237,83 @@ def get_upcoming_deadlines(days_ahead: int | None = None) -> list[dict]:
     return overdue + upcoming
 
 
+def mark_overdue_filings(today: date | None = None, *,
+                         dry_run: bool = False) -> dict:
+    """Persist pending → late when due_date is before today in AGENT_TZ.
+
+    This is the write that `_run_deadline_check` used to skip: it classified
+    overdue rows in memory (and even stamped status="late" on the returned
+    dicts) but never updated filing_calendar, so SQL `status='late'` stayed 0
+    and reminder_sent stayed false.
+
+    `filed` and `not_required` are never touched. Already-late rows stay late.
+    `reminder_sent` is set on newly flipped rows so the existing daily
+    Telegram digest can treat them as already-noted — no new alert stack.
+    """
+    stamp = today or agent_today()
+    today_iso = stamp.isoformat()
+
+    flipped: list[dict] = []
+    already_late = 0
+    skipped_settled = 0
+
+    for row in fetch_all("filing_calendar", order="due_date"):
+        status = str(row.get("status") or "pending")
+        due = _as_iso(row.get("due_date"))
+        past_due = bool(due and due < today_iso)
+
+        if status in SETTLED_STATUSES:
+            if past_due:
+                skipped_settled += 1
+            continue
+        if status == "late":
+            already_late += 1
+            continue
+        if status != "pending" or not past_due:
+            continue
+        flipped.append(row)
+
+    if not dry_run:
+        for row in flipped:
+            filters = (
+                {"id": row["id"]}
+                if row.get("id")
+                else {"state_code": row.get("state_code"),
+                      "period_type": row.get("period_type"),
+                      "period_label": row.get("period_label")}
+            )
+            update_row(
+                "filing_calendar",
+                filters,
+                {"status": "late", "reminder_sent": True},
+            )
+        if flipped:
+            log_audit(
+                action="mark_overdue_filings",
+                category="calendar",
+                details={"today": today_iso,
+                         "flipped": len(flipped),
+                         "states": sorted({r.get("state_code") for r in flipped})},
+                rows_affected=len(flipped),
+            )
+
+    return {
+        "today": today_iso,
+        "dry_run": dry_run,
+        "flipped": len(flipped),
+        "already_late": already_late,
+        "skipped_settled": skipped_settled,
+        "changes": [
+            {"state_code": r.get("state_code"),
+             "period_type": r.get("period_type"),
+             "period_label": r.get("period_label"),
+             "due_date": _as_iso(r.get("due_date")),
+             "from_status": r.get("status") or "pending"}
+            for r in flipped
+        ],
+    }
+
+
 def audit_filing_calendar(today: date | None = None) -> dict:
     """Explain every calendar row: live obligation, or excluded and why.
 
@@ -241,7 +323,7 @@ def audit_filing_calendar(today: date | None = None) -> dict:
     return classify_filings(
         fetch_all("filing_calendar", order="due_date"),
         fetch_all("nexus_status"),
-        today or date.today(),
+        today or agent_today(),
     )
 
 
@@ -257,7 +339,7 @@ def cleanup_filing_calendar(dry_run: bool = True, today: date | None = None) -> 
     Already-settled rows are left completely alone.
     """
     result = audit_filing_calendar(today)
-    stamp = (today or date.today()).isoformat()
+    stamp = (today or agent_today()).isoformat()
 
     changes = []
     for row in result["excluded"]:

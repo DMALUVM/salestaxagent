@@ -68,6 +68,20 @@ PNL_DEFAULT_REFERRAL_PCT: float = _RULES["pnl"]["default_referral_pct"]
 PNL_DEFAULT_FBA_FEE_PER_UNIT: float = _RULES["pnl"]["default_fba_fee_per_unit"]
 
 
+def agent_today(now: datetime | None = None) -> date:
+    """Today's calendar date in AGENT_TZ (America/New_York).
+
+    Filing due-date comparisons use this, not the machine clock and not
+    Amazon's Pacific day boundary. A UTC date after 00:00 UTC / before
+    20:00 Eastern is still "yesterday" in AGENT_TZ and would mark a
+    return late a day early.
+    """
+    moment = now or datetime.now(AGENT_TZ)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=AGENT_TZ)
+    return moment.astimezone(AGENT_TZ).date()
+
+
 def amazon_as_of(now: datetime | None = None) -> date:
     """Yesterday in the Amazon reporting timezone — the newest closed day.
 
