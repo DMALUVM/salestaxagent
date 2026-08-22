@@ -7,8 +7,9 @@ are different decisions with different follow-ups.
 import pytest
 
 from src.amazon_ads.playbook import (
-    P0, P1, P2, P3, brand_actions, build_playbook, discovery_actions,
-    growth_actions, placement_actions, waste_actions,
+    P0, P1, P2, P3, TOP_N, brand_actions, build_playbook, discovery_actions,
+    growth_actions, is_rank_blocked_raise, placement_actions, rec_to_action,
+    top_n_playbook, waste_actions,
 )
 
 
@@ -149,3 +150,76 @@ class TestOrdering:
         for a in build_playbook(36.9, recs, [{"placement": "DP", "spend": 100.0,
                                               "sales": 50.0}], []):
             assert a.why and a.do and a.priority in (P0, P1, P2, P3)
+
+
+class TestTopN:
+    def _open(self, **kw):
+        row = rec(**kw)
+        row["id"] = kw.get("id", "r-" + row["entity_name"])
+        row["status"] = "open"
+        row["impact_estimate"] = row["impact"]
+        row["suggested_action"] = f"Do {row['entity_name']}"
+        return row
+
+    def test_cap_is_ten(self):
+        recs = [self._open(name=f"waste-{i}", rtype="NEGATE_SEARCH_TERM",
+                           impact=100.0 - i) for i in range(25)]
+        out = top_n_playbook(36.9, recs, [], [])
+        assert len(out) == TOP_N == 10
+
+    def test_waste_outranks_a_larger_scale(self):
+        recs = [
+            self._open(name="grow", rtype="INCREASE_BID", impact=9999.0),
+            self._open(name="neg", rtype="NEGATE_SEARCH_TERM", impact=12.0,
+                       policy=None),
+        ]
+        recs[0]["priority"] = P1
+        recs[1]["priority"] = P0
+        recs[0]["evidence"]["rank_policy_applied"] = "full_increase"
+        out = top_n_playbook(36.9, recs, [], [])
+        assert out[0].priority == P0
+        assert "neg" in out[0].title
+
+    def test_placement_cut_is_in_the_top_n(self):
+        recs = [self._open(name="grow", rtype="INCREASE_BID", impact=50.0)]
+        pl = [{"placement": "Detail Page on-Amazon", "spend": 400.0, "sales": 200.0}]
+        out = top_n_playbook(36.9, recs, pl, [])
+        assert any("Detail Page" in a.title for a in out)
+        assert out[0].priority == P0
+
+    def test_rank_blocked_raise_is_excluded(self):
+        blocked = self._open(name="held", policy="capped", branded=True,
+                             impact=500.0)
+        blocked["type"] = "INCREASE_BID"
+        blocked["evidence"]["rank_policy_applied"] = "capped"
+        assert is_rank_blocked_raise(blocked)
+        waste = self._open(name="neg", rtype="NEGATE_SEARCH_TERM", impact=10.0)
+        waste["priority"] = P0
+        out = top_n_playbook(36.9, [blocked, waste], [], [])
+        assert all("held" not in a.title for a in out)
+        assert out[0].evidence.get("entity_name") == "neg" or "neg" in out[0].title
+
+    def test_applied_recs_are_skipped(self):
+        r = self._open(name="done", rtype="NEGATE_SEARCH_TERM", impact=80.0)
+        r["status"] = "applied"
+        r["priority"] = P0
+        assert top_n_playbook(36.9, [r], [], []) == []
+
+    def test_rec_to_action_keeps_id_and_impact_estimate(self):
+        r = self._open(name="term", rtype="NEGATE_SEARCH_TERM", impact=42.5)
+        r["priority"] = P0
+        r["evidence"]["why"] = "Spent $42.50 with 0 orders."
+        a = rec_to_action(r)
+        assert a.rec_id == r["id"]
+        assert a.impact == 42.5
+        assert a.why.startswith("Spent")
+        assert a.as_dict()["rec_id"] == r["id"]
+
+    def test_does_not_emit_more_than_n(self):
+        recs = [self._open(name=f"n-{i}", rtype="NEGATE_SEARCH_TERM",
+                           impact=10.0) for i in range(8)]
+        pl = [{"placement": "A", "spend": 100.0, "sales": 0.0},
+              {"placement": "B", "spend": 80.0, "sales": 0.0},
+              {"placement": "C", "spend": 60.0, "sales": 0.0}]
+        out = top_n_playbook(36.9, recs, pl, [], n=5)
+        assert len(out) == 5

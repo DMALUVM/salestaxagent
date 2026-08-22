@@ -169,18 +169,62 @@ def link_recommendations(as_of: date | None = None) -> int:
         return 0
 
 
+MARKABLE = ("applied", "dismissed", "open", "expired")
+
+
+def decision_patch(status: str, now: datetime | None = None) -> dict | None:
+    """The exact columns ads-mark and the dashboard write onto a decision row.
+
+    Isolated so tests can pin the payload without a database. Invalid statuses
+    return None — callers must not invent a fourth state.
+    """
+    if status not in MARKABLE:
+        return None
+    stamp = (now or datetime.now(timezone.utc)).isoformat()
+    patch: dict = {"status": status}
+    if status == "applied":
+        patch["applied_at"] = stamp
+    elif status == "dismissed":
+        patch["dismissed_at"] = stamp
+    elif status == "expired":
+        patch["expired_at"] = stamp
+    return patch
+
+
+def resolve_decision_id(rec: dict, *, client=None) -> str | None:
+    """Find the decision row for a live recommendation.
+
+    Prefers the linked decision_id. If that was never written (link_recommendations
+    missed a row), fall back to the natural key the two tables share so Apply
+    still closes the loop instead of updating the queue alone.
+    """
+    did = rec.get("decision_id")
+    if did:
+        return str(did)
+    try:
+        if client is None:
+            from src.db import get_client
+            client = get_client()
+        rows = (client.table(DECISIONS_TABLE)
+                .select("id")
+                .eq("rec_type", rec.get("type"))
+                .eq("entity_name", rec.get("entity_name") or "")
+                .eq("campaign_id", str(rec.get("campaign_id") or ""))
+                .order("as_of_date", desc=True)
+                .limit(1).execute().data) or []
+        return str(rows[0]["id"]) if rows else None
+    except Exception as e:
+        if not _missing_table(e, DECISIONS_TABLE):
+            log.warning("Could not resolve decision for rec %s: %s",
+                        rec.get("id"), str(e)[:160])
+        return None
+
+
 def mark_decision(decision_id: str, status: str) -> bool:
     """Mirror an apply/dismiss onto the decision row. Called by the API."""
-    if status not in ("applied", "dismissed", "open", "expired"):
+    patch = decision_patch(status)
+    if patch is None:
         return False
-    patch: dict = {"status": status}
-    now = datetime.now(timezone.utc).isoformat()
-    if status == "applied":
-        patch["applied_at"] = now
-    elif status == "dismissed":
-        patch["dismissed_at"] = now
-    elif status == "expired":
-        patch["expired_at"] = now
     try:
         from src.db import get_client
         get_client().table(DECISIONS_TABLE).update(patch).eq("id", decision_id).execute()
@@ -189,6 +233,41 @@ def mark_decision(decision_id: str, status: str) -> bool:
         if not _missing_table(e, DECISIONS_TABLE):
             log.warning("Could not mark decision %s as %s: %s", decision_id, status, str(e)[:160])
         return False
+
+
+def mark_recommendation(rec: dict, status: str, *, client=None) -> dict:
+    """The one apply/dismiss path: queue row + decision log.
+
+    ads-mark and the dashboard API must both end here. Never writes to Amazon.
+    Returns {"ok", "decisionLogged", "decisionId"} so the UI can say whether
+    the learning loop was actually closed.
+    """
+    patch = decision_patch(status)
+    if patch is None:
+        return {"ok": False, "decisionLogged": False, "decisionId": None,
+                "error": f"invalid status {status!r}"}
+    rec_id = rec.get("id")
+    if not rec_id:
+        return {"ok": False, "decisionLogged": False, "decisionId": None,
+                "error": "recommendation id required"}
+    try:
+        if client is None:
+            from src.db import get_client
+            client = get_client()
+        client.table("ads_recommendations").update(
+            {"status": status}).eq("id", rec_id).execute()
+        decision_id = resolve_decision_id(rec, client=client)
+        logged = False
+        if decision_id:
+            client.table(DECISIONS_TABLE).update(patch).eq("id", decision_id).execute()
+            logged = True
+        return {"ok": True, "decisionLogged": logged, "decisionId": decision_id}
+    except Exception as e:
+        if not _missing_table(e, DECISIONS_TABLE):
+            log.warning("Could not mark recommendation %s as %s: %s",
+                        rec_id, status, str(e)[:160])
+        return {"ok": False, "decisionLogged": False, "decisionId": None,
+                "error": str(e)[:200]}
 
 
 # ── Outcome snapshots ───────────────────────────────────────────

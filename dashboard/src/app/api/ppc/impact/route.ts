@@ -116,13 +116,18 @@ export async function GET() {
       roleCounts.set(role, (roleCounts.get(role) ?? 0) + 1);
     }
 
+    const appliedIds = decisions.filter((d) => d.status === "applied").map((d) => d.id);
+    const outcomeDecisionIds = new Set(outcomes.map((o) => o.decision_id));
+    const appliedAwaiting = appliedIds.filter((id) => !outcomeDecisionIds.has(id)).length;
+
     return Response.json({
       available: true,
       caveat,
       totals: {
         decisions: decisions.length,
         outcomes: outcomes.length,
-        applied: decisions.filter((d) => d.status === "applied").length,
+        applied: appliedIds.length,
+        appliedAwaiting,
         dismissed: decisions.filter((d) => d.status === "dismissed").length,
         open: decisions.filter((d) => (d.status ?? "open") === "open").length,
         firstAsOf: decisions.length ? decisions[decisions.length - 1].as_of_date : null,

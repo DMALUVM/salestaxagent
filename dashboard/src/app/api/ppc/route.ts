@@ -4,6 +4,7 @@ import {
   classifyCampaign, roleLabels, roleOrder, roleDescriptions, roleConfigSource,
 } from "@/lib/ads-roles";
 import { loadMergedStrategy, roleTargetOf, shareStatusOf } from "@/lib/ads-strategy-settings";
+import { decisionPatch, isMarkableStatus } from "@/lib/ppc-mark";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -1004,35 +1005,50 @@ export async function POST(request: Request) {
       });
     }
 
-    // Update status
+    // Update status — same two-table write as /api/ppc/mark and ads-mark.
+    // Kept so older clients that POST {id,status} here still close the loop.
     const { id, status } = body;
     if (!id || !status) return Response.json({ ok: false, error: "id and status required" }, { status: 400 });
+
+    if (!isMarkableStatus(String(status))) {
+      return Response.json({ ok: false, error: "invalid status" }, { status: 400 });
+    }
     const sb = getServerSupabase();
 
-    // Read the linked decision first: the update below does not return the row,
-    // and the decision log is what a future model trains on.
-    let decisionId: string | null = null;
+    let rec: { decision_id?: string | null; type?: string; entity_name?: string;
+               campaign_id?: string } | null = null;
     try {
-      const r = await sb.from("ads_recommendations").select("decision_id").eq("id", id).limit(1);
-      decisionId = r.data?.[0]?.decision_id ?? null;
+      const r = await sb.from("ads_recommendations")
+        .select("decision_id,type,entity_name,campaign_id").eq("id", id).limit(1);
+      rec = r.data?.[0] ?? null;
     } catch { /* column absent until migration_ads_learning.sql is run */ }
 
     const upd = await sb.from("ads_recommendations").update({ status }).eq("id", id);
     if (upd.error) return Response.json({ ok: false, error: upd.error.message }, { status: 500 });
 
-    // Mirror onto the append-only decision row so the outcome snapshots know
-    // when the action was taken. Extends the existing path — the dashboard
-    // still calls this one endpoint.
+    let decisionId: string | null = rec?.decision_id ? String(rec.decision_id) : null;
+    if (!decisionId && rec) {
+      try {
+        const found = await sb.from("ads_action_decisions")
+          .select("id")
+          .eq("rec_type", rec.type)
+          .eq("entity_name", rec.entity_name ?? "")
+          .eq("campaign_id", String(rec.campaign_id ?? ""))
+          .order("as_of_date", { ascending: false })
+          .limit(1);
+        decisionId = found.data?.[0]?.id ? String(found.data[0].id) : null;
+      } catch { /* learning tables may be absent */ }
+    }
+
     let decisionLogged = false;
-    if (decisionId && (status === "applied" || status === "dismissed")) {
-      const patch: Record<string, unknown> = { status };
-      patch[status === "applied" ? "applied_at" : "dismissed_at"] = new Date().toISOString();
+    const patch = decisionPatch(String(status), new Date().toISOString());
+    if (decisionId && patch && (status === "applied" || status === "dismissed")) {
       try {
         const d = await sb.from("ads_action_decisions").update(patch).eq("id", decisionId);
         decisionLogged = !d.error;
       } catch { /* learning tables not present yet */ }
     }
-    return Response.json({ ok: true, decisionLogged });
+    return Response.json({ ok: true, decisionLogged, decisionId });
   } catch (e) {
     return Response.json({ ok: false, error: String(e) }, { status: 500 });
   }
