@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 import httpx
 
@@ -130,14 +131,15 @@ def get_inventory() -> list[dict]:
     return list(seen_skus.values())
 
 
-def sync_3pl(dry_run: bool = False) -> dict:
-    """Fetch Ship Sidekick inventory and upsert to inventory_3pl_snapshots.
+def _snapshot_rows(items: list[dict], pulled_at: str | None = None) -> list[dict]:
+    """Build inventory_3pl_snapshots rows, always stamping pulled_at.
 
-    Returns summary dict.
+    Postgres DEFAULT now() applies on INSERT only. Upsert-on-sku would
+    otherwise leave pulled_at frozen at first insert, so monitors can show
+    a stale snapshot while the 3PL job reports success.
     """
-    items = get_inventory()
-
-    rows = [
+    stamp = pulled_at or datetime.now(timezone.utc).isoformat()
+    return [
         {
             "sku": item["sku"],
             "product_name": item["product_name"],
@@ -148,9 +150,19 @@ def sync_3pl(dry_run: bool = False) -> dict:
             "damaged": item["damaged"],
             "warehouse": item["warehouse"],
             "raw": item["raw"],
+            "pulled_at": stamp,
         }
         for item in items
     ]
+
+
+def sync_3pl(dry_run: bool = False) -> dict:
+    """Fetch Ship Sidekick inventory and upsert to inventory_3pl_snapshots.
+
+    Returns summary dict.
+    """
+    items = get_inventory()
+    rows = _snapshot_rows(items)
 
     result = {
         "source": "shipsidekick",

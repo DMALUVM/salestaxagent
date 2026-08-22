@@ -666,3 +666,66 @@ class TestSpapiOrderFreshness:
         assert result["rows_inserted"] == 1
         assert captured["table"] == "sales_by_sku"
         assert captured["rows"][0]["ingested_at"]
+
+
+# ── 4g. SUMMARY search-term date is a window label, not daily grain ──
+
+
+class TestSearchTermSummaryDateStamp:
+    """timeUnit=SUMMARY collapses each chunk to one row.
+
+    Consumers (actions engine, search-term loop, brief, SQL) filter on `date`
+    then SUM metrics — they do not require daily grain. Stamping chunk END
+    makes max(date) a freshness proxy without extra Ads report calls. Do not
+    switch search_term_chunk_days to 1 for this; that would multiply API load
+    and change how many SUMMARY rows a lookback sums.
+    """
+
+    def _term_row(self, term="tallow balm"):
+        return {
+            "searchTerm": term, "campaignId": "camp-1", "campaignName": "SP",
+            "adGroupId": "ag-1", "adGroupName": "AG", "keyword": "tallow",
+            "keywordId": "kw-1", "matchType": "EXACT",
+            "impressions": 100, "clicks": 10, "spend": 4.50,
+            "sales14d": 12.00, "purchases14d": 1,
+        }
+
+    def test_summary_rows_use_chunk_end_not_start(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        written: list[dict] = []
+
+        monkeypatch.setattr(reports, "_fetch_search_terms_chunk",
+                            lambda cs, ce: [self._term_row()])
+        monkeypatch.setattr(reports, "upsert_rows",
+                            lambda t, rows, on_conflict=None: written.extend(rows) or len(rows))
+
+        start, end = date(2026, 8, 15), date(2026, 8, 21)
+        reports.fetch_search_terms(start, end, chunk_days=7)
+
+        assert len(written) == 1
+        assert written[0]["date"] == "2026-08-21"
+        assert written[0]["date"] != "2026-08-15"
+        assert written[0]["search_term"] == "tallow balm"
+        # Metric math is the SUMMARY totals, not a per-day split.
+        assert written[0]["spend"] == 4.50
+        assert written[0]["sales_14d"] == 12.00
+        assert written[0]["orders_14d"] == 1
+
+    def test_each_chunk_is_labelled_with_its_own_end(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        written: list[dict] = []
+
+        def fake_chunk(cs, ce):
+            return [self._term_row(term=f"{cs.isoformat()}")]
+
+        monkeypatch.setattr(reports, "_fetch_search_terms_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows",
+                            lambda t, rows, on_conflict=None: written.extend(rows) or len(rows))
+
+        reports.fetch_search_terms(date(2026, 8, 8), date(2026, 8, 21), chunk_days=7)
+        dates = sorted(r["date"] for r in written)
+        assert dates == ["2026-08-14", "2026-08-21"]
