@@ -39,3 +39,19 @@ A `200` with `"available":true` means the deploy, the env and the database are
 all healthy. Deploys are triggered by pushing to `main` (GitHub integration) —
 the local `dashboard/` directory is not `vercel link`ed, so `vercel --prod`
 would prompt for a project and is not the normal path.
+
+## Security: anon key vs service role
+
+**Critical:** After `supabase/migration_rls_lockdown.sql` is applied, the anon
+key cannot read or write any public table (RLS enabled, no anon policies).
+That is intentional.
+
+- Browser clients may still use `NEXT_PUBLIC_SUPABASE_ANON_KEY` for Auth /
+  Realtime scaffolding, but data access must go through Next.js API routes
+  that use **`SUPABASE_SERVICE_KEY`**.
+- Never put the service role key in a `NEXT_PUBLIC_*` variable.
+- The old `"Service role full access" … USING (true)` policies were unsafe:
+  they applied to anon too. The lockdown migration drops them. The Postgres
+  `service_role` bypasses RLS without needing a policy.
+- See root `SECURITY.md` for the apply checklist.
+
