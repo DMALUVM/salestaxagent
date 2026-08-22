@@ -13,6 +13,7 @@ import {
   groupByDueMonth,
   type DueWindow,
 } from "@/lib/filing-groups";
+import { agentToday } from "@/lib/as-of";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -476,7 +477,13 @@ function FilingTable({
         <TableBody>
           {rows.map((f) => {
             const days = daysUntil(f.due_date);
-            const isOverdue = f.status !== "filed" && days < 0;
+            const isOverdue =
+              f.status !== "filed" &&
+              f.status !== "not_required" &&
+              (f.status === "late" || days < 0);
+            const badgeStatus = isOverdue
+              ? (f.status === "late" ? "late" : "overdue")
+              : f.status;
 
             return (
               <TableRow
@@ -522,9 +529,7 @@ function FilingTable({
                   <FrequencyBadge frequency={f.period_type} />
                 </TableCell>
                 <TableCell>
-                  <FilingStatusBadge
-                    status={isOverdue ? "overdue" : f.status}
-                  />
+                  <FilingStatusBadge status={badgeStatus} />
                 </TableCell>
                 <TableCell>
                   {f.status !== "filed" ? (
@@ -586,7 +591,7 @@ export default function CalendarPage() {
   // This used to filter on status + registration_date only: it never checked
   // is_registered, never honoured nexus_status.last_filed_through, and never
   // noticed a state carrying two overlapping period cadences.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = agentToday();
   const cls = classifyFilings<FilingEntry & FilingRow>(
     filings as Array<FilingEntry & FilingRow>,
     nexusData as unknown as NexusRow[],
@@ -617,6 +622,20 @@ export default function CalendarPage() {
           Track deadlines and mark filings complete
         </p>
       </div>
+
+      {overdue.length > 0 && (
+        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50/80 px-4 py-3 text-sm dark:border-red-900 dark:bg-red-950/40">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
+          <div>
+            <p className="font-medium text-red-800 dark:text-red-200">
+              {overdue.length} late filing{overdue.length === 1 ? "" : "s"} past due
+            </p>
+            <p className="text-xs text-red-700/80 dark:text-red-300/80">
+              Open the Overdue tab to file or mark not required.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid gap-4 sm:grid-cols-3">
@@ -683,14 +702,16 @@ export default function CalendarPage() {
       <Tabs defaultValue={defaultTab}>
         <div className="flex items-center justify-between gap-4">
           <TabsList>
-            {overdue.length > 0 && (
-              <TabsTrigger
-                value="overdue"
-                className="text-red-600 dark:text-red-400"
-              >
-                Overdue ({overdue.length})
-              </TabsTrigger>
-            )}
+            <TabsTrigger
+              value="overdue"
+              className={
+                overdue.length > 0
+                  ? "text-red-600 dark:text-red-400"
+                  : undefined
+              }
+            >
+              Overdue ({overdue.length})
+            </TabsTrigger>
             <TabsTrigger value="upcoming">
               Upcoming ({upcomingAll.length})
             </TabsTrigger>
@@ -707,19 +728,17 @@ export default function CalendarPage() {
           )}
         </div>
 
-        {overdue.length > 0 && (
-          <TabsContent value="overdue" className="mt-4">
-            <Card>
-              <CardContent className="p-0">
-                <MonthGroupedFilings
-                  rows={overdue}
-                  mode="overdue"
-                  onRefetch={refetch}
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
+        <TabsContent value="overdue" className="mt-4">
+          <Card className={overdue.length > 0 ? "border-red-200 dark:border-red-900" : ""}>
+            <CardContent className="p-0">
+              <MonthGroupedFilings
+                rows={overdue}
+                mode="overdue"
+                onRefetch={refetch}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="upcoming" className="mt-4">
           <Card>

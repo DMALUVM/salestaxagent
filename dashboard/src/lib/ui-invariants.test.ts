@@ -19,6 +19,16 @@ describe("calendar action labels", () => {
       "Quick-mark and dialog buttons must not share the label Filed",
     );
   });
+
+  test("keeps late/overdue treatment from filings PR #2", () => {
+    const page = src("src/app/calendar/page.tsx");
+    assert.match(page, /agentToday\(\)/);
+    assert.match(page, /f\.status === "late"/);
+    assert.match(page, /Overdue \(\{overdue\.length\}\)/);
+    // Tab stays mounted even when the count is 0.
+    assert.doesNotMatch(page, /\{overdue\.length > 0 && \(\s*<TabsContent value="overdue"/);
+    assert.match(page, /MonthGroupedFilings/);
+  });
 });
 
 describe("entity review cards", () => {

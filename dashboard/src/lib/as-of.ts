@@ -10,6 +10,16 @@
 
 export const AMAZON_TZ = "America/Los_Angeles";
 
+/** Scheduler / filing-deadline zone — mirrors config/business_rules.json agent.timezone. */
+export const AGENT_TZ = "America/New_York";
+
+/** Today's date in AGENT_TZ, as YYYY-MM-DD. Filing due-date math uses this. */
+export function agentToday(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: AGENT_TZ, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(now);
+}
+
 /** Today's date in the Amazon reporting timezone, as YYYY-MM-DD. */
 export function amazonToday(now: Date = new Date()): string {
   // en-CA formats as YYYY-MM-DD.

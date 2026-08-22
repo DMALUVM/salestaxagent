@@ -2669,6 +2669,36 @@ def filing_audit_cmd(state, show_excluded):
                        f"{x['excluded_detail']}")
 
 
+@cli.command("filing-mark-late")
+@click.option("--dry-run/--apply", default=True,
+              help="Dry run by default; --apply writes the changes")
+def filing_mark_late_cmd(dry_run):
+    """Flip pending filings to late when due_date is before today (AGENT_TZ).
+
+    Does not touch filed or not_required. Sets reminder_sent on flipped
+    rows; Telegram still goes through the existing daily summary.
+    """
+    from src.calendar.filing_calendar import mark_overdue_filings
+
+    r = mark_overdue_filings(dry_run=dry_run)
+    verb = "would flip" if r["dry_run"] else "flipped"
+    click.echo(
+        f"{'DRY RUN — ' if r['dry_run'] else ''}{verb} {r['flipped']} "
+        f"pending→late (today {r['today']} AGENT_TZ)"
+    )
+    for c in r["changes"]:
+        click.echo(
+            f"  {c['state_code']} {c['period_label']:<9} "
+            f"due {c['due_date']}  {c['from_status']} → late"
+        )
+    click.echo(
+        f"  already late: {r['already_late']}, "
+        f"past-due settled left alone: {r['skipped_settled']}"
+    )
+    if r["dry_run"] and r["flipped"]:
+        click.echo("\n  Re-run with --apply to write these changes.")
+
+
 @cli.command("filing-cleanup")
 @click.option("--dry-run/--apply", default=True,
               help="Dry run by default; --apply writes the changes")
@@ -4596,7 +4626,9 @@ def _run_daily_analysis():
     from src.db import fetch_all, job_start, job_finish
     from src.engines.physical_nexus import evaluate_physical_nexus
     from src.engines.economic_nexus import evaluate_economic_nexus
-    from src.calendar.filing_calendar import get_upcoming_deadlines
+    from src.calendar.filing_calendar import (
+        get_upcoming_deadlines, mark_overdue_filings,
+    )
     from src.alerts.telegram import (
         send_daily_summary,
         send_threshold_crossed,
@@ -4631,6 +4663,12 @@ def _run_daily_analysis():
                 detail.get("threshold_amount_cfg", 100000),
                 notes[:200] if notes else f"${detail.get('threshold_amount',0):,.0f}",
             )
+
+        # Persist overdue status before the digest reads the calendar.
+        # deadline_check at 09:00 does the same write; doing it here keeps
+        # the 08:00 summary and SQL `status='late'` in step the first day
+        # a return slips past due.
+        mark_overdue_filings()
 
         # ── Gather deadlines ──
         deadlines = get_upcoming_deadlines()
@@ -4683,18 +4721,34 @@ def _run_daily_analysis():
 
 
 def _run_deadline_check():
-    """Deadline check is now part of the daily summary.
-    This function is kept for backward compatibility with the scheduler
-    but no longer sends individual alerts.
-    """
-    from src.calendar.filing_calendar import get_upcoming_deadlines
+    """Flip pending → late for past-due filings, then log the queue.
 
+    Individual Telegram alerts are still the daily summary's job
+    (08:00). This 09:00 pass is the write that used to be missing:
+    get_upcoming_deadlines stamped status="late" only in memory.
+    """
+    from src.calendar.filing_calendar import (
+        get_upcoming_deadlines, mark_overdue_filings,
+    )
+    from src.db import job_start, job_finish
+
+    run_id = job_start("deadline_check")
     try:
+        marked = mark_overdue_filings()
         deadlines = get_upcoming_deadlines()
         overdue = [d for d in deadlines if d.get("days_overdue")]
-        print(f"[Deadline Check] {len(overdue)} overdue, {len(deadlines)} total (included in daily summary)")
+        print(
+            f"[Deadline Check] flipped {marked['flipped']} pending→late "
+            f"(today={marked['today']}); {len(overdue)} overdue, "
+            f"{len(deadlines)} total (included in daily summary)"
+        )
+        job_finish(
+            run_id, "success",
+            f"flipped {marked['flipped']}, overdue {len(overdue)}",
+        )
     except Exception as e:
         print(f"[Deadline Check] Error: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
 
 
 def _run_spapi_refresh():

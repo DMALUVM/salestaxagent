@@ -63,4 +63,13 @@ describe("Overview registered tile", () => {
       "Pulse must pass n.is_registered — passing the row used to show 0",
     );
   });
+
+  test("classifies filings with agentToday and surfaces late on Actions", () => {
+    const src = readFileSync(path.join(process.cwd(), "src/app/page.tsx"), "utf8");
+    assert.match(src, /const filingToday = agentToday\(\)/);
+    assert.match(src, /classifyFilings[\s\S]*filingToday/);
+    assert.match(src, /Late Filing/);
+    assert.match(src, /href=\{overdue\.length > 0 \? "\/calendar"/);
+    assert.match(src, /QueryError/);
+  });
 });

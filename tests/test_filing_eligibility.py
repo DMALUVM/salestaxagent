@@ -163,6 +163,8 @@ class TestRebuildPreservesSettled:
              "period_label": "2026-Q2", "status": "filed"},
             {"state_code": "NV", "period_type": "quarterly",
              "period_label": "2026-Q3", "status": "pending"},
+            {"state_code": "NV", "period_type": "quarterly",
+             "period_label": "2026-Q4", "status": "late"},
         ]
         nexus = [{"state_code": "NV", "is_registered": True,
                   "assigned_frequency": "quarterly"}]
@@ -181,8 +183,9 @@ class TestRebuildPreservesSettled:
         labels = {r["period_label"] for r in written}
         assert "2026-Q1" not in labels, "not_required period was reopened"
         assert "2026-Q2" not in labels, "filed period was reopened"
+        assert "2026-Q4" not in labels, "late period was reset to pending"
         assert "2026-Q3" in labels, "an open period should still be refreshed"
-        assert result["settled_preserved"] == 2
+        assert result["settled_preserved"] == 3
 
     def test_only_registered_states_get_periods(self, monkeypatch):
         import src.calendar.filing_calendar as fc
@@ -201,3 +204,82 @@ class TestRebuildPreservesSettled:
 
         fc.populate_calendar_for_registered_states(year=2026)
         assert {r["state_code"] for r in written} == {"TX"}
+
+
+class TestMarkOverdueFilings:
+    """deadline_check must persist pending → late; it used to only print."""
+
+    TODAY = date(2026, 8, 22)
+
+    def _rows(self):
+        return [
+            filing(state_code="CT", period_type="monthly",
+                   period_label="2026-07", period_end="2026-07-31",
+                   due_date="2026-08-20", status="pending"),
+            filing(state_code="MI", period_type="monthly",
+                   period_label="2026-07", period_end="2026-07-31",
+                   due_date="2026-08-20", status="pending"),
+            filing(state_code="VA", period_type="monthly",
+                   period_label="2026-07", period_end="2026-07-31",
+                   due_date="2026-08-20", status="filed"),
+            filing(state_code="NC", period_type="monthly",
+                   period_label="2026-07", period_end="2026-07-31",
+                   due_date="2026-08-20", status="not_required"),
+            filing(state_code="PA", period_type="monthly",
+                   period_label="2026-07", period_end="2026-07-31",
+                   due_date="2026-08-20", status="late"),
+            filing(state_code="SC", period_type="monthly",
+                   period_label="2026-08", period_end="2026-08-31",
+                   due_date="2026-09-20", status="pending"),
+            filing(state_code="CT", period_type="monthly",
+                   period_label="2026-08", period_end="2026-08-31",
+                   due_date=self.TODAY.isoformat(), status="pending"),
+        ]
+
+    def test_flips_pending_past_due_only(self, monkeypatch):
+        import src.calendar.filing_calendar as fc
+
+        updates: list[tuple] = []
+        monkeypatch.setattr(fc, "fetch_all", lambda *a, **kw: self._rows())
+        monkeypatch.setattr(
+            fc, "update_row",
+            lambda table, filters, updates_dict: updates.append(
+                (filters, updates_dict)) or {"ok": True})
+        monkeypatch.setattr(fc, "log_audit", lambda **kw: None)
+
+        result = fc.mark_overdue_filings(today=self.TODAY)
+
+        flipped = {(c["state_code"], c["period_label"]) for c in result["changes"]}
+        assert flipped == {("CT", "2026-07"), ("MI", "2026-07")}
+        assert result["flipped"] == 2
+        assert result["already_late"] == 1
+        assert result["skipped_settled"] == 2
+        assert result["today"] == "2026-08-22"
+
+        for _filters, body in updates:
+            assert body == {"status": "late", "reminder_sent": True}
+
+    def test_dry_run_does_not_write(self, monkeypatch):
+        import src.calendar.filing_calendar as fc
+
+        monkeypatch.setattr(fc, "fetch_all", lambda *a, **kw: self._rows())
+        monkeypatch.setattr(
+            fc, "update_row",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("wrote")))
+        monkeypatch.setattr(fc, "log_audit", lambda **kw: None)
+
+        result = fc.mark_overdue_filings(today=self.TODAY, dry_run=True)
+        assert result["flipped"] == 2
+        assert result["dry_run"] is True
+
+    def test_due_today_stays_pending(self, monkeypatch):
+        import src.calendar.filing_calendar as fc
+
+        rows = [filing(due_date="2026-08-22", status="pending")]
+        monkeypatch.setattr(fc, "fetch_all", lambda *a, **kw: rows)
+        monkeypatch.setattr(fc, "update_row", lambda *a, **kw: None)
+        monkeypatch.setattr(fc, "log_audit", lambda **kw: None)
+
+        result = fc.mark_overdue_filings(today=self.TODAY)
+        assert result["flipped"] == 0
+        assert result["changes"] == []

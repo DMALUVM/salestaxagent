@@ -23,10 +23,15 @@ from datetime import date
 # filed_notes rather than invented as a status the database would reject.
 SETTLED_STATUSES = frozenset({"filed", "not_required"})
 
-# Statuses that still represent an open obligation. `late` is what the older
-# code wrote onto rows it considered overdue; it is treated as open, not as a
-# separate kind of thing.
+# Statuses that still represent an open obligation. `late` is written by
+# mark_overdue_filings onto pending rows whose due_date has passed; it is
+# treated as open, not as a separate kind of thing.
 OPEN_STATUSES = frozenset({"pending", "late"})
+
+# Statuses the nightly calendar rebuild must never overwrite back to pending.
+# `late` is still an open obligation — it is listed here only so populate
+# cannot silently reopen an overdue row as pending.
+PRESERVED_STATUSES = SETTLED_STATUSES | {"late"}
 
 # Recurring within-year cadences. Two different ones covering the same months
 # are a duplicate; `annual` is deliberately excluded because a yearly

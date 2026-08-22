@@ -365,6 +365,13 @@ class TestAgentTimezone:
         assert AMAZON_TZ_NAME == "America/Los_Angeles"
         assert AGENT_TZ_NAME != AMAZON_TZ_NAME
 
+    def test_agent_today_uses_eastern_not_utc(self):
+        """00:30 UTC on the 21st is still the 20th in America/New_York."""
+        from datetime import datetime, timezone
+        from src.rules import agent_today
+        utc = datetime(2026, 8, 21, 0, 30, tzinfo=timezone.utc)
+        assert agent_today(utc).isoformat() == "2026-08-20"
+
 
 # ── 5. SP-API chunking produces valid chunks ─────────────────
 
