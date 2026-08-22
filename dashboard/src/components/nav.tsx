@@ -32,6 +32,7 @@ interface NavItem {
   href: string;
   label: string;
   icon: typeof LayoutDashboard;
+  children?: NavItem[];
 }
 
 const primaryLinks: NavItem[] = [
@@ -42,7 +43,16 @@ const primaryLinks: NavItem[] = [
   // Entity-level filings (annual reports, franchise tax, foreign qualification).
   // Separate from the Filing Calendar on purpose — these are not sales tax.
   { href: "/entity", label: "Entity & Compliance", icon: Building2 },
-  { href: "/inventory", label: "Inventory", icon: Warehouse },
+  {
+    href: "/inventory",
+    label: "Inventory",
+    icon: Warehouse,
+    // Deep links stay at /inventory/returns and /inventory/3pl.
+    children: [
+      { href: "/inventory/returns", label: "FBA Returns", icon: RotateCcw },
+      { href: "/inventory/3pl", label: "3PL Costs", icon: Package },
+    ],
+  },
   // Demand Forecast + Inbound Planner merged into one destination with tabs.
   { href: "/planning", label: "Planning", icon: TrendingUp },
 ];
@@ -55,8 +65,6 @@ const monitorLinks: NavItem[] = [
   { href: "/costs", label: "COGS", icon: DollarSign },
   { href: "/amazon", label: "Amazon Ops", icon: TrendingUp },
   { href: "/ppc", label: "Amazon PPC", icon: TrendingUp },
-  { href: "/inventory/returns", label: "FBA Returns", icon: RotateCcw },
-  { href: "/inventory/3pl", label: "3PL Costs", icon: Package },
   { href: "/sales-map", label: "Sales Map", icon: MapPinned },
   { href: "/skus", label: "SKU Performance", icon: Package },
   { href: "/compliance", label: "Compliance Guides", icon: BookOpen },
@@ -102,44 +110,57 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
   const pathname = usePathname();
   const complianceCount = useComplianceCount();
 
-  function renderLink(item: NavItem) {
-    const active =
-      item.href === "/"
-        ? pathname === "/"
-        : pathname.startsWith(item.href);
+  function isActive(href: string) {
+    if (href === "/") return pathname === "/";
+    if (href === "/inventory") {
+      return pathname === "/inventory" || pathname.startsWith("/inventory/");
+    }
+    return pathname === href || pathname.startsWith(`${href}/`);
+  }
+
+  function renderLink(item: NavItem, nested = false) {
+    const active = isActive(item.href);
     const Icon = item.icon;
     const showBadge = item.href === "/compliance" && complianceCount > 0;
     return (
-      <Link
-        key={item.href}
-        href={item.href}
-        onClick={onClick}
-        className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-          active
-            ? "bg-primary/5 text-primary dark:bg-primary/10"
-            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-        }`}
-      >
-        <Icon className="h-4 w-4" />
-        {item.label}
-        {showBadge && (
-          <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-semibold text-white">
-            {complianceCount}
-          </span>
+      <div key={item.href}>
+        <Link
+          href={item.href}
+          onClick={onClick}
+          className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            nested ? "py-1.5 pl-9 text-[13px]" : ""
+          } ${
+            active
+              ? "bg-primary/5 text-primary dark:bg-primary/10"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          }`}
+        >
+          <Icon className={nested ? "h-3.5 w-3.5" : "h-4 w-4"} />
+          {item.label}
+          {showBadge && (
+            <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-semibold text-white">
+              {complianceCount}
+            </span>
+          )}
+        </Link>
+        {item.children && (
+          <div className="mt-0.5 space-y-0.5">
+            {item.children.map((child) => renderLink(child, true))}
+          </div>
         )}
-      </Link>
+      </div>
     );
   }
 
   return (
     <nav className="flex flex-col gap-1">
-      {primaryLinks.map(renderLink)}
+      {primaryLinks.map((item) => renderLink(item))}
       <div className="mt-4 mb-1 px-3">
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
           Monitoring
         </span>
       </div>
-      {monitorLinks.map(renderLink)}
+      {monitorLinks.map((item) => renderLink(item))}
     </nav>
   );
 }

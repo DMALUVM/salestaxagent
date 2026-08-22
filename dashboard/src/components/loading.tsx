@@ -1,9 +1,5 @@
 export function LoadingState() {
-  return (
-    <div className="flex items-center justify-center py-16">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-muted-foreground" />
-    </div>
-  );
+  return <PageSkeleton />;
 }
 
 export function LoadingSkeleton({ rows = 5 }: { rows?: number }) {
@@ -16,6 +12,25 @@ export function LoadingSkeleton({ rows = 5 }: { rows?: number }) {
           <div className="h-4 w-20 animate-pulse rounded bg-muted" />
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Command-center page placeholder — tiles + a chart block, not a bare spinner. */
+export function PageSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true" aria-label="Loading">
+      <div className="space-y-2">
+        <div className="h-6 w-40 animate-pulse rounded bg-muted" />
+        <div className="h-4 w-64 animate-pulse rounded bg-muted" />
+      </div>
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-24 animate-pulse rounded-lg bg-muted" />
+        ))}
+      </div>
+      <div className="h-40 animate-pulse rounded-lg bg-muted" />
+      <LoadingSkeleton rows={6} />
     </div>
   );
 }

@@ -563,7 +563,7 @@ export default function InventoryPage() {
             )}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -579,6 +579,16 @@ export default function InventoryPage() {
             <Button variant="default" size="sm">
               <Play className="mr-1.5 h-3.5 w-3.5" />
               Plan SKU
+            </Button>
+          </Link>
+          <Link href="/inventory/returns">
+            <Button variant="outline" size="sm">
+              FBA Returns
+            </Button>
+          </Link>
+          <Link href="/inventory/3pl">
+            <Button variant="outline" size="sm">
+              3PL Costs
             </Button>
           </Link>
           <Link href="/inventory/pallets">

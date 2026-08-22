@@ -129,6 +129,23 @@ export function DemandPlannerView() {
 
       {loading && <LoadingState />}
 
+      {!loading && !result && !error && (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Calculator className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
+            <p className="text-sm font-medium">No forecast loaded</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+              Pick a SKU and a coverage end date, then run Forecast. This is a
+              planning aid — it does not place inbound or change Amazon settings.
+            </p>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Uses velocity, seasonality, and Subscribe &amp; Save when those
+              tables are populated. If a SKU is missing, check Inventory first.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {result && (
         <>
           {/* Headline */}
