@@ -263,10 +263,11 @@ recorded as `partial`, not `fail`. Check what actually ran with
 `python -m src.main jobs` (add `--failures` to see only problems, or
 `--job ads_campaigns_sync` for one job); every run writes a `job_runs` row with
 status and timestamps, which is what the dashboard's "last sync" label reads.
-After changing code, restart the agent with
-`launchctl kickstart -k gui/$(id -u)/com.tallowbourn.salestax` — the scheduler
-builds its job list once at startup. See `deploy/launchd/README.md` for the full
-job table.
+Hands-off auto-update is enabled: a 04:30 ET APScheduler job (and a once-on-
+startup pass) fast-forwards `origin/main` when the tree is clean, then exits
+so launchd `KeepAlive` respawns with the new code. Dirty or diverged checkouts
+abort and log; nothing is force-reset. Kickstart is only an emergency
+fallback. See `deploy/launchd/README.md`.
 
 ---
 

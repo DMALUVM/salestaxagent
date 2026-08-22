@@ -3505,6 +3505,30 @@ def github_backup(dry_run):
         click.echo(f"Backup failed: {result.get('error', result['status'])}")
 
 
+@cli.command("git-auto-update")
+@click.option("--dry-run", is_flag=True,
+              help="Fetch and report; never pull, never exit")
+@click.option("--restart", is_flag=True,
+              help="After a HEAD-changing pull, exit so launchd KeepAlive respawns")
+def git_auto_update_cmd(dry_run, restart):
+    """Fast-forward origin/main if the working tree is clean.
+
+    The scheduler runs this daily at 04:30 ET and once shortly after
+    startup. Manual use is for inspection: --dry-run never writes.
+    Never pushes. Never resets. Aborts if dirty or diverged.
+    """
+    from src.maintenance.git_auto_update import run_auto_update
+
+    result = run_auto_update(dry_run=dry_run, restart=restart if restart else False)
+    status = result.get("status")
+    detail = result.get("message") or result.get("error") or ""
+    click.echo(f"{status}: {detail}".rstrip(": "))
+    if result.get("restart"):
+        from src.maintenance.git_auto_update import request_process_exit
+        click.echo("HEAD changed — exiting so launchd KeepAlive can respawn.")
+        request_process_exit(delay_seconds=0.2)
+
+
 @cli.command("inventory-sync")
 @click.option("--dry-run", is_flag=True)
 def inventory_sync_cmd(dry_run):
@@ -4467,6 +4491,47 @@ def run():
         )
         click.echo("[Scheduler] Action outcome snapshots daily at 07:00 (after P&L)")
 
+        # Safe ff-only pull of origin/main. One job inside this scheduler —
+        # not a second launchd agent — so it cannot race the running process.
+        # 04:30 is before ads_campaigns_sync (05:00). A startup pass catches
+        # merges that landed while the Mini was off. See
+        # src/maintenance/git_auto_update.py for the safety rules.
+        from datetime import datetime, timedelta
+        from src.maintenance.git_auto_update import (
+            CRON_HOUR as _GIT_UPD_HOUR,
+            CRON_MINUTE as _GIT_UPD_MINUTE,
+            STARTUP_DELAY_SECONDS as _GIT_UPD_DELAY,
+            is_enabled as _git_auto_update_enabled,
+        )
+        if _git_auto_update_enabled():
+            scheduler.add_job(
+                _run_git_auto_update,
+                "cron",
+                hour=_GIT_UPD_HOUR,
+                minute=_GIT_UPD_MINUTE,
+                id="git_auto_update",
+                misfire_grace_time=3600,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo(
+                f"[Scheduler] Git auto-update daily at "
+                f"{_GIT_UPD_HOUR:02d}:{_GIT_UPD_MINUTE:02d} "
+                "(ff-only origin/main; KeepAlive respawn if HEAD moves)"
+            )
+            scheduler.add_job(
+                _run_git_auto_update,
+                "date",
+                run_date=datetime.now(AGENT_TZ) + timedelta(seconds=_GIT_UPD_DELAY),
+                id="git_auto_update_startup",
+                misfire_grace_time=300,
+            )
+            click.echo(
+                f"[Scheduler] Git auto-update once {_GIT_UPD_DELAY}s after startup"
+            )
+        else:
+            click.echo("[Scheduler] Git auto-update disabled (GIT_AUTO_UPDATE=0)")
+
         # Weekly GitHub backup (Sunday 09:00)
         scheduler.add_job(
             _run_github_backup,
@@ -5334,6 +5399,43 @@ def _run_github_backup():
             print(f"[Backup] {r['status']}: {r.get('error', '')[:200]}")
     except Exception as e:
         print(f"[Backup] Error: {e}")
+
+
+def _run_git_auto_update():
+    """ff-only pull of origin/main; exit so KeepAlive loads new code.
+
+    Dirty, diverged, or off-main aborts without touching the tree. A
+    no-op when already at origin/main. job_runs records every outcome;
+    Telegram fires only when a human has to unstick the checkout.
+    """
+    from src.db import job_finish, job_start
+    from src.maintenance.git_auto_update import (
+        alert_if_needed, request_process_exit, run_auto_update,
+    )
+
+    run_id = job_start("git_auto_update")
+    try:
+        result = run_auto_update()
+    except Exception as e:
+        print(f"[git_auto_update] Error: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        alert_if_needed({"status": "error", "error": str(e)})
+        return
+
+    status = result.get("status")
+    msg = result.get("message") or result.get("error") or status
+    print(f"[git_auto_update] {status}: {msg}")
+
+    if status in {"up_to_date", "updated", "disabled", "skipped", "dry_run"}:
+        job_finish(run_id, "success", str(msg)[:500])
+    else:
+        job_finish(run_id, "fail", str(msg)[:500])
+        alert_if_needed(result)
+
+    if result.get("restart"):
+        print("[git_auto_update] HEAD changed — exiting so launchd "
+              "KeepAlive respawns with the new checkout")
+        request_process_exit()
 
 
 def _run_cpa_exports():

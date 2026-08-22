@@ -12,6 +12,11 @@
   RunAtLoad + KeepAlive means the agent starts at login and is restarted if it
   ever exits, so every scheduled job survives a reboot with no terminal.
 
+  Auto-update is an APScheduler job inside this process (04:30 ET + once
+  shortly after start), not a second plist. After a successful ff-only
+  pull it exits; KeepAlive is what loads the new code. Do not add another
+  LaunchAgent that also runs `src.main run`.
+
   Liveness has two independent signals, and they detect different failures:
     - the heartbeat file (logs/heartbeat.json), stamped every 5 minutes, catches
       a process that is ALIVE but whose job threads have wedged;
