@@ -49,6 +49,14 @@ class TestBusinessRulesConfig:
     def test_ads_chunk_within_api_limit(self):
         assert self.cfg["ads"]["max_chunk_days"] <= self.cfg["ads"]["max_report_days"]
 
+    def test_ads_sb_sd_timeouts_are_durable(self):
+        ads = self.cfg["ads"]
+        assert ads["campaign_report_timeout_sb_seconds"] >= 900
+        assert ads["campaign_report_timeout_sd_seconds"] >= 900
+        # Still below the SP client default so SP remains the longer path.
+        assert ads["campaign_report_timeout_sb_seconds"] < 1800
+        assert ads["campaign_report_timeout_sd_seconds"] < 1800
+
     def test_spapi_chunk_limit(self):
         assert self.cfg["spapi"]["max_chunk_days"] <= 31
 
@@ -114,6 +122,16 @@ class TestRulesModule:
         from src.rules import ADS_MAX_CHUNK_DAYS, ADS_MAX_REPORT_DAYS
         assert ADS_MAX_CHUNK_DAYS <= ADS_MAX_REPORT_DAYS
         assert ADS_MAX_CHUNK_DAYS <= 31
+
+    def test_ads_sb_sd_timeouts_from_config(self):
+        from src.rules import (
+            ADS_CAMPAIGN_TIMEOUT_SB_SECONDS,
+            ADS_CAMPAIGN_TIMEOUT_SD_SECONDS,
+        )
+        assert ADS_CAMPAIGN_TIMEOUT_SB_SECONDS >= 900
+        assert ADS_CAMPAIGN_TIMEOUT_SD_SECONDS >= 900
+        assert ADS_CAMPAIGN_TIMEOUT_SB_SECONDS < 1800
+        assert ADS_CAMPAIGN_TIMEOUT_SD_SECONDS < 1800
 
     def test_spapi_chunk_size_within_limit(self):
         from src.rules import SPAPI_MAX_CHUNK_DAYS
@@ -351,6 +369,36 @@ class TestAdsSyncOutcome:
         assert status == "fail"
 
 
+# ── 4d2. SP-API refresh outcome classification ────────────────
+
+
+class TestSpapiRefreshOutcome:
+    """Zero order rows must not be recorded as a green tax SoT refresh."""
+
+    def test_orders_written_is_success(self):
+        from src.main import _spapi_refresh_outcome
+        status, msg = _spapi_refresh_outcome([], 51)
+        assert status == "success"
+        assert "51" in msg
+
+    def test_zero_order_rows_is_partial(self):
+        from src.main import _spapi_refresh_outcome
+        status, msg = _spapi_refresh_outcome([], 0)
+        assert status == "partial"
+        assert "0" in msg
+
+    def test_orders_error_is_fail(self):
+        from src.main import _spapi_refresh_outcome
+        status, msg = _spapi_refresh_outcome(["Orders: timeout"], 0)
+        assert status == "fail"
+        assert "Orders" in msg
+
+    def test_inventory_error_is_fail_even_if_orders_wrote(self):
+        from src.main import _spapi_refresh_outcome
+        status, _ = _spapi_refresh_outcome(["Inventory: boom"], 12)
+        assert status == "fail"
+
+
 # ── 4e. Scheduler timezone is explicit ────────────────────────
 
 
@@ -512,9 +560,109 @@ class TestAdProductCoverage:
 
         Amazon's report queue goes through slow spells where even a one-day SP
         report sits PENDING for many minutes. SP feeds the KPI cards and P&L,
-        so it keeps the client default; only the additive products are capped.
+        so it keeps the client default; only the additive products are capped,
+        and those caps come from business_rules.json (not a 300s hardcoded).
         """
         from src.amazon_ads.reports import CAMPAIGN_REPORT_TIMEOUT
+        from src.rules import (
+            ADS_CAMPAIGN_TIMEOUT_SB_SECONDS,
+            ADS_CAMPAIGN_TIMEOUT_SD_SECONDS,
+        )
         assert "SP" not in CAMPAIGN_REPORT_TIMEOUT
+        assert CAMPAIGN_REPORT_TIMEOUT["SB"] == ADS_CAMPAIGN_TIMEOUT_SB_SECONDS
+        assert CAMPAIGN_REPORT_TIMEOUT["SD"] == ADS_CAMPAIGN_TIMEOUT_SD_SECONDS
+        assert CAMPAIGN_REPORT_TIMEOUT["SB"] >= 900
+        assert CAMPAIGN_REPORT_TIMEOUT["SD"] >= 900
         assert CAMPAIGN_REPORT_TIMEOUT["SB"] < 1800
         assert CAMPAIGN_REPORT_TIMEOUT["SD"] < 1800
+
+
+# ── 4f. SP-API order upsert stamps ingested_at ─────────────────
+
+
+class TestSpapiOrderFreshness:
+    """Re-upserted monthly sales_by_state rows must refresh ingested_at."""
+
+    def test_stamp_sets_iso_utc(self):
+        from datetime import datetime, timezone
+        from src.amazon_sp.reports import _stamp_ingested_at
+
+        now = datetime(2026, 8, 22, 17, 52, tzinfo=timezone.utc)
+        rows = [{"state_code": "TX", "source": "amazon_spapi"}]
+        _stamp_ingested_at(rows, now=now)
+        assert rows[0]["ingested_at"] == now.isoformat()
+
+    def test_fetch_orders_upsert_includes_ingested_at(self, monkeypatch):
+        from datetime import date
+        import src.amazon_sp.reports as reports
+        from src.models.schema import SalesByState
+
+        captured: dict = {}
+
+        def fake_upsert(table, rows, on_conflict=None):
+            captured["table"] = table
+            captured["rows"] = rows
+            captured["on_conflict"] = on_conflict
+            return len(rows)
+
+        rec = SalesByState(
+            state_code="TX",
+            channel="amazon",
+            period_start=date(2026, 8, 1),
+            period_end=date(2026, 8, 31),
+            order_count=1,
+            gross_sales=10.0,
+            net_sales=10.0,
+            source="amazon_spapi",
+        )
+        monkeypatch.setattr(reports, "_date_chunks", lambda s, e: [(s, e)])
+        monkeypatch.setattr(reports, "request_and_download", lambda *a, **k: "x")
+        monkeypatch.setattr(reports, "parse_orders_report", lambda _c: {
+            "rows_total": 1, "rows_parsed": 1, "rows_skipped": 0,
+            "ship_to_states": {"TX"}, "total_gross_sales": 10.0,
+            "total_tax": 0.0, "warnings": [], "sales_records": [rec],
+            "unique_orders": 1, "_samples": [rec],
+        })
+        monkeypatch.setattr(reports, "upsert_rows", fake_upsert)
+        monkeypatch.setattr(reports, "log_ingestion", lambda **k: None)
+        monkeypatch.setattr(reports, "log_audit", lambda **k: None)
+
+        result = reports.fetch_orders(date(2026, 8, 14), date(2026, 8, 21))
+        assert result["rows_inserted"] == 1
+        assert captured["table"] == "sales_by_state"
+        assert captured["rows"][0]["ingested_at"]
+        assert captured["rows"][0]["source"] == "amazon_spapi"
+
+    def test_fetch_amazon_skus_upsert_includes_ingested_at(self, monkeypatch):
+        from datetime import date
+        import src.amazon_sp.reports as reports
+
+        captured: dict = {}
+
+        def fake_upsert(table, rows, on_conflict=None):
+            captured["table"] = table
+            captured["rows"] = rows
+            return len(rows)
+
+        monkeypatch.setattr(reports, "_date_chunks", lambda s, e: [(s, e)])
+        monkeypatch.setattr(reports, "request_and_download", lambda *a, **k: "x")
+        monkeypatch.setattr(reports, "parse_orders_by_sku", lambda _c: {
+            "rows_total": 1, "rows_parsed": 1, "rows_skipped": 0,
+            "warnings": [],
+            "sku_rows": [{
+                "channel": "amazon", "sku": "SKU-1", "asin": "B00",
+                "product_title": "t", "state_code": "TX",
+                "period_start": "2026-08-01", "period_end": "2026-08-31",
+                "units": 1, "gross_sales": 10.0, "net_sales": 10.0,
+                "order_count": 1, "source": "amazon_spapi",
+            }],
+            "unique_skus": 1,
+        })
+        monkeypatch.setattr(reports, "upsert_rows", fake_upsert)
+        monkeypatch.setattr(reports, "log_ingestion", lambda **k: None)
+        monkeypatch.setattr(reports, "log_audit", lambda **k: None)
+
+        result = reports.fetch_amazon_skus(date(2026, 8, 14), date(2026, 8, 21))
+        assert result["rows_inserted"] == 1
+        assert captured["table"] == "sales_by_sku"
+        assert captured["rows"][0]["ingested_at"]

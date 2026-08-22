@@ -9,7 +9,7 @@ import csv
 import io
 import re
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from src.channels import AMAZON
 from src.db import delete_rows, log_audit, log_ingestion, upsert_rows
@@ -30,6 +30,19 @@ SALES_TRAFFIC_REPORT = "GET_SALES_AND_TRAFFIC_REPORT"
 FBA_REIMBURSEMENTS_REPORT = "GET_FBA_REIMBURSEMENTS_DATA"
 
 SOURCE_LABEL = "amazon_spapi"
+
+
+def _stamp_ingested_at(rows: list[dict], now: datetime | None = None) -> list[dict]:
+    """Set ingested_at so a PostgREST upsert refreshes the freshness column.
+
+    sales_by_state / sales_by_sku default ingested_at to now() on INSERT only.
+    Re-upserts of the same monthly key left the old timestamp, so a successful
+    morning refresh could look a week stale on the tax SoT rows.
+    """
+    ts = (now or datetime.now(timezone.utc)).isoformat()
+    for row in rows:
+        row["ingested_at"] = ts
+    return rows
 
 US_STATES = {
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
@@ -550,6 +563,7 @@ def fetch_amazon_skus(
             seen[key] = dict(row)
 
     deduped = list(seen.values())
+    _stamp_ingested_at(deduped)
 
     inserted = upsert_rows(
         "sales_by_sku", deduped,
@@ -768,6 +782,7 @@ def fetch_orders(
         return summary
 
     rows = [r.model_dump() for r in all_records]
+    _stamp_ingested_at(rows)
     inserted = upsert_rows(
         "sales_by_state", rows,
         on_conflict="state_code,channel,period_start,period_end",
