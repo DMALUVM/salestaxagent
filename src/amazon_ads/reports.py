@@ -10,7 +10,12 @@ from datetime import date, timedelta
 
 from src.amazon_ads.client import fetch_report, SEARCH_TERM_TIMEOUT
 from src.db import upsert_rows
-from src.rules import ADS_MAX_CHUNK_DAYS, ADS_SEARCH_TERM_CHUNK_DAYS
+from src.rules import (
+    ADS_CAMPAIGN_TIMEOUT_SB_SECONDS,
+    ADS_CAMPAIGN_TIMEOUT_SD_SECONDS,
+    ADS_MAX_CHUNK_DAYS,
+    ADS_SEARCH_TERM_CHUNK_DAYS,
+)
 
 log = logging.getLogger(__name__)
 
@@ -123,15 +128,16 @@ DEFAULT_AD_PRODUCTS = ("SP", "SB", "SD")
 # minutes — observed on this account. Trimming SP's headroom would turn those
 # spells into nightly failures.
 #
-# SB and SD are capped tighter: they are additive spend, they are fetched after
-# SP has already been committed, and a Brands report that hangs must not hold
-# the nightly ads window open. Losing a night of SB/SD costs a few percent of
-# spend accuracy and is reported as a partial; losing SP costs the dashboard.
-# 300s: a campaign report that is actually going to generate does so in one to
-# three minutes. When Amazon's queue stalls it stalls for far longer than any
-# cap worth waiting out, so a tighter bound just surfaces the stall sooner —
-# each chunk has already committed, and the next run picks the day back up.
-CAMPAIGN_REPORT_TIMEOUT = {"SB": 300, "SD": 300}
+# SB and SD are fetched after SP is committed, so a hang cannot discard SP.
+# They still need a durable poll: a 300s cap produced nightly
+# `SB+SD FAILED, SP kept` partials when Brands/Display sat PENDING longer than
+# five minutes. Knobs live in config/business_rules.json
+# (`ads.campaign_report_timeout_{sb,sd}_seconds`); both default to 900s, still
+# below SP's 1800s client default.
+CAMPAIGN_REPORT_TIMEOUT = {
+    "SB": ADS_CAMPAIGN_TIMEOUT_SB_SECONDS,
+    "SD": ADS_CAMPAIGN_TIMEOUT_SD_SECONDS,
+}
 
 
 def _normalise_metric_keys(r: dict) -> dict:

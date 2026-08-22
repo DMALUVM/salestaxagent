@@ -29,6 +29,8 @@
     "max_chunk_days": 30,
     "search_term_chunk_days": 7,
     "search_term_timeout_seconds": 5400,
+    "campaign_report_timeout_sb_seconds": 900,
+    "campaign_report_timeout_sd_seconds": 900,
     "mandatory_chunking": true
   },
   "agent": {

@@ -4816,6 +4816,28 @@ def _run_deadline_check():
         job_finish(run_id, "fail", str(e)[:500])
 
 
+def _spapi_refresh_outcome(
+    errors: list[str],
+    orders_inserted: int | None,
+) -> tuple[str, str]:
+    """Classify the morning SP-API refresh for job_runs.
+
+    Hard errors (orders exception, inventory, daily sales) stay fail.
+    Orders returning 0 rows while inventory/daily succeeded used to record
+    success — that hid a stale sales_by_state tax SoT behind a green job.
+    """
+    if errors:
+        return "fail", "; ".join(errors[:3])
+    n = 0 if orders_inserted is None else orders_inserted
+    if n <= 0:
+        return "partial", (
+            "Orders wrote 0 sales_by_state rows; inventory + daily sales synced"
+        )
+    return "success", (
+        f"Orders {n} rows + inventory + daily sales synced"
+    )
+
+
 def _run_spapi_refresh():
     from datetime import date, timedelta, datetime, timezone
     from src.amazon_sp.reports import fetch_orders, fetch_inventory
@@ -4835,17 +4857,18 @@ def _run_spapi_refresh():
     # duplicating them, and never removes anything older than the window.
     inv_start = end - timedelta(days=SPAPI_INVENTORY_LEDGER_DAYS)
     errors = []
+    orders_inserted: int | None = None
     try:
         orders = fetch_orders(start, end)
-        inserted = orders.get("rows_inserted", 0)
-        print(f"[SP-API] {ts} Orders: {inserted} rows, "
+        orders_inserted = orders.get("rows_inserted", 0)
+        print(f"[SP-API] {ts} Orders: {orders_inserted} rows, "
               f"${orders.get('total_gross_sales', 0):,.0f} sales")
         log_ingestion(
             filename=f"spapi_orders_{ts}",
             file_type="amazon_spapi",
-            rows_total=orders.get("rows_total", inserted),
-            rows_inserted=inserted,
-            status="success",
+            rows_total=orders.get("rows_total", orders_inserted),
+            rows_inserted=orders_inserted,
+            status="success" if orders_inserted else "partial",
         )
     except Exception as e:
         errors.append(f"Orders: {e}")
@@ -4975,8 +4998,9 @@ def _run_spapi_refresh():
     except Exception as e:
         print(f"[PnL] {ts} Error: {e}")
 
-    if errors:
-        job_finish(run_id, "fail", "; ".join(errors[:3]))
+    status, message = _spapi_refresh_outcome(errors, orders_inserted)
+    if status == "fail":
+        job_finish(run_id, status, message)
         try:
             from src.alerts.telegram import send_telegram
             send_telegram(
@@ -4986,7 +5010,7 @@ def _run_spapi_refresh():
         except Exception:
             pass
     else:
-        job_finish(run_id, "success", f"Orders + inventory + daily sales synced")
+        job_finish(run_id, status, message)
 
 
 def _run_source_monitoring():
