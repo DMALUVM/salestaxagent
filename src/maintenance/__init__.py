@@ -1,1 +1,1 @@
-"""Maintenance utilities — automated backups, housekeeping."""
+"""Maintenance utilities — automated backups, safe auto-update, housekeeping."""
