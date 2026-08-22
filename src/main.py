@@ -5436,8 +5436,22 @@ def _run_job_worker():
         print(f"[Job Worker] Running job {job_id}: {job_type}")
 
         try:
+            payload = job.get("payload") or {}
             if job_type in ("export_cpa", "export_triage", "export_economic_audit"):
                 _run_cpa_exports()  # runs all three: inventory, triage, economic
+            elif job_type == "spapi_refresh":
+                # Dashboard /api/spapi-refresh enqueues this. Honour payload days.
+                from datetime import date as d, timedelta
+                days = int(payload.get("days", 30))
+                end = d.today() - timedelta(days=1)
+                start = end - timedelta(days=days)
+                from src.amazon_sp.reports import fetch_orders, fetch_inventory
+                print(f"[Job Worker] spapi_refresh {start} → {end}")
+                fetch_orders(start, end)
+                fetch_inventory(start, end)
+            elif job_type in ("ads_sync", "ppc_sync"):
+                days = int(payload.get("days", 14))
+                _run_ads_sync_job("ads_sync", days=days, label="dashboard-enqueue")
             else:
                 raise ValueError(f"Unknown job type: {job_type}")
 
