@@ -21,3 +21,17 @@ build/
 logs/heartbeat.json
 logs/heartbeat.tmp
 logs/health_state.json
+
+# Generated exports / CPA packets / filing CSVs — never commit business data.
+exports/
+exports/**
+!exports/playbooks/
+!exports/playbooks/**
+
+# Next.js / Node build artifacts (also covered under dashboard/.gitignore)
+.next/
+.next/**
+node_modules/
+**/node_modules/
+out/
+.turbo/

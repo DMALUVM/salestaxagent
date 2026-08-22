@@ -1,5 +1,0 @@
-state,period_start,period_end,channel,channel_label,seller_responsible,gross_sales,tax_collected,order_count
-MD,2026-07-01,2026-07-31,amazon,Amazon FBA (Amazon remits),False,1867.41,108.76,110
-MD,2026-08-01,2026-08-31,shopify,Shopify (seller),True,137.03,8.23,3
-MD,2026-08-01,2026-08-31,amazon,Amazon FBA (Amazon remits),False,307.78,17.69,22
-MD,2026-07-01,2026-07-31,shopify,Shopify (seller),True,406.89,24.43,9
