@@ -747,9 +747,7 @@ export async function POST(request: Request) {
       }
 
       const sb = getServerSupabase();
-      const from = new Date();
-      from.setDate(from.getDate() - rangeDays);
-      const cutoff = from.toISOString().slice(0, 10);
+      const cutoff = windowStart(amazonAsOf(), rangeDays);
 
       // Load search terms inside the window, paginated — the PostgREST
       // 1,000-row default would silently truncate the input set and generate

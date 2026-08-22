@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Optional
 
-from src.channels import SHOPIFY, AMAZON, normalize_channel
+from src.channels import SHOPIFY, AMAZON, is_quarantined_source, normalize_channel
 from src.db import fetch_all
 from src.alerts.telegram import send_telegram
 
@@ -45,6 +45,8 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
     amazon_mtd = 0.0
 
     for row in sales_rows:
+        if is_quarantined_source(row.get("source")):
+            continue
         period_end = row.get("period_end", "")
         # Include rows whose period overlaps the current month
         if period_end < month_start:

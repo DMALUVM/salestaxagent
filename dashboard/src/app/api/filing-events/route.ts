@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { agentToday } from "@/lib/as-of";
 
 /**
  * POST /api/filing-events
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
     try {
       await sb
         .from("filing_calendar")
-        .update({ status: "filed", filed_date: new Date().toISOString().slice(0, 10) })
+        .update({ status: "filed", filed_date: agentToday() })
         .eq("state_code", state_code)
         .lte("period_end", period_end)
         .eq("status", "pending");

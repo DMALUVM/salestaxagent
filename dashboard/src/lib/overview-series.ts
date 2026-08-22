@@ -1,3 +1,4 @@
+import { amazonAsOf, shiftDays } from "./as-of";
 import { normalizeChannel, SHOPIFY, AMAZON } from "./channels";
 
 /**
@@ -8,9 +9,9 @@ import { normalizeChannel, SHOPIFY, AMAZON } from "./channels";
  * what the page did before. See overview-series.test.ts — that test is the
  * regression guard for the shape of this series.
  *
- * The window is the 30 days ENDING YESTERDAY in the viewer's local timezone.
- * Today is excluded on purpose: it is still accruing and would always render as
- * a short bar.
+ * The window is the 30 days ENDING YESTERDAY in America/Los_Angeles
+ * (business rule 1 — Amazon day boundaries). Today is excluded on purpose:
+ * it is still accruing and would always render as a short bar.
  *
  * The one behavioural addition is `hasData`, which distinguishes "we have a row
  * for this day and it was $0" from "no row exists". The chart needs that to
@@ -55,7 +56,7 @@ export const SERIES_DAYS = 30;
  * Build the 30-day stacked series ending yesterday.
  *
  * @param rows sales_daily rows (any channels; only Shopify and Amazon are kept)
- * @param now  reference "now"; the series ends the day before this
+ * @param now  reference "now"; the series ends amazonAsOf(now)
  */
 export function buildLast30Series(
   rows: SalesDailyRow[],
@@ -79,11 +80,11 @@ export function buildLast30Series(
     else if (ch === AMAZON) entry.amazon += Number(row.gross_sales ?? 0);
   }
 
+  const asOf = amazonAsOf(now);
   const out: SeriesPoint[] = [];
   for (let i = days - 1; i >= 0; i--) {
-    // Local-midnight arithmetic, so a DST shift cannot drop or duplicate a day.
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - i);
-    const ds = localDate(d);
+    // Whole-day ISO arithmetic, so a DST shift cannot drop or duplicate a day.
+    const ds = shiftDays(asOf, -i);
     const entry = dailyMap.get(ds);
     const shopify = entry?.shopify ?? 0;
     const amazon = entry?.amazon ?? 0;

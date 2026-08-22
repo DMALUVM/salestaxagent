@@ -15,7 +15,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from src.db import log_audit, log_ingestion, upsert_rows
+from src.db import fetch_all, log_audit, log_ingestion, upsert_rows
 from src.models.schema import SalesByState
 
 # ---------------------------------------------------------------------------
@@ -383,12 +383,46 @@ def ingest_amazon_tax_report(file_path: str | Path, dry_run: bool = False) -> di
     if dry_run or (not parsed["sales_records"] and not parsed["inventory_records"]):
         return summary
 
-    # Upsert sales_by_state
+    # Upsert sales_by_state — never overwrite amazon_spapi rows. The unique
+    # key is (state_code, channel, period_start, period_end) with no source,
+    # so a tax-report upsert would replace the authoritative SP-API totals.
     if parsed["sales_records"]:
         sales_rows = [r.model_dump() for r in parsed["sales_records"]]
+        existing = fetch_all("sales_by_state")
+        protected = {
+            (
+                r.get("state_code"),
+                r.get("channel"),
+                str(r.get("period_start") or ""),
+                str(r.get("period_end") or ""),
+            )
+            for r in existing
+            if (r.get("source") or "").strip().lower() == "amazon_spapi"
+        }
+        kept: list[dict] = []
+        skipped_spapi = 0
+        for r in sales_rows:
+            key = (
+                r.get("state_code"),
+                r.get("channel"),
+                str(r.get("period_start") or ""),
+                str(r.get("period_end") or ""),
+            )
+            if key in protected:
+                skipped_spapi += 1
+                continue
+            kept.append(r)
+        if skipped_spapi:
+            warning = (
+                f"Skipped {skipped_spapi} tax-report period(s) that already "
+                "have amazon_spapi sales — quarantined sources cannot overwrite "
+                "SP-API totals."
+            )
+            summary["warnings"].append(warning)
+            parsed["warnings"].append(warning)
         inserted = upsert_rows(
             "sales_by_state",
-            sales_rows,
+            kept,
             on_conflict="state_code,channel,period_start,period_end",
         )
         summary["rows_inserted"] = inserted

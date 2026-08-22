@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo
 
 from src.channels import SHOPIFY, AMAZON
 from src.db import upsert_rows, get_client
-from src.rules import AMAZON_TZ, SHOPIFY_TZ, is_excluded_status
+from src.rules import AMAZON_TZ, SHOPIFY_TZ, amazon_today, is_excluded_status
 
 log = logging.getLogger(__name__)
 
@@ -373,7 +373,7 @@ def _write_daily_guarded(rows: list[dict], job: str,
                 .gte("sale_date", days[0]).lte("sale_date", days[-1])
                 .in_("channel", channels).execute().data) or []
 
-    res = guard_rows(rows, existing, date.today(),
+    res = guard_rows(rows, existing, amazon_today(),
                      allow_decrease=allow_decrease, job=job)
 
     stamped = []
@@ -424,7 +424,7 @@ def sync_amazon_daily(days: int = 7) -> dict:
         _build_header_lookup, _get, _parse_money,
     )
 
-    end = date.today()
+    end = amazon_today()
     start = end - timedelta(days=days)
 
     # Track unique order IDs per day to avoid double-counting line items

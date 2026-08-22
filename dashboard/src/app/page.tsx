@@ -17,7 +17,7 @@ import type {
 import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
 import { buildLast30Series } from "@/lib/overview-series";
 import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
-import { agentToday } from "@/lib/as-of";
+import { agentToday, amazonAsOf, monthStart, shiftDays, windowStart } from "@/lib/as-of";
 import { LoadingState } from "@/components/loading";
 import { QueryError } from "@/components/query-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,12 +35,12 @@ function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
-/** YYYY-MM-DD in local time (not UTC — avoids timezone shift bugs). */
-function localDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+/** Month name from a YYYY-MM-DD string, using UTC noon so the day never shifts. */
+function monthNameFromIso(iso: string): string {
+  return new Date(`${iso}T12:00:00Z`).toLocaleString("en-US", {
+    month: "long",
+    timeZone: "UTC",
+  });
 }
 
 /** Format YoY %: "+22% YoY", "−5% YoY", or "n/a" when null. */
@@ -140,37 +140,36 @@ export default function Pulse() {
   /** Hovered/focused index in the 30-day chart, or null. */
   const [hoverDay, setHoverDay] = useState<number | null>(null);
 
-  const todayStr = localDate(new Date());
+  const asOf = amazonAsOf();
   const filingToday = agentToday();
 
   // ── Sales aggregation ──
   const sales = useMemo(() => {
     const now = new Date();
-    const yd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-    const yesterday = localDate(yd);
+    // Closed Amazon day (America/Los_Angeles) — matches sales_daily buckets.
+    const yesterday = amazonAsOf(now);
 
     // YoY dates: same weekday last year (- 364 days)
-    const yoyYd = localDate(new Date(yd.getFullYear(), yd.getMonth(), yd.getDate() - 364));
+    const yoyYd = shiftDays(yesterday, -364);
 
     // Window boundaries (inclusive, ending on yesterday)
-    const l7Start = localDate(new Date(yd.getFullYear(), yd.getMonth(), yd.getDate() - 6));
-    const l30Start = localDate(new Date(yd.getFullYear(), yd.getMonth(), yd.getDate() - 29));
+    const l7Start = windowStart(yesterday, 7);
+    const l30Start = windowStart(yesterday, 30);
 
     // YoY windows (same weekday alignment)
-    const yoyL7Start = localDate(new Date(yd.getFullYear(), yd.getMonth(), yd.getDate() - 364 - 6));
+    const yoyL7Start = windowStart(yoyYd, 7);
     const yoyL7End = yoyYd;
-    const yoyL30Start = localDate(new Date(yd.getFullYear(), yd.getMonth(), yd.getDate() - 364 - 29));
+    const yoyL30Start = windowStart(yoyYd, 30);
     const yoyL30End = yoyYd;
 
     // MTD
-    const mtdStart = yesterday.slice(0, 8) + "01";
-    const mtdMonthName = yd.toLocaleString(undefined, { month: "long" });
+    const mtdStart = monthStart(yesterday);
+    const mtdMonthName = monthNameFromIso(yesterday);
 
     // Last month
-    const lmEnd = new Date(yd.getFullYear(), yd.getMonth(), 0); // last day of prev month
-    const lmStart = localDate(new Date(lmEnd.getFullYear(), lmEnd.getMonth(), 1));
-    const lmEndStr = localDate(lmEnd);
-    const lmName = lmEnd.toLocaleString(undefined, { month: "long" });
+    const lmEndStr = shiftDays(mtdStart, -1);
+    const lmStart = monthStart(lmEndStr);
+    const lmName = monthNameFromIso(lmEndStr);
 
     // Buckets
     const bYd = emptyBucket();
@@ -237,7 +236,7 @@ export default function Pulse() {
       shopifyStale: isStale(maxShopifyDate),
       amazonStale: isStale(maxAmazonDate),
     };
-  }, [salesDaily, todayStr]);
+  }, [salesDaily, asOf]);
 
   // ── Actions ──
   const recs = useMemo(

@@ -188,9 +188,43 @@ async function handleTaxReport(content: string, filename: string) {
   let salesInserted = 0;
   let shipFromInserted = 0;
 
+  // Never overwrite amazon_spapi rows. The unique key does not include
+  // source, so a tax-report upsert would replace authoritative SP-API totals.
+  const periodKeys = parsed.sales_records.map((r) => ({
+    state_code: r.state_code,
+    channel: r.channel,
+    period_start: r.period_start,
+    period_end: r.period_end,
+  }));
+  const protectedKeys = new Set<string>();
+  if (periodKeys.length > 0) {
+    const states = [...new Set(periodKeys.map((k) => k.state_code).filter(Boolean))];
+    const { data: existing } = await sb
+      .from("sales_by_state")
+      .select("state_code,channel,period_start,period_end,source")
+      .in("state_code", states);
+    for (const row of existing ?? []) {
+      if ((row.source ?? "").trim().toLowerCase() === "amazon_spapi") {
+        protectedKeys.add(
+          `${row.state_code}|${row.channel}|${row.period_start}|${row.period_end}`,
+        );
+      }
+    }
+  }
+  const salesToWrite = parsed.sales_records.filter((r) => {
+    const key = `${r.state_code}|${r.channel}|${r.period_start}|${r.period_end}`;
+    return !protectedKeys.has(key);
+  });
+  const skippedSpapi = parsed.sales_records.length - salesToWrite.length;
+  if (skippedSpapi > 0) {
+    parsed.warnings.push(
+      `Skipped ${skippedSpapi} period(s) that already have SP-API sales. Amazon tax reports cannot overwrite amazon_spapi totals.`,
+    );
+  }
+
   // Upsert sales_by_state
-  for (let i = 0; i < parsed.sales_records.length; i += batchSize) {
-    const batch = parsed.sales_records.slice(i, i + batchSize);
+  for (let i = 0; i < salesToWrite.length; i += batchSize) {
+    const batch = salesToWrite.slice(i, i + batchSize);
 
     const { data, error } = await sb
       .from("sales_by_state")

@@ -147,5 +147,110 @@ class TestStateRules:
             assert rules["states"][code]["has_sales_tax"] is False
 
 
+def _stub_supabase() -> None:
+    """The repo's supabase/ SQL folder shadows the Python client on sys.path."""
+    import sys
+    from types import ModuleType
+    fake = ModuleType("supabase")
+    fake.create_client = lambda *a, **k: None  # type: ignore[attr-defined]
+    fake.Client = object  # type: ignore[attr-defined]
+    sys.modules["supabase"] = fake
+
+
+def _orders_csv(*rows: dict) -> str:
+    headers = [
+        "amazon-order-id", "order-status", "ship-country", "ship-state",
+        "item-price", "item-tax", "quantity", "purchase-date",
+        "sku", "asin", "product-name",
+    ]
+    lines = ["\t".join(headers)]
+    for row in rows:
+        lines.append("\t".join(str(row.get(h, "")) for h in headers))
+    return "\n".join(lines)
+
+
+class TestAmazonOrdersPurchaseDate:
+    def test_utc_early_morning_lands_on_previous_la_month(self):
+        _stub_supabase()
+        from src.amazon_sp.reports import parse_orders_report
+
+        csv = _orders_csv({
+            "amazon-order-id": "111-1",
+            "order-status": "Shipped",
+            "ship-country": "US",
+            "ship-state": "TX",
+            "item-price": "10.00",
+            "item-tax": "0",
+            "quantity": "1",
+            "purchase-date": "2026-09-01T06:00:00+00:00",
+        })
+        result = parse_orders_report(csv)
+        assert result["rows_parsed"] == 1
+        rec = result["sales_records"][0]
+        assert rec.period_start.isoformat() == "2026-08-01"
+        assert rec.period_end.isoformat() == "2026-08-31"
+
+    def test_pacific_afternoon_stays_on_same_day(self):
+        _stub_supabase()
+        from src.amazon_sp.reports import parse_orders_report
+
+        csv = _orders_csv({
+            "amazon-order-id": "111-2",
+            "order-status": "Shipped",
+            "ship-country": "US",
+            "ship-state": "TX",
+            "item-price": "10.00",
+            "item-tax": "0",
+            "quantity": "1",
+            "purchase-date": "2026-09-01T20:00:00+00:00",
+        })
+        result = parse_orders_report(csv)
+        rec = result["sales_records"][0]
+        assert rec.period_start.isoformat() == "2026-09-01"
+
+
+class TestAmazonOrdersSkuPending:
+    def test_pending_orders_are_included_in_sku_totals(self):
+        _stub_supabase()
+        from src.amazon_sp.reports import parse_orders_by_sku
+
+        csv = _orders_csv({
+            "amazon-order-id": "111-3",
+            "order-status": "Pending",
+            "ship-country": "US",
+            "ship-state": "CA",
+            "item-price": "25.00",
+            "item-tax": "0",
+            "quantity": "2",
+            "purchase-date": "2026-08-15T18:00:00-07:00",
+            "sku": "BALM-01",
+            "asin": "B000000001",
+            "product-name": "Balm",
+        })
+        result = parse_orders_by_sku(csv)
+        assert result["rows_parsed"] == 1
+        assert result["sku_rows"][0]["units"] == 2
+        assert result["sku_rows"][0]["gross_sales"] == 25.0
+
+    def test_cancelled_orders_are_still_excluded(self):
+        _stub_supabase()
+        from src.amazon_sp.reports import parse_orders_by_sku
+
+        csv = _orders_csv({
+            "amazon-order-id": "111-4",
+            "order-status": "Cancelled",
+            "ship-country": "US",
+            "ship-state": "CA",
+            "item-price": "25.00",
+            "item-tax": "0",
+            "quantity": "2",
+            "purchase-date": "2026-08-15T18:00:00-07:00",
+            "sku": "BALM-01",
+        })
+        result = parse_orders_by_sku(csv)
+        assert result["rows_parsed"] == 0
+        assert result["sku_rows"] == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

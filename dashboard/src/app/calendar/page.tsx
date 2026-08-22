@@ -59,19 +59,27 @@ function MarkCompleteDialog({
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [open, setOpen] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function handleSubmit() {
     setSubmitting(true);
+    setSaveError(null);
     const sb = getSupabase();
-    await sb
+    const { error } = await sb
       .from("filing_calendar")
       .update({
         status: "filed",
         filed_amount: amount ? parseFloat(amount) : null,
         filed_notes: notes || null,
-        filed_date: new Date().toISOString().slice(0, 10),
+        filed_date: agentToday(),
       })
       .eq("id", filing.id);
+
+    if (error) {
+      setSubmitting(false);
+      setSaveError(error.message);
+      return;
+    }
 
     // Update last_filed_through on nexus_status if this period is newer
     const { data: nexus } = await sb
@@ -136,6 +144,9 @@ function MarkCompleteDialog({
                 className="mt-1"
               />
             </div>
+            {saveError && (
+              <p className="text-sm text-red-600 dark:text-red-400">{saveError}</p>
+            )}
             <Button
               onClick={handleSubmit}
               disabled={submitting}
@@ -166,15 +177,19 @@ function QuickMarkButton({
   async function mark() {
     setBusy(true);
     const sb = getSupabase();
-    await sb
+    const { error } = await sb
       .from("filing_calendar")
       .update({
         status: "filed",
         filed_amount: null,
         filed_notes: null,
-        filed_date: new Date().toISOString().slice(0, 10),
+        filed_date: agentToday(),
       })
       .eq("id", filing.id);
+    if (error) {
+      setBusy(false);
+      return;
+    }
 
     // Update last_filed_through
     if (filing.period_end) {
@@ -270,11 +285,11 @@ function BulkMarkOverdueButton({
   async function markAll() {
     setBusy(true);
     const sb = getSupabase();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = agentToday();
 
     // Mark all overdue as filed
     const ids = overdue.map((f) => f.id);
-    await sb
+    const { error } = await sb
       .from("filing_calendar")
       .update({
         status: "filed",
@@ -283,6 +298,10 @@ function BulkMarkOverdueButton({
         filed_date: today,
       })
       .in("id", ids);
+    if (error) {
+      setBusy(false);
+      return;
+    }
 
     // Update last_filed_through for each affected state
     const byState: Record<string, string> = {};

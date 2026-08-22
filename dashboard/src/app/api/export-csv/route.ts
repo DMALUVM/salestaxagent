@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { isQuarantinedSource } from "@/lib/channels";
 
 /**
  * GET /api/export-csv?table=sales_by_state&start=2026-01-01&end=2026-12-31
@@ -35,14 +36,20 @@ export async function GET(request: NextRequest) {
     offset += PAGE;
   }
 
-  if (all.length === 0) {
+  const includeQuarantined = params.get("include_quarantined") === "1";
+  const rows =
+    table === "sales_by_state" && !includeQuarantined
+      ? all.filter((r) => !isQuarantinedSource(typeof r.source === "string" ? r.source : null))
+      : all;
+
+  if (rows.length === 0) {
     return Response.json({ error: "No data for the selected range" }, { status: 404 });
   }
 
   // Build CSV
-  const keys = Object.keys(all[0]);
+  const keys = Object.keys(rows[0]);
   const lines = [keys.join(",")];
-  for (const row of all) {
+  for (const row of rows) {
     lines.push(
       keys
         .map((k) => {

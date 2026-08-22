@@ -134,6 +134,14 @@ test("spans a month boundary without gaps or repeats", () => {
   assert.equal(new Set(s.map((p) => p.date)).size, 30);
 });
 
+test("series ends yesterday in America/Los_Angeles, not UTC", () => {
+  // 06:00 UTC on Aug 20 is still Aug 19 23:00 in Pacific — yesterday is Aug 18.
+  const utcMorning = new Date("2026-08-20T06:00:00.000Z");
+  const s = buildLast30Series([], utcMorning);
+  assert.equal(s[s.length - 1].date, "2026-08-18");
+  assert.ok(!s.some((p) => p.date === "2026-08-19"), "UTC yesterday must not leak in");
+});
+
 test("string gross_sales values are coerced, not concatenated", () => {
   const rows: SalesDailyRow[] = [
     { sale_date: YESTERDAY, channel: "amazon", gross_sales: "100.50" },

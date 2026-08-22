@@ -1,4 +1,5 @@
 import { getServerSupabase } from "@/lib/supabase-server";
+import { isQuarantinedSource } from "@/lib/channels";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 
@@ -43,7 +44,7 @@ export async function GET() {
     { data: flagRows },
   ] = await Promise.all([
     sb.from("nexus_status").select("*"),
-    sb.from("sales_by_state").select("state_code, channel, gross_sales, period_end"),
+    sb.from("sales_by_state").select("state_code, channel, gross_sales, period_end, source"),
     sb.from("franchise_tax_flags").select("*").eq("status", "open"),
   ]);
 
@@ -100,6 +101,7 @@ export async function GET() {
 
   const salesMap: Record<string, { shopify: number; amazon: number }> = {};
   for (const s of salesRows ?? []) {
+    if (isQuarantinedSource(s.source)) continue;
     const pe = s.period_end ?? "";
     if (pe < cutoffStr) continue;
     const sc = s.state_code;

@@ -16,6 +16,7 @@ import {
   AMAZON,
   STATE_TAX_RATES,
 } from "@/lib/channels";
+import { formatYmd } from "@/lib/as-of";
 import { isRegistered } from "@/lib/compliance-status";
 import { LoadingState } from "@/components/loading";
 import { Badge } from "@/components/ui/badge";
@@ -149,8 +150,8 @@ function computeNextDue(
       : periodEndDate.getFullYear();
   const dueDate = new Date(dueYear, dueMonth % 12, Math.min(dueDay, 28));
 
-  const periodEnd = periodEndDate.toISOString().slice(0, 10);
-  const due = dueDate.toISOString().slice(0, 10);
+  const periodEnd = formatYmd(periodEndDate);
+  const due = formatYmd(dueDate);
   const days = Math.ceil(
     (dueDate.getTime() - Date.now()) / 86400000,
   );

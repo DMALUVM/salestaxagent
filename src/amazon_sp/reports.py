@@ -15,7 +15,7 @@ from src.channels import AMAZON
 from src.db import delete_rows, log_audit, log_ingestion, upsert_rows
 from src.mappers.fc_to_state import fc_to_state
 from src.models.schema import InventoryEvent, SalesByState
-from src.rules import SPAPI_MAX_CHUNK_DAYS, is_excluded_status
+from src.rules import AMAZON_TZ, SPAPI_MAX_CHUNK_DAYS, is_excluded_status
 from src.sku_normalize import normalize_sku
 
 from src.amazon_sp.client import request_and_download
@@ -173,6 +173,27 @@ def _parse_date(value: str) -> date | None:
         return None
 
 
+def _parse_amazon_purchase_date(value: str) -> date | None:
+    """Parse SP-API ``purchase-date`` onto the America/Los_Angeles calendar.
+
+    Timezone-aware ISO strings (the usual SP-API form) are converted to
+    Pacific before taking the date. Date-only and ledger-style strings
+    fall through to ``_parse_date``. Truncating ``2026-09-01T06:00:00+00:00``
+    to the first 10 characters would bucket the order as September 1
+    UTC — August 31 in LA — and shift monthly nexus/tax totals.
+    """
+    v = value.strip()
+    if not v:
+        return None
+    try:
+        dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            return dt.astimezone(AMAZON_TZ).date()
+    except (ValueError, TypeError):
+        pass
+    return _parse_date(v)
+
+
 def _parse_money(value: str) -> float:
     v = value.strip().replace(",", "")
     if not v:
@@ -312,7 +333,7 @@ def parse_orders_report(content: str) -> dict:
         all_order_ids.add(order_id)
         result["ship_to_states"].add(state)
 
-        purchase_date = _parse_date(_get(row, H, "purchase-date"))
+        purchase_date = _parse_amazon_purchase_date(_get(row, H, "purchase-date"))
         if not purchase_date:
             continue
 
@@ -411,7 +432,7 @@ def parse_orders_by_sku(content: str) -> dict:
         if not order_id:
             result["rows_skipped"] += 1
             continue
-        if status in ("cancelled", "pending"):
+        if is_excluded_status(status):
             result["rows_skipped"] += 1
             continue
         if country and country not in ("US", ""):
@@ -433,7 +454,7 @@ def parse_orders_by_sku(content: str) -> dict:
             result["rows_skipped"] += 1
             continue
 
-        purchase_date = _parse_date(_get(row, H, "purchase-date"))
+        purchase_date = _parse_amazon_purchase_date(_get(row, H, "purchase-date"))
         if not purchase_date:
             result["rows_skipped"] += 1
             continue

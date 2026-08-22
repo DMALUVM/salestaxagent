@@ -7,7 +7,8 @@
  */
 
 import type { NexusStatus, StateRule, SalesByState } from "@/lib/types";
-import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
+import { amazonAsOf, shiftDays } from "@/lib/as-of";
+import { isQuarantinedSource, normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -76,14 +77,20 @@ export function buildRecommendations(
   nexus: NexusStatus[],
   sales: SalesByState[],
   flags: Array<{ state_code: string; [key: string]: unknown }>,
+  asOf?: string,
 ): StateRecommendation[] {
   if (!rules || rules.length === 0) return [];
 
   const nexusMap = new Map(nexus.map((n) => [n.state_code, n]));
 
-  // Aggregate trailing-12m sales by state + channel
+  // Aggregate trailing-12m sales by state + channel. Quarantined Amazon
+  // tax-report sources must not inflate REGISTER_NOW / REVIEW thresholds.
+  const cutoff = shiftDays(asOf ?? amazonAsOf(), -365);
   const salesMap: Record<string, { shopify: number; amazon: number }> = {};
   for (const s of sales) {
+    if (isQuarantinedSource(s.source)) continue;
+    const pe = s.period_end ?? "";
+    if (pe && pe < cutoff) continue;
     const sc = s.state_code;
     if (!sc) continue;
     if (!salesMap[sc]) salesMap[sc] = { shopify: 0, amazon: 0 };

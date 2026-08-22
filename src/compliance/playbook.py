@@ -11,7 +11,7 @@ from pathlib import Path
 
 from src.config import PROJECT_ROOT, load_state_rules
 from src.db import fetch_all
-from src.channels import normalize_channel, SHOPIFY, AMAZON
+from src.channels import is_quarantined_source, normalize_channel, SHOPIFY, AMAZON
 
 PLAYBOOK_DIR = PROJECT_ROOT / "config" / "compliance_playbooks"
 
@@ -64,6 +64,8 @@ def _get_context(state_code: str) -> dict:
     amazon_total = 0.0
     for s in sales:
         if s.get("state_code") != state_code:
+            continue
+        if is_quarantined_source(s.get("source")):
             continue
         ch = normalize_channel(s.get("channel", ""))
         if ch == SHOPIFY:

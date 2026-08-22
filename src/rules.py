@@ -88,6 +88,20 @@ def agent_today(now: datetime | None = None) -> date:
     return moment.astimezone(AGENT_TZ).date()
 
 
+def amazon_today(now: datetime | None = None) -> date:
+    """Today's calendar date in AMAZON_TZ (America/Los_Angeles).
+
+    Use this — not ``date.today()`` — whenever a writer needs to know which
+    Amazon reporting day is still accruing. From 00:00–06:59 UTC, Pacific is
+    still on the previous calendar date; a machine/UTC ``date.today()`` would
+    treat that Pacific day as already closed.
+    """
+    moment = now or datetime.now(AMAZON_TZ)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=AMAZON_TZ)
+    return moment.astimezone(AMAZON_TZ).date()
+
+
 def amazon_as_of(now: datetime | None = None) -> date:
     """Yesterday in the Amazon reporting timezone — the newest closed day.
 
@@ -97,10 +111,7 @@ def amazon_as_of(now: datetime | None = None) -> date:
     machine's clock or a UTC date: from 00:00 UTC — 17:00 Pacific — a UTC date
     is already tomorrow in LA terms and silently shortens the window.
     """
-    moment = now or datetime.now(AMAZON_TZ)
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=AMAZON_TZ)
-    return moment.astimezone(AMAZON_TZ).date() - timedelta(days=1)
+    return amazon_today(now) - timedelta(days=1)
 
 
 def window_start(as_of: date, days: int) -> date:

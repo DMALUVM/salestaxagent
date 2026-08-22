@@ -168,6 +168,23 @@ class TestPSTDateBoundary:
         pst_date = utc_morning.astimezone(AMAZON_TZ).date()
         assert pst_date == date(2026, 8, 19)
 
+    def test_amazon_today_not_utc_date(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from src.rules import amazon_today
+
+        # 00:30 UTC on the 21st is still the 20th in Pacific (PDT, UTC-7).
+        utc = datetime(2026, 8, 21, 0, 30, 0, tzinfo=ZoneInfo("UTC"))
+        assert amazon_today(utc) == date(2026, 8, 20)
+
+    def test_amazon_as_of_is_pacific_yesterday(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from src.rules import amazon_as_of
+
+        utc = datetime(2026, 8, 21, 0, 30, 0, tzinfo=ZoneInfo("UTC"))
+        assert amazon_as_of(utc) == date(2026, 8, 19)
+
 
 # ── 4. Ads chunking produces valid chunks ─────────────────────
 

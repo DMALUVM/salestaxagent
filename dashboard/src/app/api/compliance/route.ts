@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { AMAZON, SHOPIFY, SHOPIFY_SHOP, SHOPIFY_SUB, isQuarantinedSource, normalizeChannel } from "@/lib/channels";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 
@@ -73,15 +74,16 @@ export async function GET(request: NextRequest) {
   // Sales totals
   const { data: sales } = await sb
     .from("sales_by_state")
-    .select("channel, gross_sales")
+    .select("channel, gross_sales, source")
     .eq("state_code", state);
   let shopify = 0;
   let amazon = 0;
   for (const s of sales ?? []) {
-    const ch = (s.channel ?? "").toLowerCase();
+    if (isQuarantinedSource(s.source)) continue;
+    const ch = normalizeChannel(s.channel ?? "");
     const amt = Number(s.gross_sales) || 0;
-    if (ch === "shopify") shopify += amt;
-    else if (ch === "amazon") amazon += amt;
+    if (ch === SHOPIFY || ch === SHOPIFY_SHOP || ch === SHOPIFY_SUB) shopify += amt;
+    else if (ch === AMAZON) amazon += amt;
   }
 
   return Response.json({

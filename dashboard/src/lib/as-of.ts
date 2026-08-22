@@ -49,3 +49,11 @@ export function monthStart(isoDate: string): string {
 export function windowStart(asOf: string, days: number): string {
   return shiftDays(asOf, -(days - 1));
 }
+
+/** Format a Date using its local calendar fields (never UTC). */
+export function formatYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
