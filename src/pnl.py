@@ -34,7 +34,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from src.db import fetch_all, get_client, upsert_rows
-from src.rules import PNL_DEFAULT_REFERRAL_PCT, PNL_DEFAULT_FBA_FEE_PER_UNIT
+from src.rules import PNL_DEFAULT_REFERRAL_PCT, PNL_DEFAULT_FBA_FEE_PER_UNIT, amazon_today
 
 log = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ def _sku_units_by_day(days: int) -> tuple[dict[str, dict[str, int]], dict[str, i
         log.exception("Could not import orders-report helpers; COGS will be 0")
         return {}, {}
 
-    end = date.today()
+    end = amazon_today()
     start = end - timedelta(days=days)
     start_iso = start.isoformat()
     out: dict[str, dict[str, int]] = defaultdict(dict)
@@ -184,7 +184,7 @@ def _settled_by_day(days: int) -> dict[str, dict]:
     """
     try:
         from src.amazon_sp.economics import fetch_transactions, aggregate_daily
-        end = date.today()
+        end = amazon_today()
         start = end - timedelta(days=days)
         agg = aggregate_daily(fetch_transactions(start, end))
     except Exception:
@@ -225,7 +225,7 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
     """
     if fee_basis not in ("estimate", "settled"):
         raise ValueError("fee_basis must be 'estimate' or 'settled'")
-    today = date.today()
+    today = amazon_today()
     start = today - timedelta(days=days)
     start_iso = start.isoformat()
 

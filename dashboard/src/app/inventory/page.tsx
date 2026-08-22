@@ -109,8 +109,6 @@ interface ComputedRow {
 // ---------------------------------------------------------------------------
 
 export default function InventoryPage() {
-  if (!isConfigured()) return <SetupPrompt />;
-
   const { data: raw, loading, error, refetch } = useInventory();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<ComputedRow | null>(null);
@@ -533,6 +531,7 @@ export default function InventoryPage() {
     URL.revokeObjectURL(url);
   }
 
+  if (!isConfigured()) return <SetupPrompt />;
   if (loading) return <LoadingState />;
 
   const target = s.holiday_mode ? 90 : s.target_cover_days;

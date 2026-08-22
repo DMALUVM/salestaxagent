@@ -1,20 +1,17 @@
 import { normalizeChannel, SHOPIFY, AMAZON } from "./channels";
+import { amazonAsOf, shiftDays } from "./as-of";
 
 /**
  * Overview "Last 30 Days" series builder.
  *
- * Extracted from app/page.tsx UNCHANGED in behaviour so it can be tested: the
- * window, the local-date normalisation and the channel bucketing are exactly
- * what the page did before. See overview-series.test.ts — that test is the
- * regression guard for the shape of this series.
+ * The window is the 30 closed days ending yesterday in America/Los_Angeles
+ * (business rule 1). Amazon `sales_daily` rows are keyed on that calendar;
+ * a browser-local "yesterday" is a full day off for anyone outside Pacific
+ * (and for UTC hosts from 00:00–16:59 UTC). Today is excluded on purpose:
+ * it is still accruing and would always render as a short bar.
  *
- * The window is the 30 days ENDING YESTERDAY in the viewer's local timezone.
- * Today is excluded on purpose: it is still accruing and would always render as
- * a short bar.
- *
- * The one behavioural addition is `hasData`, which distinguishes "we have a row
- * for this day and it was $0" from "no row exists". The chart needs that to
- * draw a gap rather than a stub bar that reads as a real, terrible day.
+ * `hasData` distinguishes "we have a row for this day and it was $0" from
+ * "no row exists" so the chart can draw a gap rather than a stub bar.
  */
 
 export interface SalesDailyRow {
@@ -41,7 +38,7 @@ export interface SeriesPoint {
   isComplete: boolean;
 }
 
-/** YYYY-MM-DD in the viewer's local timezone (never UTC — see page.tsx). */
+/** YYYY-MM-DD in the viewer's local timezone. Prefer amazonAsOf for Amazon windows. */
 export function localDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -80,10 +77,10 @@ export function buildLast30Series(
   }
 
   const out: SeriesPoint[] = [];
+  const asOf = amazonAsOf(now);
   for (let i = days - 1; i >= 0; i--) {
-    // Local-midnight arithmetic, so a DST shift cannot drop or duplicate a day.
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - i);
-    const ds = localDate(d);
+    // Amazon closed-day arithmetic: never UTC, never browser-local.
+    const ds = shiftDays(asOf, -i);
     const entry = dailyMap.get(ds);
     const shopify = entry?.shopify ?? 0;
     const amazon = entry?.amazon ?? 0;

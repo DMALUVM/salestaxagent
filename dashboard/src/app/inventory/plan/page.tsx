@@ -66,8 +66,6 @@ function localDate(d: Date): string {
 }
 
 export default function PlanSkuPage() {
-  if (!isConfigured()) return <SetupPrompt />;
-
   const { data: raw, loading } = useInventory();
   const [selectedSku, setSelectedSku] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -282,6 +280,7 @@ export default function PlanSkuPage() {
     }
   }, [selectedSku, autoRan, loading, velocities.length]);
 
+  if (!isConfigured()) return <SetupPrompt />;
   if (loading) return <LoadingState />;
 
   // Chart

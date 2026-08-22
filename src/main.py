@@ -4842,11 +4842,11 @@ def _run_spapi_refresh():
     from src.amazon_sp.reports import fetch_orders, fetch_inventory
     from src.db import log_ingestion, job_start, job_finish
 
-    from src.rules import SPAPI_INVENTORY_LEDGER_DAYS
+    from src.rules import SPAPI_INVENTORY_LEDGER_DAYS, amazon_as_of
 
     run_id = job_start("spapi_refresh")
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    end = date.today() - timedelta(days=1)
+    end = amazon_as_of()
     start = end - timedelta(days=7)
     # The inventory ledger gets its own, wider window. It drives physical nexus
     # and therefore registration decisions, and Amazon restates ledger rows for
@@ -5125,10 +5125,10 @@ def _run_inventory_ledger_backfill():
     from datetime import date, timedelta
     from src.db import job_start, job_finish
     from src.amazon_sp.reports import fetch_inventory
-    from src.rules import SPAPI_INVENTORY_BACKFILL_DAYS
+    from src.rules import SPAPI_INVENTORY_BACKFILL_DAYS, amazon_as_of
 
     run_id = job_start("inventory_ledger_backfill")
-    end = date.today() - timedelta(days=1)
+    end = amazon_as_of()
     start = end - timedelta(days=SPAPI_INVENTORY_BACKFILL_DAYS)
     try:
         r = fetch_inventory(start, end)

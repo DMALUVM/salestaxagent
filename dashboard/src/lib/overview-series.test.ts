@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildLast30Series, localDate, SERIES_DAYS, type SalesDailyRow } from "./overview-series";
+import { buildLast30Series, SERIES_DAYS, type SalesDailyRow } from "./overview-series";
+import { amazonAsOf, shiftDays } from "./as-of";
 
 /**
  * Regression guard for the Overview "Last 30 Days" chart series.
@@ -13,9 +14,10 @@ import { buildLast30Series, localDate, SERIES_DAYS, type SalesDailyRow } from ".
  * Run: npm test   (from dashboard/)
  */
 
-const NOW = new Date(2026, 7, 20, 14, 30); // 2026-08-20 local
-const YESTERDAY = "2026-08-19";
-const THIRTY_AGO = "2026-07-21";
+// 14:30 PDT on 2026-08-20 — afternoon in Amazon TZ, so as-of is 2026-08-19.
+const NOW = new Date("2026-08-20T21:30:00.000Z");
+const YESTERDAY = amazonAsOf(NOW);
+const THIRTY_AGO = shiftDays(YESTERDAY, -(SERIES_DAYS - 1));
 
 function rowsFor(dates: string[], amazon = 3000, shopify = 300): SalesDailyRow[] {
   return dates.flatMap((d) => [
@@ -25,9 +27,10 @@ function rowsFor(dates: string[], amazon = 3000, shopify = 300): SalesDailyRow[]
 }
 
 function allDates(now: Date, days = SERIES_DAYS): string[] {
+  const asOf = amazonAsOf(now);
   const out: string[] = [];
   for (let i = days - 1; i >= 0; i--) {
-    out.push(localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1 - i)));
+    out.push(shiftDays(asOf, -i));
   }
   return out;
 }
@@ -127,11 +130,20 @@ test("empty input still yields 30 contiguous points", () => {
 });
 
 test("spans a month boundary without gaps or repeats", () => {
-  const now = new Date(2026, 8, 2, 9, 0); // 2026-09-02
+  const now = new Date("2026-09-02T16:00:00.000Z"); // 09:00 PDT
   const s = buildLast30Series([], now);
-  assert.equal(s[s.length - 1].date, "2026-09-01");
-  assert.equal(s[0].date, "2026-08-03");
+  assert.equal(s[s.length - 1].date, amazonAsOf(now));
+  assert.equal(s[0].date, shiftDays(amazonAsOf(now), -(SERIES_DAYS - 1)));
   assert.equal(new Set(s.map((p) => p.date)).size, 30);
+});
+
+test("UTC evening still ends on LA yesterday, not UTC yesterday", () => {
+  // 06:00 UTC on the 22nd is 23:00 PDT on the 21st — Amazon as-of is the 20th.
+  const utcEvening = new Date("2026-08-22T06:00:00.000Z");
+  const s = buildLast30Series([], utcEvening);
+  assert.equal(amazonAsOf(utcEvening), "2026-08-20");
+  assert.equal(s[s.length - 1].date, "2026-08-20");
+  assert.ok(!s.some((p) => p.date === "2026-08-21"), "must not include LA's still-open today");
 });
 
 test("string gross_sales values are coerced, not concatenated", () => {

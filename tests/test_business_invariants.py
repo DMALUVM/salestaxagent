@@ -420,6 +420,14 @@ class TestAgentTimezone:
         utc = datetime(2026, 8, 21, 0, 30, tzinfo=timezone.utc)
         assert agent_today(utc).isoformat() == "2026-08-20"
 
+    def test_amazon_today_uses_pacific_not_utc(self):
+        """06:00 UTC on the 22nd is still the 21st in America/Los_Angeles."""
+        from datetime import datetime, timezone
+        from src.rules import amazon_as_of, amazon_today
+        utc = datetime(2026, 8, 22, 6, 0, tzinfo=timezone.utc)
+        assert amazon_today(utc).isoformat() == "2026-08-21"
+        assert amazon_as_of(utc).isoformat() == "2026-08-20"
+
 
 # ── 5. SP-API chunking produces valid chunks ─────────────────
 
@@ -435,9 +443,48 @@ class TestSPAPIChunking:
 
         for cs, ce in chunks:
             span = (ce - cs).days + 1
-            assert span <= SPAPI_MAX_CHUNK_DAYS + 1, (
+            assert span <= SPAPI_MAX_CHUNK_DAYS, (
                 f"Chunk {cs}→{ce} spans {span} days"
             )
+
+    def test_january_is_split_so_no_chunk_is_31_days(self):
+        from src.amazon_sp.reports import _date_chunks
+        chunks = _date_chunks(date(2026, 1, 1), date(2026, 1, 31))
+        assert chunks == [
+            (date(2026, 1, 1), date(2026, 1, 30)),
+            (date(2026, 1, 31), date(2026, 1, 31)),
+        ]
+
+
+class TestAmazonPurchaseDate:
+    def test_utc_early_morning_buckets_to_previous_la_day(self):
+        from src.amazon_sp.reports import _parse_date
+        assert _parse_date("2026-08-19T02:00:00+00:00") == date(2026, 8, 18)
+        assert _parse_date("2026-08-19T02:00:00Z") == date(2026, 8, 18)
+
+    def test_afternoon_utc_stays_same_la_day(self):
+        from src.amazon_sp.reports import _parse_date
+        assert _parse_date("2026-08-19T20:00:00+00:00") == date(2026, 8, 19)
+
+    def test_date_only_is_unchanged(self):
+        from src.amazon_sp.reports import _parse_date
+        assert _parse_date("2026-08-19") == date(2026, 8, 19)
+
+
+class TestSkuParserIncludesPending:
+    def test_pending_order_is_counted(self):
+        from src.amazon_sp.reports import parse_orders_by_sku
+        report = (
+            "amazon-order-id\torder-status\tship-country\tship-state"
+            "\tsku\titem-price\tpurchase-date\tquantity\n"
+            "111-1\tPending\tUS\tCA\tSKU-A\t10.00\t2026-08-19T20:00:00+00:00\t1\n"
+            "111-2\tCancelled\tUS\tCA\tSKU-A\t10.00\t2026-08-19T20:00:00+00:00\t1\n"
+        )
+        result = parse_orders_by_sku(report)
+        assert result["rows_parsed"] == 1
+        assert result["rows_skipped"] == 1
+        assert len(result["sku_rows"]) == 1
+        assert result["sku_rows"][0]["gross_sales"] == 10.0
 
 
 # ── 6. P&L defaults match config ─────────────────────────────

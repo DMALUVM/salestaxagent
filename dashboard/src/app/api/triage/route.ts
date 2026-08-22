@@ -1,6 +1,7 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { AMAZON, SHOPIFY, isQuarantinedSource, normalizeChannel } from "@/lib/channels";
 
 interface PostureEntry {
   posture: string;
@@ -43,7 +44,7 @@ export async function GET() {
     { data: flagRows },
   ] = await Promise.all([
     sb.from("nexus_status").select("*"),
-    sb.from("sales_by_state").select("state_code, channel, gross_sales, period_end"),
+    sb.from("sales_by_state").select("state_code, channel, gross_sales, period_end, source"),
     sb.from("franchise_tax_flags").select("*").eq("status", "open"),
   ]);
 
@@ -100,15 +101,16 @@ export async function GET() {
 
   const salesMap: Record<string, { shopify: number; amazon: number }> = {};
   for (const s of salesRows ?? []) {
+    if (isQuarantinedSource(s.source)) continue;
     const pe = s.period_end ?? "";
     if (pe < cutoffStr) continue;
     const sc = s.state_code;
     if (!sc) continue;
     if (!salesMap[sc]) salesMap[sc] = { shopify: 0, amazon: 0 };
-    const ch = (s.channel ?? "").toLowerCase();
+    const ch = normalizeChannel(s.channel ?? "");
     const amt = Number(s.gross_sales) || 0;
-    if (ch.includes("shopify")) salesMap[sc].shopify += amt;
-    else salesMap[sc].amazon += amt;
+    if (ch === SHOPIFY) salesMap[sc].shopify += amt;
+    else if (ch === AMAZON) salesMap[sc].amazon += amt;
   }
 
   // Entity tax flags by state

@@ -49,3 +49,24 @@ export function monthStart(isoDate: string): string {
 export function windowStart(asOf: string, days: number): string {
   return shiftDays(asOf, -(days - 1));
 }
+
+/**
+ * YYYY-MM-DD from a Date's local calendar fields.
+ * Never use `toISOString().slice(0, 10)` for this — that converts to UTC
+ * and can shift the date backward in US timezones.
+ */
+export function formatLocalYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Month name from a YYYY-MM-DD string, timezone-stable. */
+export function monthNameFromIso(isoDate: string): string {
+  const [y, m] = isoDate.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, 15)).toLocaleString("en-US", {
+    month: "long",
+    timeZone: "UTC",
+  });
+}

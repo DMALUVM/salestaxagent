@@ -82,19 +82,10 @@ test("/ppc calls every hook unconditionally", { timeout: TIMEOUT }, async () => 
 });
 
 /**
- * Files that already violated the rule before this test existed.
- *
- * Both open with `if (!isConfigured()) return <SetupPrompt />` ahead of their
- * hooks. That has never crashed, because `isConfigured()` reads build-time env
- * and returns the same value for every render of a session — the hook count is
- * wrong in shape but constant in practice. /ppc differed in exactly one way:
- * it gated on `loading`, which flips, so its hook count actually changed.
- *
- * They are pinned rather than fixed because this change was scoped to /ppc.
- * The list may only shrink — a new offending file fails the test, and so does
- * a stale entry, so deleting the guard clause here is what removes the name.
+ * Pages that still call hooks after an early return. Must stay empty —
+ * /inventory and /inventory/plan used to be listed here.
  */
-const KNOWN = ["src/app/inventory/page.tsx", "src/app/inventory/plan/page.tsx"];
+const KNOWN: string[] = [];
 
 test("no new page or component calls hooks conditionally", { timeout: TIMEOUT }, async () => {
   const found = await violations(["src/app/**/*.tsx", "src/components/**/*.tsx"]);

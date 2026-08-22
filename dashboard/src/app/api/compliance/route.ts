@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { AMAZON, SHOPIFY, isQuarantinedSource, normalizeChannel } from "@/lib/channels";
 
 /**
  * GET /api/compliance?state=CA
@@ -70,18 +71,20 @@ export async function GET(request: NextRequest) {
     .eq("state_code", state)
     .order("due_date", { ascending: true });
 
-  // Sales totals
+  // Sales totals — SP-API / Shopify only. Quarantined Amazon tax CSVs
+  // stay in the table for audit and must not feed compliance math.
   const { data: sales } = await sb
     .from("sales_by_state")
-    .select("channel, gross_sales")
+    .select("channel, gross_sales, source")
     .eq("state_code", state);
   let shopify = 0;
   let amazon = 0;
   for (const s of sales ?? []) {
-    const ch = (s.channel ?? "").toLowerCase();
+    if (isQuarantinedSource(s.source)) continue;
+    const ch = normalizeChannel(s.channel ?? "");
     const amt = Number(s.gross_sales) || 0;
-    if (ch === "shopify") shopify += amt;
-    else if (ch === "amazon") amazon += amt;
+    if (ch === SHOPIFY) shopify += amt;
+    else if (ch === AMAZON) amazon += amt;
   }
 
   return Response.json({

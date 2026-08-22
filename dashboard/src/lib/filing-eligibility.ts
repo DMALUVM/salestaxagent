@@ -130,7 +130,7 @@ export interface Classified<T extends FilingRow> {
   excluded: Array<T & { excluded_reason: ExclusionReason; excluded_detail: string }>;
 }
 
-function daysBetween(fromIso: string, toIso: string): number {
+export function daysBetween(fromIso: string, toIso: string): number {
   const MS = 86400000;
   return Math.round((Date.parse(`${toIso}T00:00:00Z`) - Date.parse(`${fromIso}T00:00:00Z`)) / MS);
 }

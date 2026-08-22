@@ -17,6 +17,7 @@ import {
   STATE_TAX_RATES,
 } from "@/lib/channels";
 import { isRegistered } from "@/lib/compliance-status";
+import { formatLocalYmd } from "@/lib/as-of";
 import { LoadingState } from "@/components/loading";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -149,8 +150,8 @@ function computeNextDue(
       : periodEndDate.getFullYear();
   const dueDate = new Date(dueYear, dueMonth % 12, Math.min(dueDay, 28));
 
-  const periodEnd = periodEndDate.toISOString().slice(0, 10);
-  const due = dueDate.toISOString().slice(0, 10);
+  const periodEnd = formatLocalYmd(periodEndDate);
+  const due = formatLocalYmd(dueDate);
   const days = Math.ceil(
     (dueDate.getTime() - Date.now()) / 86400000,
   );
@@ -206,7 +207,7 @@ function MarkFiledDialog({
       else if (row.frequency === "annual") d.setFullYear(d.getFullYear() + 1);
       // period_end = last day of the derived month
       const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-      setPeriodEnd(last.toISOString().slice(0, 10));
+      setPeriodEnd(formatLocalYmd(last));
     }
     setConfirmation(""); setAmount(""); setNotes(""); setError(null);
   }, [row, open]);
@@ -222,7 +223,7 @@ function MarkFiledDialog({
         body: JSON.stringify({
           state_code: row.state_code,
           period_start: row.filed_through
-            ? new Date(new Date(row.filed_through + "T00:00:00").getTime() + 86400000).toISOString().slice(0, 10)
+            ? formatLocalYmd(new Date(new Date(row.filed_through + "T00:00:00").getTime() + 86400000))
             : periodEnd.slice(0, 7) + "-01",
           period_end: periodEnd,
           confirmation_number: confirmation.trim(),

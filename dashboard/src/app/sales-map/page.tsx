@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type { SalesByState } from "@/lib/types";
-import { normalizeChannel, SHOPIFY, AMAZON, channelLabel } from "@/lib/channels";
+import { normalizeChannel, SHOPIFY, AMAZON, channelLabel, isQuarantinedSource } from "@/lib/channels";
 import { useUSGeo, useDarkMode } from "@/lib/use-us-geo";
 import { LoadingState } from "@/components/loading";
 import { Card, CardContent } from "@/components/ui/card";
@@ -81,6 +81,7 @@ function aggregate(
       : month;
 
   for (const s of sales) {
+    if (isQuarantinedSource(s.source)) continue;
     const ps = s.period_start ?? "";
     if (year !== "all" && ps.slice(0, 4) !== year) continue;
 

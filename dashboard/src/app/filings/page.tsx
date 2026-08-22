@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type { NexusStatus, StateRule, SalesByState } from "@/lib/types";
-import { normalizeChannel, isSellerResponsible, SHOPIFY, STATE_TAX_RATES } from "@/lib/channels";
+import { isSellerResponsible, isQuarantinedSource, STATE_TAX_RATES } from "@/lib/channels";
+import { isRegistered } from "@/lib/compliance-status";
+import { agentToday, formatLocalYmd, shiftDays } from "@/lib/as-of";
+import { daysBetween } from "@/lib/filing-eligibility";
 import { LoadingState } from "@/components/loading";
 import { EmptyState } from "@/components/empty-state";
 import { Disclaimer } from "@/components/disclaimer";
@@ -74,9 +77,9 @@ function computeNextDue(
       : periodEndDate.getFullYear();
   const dueDate = new Date(dueYear, dueMonth % 12, Math.min(dueDay, 28));
 
-  const periodEnd = periodEndDate.toISOString().slice(0, 10);
-  const due = dueDate.toISOString().slice(0, 10);
-  const days = Math.ceil((dueDate.getTime() - Date.now()) / 86400000);
+  const periodEnd = formatLocalYmd(periodEndDate);
+  const due = formatLocalYmd(dueDate);
+  const days = daysBetween(agentToday(), due);
 
   // Build human-readable period label
   const peMonth = periodEndDate.getMonth();
@@ -142,8 +145,7 @@ export default function FilingsPage() {
     const result: FilingRow[] = [];
 
     for (const n of nexus) {
-      const isReg = n.is_registered === true || (n.is_registered as unknown) === "true";
-      if (!isReg) continue;
+      if (!isRegistered(n.is_registered)) continue;
 
       const rule = rulesMap.get(n.state_code);
       if (!rule) continue;
@@ -156,35 +158,22 @@ export default function FilingsPage() {
       const nextDue = computeNextDue(lft, freq, dueDay);
       if (!nextDue) continue;
 
-      // Sum seller-responsible sales since last_filed_through through yesterday.
-      // Complete past months use full monthly totals.
-      // Current (partial) month is prorated by days elapsed.
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const cutoff = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+      // Sum seller-responsible sales since last_filed_through.
+      // sales_by_state monthly aggregates are actual orders placed in that
+      // month — not a full-month projection — so we do not prorate the
+      // current month (same as the Liability page).
+      const cutoff = shiftDays(agentToday(), -1);
 
       let shopifySince = 0;
       for (const s of sales) {
         if (s.state_code !== n.state_code) continue;
+        if (isQuarantinedSource(s.source)) continue;
         if (!isSellerResponsible(s.channel ?? "")) continue;
         const pe = s.period_end ?? "";
         const ps = s.period_start ?? "";
         if (lft && pe <= lft) continue;
         if (ps > cutoff) continue;
-
-        let gross = Number(s.gross_sales) || 0;
-        // Prorate if current month extends past cutoff
-        if (pe > cutoff && ps <= cutoff) {
-          const psDate = new Date(ps + "T00:00:00");
-          const peDate = new Date(pe + "T00:00:00");
-          const cutDate = new Date(cutoff + "T00:00:00");
-          const totalDays = Math.round((peDate.getTime() - psDate.getTime()) / 86400000) + 1;
-          const elapsed = Math.round((cutDate.getTime() - psDate.getTime()) / 86400000) + 1;
-          if (totalDays > 0 && elapsed < totalDays) {
-            gross = Math.round(gross * elapsed / totalDays * 100) / 100;
-          }
-        }
-        shopifySince += gross;
+        shopifySince += Number(s.gross_sales) || 0;
       }
       shopifySince = Math.round(shopifySince * 100) / 100;
 

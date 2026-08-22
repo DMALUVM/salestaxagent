@@ -15,6 +15,7 @@ from src.rules import (
     ADS_CAMPAIGN_TIMEOUT_SD_SECONDS,
     ADS_MAX_CHUNK_DAYS,
     ADS_SEARCH_TERM_CHUNK_DAYS,
+    amazon_as_of,
 )
 
 log = logging.getLogger(__name__)
@@ -570,7 +571,7 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
         raise ValueError("campaigns_only, search_terms_only and placements_only "
                          "are mutually exclusive")
 
-    end = date.today() - timedelta(days=1)
+    end = amazon_as_of()
     start = end - timedelta(days=days - 1)
 
     any_only = any(only_flags)

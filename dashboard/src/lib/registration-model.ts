@@ -7,7 +7,7 @@
  */
 
 import type { NexusStatus, StateRule, SalesByState } from "@/lib/types";
-import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
+import { normalizeChannel, SHOPIFY, AMAZON, isQuarantinedSource } from "@/lib/channels";
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -86,6 +86,7 @@ export function buildRecommendations(
   for (const s of sales) {
     const sc = s.state_code;
     if (!sc) continue;
+    if (isQuarantinedSource(s.source)) continue;
     if (!salesMap[sc]) salesMap[sc] = { shopify: 0, amazon: 0 };
     const ch = normalizeChannel(s.channel ?? "");
     const amt = Number(s.gross_sales) || 0;

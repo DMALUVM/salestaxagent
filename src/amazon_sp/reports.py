@@ -15,7 +15,7 @@ from src.channels import AMAZON
 from src.db import delete_rows, log_audit, log_ingestion, upsert_rows
 from src.mappers.fc_to_state import fc_to_state
 from src.models.schema import InventoryEvent, SalesByState
-from src.rules import SPAPI_MAX_CHUNK_DAYS, is_excluded_status
+from src.rules import AMAZON_TZ, SPAPI_MAX_CHUNK_DAYS, is_excluded_status
 from src.sku_normalize import normalize_sku
 
 from src.amazon_sp.client import request_and_download
@@ -154,8 +154,21 @@ def _parse_date(value: str) -> date | None:
     v = value.strip()
     if not v:
         return None
-    # ISO-like: "2024-01-15T08:30:00+00:00", "2024-01-15"
-    if len(v) >= 10 and v[4:5] == "-":
+    # ISO datetime with an offset or Z: convert to America/Los_Angeles
+    # before taking the calendar day. Taking v[:10] of a UTC timestamp
+    # buckets 00:00–07:59 UTC onto the wrong Amazon day (and can shift
+    # month-boundary orders into the next tax period).
+    if "T" in v or v.endswith("Z"):
+        try:
+            iso = v.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(iso)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(AMAZON_TZ).date()
+        except ValueError:
+            pass
+    # Date-only: "2024-01-15" — already a calendar day, no conversion.
+    if len(v) >= 10 and v[4:5] == "-" and "T" not in v:
         try:
             return datetime.strptime(v[:10], "%Y-%m-%d").date()
         except ValueError:
@@ -168,7 +181,10 @@ def _parse_date(value: str) -> date | None:
         except ValueError:
             continue
     try:
-        return datetime.fromisoformat(v).date()
+        dt = datetime.fromisoformat(v)
+        if dt.tzinfo is not None:
+            return dt.astimezone(AMAZON_TZ).date()
+        return dt.date()
     except (ValueError, TypeError):
         return None
 
@@ -197,25 +213,22 @@ MAX_CHUNK_DAYS = SPAPI_MAX_CHUNK_DAYS
 
 
 def _date_chunks(start: date, end: date) -> list[tuple[date, date]]:
-    """Split a date range into calendar-month-aligned chunks.
+    """Split a date range into ≤SPAPI_MAX_CHUNK_DAYS chunks.
 
-    Each chunk covers one calendar month (or partial month at the
-    boundaries).  This keeps the chunks aligned with our sales_by_state
-    monthly aggregation periods and avoids hitting Amazon's report-range
-    limit (~30 days for the orders report).
+    Prefer calendar-month alignment (sales_by_state is monthly) but cap
+    each chunk at the business-rule 30-day SP-API limit. A 31-day month
+    therefore becomes two requests (1–30 and 31) instead of one that
+    Amazon can silently refuse.
 
     Returns a list of ``(chunk_start, chunk_end)`` tuples.
     """
     chunks: list[tuple[date, date]] = []
     cursor = start
+    max_span = timedelta(days=SPAPI_MAX_CHUNK_DAYS - 1)
     while cursor <= end:
-        # End of this calendar month
-        chunk_end = _month_end(cursor)
-        # Clamp to overall end
-        if chunk_end > end:
-            chunk_end = end
+        month_end = _month_end(cursor)
+        chunk_end = min(month_end, cursor + max_span, end)
         chunks.append((cursor, chunk_end))
-        # Advance to first day of next month
         cursor = chunk_end + timedelta(days=1)
     return chunks
 
@@ -411,7 +424,7 @@ def parse_orders_by_sku(content: str) -> dict:
         if not order_id:
             result["rows_skipped"] += 1
             continue
-        if status in ("cancelled", "pending"):
+        if is_excluded_status(status):
             result["rows_skipped"] += 1
             continue
         if country and country not in ("US", ""):
@@ -818,17 +831,39 @@ def fetch_inventory(
     dry_run: bool = False,
     on_poll: callable | None = None,
 ) -> dict:
-    """Fetch inventory ledger via SP-API and ingest into inventory_events."""
-    content = request_and_download(
-        INVENTORY_LEDGER_REPORT, start, end, on_poll=on_poll,
-    )
+    """Fetch inventory ledger via SP-API and ingest into inventory_events.
 
-    parsed = parse_inventory_ledger(content)
+    Windows longer than SPAPI_MAX_CHUNK_DAYS are requested in chunks so a
+    90-day weekly backfill cannot silently fail the unchunked report.
+    """
+    chunks = _date_chunks(start, end)
+    parsed = {
+        "rows_total": 0,
+        "rows_parsed": 0,
+        "rows_skipped": 0,
+        "warnings": [],
+        "events": [],
+        "states_found": set(),
+        "unknown_fcs": set(),
+    }
+    for c_start, c_end in chunks:
+        content = request_and_download(
+            INVENTORY_LEDGER_REPORT, c_start, c_end, on_poll=on_poll,
+        )
+        part = parse_inventory_ledger(content)
+        parsed["rows_total"] += part["rows_total"]
+        parsed["rows_parsed"] += part["rows_parsed"]
+        parsed["rows_skipped"] += part["rows_skipped"]
+        parsed["warnings"].extend(part["warnings"])
+        parsed["events"].extend(part["events"])
+        parsed["states_found"].update(part["states_found"])
+        parsed["unknown_fcs"].update(part["unknown_fcs"])
 
     summary = {
         "report_type": "inventory_ledger",
         "source": SOURCE_LABEL,
         "period": f"{start} to {end}",
+        "chunks": len(chunks),
         "rows_total": parsed["rows_total"],
         "rows_parsed": parsed["rows_parsed"],
         "rows_skipped": parsed["rows_skipped"],
@@ -882,6 +917,7 @@ def fetch_inventory(
         category="ingestion",
         details={
             "period": f"{start} to {end}",
+            "chunks": len(chunks),
             "states": sorted(parsed["states_found"]),
             "unknown_fcs": sorted(parsed["unknown_fcs"]),
         },
