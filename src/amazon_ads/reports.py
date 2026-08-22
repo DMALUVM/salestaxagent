@@ -474,8 +474,9 @@ def fetch_search_terms(start: date, end: date,
     produces usable recommendations.
 
     Note: the report is requested with timeUnit=SUMMARY, so each chunk returns
-    one aggregate row per term stamped with the chunk's START date. Smaller
-    chunks therefore mean finer date resolution as well as shorter reports.
+    one aggregate row per term. `date` is a window label (chunk END), not a
+    daily grain — consumers filter on it then sum metrics. Smaller chunks
+    still mean shorter reports; they are not required for freshness.
     """
     chunks = _date_chunks(start, end, chunk_days or SEARCH_TERM_CHUNK_DAYS)
     all_parsed: list[dict] = []
@@ -504,7 +505,11 @@ def fetch_search_terms(start: date, end: date,
         for r in rows:
             m = _metrics(r)
             all_parsed.append({
-                "date": cs.isoformat(),
+                # timeUnit=SUMMARY collapses the chunk to one aggregate row.
+                # Stamp chunk END so max(date) is a freshness proxy for the
+                # window (a 7-day chunk ending yesterday would otherwise look
+                # ~6 days stale if we stamped the start). Metrics are unchanged.
+                "date": ce.isoformat(),
                 "search_term": r.get("searchTerm", ""),
                 "campaign_id": str(r.get("campaignId", "")),
                 "campaign_name": r.get("campaignName", ""),
