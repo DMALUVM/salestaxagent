@@ -1846,8 +1846,8 @@ def ads_mark_cmd(rec_ids, priority, rec_type, status, dry_run):
     worked. Marking a batch after applying it in Seller Central is the whole
     cost of making next week's brief evidence-weighted.
     """
-    from src.amazon_ads.learning import mark_decision
-    from src.db import fetch_all, get_client
+    from src.amazon_ads.learning import mark_recommendation
+    from src.db import fetch_all
 
     recs = [r for r in fetch_all("ads_recommendations")
             if str(r.get("status") or "open") == "open"]
@@ -1878,14 +1878,13 @@ def ads_mark_cmd(rec_ids, priority, rec_type, status, dry_run):
         click.echo("\n  Re-run with --apply to record them.")
         return
 
-    client = get_client()
     marked = linked = 0
     for r in chosen:
-        client.table("ads_recommendations").update(
-            {"status": status}).eq("id", r["id"]).execute()
-        marked += 1
-        if r.get("decision_id") and mark_decision(str(r["decision_id"]), status):
-            linked += 1
+        result = mark_recommendation(r, status)
+        if result.get("ok"):
+            marked += 1
+            if result.get("decisionLogged"):
+                linked += 1
 
     click.echo(f"\n  Marked {marked} recommendation(s); {linked} mirrored onto "
                f"the decision log.")

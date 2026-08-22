@@ -14,6 +14,7 @@ import { rankBadgeOf } from "@/lib/ppc-actions";
 import { SqpStatus } from "@/components/sqp-status";
 import { BrandShare } from "@/components/brand-share";
 import { PpcPlaybook } from "@/components/ppc-playbook";
+import { PpcSkuAds } from "@/components/ppc-sku-ads";
 import { isConfigured } from "@/lib/supabase";
 import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy, Settings2 } from "lucide-react";
 import {
@@ -115,8 +116,10 @@ interface SearchTerm {
 interface Rec {
   id: string; type: string; priority: string; impact_estimate: number;
   entity_type: string; entity_name: string; campaign_name: string;
+  campaign_id?: string;
   suggested_action: string;
   evidence: string | Record<string, unknown> | null; status: string;
+  decision_id?: string | null;
 }
 interface PPCData {
   kpi7: KPIs | null; kpi7Days: number;
@@ -388,7 +391,8 @@ interface ImpactHorizon {
 }
 interface ImpactData {
   available: boolean; caveat: string; note?: string;
-  totals: { decisions: number; outcomes: number; applied: number; dismissed: number;
+  totals: { decisions: number; outcomes: number; applied: number; appliedAwaiting?: number;
+            dismissed: number;
             open: number; firstAsOf: string | null; lastAsOf: string | null } | null;
   byType: ImpactByType[];
   horizons: ImpactHorizon[];
@@ -399,13 +403,26 @@ interface ImpactData {
  * actions, not effects attributable to them, and the panel says so rather than
  * dressing them up as a scorecard.
  */
-function ImpactPanel() {
+function ImpactPanel({ refreshToken = 0 }: { refreshToken?: number }) {
   const [data, setData] = useState<ImpactData | null>(null);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    fetch("/api/ppc/impact").then((r) => r.json()).then(setData).catch(() => {});
-  }, []);
+    fetch("/api/ppc/impact")
+      .then((r) => r.json())
+      .then((d) => { setData(d); setError(null); })
+      .catch((e) => setError(e instanceof Error ? e.message : "Could not load the action log."));
+  }, [refreshToken]);
 
-  if (!data) return null;
+  if (error && !data) {
+    return (
+      <p className="text-xs text-amber-700 dark:text-amber-400">
+        Action log failed to load: {error}
+      </p>
+    );
+  }
+  if (!data) {
+    return <p className="text-xs text-muted-foreground">Loading action log…</p>;
+  }
   if (!data.available) {
     return (
       <p className="text-xs text-muted-foreground">
@@ -415,6 +432,7 @@ function ImpactPanel() {
     );
   }
   const t = data.totals;
+  const awaiting = t?.appliedAwaiting ?? 0;
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -423,7 +441,7 @@ function ImpactPanel() {
           {t && (
             <span className="ml-2 font-normal text-muted-foreground">
               {t.decisions} decisions{t.firstAsOf ? ` since ${t.firstAsOf}` : ""} ·{" "}
-              {t.applied} applied · {t.dismissed} dismissed · {t.outcomes} outcome snapshots
+              {t.applied} applied · {awaiting} awaiting outcome · {t.dismissed} dismissed · {t.outcomes} recorded
             </span>
           )}
         </CardTitle>
@@ -479,7 +497,9 @@ function ImpactPanel() {
         )}
         {data.horizons.length === 0 && (
           <p className="text-xs text-muted-foreground">
-            No outcome snapshots yet — they are written once a decision&rsquo;s +7 day has closed.
+            {awaiting > 0
+              ? `${awaiting} applied action${awaiting === 1 ? "" : "s"} waiting on the nightly ads_outcomes job. Snapshots write at +7, +14 and +30 closed days after you mark applied — never immediately, and never by writing to Amazon.`
+              : "No outcome snapshots yet. Mark an action Applied after you change Seller Central; the nightly ads_outcomes job records +7 / +14 / +30. Until then every brief stays rules-based only."}
           </p>
         )}
 
@@ -525,6 +545,9 @@ export default function PPCPage() {
   // no exceptions, however far the state is from the code that uses it.
   const [exporting, setExporting] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // Bumps ImpactPanel after Apply/Dismiss so awaiting-vs-recorded counts refresh
+  // without a full /api/ppc reload. Declared here — before any early return.
+  const [impactRefresh, setImpactRefresh] = useState(0);
 
   const loadData = useCallback(async () => {
     try {
@@ -553,16 +576,44 @@ export default function PPCPage() {
   }, [loadData]);
 
   async function updateRec(id: string, status: string) {
-    await fetch("/api/ppc", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, status }),
-    });
-    if (data) {
-      setData({
-        ...data,
-        recommendations: data.recommendations.map((r) =>
-          r.id === id ? { ...r, status } : r
-        ),
+    try {
+      const resp = await fetch("/api/ppc/mark", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status }),
+      });
+      let result: {
+        ok?: boolean; error?: string; decisionLogged?: boolean;
+        loop?: { appliedAwaiting?: number; outcomesRecorded?: number };
+      } = {};
+      try { result = await resp.json(); } catch { /* non-JSON */ }
+      if (!resp.ok || result.ok === false) {
+        setNotice({ kind: "error", text: result.error ?? `Could not mark (${resp.status}).` });
+        return;
+      }
+      if (data) {
+        setData({
+          ...data,
+          recommendations: data.recommendations.map((r) =>
+            r.id === id ? { ...r, status } : r
+          ),
+        });
+      }
+      setImpactRefresh((n) => n + 1);
+      const awaiting = result.loop?.appliedAwaiting;
+      const recorded = result.loop?.outcomesRecorded;
+      const loopBit = typeof awaiting === "number"
+        ? ` ${awaiting} applied awaiting a snapshot · ${recorded ?? 0} outcomes recorded.`
+        : "";
+      setNotice({
+        kind: result.decisionLogged === false ? "warn" : "success",
+        text: status === "applied"
+          ? `Marked applied. Nightly ads_outcomes snapshots +7/+14/+30 — nothing writes to Amazon.${loopBit}`
+          : `Dismissed and recorded on the decision log.${loopBit}`,
+      });
+    } catch (e) {
+      setNotice({
+        kind: "error",
+        text: e instanceof Error ? e.message : "Could not record that mark.",
       });
     }
   }
@@ -834,6 +885,8 @@ export default function PPCPage() {
       <SectionNav
         items={[
           { id: "ppc-kpis", label: "KPIs" },
+          { id: "ppc-playbook", label: "Top 10" },
+          { id: "ppc-sku-ads", label: "SKU ads" },
           { id: "ppc-budget", label: "Budget" },
           { id: "ppc-placement", label: "Placement" },
           { id: "ppc-queue", label: "Actions" },
@@ -954,7 +1007,15 @@ export default function PPCPage() {
             </Card>
           </div>
 
-          <PpcPlaybook />
+          <PpcPlaybook
+            recs={recs}
+            placements={placements}
+            roles={roles}
+            targetAcos={targetAcos}
+            onMark={updateRec}
+          />
+
+          <PpcSkuAds days={rangeDays} />
 
           <BrandShare />
 
@@ -1445,7 +1506,7 @@ export default function PPCPage() {
             </Card>
           )}
 
-          {tab === "actions" && <ImpactPanel />}
+          {tab === "actions" && <ImpactPanel refreshToken={impactRefresh} />}
 
           {/* Search terms */}
           {tab === "search" && (
@@ -1613,8 +1674,6 @@ export default function PPCPage() {
               </CardContent>
             </Card>
           )}
-
-          {tab === "actions" && <ImpactPanel />}
 
           {/* Campaigns */}
           {tab === "campaigns" && (

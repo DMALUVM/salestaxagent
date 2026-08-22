@@ -37,11 +37,12 @@ class Action:
     do: str
     impact: float = 0.0
     evidence: dict = field(default_factory=dict)
+    rec_id: str | None = None
 
     def as_dict(self) -> dict:
         return {"priority": self.priority, "title": self.title, "why": self.why,
                 "do": self.do, "impact": round(self.impact, 2),
-                "evidence": self.evidence}
+                "evidence": self.evidence, "rec_id": self.rec_id}
 
 
 _ORDER = {P0: 0, P1: 1, P2: 2, P3: 3}
@@ -244,6 +245,92 @@ def build_playbook(target_acos: float, recs: list[dict],
     actions += discovery_actions(roles)
     actions.sort(key=lambda a: (_ORDER.get(a.priority, 9), -a.impact))
     return actions
+
+
+# Dashboard Top-N. The CLI playbook stays uncapped; the page must never dump
+# the full 80+ queue into the first panel. Ranking is the same opinion as
+# build_playbook (waste → placements → scale) applied to individual recs plus
+# placement cards. This is ranking, not a second recommendation generator.
+TOP_N = 10
+
+
+def _rec_evidence(rec: dict) -> dict:
+    ev = rec.get("evidence")
+    return ev if isinstance(ev, dict) else {}
+
+
+def is_rank_blocked_raise(rec: dict) -> bool:
+    """True when a bid increase is held by the organic-rank gate.
+
+    Those are listed in the brief's gate section, not as things to do. Putting
+    them in the Top-N would tell the operator to raise a bid the gate is
+    holding — the same contradiction export_brief._action_plan already avoids.
+    """
+    typ = str(rec.get("type") or "").upper()
+    if "INCREASE" not in typ and "RAISE" not in typ:
+        return False
+    ev = _rec_evidence(rec)
+    return bool(ev.get("needs_rank_check")
+                or ev.get("rank_policy_applied") in ("capped", "hold"))
+
+
+def rec_to_action(rec: dict) -> Action:
+    """One queued recommendation as a playbook Action. No new scoring."""
+    ev = _rec_evidence(rec)
+    typ = str(rec.get("type") or "").replace("_", " ").title()
+    name = str(rec.get("entity_name") or "unknown")
+    impact = float(rec.get("impact_estimate") if rec.get("impact_estimate") is not None
+                   else rec.get("impact") or 0)
+    why = str(ev.get("why") or "").strip()
+    if not why:
+        spend = ev.get("spend")
+        acos = ev.get("acos")
+        bits = []
+        if spend is not None:
+            bits.append(f"{_usd(float(spend))} spend")
+        if acos is not None:
+            bits.append(f"{float(acos):.0f}% ACOS")
+        why = ", ".join(bits) or "Queued recommendation — see the Actions list for evidence."
+    return Action(
+        str(rec.get("priority") or P1),
+        f"{typ} — {name}",
+        why,
+        str(rec.get("suggested_action") or "Apply this in Campaign Manager, then mark it here."),
+        impact=impact,
+        evidence={
+            "rec_type": rec.get("type"),
+            "entity_name": name,
+            "campaign_name": rec.get("campaign_name"),
+            "spend": ev.get("spend"),
+            "acos": ev.get("acos"),
+            "impact_estimate": impact,
+        },
+        rec_id=str(rec["id"]) if rec.get("id") else None,
+    )
+
+
+def top_n_playbook(target_acos: float, recs: list[dict],
+                   placements: list[dict], roles: list[dict] | None = None,
+                   n: int = TOP_N) -> list[Action]:
+    """Ordered Top-N for the dashboard. Cap `n`, never the full queue.
+
+    Placement cards come from placement_actions (live KPIs, not a second
+    generator). Individual open recs fill the rest, ranked priority then
+    impact_estimate dollars. Rank-blocked raises are excluded. `roles` is
+    accepted so the signature matches build_playbook; discovery share is a
+    P3 theme and only appears when it outranks leftover recs after the cap.
+    """
+    open_recs = [r for r in recs
+                 if str(r.get("status") or "open") == "open"
+                 and not is_rank_blocked_raise(r)]
+
+    actions: list[Action] = []
+    actions += placement_actions(placements, target_acos)
+    actions += [rec_to_action(r) for r in open_recs]
+    if roles:
+        actions += discovery_actions(roles)
+    actions.sort(key=lambda a: (_ORDER.get(a.priority, 9), -a.impact))
+    return actions[: max(0, int(n))]
 
 
 WEEKLY_CADENCE = [
