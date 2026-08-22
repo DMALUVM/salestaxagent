@@ -17,8 +17,15 @@
 /**
  * Canonical registration check. Use this instead of raw `=== true`.
  * Handles: true, "true", 1, "1" → true; everything else → false.
+ *
+ * Also accepts a nexus/compliance row (`{ is_registered }`) so a caller that
+ * passes the whole object — the Pulse Overview bug — still matches
+ * /registrations, which reads the field via buildRecommendations.
  */
 export function isRegistered(val: unknown): boolean {
+  if (val && typeof val === "object" && "is_registered" in val) {
+    return isRegistered((val as { is_registered: unknown }).is_registered);
+  }
   return val === true || val === "true" || val === 1 || val === "1";
 }
 
