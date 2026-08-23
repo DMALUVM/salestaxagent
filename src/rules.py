@@ -48,6 +48,10 @@ SPAPI_INVENTORY_BACKFILL_DAYS: int = _RULES["spapi"].get(
 ADS_MAX_REPORT_DAYS: int = _RULES["ads"]["max_report_days"]
 ADS_MAX_CHUNK_DAYS: int = _RULES["ads"]["max_chunk_days"]
 ADS_MANDATORY_CHUNKING: bool = _RULES["ads"]["mandatory_chunking"]
+# Campaign reports default to 7-day chunks. A single 30-day SB/SD report on
+# this account sits PENDING past the 900s cap; the same window in 7-day
+# chunks completes. Still clamped to ADS_MAX_CHUNK_DAYS at request time.
+ADS_CAMPAIGN_CHUNK_DAYS: int = int(_RULES["ads"].get("campaign_chunk_days", 7))
 # Search-term reports are far heavier than campaign reports; they are chunked
 # smaller so a single request cannot sit past its poll timeout.
 ADS_SEARCH_TERM_CHUNK_DAYS: int = _RULES["ads"]["search_term_chunk_days"]

@@ -22,6 +22,9 @@ from src.rules import ADS_SEARCH_TERM_TIMEOUT_SECONDS
 BASE_URL = "https://advertising-api.amazon.com"
 POLL_INTERVAL = 30  # seconds (Ads reports take 5-20 minutes)
 DEFAULT_TIMEOUT = 1800    # 30 minutes — SP campaigns use this (no override)
+# Mid-poll 429/5xx used to abort a report Amazon was still producing, then
+# the caller created a second report on the same queue. Stay on this report.
+TRANSIENT_POLL_STATUS = frozenset({429, 425, 500, 502, 503, 504})
 # SB/SD campaign poll caps live in config/business_rules.json
 # (ads.campaign_report_timeout_{sb,sd}_seconds) and are applied in
 # reports.CAMPAIGN_REPORT_TIMEOUT — not here — so SP stays on this default.
@@ -60,12 +63,23 @@ def poll_report(report_id: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
     last_status = ""
     refreshed = False
     while time.time() - start < timeout:
-        resp = httpx.get(f"{BASE_URL}/reporting/reports/{report_id}",
-                         headers=headers, timeout=15)
+        try:
+            resp = httpx.get(f"{BASE_URL}/reporting/reports/{report_id}",
+                             headers=headers, timeout=15)
+        except (httpx.TimeoutException, httpx.NetworkError) as e:
+            log.warning("Report %s: poll transport error (%s) — retrying",
+                        report_id, e)
+            time.sleep(POLL_INTERVAL)
+            continue
         if resp.status_code == 401 and not refreshed:
             log.info("Report %s: token expired mid-poll — refreshing", report_id)
             headers = ads_headers(force_refresh=True)
             refreshed = True
+            continue
+        if resp.status_code in TRANSIENT_POLL_STATUS:
+            log.warning("Report %s: poll HTTP %s — staying on this report",
+                        report_id, resp.status_code)
+            time.sleep(POLL_INTERVAL)
             continue
         resp.raise_for_status()
         refreshed = False  # a good response re-arms the one-shot refresh

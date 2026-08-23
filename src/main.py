@@ -559,9 +559,8 @@ def ads_test_cmd():
 @click.option("--search-term-chunk-days", default=None, type=int,
               help="Chunk size for search-term reports (default 7)")
 @click.option("--campaign-chunk-days", default=None, type=int,
-              help="Chunk size for campaign reports (default 30, max 30). "
-                   "Use a smaller value to backfill SB/SD incrementally — each "
-                   "chunk commits on its own and prints progress.")
+              help="Chunk size for campaign reports (default 7, max 30). "
+                   "Smaller chunks keep SB/SD under the 900s poll cap.")
 @click.option("--ad-products", default=None,
               help="Comma-separated ad products for campaigns: SP,SB,SD "
                    "(default: all three). Search terms and placements are "
@@ -571,8 +570,8 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
                  ad_products):
     """Sync Amazon Ads campaigns + search terms (auto-chunked).
 
-    Campaigns chunk at ≤30 days; search terms at 7 by default because those
-    reports are far heavier and a wide window times out.
+    Campaigns chunk at 7 days by default (≤30 max); search terms at 7.
+    A single 30-day SB/SD report times out on this account.
 
     Campaigns cover Sponsored Products, Brands and Display; each row carries
     its campaign_type so the totals match the Ads console while the breakdown
@@ -607,8 +606,10 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
              "search terms only" if search_terms_only else
              "placements only" if placements_only else
              "campaigns + search terms" + (" + placements" if with_placements else ""))
+    from src.rules import ADS_CAMPAIGN_CHUNK_DAYS
+    camp_chunk = campaign_chunk_days or ADS_CAMPAIGN_CHUNK_DAYS
     click.echo(f"Syncing last {days} days of Ads data ({scope}; "
-               f"campaigns ≤30d chunks, search terms {st_chunk}d chunks)...")
+               f"campaigns {camp_chunk}d chunks, search terms {st_chunk}d chunks)...")
     result = sync_ads(days=days, campaigns_only=campaigns_only,
                       search_terms_only=search_terms_only,
                       placements_only=placements_only,
@@ -4437,8 +4438,9 @@ def run():
                 id="ads_campaigns_sync",
                 misfire_grace_time=3600,
                 coalesce=True,
+                max_instances=1,
             )
-            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (30d, ≤30d chunks)")
+            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (30d, 7d chunks)")
 
             scheduler.add_job(
                 _run_ads_search_terms_sync,
@@ -4460,6 +4462,7 @@ def run():
                 id="ads_actions",
                 misfire_grace_time=3600,
                 coalesce=True,
+                max_instances=1,
             )
             click.echo("[Scheduler] Ads actions daily at 06:00 (7d, break-even target from account_target_acos — sole owner of the queue)")
 
@@ -4472,8 +4475,9 @@ def run():
                 id="ads_campaigns_backfill",
                 misfire_grace_time=7200,
                 coalesce=True,
+                max_instances=1,
             )
-            click.echo("[Scheduler] Ads campaigns backfill weekly Sunday 03:00 (90d)")
+            click.echo("[Scheduler] Ads campaigns backfill weekly Sunday 03:00 (90d, 7d chunks)")
 
             # Placement performance at 05:15 — between campaigns and search
             # terms. Second spCampaigns report, so it is its own job rather
@@ -4486,6 +4490,7 @@ def run():
                 id="ads_placements_sync",
                 misfire_grace_time=3600,
                 coalesce=True,
+                max_instances=1,
             )
             click.echo("[Scheduler] Ads placements sync daily at 05:15 (14d)")
         else:
@@ -4964,30 +4969,12 @@ def _run_spapi_refresh():
     except Exception as e:
         print(f"[SP-API] {ts} SnS error: {e}")
 
-    # Ads sync (daily, 14d window)
-    try:
-        from src.config import settings as _s
-        if _s.amazon_ads_enabled:
-            from src.amazon_ads.reports import sync_ads
-            ads_result = sync_ads(days=14)
-            camps = ads_result.get("campaigns", {})
-            print(f"[Ads] {ts} Campaigns: {camps.get('rows', 0)} rows, "
-                  f"${camps.get('total_spend', 0):,.0f} spend")
-            # Recommendations are NOT regenerated here.
-            #
-            # This job and `ads_actions` are both scheduled at 06:00. This one
-            # used to call generate_recommendations(target_acos=30) — a flat 30%
-            # — while ads_actions calls it with account_target_acos(), currently
-            # 36.9%. Two writers, same minute, different break-even: whichever
-            # finished last decided what the Actions tab, the PPC brief's P0/P1
-            # tables and the health check-in's P0 count all reported. A term
-            # profitable at 36.9% was cut or kept depending on a race.
-            #
-            # `ads_actions` (06:00) is the single owner of the queue.
-        else:
-            print(f"[Ads] {ts} Not configured (skip)")
-    except Exception as e:
-        print(f"[Ads] {ts} Error: {e}")
+    # Ads are owned by ads_campaigns_sync (05:00), ads_placements_sync
+    # (05:15) and ads_search_terms_sync (05:30). A second 14-day ads pull
+    # here at 06:00 stacked reports on the same Ads queue, hung this job,
+    # and produced nightly SB/SD timeouts. ads_actions (also 06:00) is the
+    # sole owner of the recommendation queue.
+    print(f"[Ads] {ts} Skipped — dedicated ads_* jobs own the pull")
 
     # P&L recompute (picks up fresh ad spend + COGS)
     try:
@@ -5220,45 +5207,53 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
     from src.amazon_ads.reports import sync_ads
 
     run_id = job_start(job_name)
+    finished = False
     try:
         result = sync_ads(days=days, campaigns_only=campaigns_only,
                           search_terms_only=search_terms_only,
                           placements_only=placements_only)
+        status, message = _ads_sync_outcome(result, days)
+        camp = result.get("campaigns")
+        if isinstance(camp, dict):
+            for t, v in (camp.get("by_type") or {}).items():
+                print(f"[Ads {label}] {t}: {v['rows']} rows, ${v['spend']:,.2f} spend, "
+                      f"{v['clicks']:,} clicks, {'ok' if v['ok'] else 'FAILED'}")
+        for key in ("campaigns", "search_terms", "placements"):
+            val = result.get(key)
+            if isinstance(val, dict):
+                if "error" in val:
+                    print(f"[Ads {label}] {key}: ERROR — {val['error'][:120]}")
+                else:
+                    print(f"[Ads {label}] {key}: {val.get('rows', 0)} rows, "
+                          f"{val.get('inserted', 0)} inserted, "
+                          f"{val.get('chunks', 0)} chunks, {len(val.get('errors', []))} chunk errors")
+        print(f"[Ads {label}] {status}: {message}")
+
+        job_finish(run_id, status, message,
+                   stats=result.get("campaigns") or result.get("search_terms"))
+        finished = True
+        # A chunk that timed out and will be re-fetched tomorrow is routine and
+        # stays in the log. Two things do get a push: a total failure, and an ad
+        # product that dropped out entirely — the latter under-reports account
+        # spend against the Amazon console for as long as it goes unnoticed, which
+        # is exactly how the SP-only sync hid ~6% of spend.
+        lost_products = (camp.get("products_failed") or []) if isinstance(camp, dict) else []
+        if status == "fail":
+            _ads_alert(f"Ads {label} sync failed", message)
+        elif lost_products:
+            _ads_alert(f"Ads {label} sync partial — {'+'.join(lost_products)} missing",
+                       message)
     except Exception as e:
         print(f"[Ads {label}] Failed: {e}")
         job_finish(run_id, "fail", str(e)[:500])
+        finished = True
         _ads_alert(f"Ads {label} sync failed", str(e))
-        return
-
-    status, message = _ads_sync_outcome(result, days)
-    camp = result.get("campaigns")
-    if isinstance(camp, dict):
-        for t, v in (camp.get("by_type") or {}).items():
-            print(f"[Ads {label}] {t}: {v['rows']} rows, ${v['spend']:,.2f} spend, "
-                  f"{v['clicks']:,} clicks, {'ok' if v['ok'] else 'FAILED'}")
-    for key in ("campaigns", "search_terms", "placements"):
-        val = result.get(key)
-        if isinstance(val, dict):
-            if "error" in val:
-                print(f"[Ads {label}] {key}: ERROR — {val['error'][:120]}")
-            else:
-                print(f"[Ads {label}] {key}: {val.get('rows', 0)} rows, "
-                      f"{val.get('inserted', 0)} inserted, "
-                      f"{val.get('chunks', 0)} chunks, {len(val.get('errors', []))} chunk errors")
-    print(f"[Ads {label}] {status}: {message}")
-
-    job_finish(run_id, status, message, stats=result.get("campaigns") or result.get("search_terms"))
-    # A chunk that timed out and will be re-fetched tomorrow is routine and
-    # stays in the log. Two things do get a push: a total failure, and an ad
-    # product that dropped out entirely — the latter under-reports account
-    # spend against the Amazon console for as long as it goes unnoticed, which
-    # is exactly how the SP-only sync hid ~6% of spend.
-    lost_products = (camp.get("products_failed") or []) if isinstance(camp, dict) else []
-    if status == "fail":
-        _ads_alert(f"Ads {label} sync failed", message)
-    elif lost_products:
-        _ads_alert(f"Ads {label} sync partial — {'+'.join(lost_products)} missing",
-                   message)
+    finally:
+        # SIGTERM / scheduler shutdown used to leave status=running for days
+        # ("stuck running since …"). Mark those so the next night is not
+        # mistaken for an in-flight pull.
+        if not finished:
+            job_finish(run_id, "fail", "interrupted before job_finish")
 
 
 def _run_sqp_sync():

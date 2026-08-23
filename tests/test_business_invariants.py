@@ -57,6 +57,11 @@ class TestBusinessRulesConfig:
         assert ads["campaign_report_timeout_sb_seconds"] < 1800
         assert ads["campaign_report_timeout_sd_seconds"] < 1800
 
+    def test_ads_campaign_chunk_days_avoid_30day_sb_timeout(self):
+        ads = self.cfg["ads"]
+        assert ads["campaign_chunk_days"] == 7
+        assert ads["campaign_chunk_days"] <= ads["max_chunk_days"]
+
     def test_spapi_chunk_limit(self):
         assert self.cfg["spapi"]["max_chunk_days"] <= 31
 
@@ -132,6 +137,11 @@ class TestRulesModule:
         assert ADS_CAMPAIGN_TIMEOUT_SD_SECONDS >= 900
         assert ADS_CAMPAIGN_TIMEOUT_SB_SECONDS < 1800
         assert ADS_CAMPAIGN_TIMEOUT_SD_SECONDS < 1800
+
+    def test_ads_campaign_chunks_are_smaller_than_the_api_cap(self):
+        from src.rules import ADS_CAMPAIGN_CHUNK_DAYS, ADS_MAX_CHUNK_DAYS
+        assert 1 <= ADS_CAMPAIGN_CHUNK_DAYS <= ADS_MAX_CHUNK_DAYS
+        assert ADS_CAMPAIGN_CHUNK_DAYS == 7
 
     def test_spapi_chunk_size_within_limit(self):
         from src.rules import SPAPI_MAX_CHUNK_DAYS
@@ -622,6 +632,107 @@ class TestAdProductCoverage:
         assert CAMPAIGN_REPORT_TIMEOUT["SD"] >= 900
         assert CAMPAIGN_REPORT_TIMEOUT["SB"] < 1800
         assert CAMPAIGN_REPORT_TIMEOUT["SD"] < 1800
+
+    def test_thirty_day_window_uses_seven_day_chunks(self, monkeypatch):
+        """Nightly 30d must not be one all-or-nothing SB/SD report."""
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        calls: list[tuple[str, date, date]] = []
+
+        def fake_chunk(cs, ce, product="SP"):
+            calls.append((product, cs, ce))
+            return []
+
+        monkeypatch.setattr(reports, "_fetch_campaigns_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows",
+                            lambda *a, **k: 0)
+
+        reports.fetch_campaigns_daily(date(2026, 8, 1), date(2026, 8, 30))
+        sp = [(cs, ce) for product, cs, ce in calls if product == "SP"]
+        assert len(sp) == 5
+        assert all((ce - cs).days + 1 <= 7 for cs, ce in sp)
+        assert sp[0][0] == date(2026, 8, 1)
+        assert sp[-1][1] == date(2026, 8, 30)
+
+
+class TestAdsPollResilience:
+    """A mid-poll 429 must not throw away a report Amazon is still building."""
+
+    def test_transient_errors_are_retried(self):
+        from src.amazon_ads.reports import _is_transient_report_error
+        import httpx
+
+        assert _is_transient_report_error(TimeoutError("timed out after 900s"))
+        assert _is_transient_report_error(RuntimeError("429 Too Many Requests"))
+        assert _is_transient_report_error(RuntimeError("425 Too Early"))
+        assert _is_transient_report_error(httpx.ConnectError("connection reset"))
+        assert not _is_transient_report_error(RuntimeError("400 bad column"))
+        assert not _is_transient_report_error(PermissionError("Ads API auth failed (401)"))
+
+    def test_backoff_retries_timeout_then_succeeds(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+
+        attempts = {"n": 0}
+
+        def flaky(config, timeout=None):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise TimeoutError("Report abc timed out after 900s")
+            return [{"campaignId": "1"}]
+
+        monkeypatch.setattr(reports, "fetch_report", flaky)
+        import time as _time
+        monkeypatch.setattr(_time, "sleep", lambda s: None)
+
+        rows = reports._fetch_report_with_backoff({"startDate": "2026-08-01"})
+        assert rows == [{"campaignId": "1"}]
+        assert attempts["n"] == 2
+
+    def test_poll_report_stays_on_report_after_429(self, monkeypatch):
+        import src.amazon_ads.client as client
+
+        clock = {"t": 0}
+
+        def fake_time():
+            clock["t"] += 1
+            return clock["t"]
+
+        responses = [
+            type("R", (), {"status_code": 429, "raise_for_status": lambda self: None})(),
+            type("R", (), {
+                "status_code": 200,
+                "raise_for_status": lambda self: None,
+                "json": lambda self: {"status": "COMPLETED", "url": "http://x"},
+            })(),
+        ]
+
+        monkeypatch.setattr(client.time, "time", fake_time)
+        monkeypatch.setattr(client.time, "sleep", lambda s: None)
+        monkeypatch.setattr(client.httpx, "get", lambda *a, **k: responses.pop(0))
+        monkeypatch.setattr(client, "ads_headers", lambda **kw: {})
+
+        data = client.poll_report("rep-1", timeout=30)
+        assert data["status"] == "COMPLETED"
+
+    def test_overlapping_sync_does_not_stack_reports(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+
+        assert reports._SYNC_LOCK.acquire(blocking=False)
+        try:
+            monkeypatch.setattr(reports, "_SYNC_LOCK_TIMEOUT", 0.05)
+            with pytest.raises(TimeoutError, match="another ads pull"):
+                reports.sync_ads(days=1, campaigns_only=True)
+        finally:
+            reports._SYNC_LOCK.release()
+
+    def test_spapi_refresh_does_not_pull_ads(self):
+        import inspect
+        from src.main import _run_spapi_refresh
+        src = inspect.getsource(_run_spapi_refresh)
+        assert "sync_ads(" not in src
+        assert "from src.amazon_ads.reports import sync_ads" not in src
+        assert "dedicated ads_* jobs" in src
 
 
 # ── 4f. SP-API order upsert stamps ingested_at ─────────────────

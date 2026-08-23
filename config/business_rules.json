@@ -27,11 +27,13 @@
   "ads": {
     "max_report_days": 31,
     "max_chunk_days": 30,
+    "campaign_chunk_days": 7,
     "search_term_chunk_days": 7,
     "search_term_timeout_seconds": 5400,
     "campaign_report_timeout_sb_seconds": 900,
     "campaign_report_timeout_sd_seconds": 900,
-    "mandatory_chunking": true
+    "mandatory_chunking": true,
+    "//campaign_chunk_days": "Daily campaign pull uses 7-day chunks, not one 30-day report. A 30-day SB/SD request on this account sits PENDING past the 900s cap (2026-08-22 nightly: SB+SD FAILED, SP kept). The same 30-day window in 7-day chunks completed. Still clamped to max_chunk_days."
   },
   "agent": {
     "timezone": "America/New_York"

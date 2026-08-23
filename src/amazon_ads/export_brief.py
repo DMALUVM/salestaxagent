@@ -339,7 +339,7 @@ def _freshness(client, asof: date) -> dict:
     # does not exist, and silently reported freshness as unknown.
     try:
         r = (client.table("job_runs").select("job_name,started_at,status")
-             .in_("job_name", ADS_JOBS).eq("status", "success")
+             .in_("job_name", ADS_JOBS).in_("status", ["success", "partial"])
              .order("started_at", desc=True).limit(1).execute().data) or []
         if r:
             stamp = str(r[0].get("started_at") or "")[:10]

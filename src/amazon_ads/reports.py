@@ -6,11 +6,15 @@ All requests chunked to ≤30 days (API max is 31).
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import date, timedelta
+
+import httpx
 
 from src.amazon_ads.client import fetch_report, SEARCH_TERM_TIMEOUT
 from src.db import upsert_rows
 from src.rules import (
+    ADS_CAMPAIGN_CHUNK_DAYS,
     ADS_CAMPAIGN_TIMEOUT_SB_SECONDS,
     ADS_CAMPAIGN_TIMEOUT_SD_SECONDS,
     ADS_MAX_CHUNK_DAYS,
@@ -22,6 +26,16 @@ log = logging.getLogger(__name__)
 
 MAX_CHUNK_DAYS = ADS_MAX_CHUNK_DAYS
 SEARCH_TERM_CHUNK_DAYS = ADS_SEARCH_TERM_CHUNK_DAYS
+CAMPAIGN_CHUNK_DAYS = ADS_CAMPAIGN_CHUNK_DAYS
+
+# One Ads Reporting v3 pull at a time. The 05:00 campaigns job, 05:15
+# placements job, 05:30 search-term job, Sunday 90d backfill, and any CLI
+# retry all hit the same queue. Overlapping them is how a 15-minute SB
+# timeout turned into a 50-hour "stuck running" row: a second pull piled
+# onto a first that Amazon had not finished, then the process was killed
+# without job_finish.
+_SYNC_LOCK = threading.Lock()
+_SYNC_LOCK_TIMEOUT = 3 * 3600  # seconds — wait for the other pull, then fail
 
 
 def _safe(v, default=0):
@@ -159,14 +173,45 @@ def _normalise_metric_keys(r: dict) -> dict:
     return out
 
 
+def _is_transient_report_error(e: Exception) -> bool:
+    """True when creating/polling a new report is likely to succeed.
+
+    429/425 are Amazon asking us to wait. Timeouts mean the previous report
+    sat PENDING until our cap — a fresh, smaller request often completes.
+    Transport and 5xx are the same class of "try again", not a bad config.
+    """
+    if isinstance(e, (TimeoutError, httpx.TimeoutException, httpx.NetworkError)):
+        return True
+    if isinstance(e, httpx.HTTPStatusError):
+        return e.response.status_code in {429, 425, 500, 502, 503, 504}
+    msg = str(e)
+    if "429" in msg or "425" in msg:
+        return True
+    if "timed out" in msg.lower():
+        return True
+    return False
+
+
+def _transient_label(e: Exception) -> str:
+    msg = str(e)
+    if "429" in msg:
+        return "rate limited"
+    if "425" in msg:
+        return "not ready"
+    if isinstance(e, TimeoutError) or "timed out" in msg.lower():
+        return "timed out"
+    return "transient error"
+
+
 def _fetch_report_with_backoff(config: dict, attempts: int = 3,
                                base_sleep: float = 45.0,
                                timeout: int | None = None) -> list[dict]:
-    """fetch_report with backoff on 429 (rate limited) and 425 (too early).
+    """fetch_report with backoff on rate limits, 5xx, and poll timeouts.
 
-    The Ads reporting API rate-limits aggressively and answers 425 while an
-    identical report is still being produced. Both are transient, so they are
-    retried rather than surfaced as a hard failure.
+    The Ads reporting API rate-limits aggressively, answers 425 while an
+    identical report is still being produced, and on this account a 30-day
+    SB/SD report can sit PENDING until the poll cap. All three are
+    transient: wait, then create a new report rather than fail the night.
     """
     import time
 
@@ -175,15 +220,17 @@ def _fetch_report_with_backoff(config: dict, attempts: int = 3,
         try:
             return fetch_report(config, timeout=timeout)
         except Exception as e:
-            msg = str(e)
-            transient = "429" in msg or "425" in msg
             last = e
-            if not transient or attempt == attempts - 1:
+            timed_out = (isinstance(e, TimeoutError)
+                         or "timed out" in str(e).lower())
+            # A 90-minute search-term timeout retried three times would pin
+            # the scheduler all morning. One fresh report is enough.
+            max_attempts = 2 if timed_out else attempts
+            if not _is_transient_report_error(e) or attempt >= max_attempts - 1:
                 raise
             wait = base_sleep * (2 ** attempt)
             log.warning("Ads report %s (attempt %d/%d) — backing off %.0fs",
-                        "rate limited" if "429" in msg else "not ready",
-                        attempt + 1, attempts, wait)
+                        _transient_label(e), attempt + 1, max_attempts, wait)
             time.sleep(wait)
     raise last  # unreachable, keeps type checkers happy
 
@@ -250,7 +297,7 @@ def _fetch_placements_chunk(start: date, end: date) -> list[dict]:
             "format": "GZIP_JSON",
         },
     }
-    return fetch_report(config)
+    return _fetch_report_with_backoff(config)
 
 
 def fetch_placements(start: date, end: date) -> dict:
@@ -336,7 +383,7 @@ def _fetch_search_terms_chunk(start: date, end: date) -> list[dict]:
             "format": "GZIP_JSON",
         },
     }
-    return fetch_report(config, timeout=SEARCH_TERM_TIMEOUT)
+    return _fetch_report_with_backoff(config, timeout=SEARCH_TERM_TIMEOUT)
 
 
 # ── Chunked fetchers ──
@@ -357,10 +404,12 @@ def fetch_campaigns_daily(start: date, end: date,
     per-product outcome so callers can alert on a partial sync.
     """
     products = tuple(ad_products or DEFAULT_AD_PRODUCTS)
-    # Smaller chunks are the useful backfill knob: a 30-day SB/SD report is one
-    # all-or-nothing gamble against a queue that stalls, while seven 4-day ones
-    # commit what they get and report progress as they go.
-    chunks = _date_chunks(start, end, chunk_days)
+    # Default is ADS_CAMPAIGN_CHUNK_DAYS (7), not 30. A single 30-day SB/SD
+    # report on this account sits PENDING past the 900s cap; the same 30-day
+    # window in 7-day chunks completed (2026-08-22 ops retry). Each chunk
+    # commits on its own, so a stall keeps the days already written.
+    size = CAMPAIGN_CHUNK_DAYS if chunk_days is None else chunk_days
+    chunks = _date_chunks(start, end, size)
     say = on_progress or (lambda _msg: None)
     all_parsed: list[dict] = []
     errors: list[str] = []
@@ -470,8 +519,8 @@ def fetch_search_terms(start: date, end: date,
                        chunk_days: int | None = None) -> dict:
     """Fetch SP search term report, chunked to `chunk_days` (default 7).
 
-    Retries each failed chunk once before recording the error. Chunks that
-    exhaust their retry are skipped, not fatal — a partial window still
+    Each chunk uses the shared backoff (429/425/one timeout retry). Chunks
+    that still fail are skipped, not fatal — a partial window still
     produces usable recommendations.
 
     Note: the report is requested with timeUnit=SUMMARY, so each chunk returns
@@ -485,21 +534,11 @@ def fetch_search_terms(start: date, end: date,
 
     for i, (cs, ce) in enumerate(chunks, 1):
         log.info("Search terms chunk %d/%d: %s → %s", i, len(chunks), cs, ce)
-        rows = None
-        last_err = None
-        for attempt in range(2):  # try + retry once
-            try:
-                rows = _fetch_search_terms_chunk(cs, ce)
-                break
-            except Exception as e:
-                last_err = e
-                if attempt == 0:
-                    log.warning("Search terms chunk %d failed (attempt 1), retrying: %s",
-                                i, str(e)[:120])
-
-        if rows is None:
-            msg = f"Chunk {i} ({cs}→{ce}): {str(last_err)[:120]}"
-            log.warning("Search terms %s (gave up after retry)", msg)
+        try:
+            rows = _fetch_search_terms_chunk(cs, ce)
+        except Exception as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:120]}"
+            log.warning("Search terms %s", msg)
             errors.append(msg)
             continue
 
@@ -552,9 +591,10 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
              on_progress=None) -> dict:
     """Ads sync: campaigns and/or search terms, auto-chunked.
 
-    Campaign ranges are chunked to ≤30 days; search-term ranges to
-    `search_term_chunk_days` (default 7) because those reports are far heavier.
-    Safe to call with days=90 or higher.
+    Campaign ranges are chunked to `campaign_chunk_days` (default 7, max 30);
+    search-term ranges to `search_term_chunk_days` (default 7). A single
+    30-day SB/SD report times out on this account. Safe to call with days=90
+    or higher.
 
     The two halves are independent on purpose: `campaigns_only` returns without
     ever touching the search-term endpoint, so the fast daily refresh that
@@ -571,15 +611,34 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
         raise ValueError("campaigns_only, search_terms_only and placements_only "
                          "are mutually exclusive")
 
+    acquired = _SYNC_LOCK.acquire(timeout=_SYNC_LOCK_TIMEOUT)
+    if not acquired:
+        raise TimeoutError(
+            "another ads pull is still running after "
+            f"{int(_SYNC_LOCK_TIMEOUT / 60)} minutes — not stacking reports")
+    try:
+        return _sync_ads_body(
+            days=days,
+            search_term_chunk_days=search_term_chunk_days,
+            ad_products=ad_products,
+            campaign_chunk_days=campaign_chunk_days,
+            on_progress=on_progress,
+            do_campaigns=campaigns_only or not any(only_flags),
+            do_search_terms=search_terms_only or not any(only_flags),
+            do_placements=placements_only or (with_placements and not any(only_flags)),
+        )
+    finally:
+        _SYNC_LOCK.release()
+
+
+def _sync_ads_body(*, days: int,
+                   search_term_chunk_days: int | None,
+                   ad_products: tuple[str, ...] | None,
+                   campaign_chunk_days: int | None,
+                   on_progress, do_campaigns: bool, do_search_terms: bool,
+                   do_placements: bool) -> dict:
     end = amazon_as_of()
     start = end - timedelta(days=days - 1)
-
-    any_only = any(only_flags)
-    do_campaigns = campaigns_only or not any_only
-    do_search_terms = search_terms_only or not any_only
-    # Placements are opt-in on a full sync: they are a second spCampaigns
-    # report, so they double that report's runtime when not needed.
-    do_placements = placements_only or (with_placements and not any_only)
 
     results: dict = {
         "start": start.isoformat(), "end": end.isoformat(), "days": days,

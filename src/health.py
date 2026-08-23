@@ -172,10 +172,14 @@ def collect(cfg: dict | None = None, now: datetime | None = None) -> dict:
         try:
             from src.amazon_ads.export_brief import ADS_JOBS
         except Exception:
-            ADS_JOBS = ["ads_sync", "ads_campaigns_sync"]
+            ADS_JOBS = ["ads_sync", "ads_campaigns_sync",
+                        "ads_search_terms_sync", "ads_placements_sync"]
         try:
+            # Partial is a real completed pull (SP committed, SB/SD missed).
+            # Counting only success made a nightly SB timeout look like
+            # "no sync today" even though campaign spend was current.
             r = (client.table("job_runs").select("job_name,started_at,status")
-                 .in_("job_name", ADS_JOBS).eq("status", "success")
+                 .in_("job_name", ADS_JOBS).in_("status", ["success", "partial"])
                  .order("started_at", desc=True).limit(1).execute().data) or []
             if r:
                 facts["ads_last_sync"] = r[0]["started_at"]
