@@ -36,6 +36,13 @@ function fmtD(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function fmtMaybe(n: number | null | undefined, kind: "int" | "money" | "roas" = "int") {
+  if (n == null) return "—";
+  if (kind === "money") return `$${fmtD(n)}`;
+  if (kind === "roas") return `${n.toFixed(2)}x`;
+  return fmt(n);
+}
+
 function viewFor(data: PaidAdsResponse | null, channel: PaidAdsChannel, range: Range): ChannelWindowView | null {
   const bundle = data?.channels?.[channel];
   if (!bundle) return null;
@@ -63,15 +70,20 @@ function ChannelSection({
   title,
   waitingCopy,
   view,
+  hasOtherWindows,
 }: {
   channel: PaidAdsChannel;
   title: string;
   waitingCopy: string;
   view: ChannelWindowView | null;
+  hasOtherWindows?: boolean;
 }) {
   const empty = !view || view.source === "empty";
   const kpis = view?.kpis;
   const campaigns = view?.campaigns ?? [];
+  const emptyCopy = hasOtherWindows
+    ? `No ${view?.window_days ?? ""}D snapshot yet. Other windows have Ads Ops data.`
+    : waitingCopy;
 
   return (
     <section className="space-y-3">
@@ -80,20 +92,28 @@ function ChannelSection({
         <Badge variant="outline" className="text-[10px] font-normal">
           {channel}
         </Badge>
+        {view?.account_label && (
+          <span className="text-[10px] text-muted-foreground">{view.account_label}</span>
+        )}
         {view?.source && view.source !== "empty" && (
           <span className="text-[10px] text-muted-foreground">
-            {view.source === "snapshot" ? "Ads Ops window snapshot" : "rolled from daily rows"}
+            Ads Ops window snapshot
             {view.as_of ? ` · as of ${view.as_of}` : ""}
+            {view.window_start && view.window_end ? ` · ${view.window_start} → ${view.window_end}` : ""}
+            {view.feed_source ? ` · ${view.feed_source}` : ""}
             {view.ingested_at ? ` · ingested ${new Date(view.ingested_at).toLocaleString()}` : ""}
           </span>
         )}
       </div>
+      {view?.notes?.length ? (
+        <p className="text-[11px] text-muted-foreground">{view.notes.join(" · ")}</p>
+      ) : null}
 
       {empty ? (
         <Card>
           <CardContent className="py-12 text-center">
             <Megaphone className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">{waitingCopy}</p>
+            <p className="text-sm text-muted-foreground">{emptyCopy}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               POST a structured payload to <code>/api/paid-ads/ingest</code> — do not scrape Ads Manager.
             </p>
@@ -141,18 +161,20 @@ function ChannelSection({
                   </TableHeader>
                   <TableBody>
                     {campaigns.map((c) => (
-                      <TableRow key={c.campaign_id}>
+                      <TableRow key={`${c.campaign_name}:${c.campaign_id ?? ""}`}>
                         <TableCell>
                           <div className="font-medium">{c.campaign_name}</div>
-                          <div className="text-[10px] text-muted-foreground">{c.campaign_id}</div>
+                          <div className="text-[10px] text-muted-foreground">
+                            {[c.status, c.note, c.campaign_id].filter(Boolean).join(" · ")}
+                          </div>
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">${fmtD(c.spend)}</TableCell>
-                        <TableCell className="text-right tabular-nums">${fmtD(c.sales_or_conv_value)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{c.roas.toFixed(2)}x</TableCell>
-                        <TableCell className="text-right tabular-nums">{fmt(c.clicks)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{fmt(c.impressions)}</TableCell>
-                        <TableCell className="text-right tabular-nums">${fmtD(c.cpc)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{fmtD(c.conversions)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtMaybe(c.spend, "money")}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtMaybe(c.sales_or_conv_value, "money")}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtMaybe(c.roas, "roas")}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtMaybe(c.clicks)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtMaybe(c.impressions)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtMaybe(c.cpc, "money")}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmtMaybe(c.conversions)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -167,7 +189,7 @@ function ChannelSection({
 }
 
 export default function PaidAdsPage() {
-  const [range, setRange] = useState<Range>(7);
+  const [range, setRange] = useState<Range>(30);
   const [data, setData] = useState<PaidAdsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -223,6 +245,7 @@ export default function PaidAdsPage() {
 
   const google = viewFor(data, "google_ads", range);
   const meta = viewFor(data, "meta_ads", range);
+  const googleHasOther = Boolean(data?.channels?.google_ads?.windows.some((w) => w.source === "snapshot"));
   const fatal = Boolean(data?.fatalError) || (Boolean(error) && !data);
 
   return (
@@ -275,6 +298,7 @@ export default function PaidAdsPage() {
             title="Google Ads"
             waitingCopy="No Google Ads data yet. Waiting for an Ads Ops structured payload."
             view={google}
+            hasOtherWindows={googleHasOther && google?.source !== "snapshot"}
           />
           <ChannelSection
             channel="meta_ads"

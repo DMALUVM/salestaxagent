@@ -24,8 +24,8 @@ surfaces in the card as a visible failure state, not a blank panel.
 |---|---|---|
 | `/api/shopify-customers` | Supabase server creds + `shopify_orders` table | Visible error card naming the migration/backfill |
 | `/api/ppc` | Supabase server creds | Load-failure card |
-| `/api/paid-ads` | Supabase server creds + `paid_ads_*` tables | Empty Google/Meta cards + optional migration hint |
-| `/api/paid-ads/ingest` | Supabase server creds (POST, Basic Auth) | 400 on bad payload; upserts `paid_ads_*` only |
+| `/api/paid-ads` | Supabase server creds + `paid_ads_snapshots` / `paid_ads_campaigns_window` | Empty Google/Meta cards + optional migration hint |
+| `/api/paid-ads/ingest` | Supabase server creds (POST, Basic Auth) | 400 on bad payload; upserts those two tables on their production uniques |
 | `/api/data-freshness` | Supabase server creds | Layout strip hidden (fail-soft) |
 | `/api/ppc-export`, `/api/ppc-playbook`, `/api/registration-plan` | a Python venv **on the same machine** | JSON `{available:false}` — these cannot work on Vercel; `ppc-export` falls back to the stored `ppc_briefs` row |
 
@@ -61,10 +61,11 @@ That is intentional.
 ## Paid Ads (Shopify) ingest
 
 `/paid-ads` is fed by an Ads Ops **structured JSON payload**, not by scraping
-Google or Meta Ads Manager. Apply `supabase/migration_paid_ads.sql`, then POST
-the payload to `/api/paid-ads/ingest` with dashboard Basic Auth. Dashboard
-Agent may upsert the same `paid_ads_*` rows in Supabase when Ads Ops sends
-the payload in chat. Payload shape, aliases, and window rules:
+Google or Meta Ads Manager. Production already has `paid_ads_snapshots` and
+`paid_ads_campaigns_window` (first `google_ads` rows as of 2026-08-22). The
+migration is `IF NOT EXISTS` / additive — do not drop or truncate those
+tables. POST to `/api/paid-ads/ingest` with dashboard Basic Auth; Dashboard
+Agent may upsert the same uniques in Supabase. Payload shape:
 `dashboard/PAID_ADS.md`.
 
 

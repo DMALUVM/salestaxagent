@@ -5,40 +5,39 @@ import path from "node:path";
 
 import {
   deriveRatios,
+  inferWindowBounds,
   metricsFromUnknown,
   normalizePaidAdsChannel,
   normalizePaidAdsPayload,
   normalizePaidAdsWindow,
   parseIsoDate,
-  rollupCampaignsWindow,
-  rollupDailyWindow,
+  rowToCampaignWindow,
+  rowToSnapshot,
   selectChannelWindow,
   sumMetrics,
   toUpsertRows,
   PAID_ADS_ATTRIBUTION,
-  type PaidAdsCampaignDailyRow,
-  type PaidAdsDailyRow,
+  type PaidAdsCampaignWindowRow,
   type PaidAdsSnapshotRow,
 } from "./paid-ads";
 
-function daily(
-  date: string,
-  spend: number,
-  sales: number,
-  extra: Partial<PaidAdsDailyRow> = {},
-): PaidAdsDailyRow {
+function snap(partial: Partial<PaidAdsSnapshotRow> & Pick<PaidAdsSnapshotRow, "window_days" | "as_of">): PaidAdsSnapshotRow {
   return {
     channel: "google_ads",
-    date,
-    spend,
-    sales_or_conv_value: sales,
-    clicks: extra.clicks ?? 10,
-    impressions: extra.impressions ?? 100,
-    conversions: extra.conversions ?? 1,
+    window_start: null,
+    window_end: null,
+    account_label: null,
+    spend: 0,
+    conv_value: 0,
+    roas: null,
+    clicks: 0,
+    impressions: 0,
+    conversions: 0,
+    cpc: null,
     currency: "USD",
     source: "ads_ops",
-    ...deriveRatios({ spend, clicks: extra.clicks ?? 10, sales_or_conv_value: sales }),
-    ...extra,
+    notes: [],
+    ...partial,
   };
 }
 
@@ -72,13 +71,26 @@ describe("normalizePaidAdsWindow + dates", () => {
     assert.equal(parseIsoDate("2026-02-31"), null);
     assert.equal(parseIsoDate("yesterday"), null);
   });
+
+  test("inferWindowBounds matches production Ads Ops windows", () => {
+    assert.deepEqual(inferWindowBounds("2026-08-22", 7), {
+      window_start: "2026-08-15", window_end: "2026-08-21",
+    });
+    assert.deepEqual(inferWindowBounds("2026-08-22", 14), {
+      window_start: "2026-08-08", window_end: "2026-08-21",
+    });
+    assert.deepEqual(inferWindowBounds("2026-08-22", 30), {
+      window_start: "2026-07-23", window_end: "2026-08-21",
+    });
+  });
 });
 
 describe("metric rollup", () => {
   test("sums additive fields and re-derives CPC/ROAS", () => {
-    const a = daily("2026-08-20", 50, 200, { clicks: 25, conversions: 2 });
-    const b = daily("2026-08-21", 50, 100, { clicks: 25, conversions: 1 });
-    const sum = sumMetrics([a, b]);
+    const sum = sumMetrics([
+      { spend: 50, sales_or_conv_value: 200, clicks: 25, impressions: 100, conversions: 2, cpc: 99, roas: 99 },
+      { spend: 50, sales_or_conv_value: 100, clicks: 25, impressions: 100, conversions: 1, cpc: 99, roas: 99 },
+    ]);
     assert.equal(sum.spend, 100);
     assert.equal(sum.sales_or_conv_value, 300);
     assert.equal(sum.clicks, 50);
@@ -88,46 +100,18 @@ describe("metric rollup", () => {
   });
 
   test("does not add stored ratios across days", () => {
-    const rows = [
-      { ...daily("2026-08-20", 10, 40, { clicks: 5 }), cpc: 99, roas: 99 },
-      { ...daily("2026-08-21", 30, 60, { clicks: 15 }), cpc: 99, roas: 99 },
-    ];
-    const sum = sumMetrics(rows);
+    const sum = sumMetrics([
+      { ...deriveRatios({ spend: 10, clicks: 5, sales_or_conv_value: 40 }), spend: 10, sales_or_conv_value: 40, clicks: 5, impressions: 1, conversions: 1, cpc: 99, roas: 99 },
+      { spend: 30, sales_or_conv_value: 60, clicks: 15, impressions: 1, conversions: 1, cpc: 99, roas: 99 },
+    ]);
     assert.equal(sum.cpc, 2);
     assert.equal(sum.roas, 2.5);
   });
 
-  test("window rollup is inclusive of as_of", () => {
-    const rows = [
-      daily("2026-08-14", 10, 20),
-      daily("2026-08-15", 10, 20),
-      daily("2026-08-20", 10, 20),
-      daily("2026-08-21", 10, 20),
-    ];
-    const week = rollupDailyWindow(rows, "2026-08-20", 7);
-    assert.equal(week.days_in_window, 3);
-    assert.equal(week.spend, 30);
-    const day = rollupDailyWindow(rows, "2026-08-20", 1);
-    assert.equal(day.days_in_window, 1);
-    assert.equal(day.spend, 10);
-  });
-
-  test("campaign rollup keys on campaign_id and sorts by spend", () => {
-    const rows: PaidAdsCampaignDailyRow[] = [
-      { ...daily("2026-08-19", 10, 20), campaign_id: "a", campaign_name: "Alpha" },
-      { ...daily("2026-08-20", 40, 80), campaign_id: "b", campaign_name: "Bravo" },
-      { ...daily("2026-08-20", 5, 10), campaign_id: "a", campaign_name: "Alpha" },
-    ];
-    const out = rollupCampaignsWindow(rows, "2026-08-20", 7);
-    assert.equal(out[0].campaign_id, "b");
-    assert.equal(out[1].campaign_id, "a");
-    assert.equal(out[1].spend, 15);
-  });
-
-  test("metricsFromUnknown accepts Ads Ops aliases", () => {
+  test("metricsFromUnknown accepts Ads Ops aliases including conv_value", () => {
     const m = metricsFromUnknown({
       cost: "12.50",
-      conversion_value: 50,
+      conv_value: 50,
       clicks: "4",
       imps: 200,
       purchases: 2,
@@ -142,69 +126,63 @@ describe("metric rollup", () => {
 });
 
 describe("normalizePaidAdsPayload", () => {
-  test("builds daily + snapshot + campaign rows from a structured feed", () => {
-    const result = normalizePaidAdsPayload({
-      channel: "google",
-      as_of: "2026-08-22",
-      currency: "usd",
-      source: "ads_ops",
-      account: { spend: 20, sales: 80, clicks: 10, impressions: 400, conversions: 2 },
-      windows: [
-        { window_days: 7, spend: 140, sales_or_conv_value: 560, clicks: 70, impressions: 2800, conversions: 14 },
-      ],
-      campaigns: [
-        { campaign_id: "c1", campaign_name: "Brand", spend: 12, sales: 50, clicks: 6, impressions: 200, conversions: 1 },
-      ],
-    });
-    assert.equal(result.ok, true);
-    if (!result.ok) return;
-    assert.equal(result.data.channel, "google_ads");
-    assert.equal(result.data.daily.length, 1);
-    assert.equal(result.data.daily[0].date, "2026-08-22");
-    assert.equal(result.data.daily[0].spend, 20);
-    assert.equal(result.data.campaigns[0].campaign_id, "c1");
-    assert.equal(result.data.campaigns[0].date, "2026-08-22");
-    const seven = result.data.snapshots.find((s) => s.window_days === 7);
-    assert.ok(seven);
-    assert.equal(seven?.spend, 140);
-    assert.equal(seven?.roas, 4);
-    const rows = toUpsertRows(result.data, "2026-08-23T00:00:00.000Z");
-    assert.equal(rows.daily[0].ingested_at, "2026-08-23T00:00:00.000Z");
-  });
-
-  test("dated daily rows do not require a top-level as_of", () => {
-    const result = normalizePaidAdsPayload({
-      channel: "meta_ads",
-      daily: [
-        { date: "2026-08-20", spend: 5, clicks: 2 },
-        { date: "2026-08-21", spend: 7, clicks: 3 },
-      ],
-    });
-    assert.equal(result.ok, true);
-    if (!result.ok) return;
-    assert.equal(result.data.as_of, "2026-08-21");
-    assert.equal(result.data.daily.length, 2);
-  });
-
-  test("attaches undated campaigns to a declared window snapshot", () => {
+  test("maps a production-shaped Ads Ops payload onto the live uniques", () => {
     const result = normalizePaidAdsPayload({
       channel: "google_ads",
       as_of: "2026-08-22",
-      window_days: 7,
-      windows: [{ window_days: 7, spend: 100, sales_or_conv_value: 300, clicks: 50 }],
-      campaigns: [{ campaign_id: "x", name: "Prospecting", spend: 40, sales: 90, clicks: 20 }],
+      currency: "USD",
+      source: "scheduled_report_baselines",
+      account_label: "Tallowbourn 533-220-6723",
+      notes: ["Meta not connected"],
+      windows: [
+        { window_days: 7, spend: 593.47, conv_value: 721.26, roas: 1.22, clicks: 343, impressions: 55183, conversions: 30, cpc: 1.73 },
+        { window_days: 14, spend: 1236.68, conv_value: 1657.71, roas: 1.34, clicks: 673, impressions: 110170, conversions: 63.99, cpc: 1.84 },
+        { window_days: 30, spend: 2175.01, conv_value: 3435.53, roas: 1.58, clicks: 1301, impressions: 212233, conversions: 119.86, cpc: 1.67 },
+      ],
+      campaigns: [
+        { campaign_name: "PMAX Max Conversions V4", window_days: 30, spend: 964.80, roas: 1.37, status: "active", note: "dominant last 7d" },
+        { campaign_name: "BRANDED Search V1", window_days: 30, spend: 378.11, roas: 2.16, status: "active" },
+      ],
     });
     assert.equal(result.ok, true);
     if (!result.ok) return;
+    assert.equal(result.data.snapshots.length, 3);
     const seven = result.data.snapshots.find((s) => s.window_days === 7);
-    const camps = (seven?.metrics.campaigns ?? []) as Array<{ campaign_id: string }>;
-    assert.equal(camps[0]?.campaign_id, "x");
-    assert.equal(result.data.campaigns.length, 0);
+    assert.equal(seven?.conv_value, 721.26);
+    assert.equal(seven?.window_start, "2026-08-15");
+    assert.equal(seven?.window_end, "2026-08-21");
+    assert.equal(seven?.account_label, "Tallowbourn 533-220-6723");
+    assert.equal(result.data.campaignWindows.length, 2);
+    assert.equal(result.data.campaignWindows[0].campaign_name, "PMAX Max Conversions V4");
+    assert.equal(result.data.campaignWindows[0].campaign_id, null);
+    assert.equal(result.data.campaignWindows[0].window_days, 30);
+    assert.equal(result.data.campaignWindows[0].conv_value, null);
+
+    const rows = toUpsertRows(result.data, "2026-08-23T00:00:00.000Z");
+    assert.equal(rows.snapshots[0].conv_value, 721.26);
+    assert.equal("sales_or_conv_value" in rows.snapshots[0], false);
+    assert.equal(rows.campaignWindows[0].campaign_name, "PMAX Max Conversions V4");
+    assert.equal(rows.snapshots[0].ingested_at, "2026-08-23T00:00:00.000Z");
   });
 
-  test("rejects Amazon and missing channel", () => {
-    assert.equal(normalizePaidAdsPayload({ channel: "amazon_ads", as_of: "2026-08-22" }).ok, false);
-    assert.equal(normalizePaidAdsPayload({ as_of: "2026-08-22" }).ok, false);
+  test("name-only campaigns attach to the declared window", () => {
+    const result = normalizePaidAdsPayload({
+      channel: "google",
+      as_of: "2026-08-22",
+      window_days: 7,
+      windows: [{ window_days: 7, spend: 100, conv_value: 300, clicks: 50 }],
+      campaigns: [{ name: "Prospecting", spend: 40, sales: 90, clicks: 20 }],
+    });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.data.campaignWindows[0].campaign_name, "Prospecting");
+    assert.equal(result.data.campaignWindows[0].window_days, 7);
+    assert.equal(result.data.campaignWindows[0].conv_value, 90);
+  });
+
+  test("rejects Amazon and missing as_of / channel", () => {
+    assert.equal(normalizePaidAdsPayload({ channel: "amazon_ads", as_of: "2026-08-22", windows: [] }).ok, false);
+    assert.equal(normalizePaidAdsPayload({ as_of: "2026-08-22", windows: [{ window_days: 7, spend: 1 }] }).ok, false);
     assert.equal(normalizePaidAdsPayload({ channel: "google_ads" }).ok, false);
   });
 
@@ -213,7 +191,7 @@ describe("normalizePaidAdsPayload", () => {
       channel: "google_ads",
       as_of: "2026-08-22",
       source: "ads-manager-scrape",
-      account: { spend: 1 },
+      windows: [{ window_days: 7, spend: 1 }],
     });
     assert.equal(result.ok, true);
     if (!result.ok) return;
@@ -222,79 +200,70 @@ describe("normalizePaidAdsPayload", () => {
 });
 
 describe("selectChannelWindow", () => {
-  const dailyRows = [
-    daily("2026-08-19", 10, 20),
-    daily("2026-08-20", 10, 30),
+  const snapshots: PaidAdsSnapshotRow[] = [
+    snap({ as_of: "2026-08-22", window_days: 7, spend: 593.47, conv_value: 721.26, roas: 1.22, clicks: 343, notes: ["Meta not connected"] }),
+    snap({ as_of: "2026-08-22", window_days: 30, spend: 2175.01, conv_value: 3435.53, roas: 1.58 }),
   ];
-  const snap: PaidAdsSnapshotRow = {
-    channel: "google_ads",
-    as_of: "2026-08-20",
-    window_days: 7,
-    spend: 999,
-    sales_or_conv_value: 1998,
-    clicks: 10,
-    impressions: 100,
-    conversions: 4,
-    cpc: 0,
-    roas: 0,
-    currency: "USD",
-    source: "ads_ops",
-    metrics: {
-      campaigns: [{ campaign_id: "snap", campaign_name: "From snapshot", spend: 50, sales: 100, clicks: 5 }],
+  const campaignWindows: PaidAdsCampaignWindowRow[] = [
+    {
+      channel: "google_ads", as_of: "2026-08-22", window_days: 30,
+      campaign_id: null, campaign_name: "PMAX Max Conversions V4",
+      spend: 964.8, conv_value: null, roas: 1.37,
+      clicks: null, impressions: null, conversions: null, cpc: null,
+      status: "active", note: "dominant last 7d",
     },
-  };
+  ];
 
-  test("prefers snapshot KPIs and snapshot campaigns at the latest as_of", () => {
+  test("reads snapshot KPIs and same-window campaign rows", () => {
     const view = selectChannelWindow({
-      channel: "google_ads",
-      windowDays: 7,
-      daily: dailyRows,
-      campaigns: [],
-      snapshots: [snap],
+      channel: "google_ads", windowDays: 30, snapshots, campaignWindows,
     });
     assert.equal(view.source, "snapshot");
-    assert.equal(view.kpis.spend, 999);
-    assert.equal(view.kpis.roas, 2);
-    assert.equal(view.campaigns[0].campaign_id, "snap");
+    assert.equal(view.kpis.spend, 2175.01);
+    assert.equal(view.kpis.sales_or_conv_value, 3435.53);
+    assert.equal(view.campaigns[0].campaign_name, "PMAX Max Conversions V4");
+    assert.equal(view.campaigns[0].sales_or_conv_value, null);
   });
 
-  test("falls back to daily rollup when the snapshot window is missing", () => {
+  test("7D snapshot can exist without campaign rows", () => {
     const view = selectChannelWindow({
-      channel: "google_ads",
-      windowDays: 14,
-      daily: dailyRows,
-      campaigns: [{ ...dailyRows[1], campaign_id: "c", campaign_name: "C" }],
-      snapshots: [snap],
+      channel: "google_ads", windowDays: 7, snapshots, campaignWindows,
     });
-    assert.equal(view.source, "daily_rollup");
-    assert.equal(view.kpis.spend, 20);
-    assert.equal(view.campaigns[0].campaign_id, "c");
+    assert.equal(view.source, "snapshot");
+    assert.equal(view.kpis.spend, 593.47);
+    assert.equal(view.campaigns.length, 0);
+    assert.deepEqual(view.notes, ["Meta not connected"]);
   });
 
-  test("newer daily as_of ignores a stale snapshot", () => {
+  test("missing window stays empty (does not invent a daily rollup)", () => {
     const view = selectChannelWindow({
-      channel: "google_ads",
-      windowDays: 7,
-      daily: [...dailyRows, daily("2026-08-21", 5, 10)],
-      campaigns: [],
-      snapshots: [snap],
+      channel: "google_ads", windowDays: 1, snapshots, campaignWindows,
     });
-    assert.equal(view.as_of, "2026-08-21");
-    assert.equal(view.source, "daily_rollup");
-    assert.equal(view.kpis.spend, 25);
+    assert.equal(view.source, "empty");
+    assert.equal(view.kpis.spend, 0);
   });
 
   test("meta stays empty when only google rows exist", () => {
     const view = selectChannelWindow({
-      channel: "meta_ads",
-      windowDays: 7,
-      daily: dailyRows,
-      campaigns: [],
-      snapshots: [snap],
+      channel: "meta_ads", windowDays: 7, snapshots, campaignWindows,
     });
     assert.equal(view.source, "empty");
-    assert.equal(view.kpis.spend, 0);
     assert.equal(view.campaigns.length, 0);
+  });
+
+  test("row mappers accept production column names", () => {
+    const s = rowToSnapshot({
+      channel: "google_ads", as_of: "2026-08-22", window_days: 7,
+      spend: "593.47", conv_value: "721.26", clicks: "343",
+    });
+    assert.equal(s?.conv_value, 721.26);
+    assert.equal(s?.spend, 593.47);
+    const c = rowToCampaignWindow({
+      channel: "google_ads", as_of: "2026-08-22", window_days: 30,
+      campaign_name: "BRANDED Search V1", spend: 378.11, roas: 2.16,
+    });
+    assert.equal(c?.campaign_name, "BRANDED Search V1");
+    assert.equal(c?.conv_value, null);
   });
 });
 
@@ -324,25 +293,32 @@ describe("page / API invariants", () => {
     assert.doesNotMatch(ingest, /puppeteer|playwright|ads\.google\.com/i);
   });
 
-  test("ingest upserts paid_ads_* only — never Amazon ads_* tables", () => {
-    assert.match(ingest, /paid_ads_daily/);
-    assert.match(ingest, /paid_ads_campaigns_daily/);
+  test("ingest/read use production window tables and uniques", () => {
     assert.match(ingest, /paid_ads_snapshots/);
+    assert.match(ingest, /paid_ads_campaigns_window/);
+    assert.match(ingest, /channel,as_of,window_days,campaign_name/);
     assert.match(ingest, /getServerSupabase/);
-    assert.match(ingest, /normalizePaidAdsPayload/);
+    assert.match(read, /paid_ads_snapshots/);
+    assert.match(read, /paid_ads_campaigns_window/);
+    assert.match(read, /conv_value/);
+    assert.doesNotMatch(ingest, /paid_ads_daily|paid_ads_campaigns_daily/);
+    assert.doesNotMatch(read, /paid_ads_daily|paid_ads_campaigns_daily/);
     assert.doesNotMatch(ingest, /\.from\(["']ads_/);
     assert.doesNotMatch(read, /\.from\(["']ads_/);
   });
 
-  test("migration keeps google_ads|meta_ads and does not enable RLS lockdown", () => {
+  test("migration matches production and does not drop or lock down", () => {
+    assert.match(migration, /CREATE TABLE IF NOT EXISTS paid_ads_snapshots/);
+    assert.match(migration, /CREATE TABLE IF NOT EXISTS paid_ads_campaigns_window/);
+    assert.match(migration, /UNIQUE \(channel, as_of, window_days\)/);
+    assert.match(migration, /UNIQUE \(channel, as_of, window_days, campaign_name\)/);
+    assert.match(migration, /conv_value/);
     assert.match(migration, /google_ads/);
     assert.match(migration, /meta_ads/);
-    assert.match(migration, /paid_ads_daily/);
-    assert.match(migration, /paid_ads_campaigns_daily/);
-    assert.match(migration, /paid_ads_snapshots/);
+    assert.doesNotMatch(migration, /DROP TABLE|DROP COLUMN|TRUNCATE TABLE/i);
     assert.doesNotMatch(migration, /ENABLE ROW LEVEL SECURITY/);
     assert.doesNotMatch(migration, /CREATE POLICY/i);
-    assert.doesNotMatch(migration, /CREATE TABLE IF NOT EXISTS ads_/);
+    assert.doesNotMatch(migration, /paid_ads_daily|paid_ads_campaigns_daily/);
   });
 
   test("paid-ads page has an error boundary", () => {

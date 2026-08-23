@@ -1,12 +1,14 @@
 /**
  * Shopify / paid-social ads (google_ads | meta_ads).
  *
- * Amazon PPC stays in ads_* tables. This module only normalizes Ads Ops
- * structured payloads and rolls windows from daily / snapshot rows.
- * It never scrapes Google or Meta Ads Manager.
+ * Matches production tables:
+ *   paid_ads_snapshots         UNIQUE (channel, as_of, window_days)
+ *   paid_ads_campaigns_window  UNIQUE (channel, as_of, window_days, campaign_name)
+ *
+ * Amazon PPC stays in ads_* tables. This module never scrapes Ads Manager.
  */
 
-import { shiftDays, windowStart } from "./as-of";
+import { shiftDays } from "./as-of";
 
 export const PAID_ADS_CHANNELS = ["google_ads", "meta_ads"] as const;
 export type PaidAdsChannel = (typeof PAID_ADS_CHANNELS)[number];
@@ -35,7 +37,6 @@ const CHANNEL_ALIASES: Record<string, PaidAdsChannel> = {
 };
 
 const AMAZON_REJECT = /^(amazon|amazon_ads|amazon_ppc|ppc|sponsored_products)$/;
-
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export interface PaidAdsMetrics {
@@ -48,35 +49,56 @@ export interface PaidAdsMetrics {
   roas: number;
 }
 
-export interface PaidAdsDailyRow extends PaidAdsMetrics {
-  channel: PaidAdsChannel;
-  date: string;
-  currency: string;
-  source: string;
-  ingested_at?: string;
-}
-
-export interface PaidAdsCampaignDailyRow extends PaidAdsMetrics {
-  channel: PaidAdsChannel;
-  date: string;
-  campaign_id: string;
-  campaign_name: string;
-  ingested_at?: string;
-}
-
-export interface PaidAdsSnapshotRow extends PaidAdsMetrics {
+export interface PaidAdsSnapshotRow {
   channel: PaidAdsChannel;
   as_of: string;
   window_days: PaidAdsWindowDays;
+  window_start: string | null;
+  window_end: string | null;
+  account_label: string | null;
+  spend: number;
+  conv_value: number;
+  roas: number | null;
+  clicks: number;
+  impressions: number;
+  conversions: number;
+  cpc: number | null;
   currency: string;
-  source: string;
-  metrics: Record<string, unknown>;
+  source: string | null;
+  notes: unknown;
   ingested_at?: string;
 }
 
-export interface PaidAdsCampaignAgg extends PaidAdsMetrics {
-  campaign_id: string;
+export interface PaidAdsCampaignWindowRow {
+  channel: PaidAdsChannel;
+  as_of: string;
+  window_days: PaidAdsWindowDays;
+  campaign_id: string | null;
   campaign_name: string;
+  spend: number;
+  conv_value: number | null;
+  roas: number | null;
+  clicks: number | null;
+  impressions: number | null;
+  conversions: number | null;
+  cpc: number | null;
+  status: string | null;
+  note: string | null;
+  ingested_at?: string;
+}
+
+export interface PaidAdsCampaignAgg {
+  campaign_id: string | null;
+  campaign_name: string;
+  spend: number;
+  sales_or_conv_value: number | null;
+  clicks: number | null;
+  impressions: number | null;
+  conversions: number | null;
+  cpc: number | null;
+  roas: number | null;
+  status: string | null;
+  note: string | null;
 }
 
 export interface PaidAdsKpis extends PaidAdsMetrics {
@@ -89,9 +111,9 @@ export interface NormalizedPaidAdsPayload {
   as_of: string;
   currency: string;
   source: string;
-  daily: PaidAdsDailyRow[];
-  campaigns: PaidAdsCampaignDailyRow[];
+  account_label: string | null;
   snapshots: PaidAdsSnapshotRow[];
+  campaignWindows: PaidAdsCampaignWindowRow[];
 }
 
 export type NormalizeResult =
@@ -102,12 +124,15 @@ export interface ChannelWindowView {
   channel: PaidAdsChannel;
   window_days: PaidAdsWindowDays;
   as_of: string | null;
-  source: "snapshot" | "daily_rollup" | "empty";
+  source: "snapshot" | "empty";
   currency: string;
   kpis: PaidAdsKpis;
   campaigns: PaidAdsCampaignAgg[];
-  date_min: string | null;
-  date_max: string | null;
+  account_label: string | null;
+  window_start: string | null;
+  window_end: string | null;
+  notes: string[];
+  feed_source: string | null;
   ingested_at: string | null;
 }
 
@@ -119,7 +144,6 @@ export function isPaidAdsWindow(value: number): value is PaidAdsWindowDays {
   return (PAID_ADS_WINDOWS as readonly number[]).includes(value);
 }
 
-/** Map Ads Ops / operator aliases to google_ads | meta_ads. Reject Amazon PPC. */
 export function normalizePaidAdsChannel(raw: unknown): PaidAdsChannel | null {
   if (typeof raw !== "string") return null;
   const key = raw.trim().toLowerCase().replace(/\s+/g, "_");
@@ -140,12 +164,11 @@ export function normalizePaidAdsWindow(raw: unknown): PaidAdsWindowDays | null {
 }
 
 export function parseIsoDate(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const value = raw.trim().slice(0, 10);
+  if (raw == null) return null;
+  const value = String(raw).trim().slice(0, 10);
   if (!ISO_DATE.test(value)) return null;
   const t = Date.parse(`${value}T12:00:00Z`);
   if (Number.isNaN(t)) return null;
-  // Reject overflow like 2026-02-31 which Date.parse accepts then rolls.
   if (new Date(t).toISOString().slice(0, 10) !== value) return null;
   return value;
 }
@@ -158,6 +181,12 @@ export function num(raw: unknown): number {
     return Number.isFinite(n) ? n : 0;
   }
   return 0;
+}
+
+export function optionalNum(raw: unknown): number | null {
+  if (raw == null || raw === "") return null;
+  const n = num(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 export function round2(n: number): number {
@@ -203,11 +232,11 @@ export function metricsFromUnknown(raw: unknown): PaidAdsMetrics {
   const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const spend = num(pickMetric(obj, ["spend", "cost", "amount_spent"]));
   const sales = num(pickMetric(obj, [
-    "sales_or_conv_value", "sales", "conv_value", "conversion_value",
+    "conv_value", "sales_or_conv_value", "sales", "conversion_value",
     "conversions_value", "purchase_value", "revenue",
   ]));
-  const clicks = Math.round(num(pickMetric(obj, ["clicks"])));
-  const impressions = Math.round(num(pickMetric(obj, ["impressions", "imps"])));
+  const clicks = num(pickMetric(obj, ["clicks"]));
+  const impressions = num(pickMetric(obj, ["impressions", "imps"]));
   const conversions = num(pickMetric(obj, ["conversions", "conv", "purchases"]));
   const providedCpc = pickMetric(obj, ["cpc"]);
   const providedRoas = pickMetric(obj, ["roas"]);
@@ -244,188 +273,30 @@ export function sumMetrics(rows: Iterable<PaidAdsMetrics>): PaidAdsMetrics {
   };
 }
 
-export function inInclusiveWindow(date: string, asOf: string, windowDays: number): boolean {
-  if (!date || !asOf) return false;
-  const from = windowStart(asOf, windowDays);
-  return date >= from && date <= asOf;
-}
-
-export function rollupDailyWindow(
-  daily: PaidAdsDailyRow[],
-  asOf: string,
-  windowDays: PaidAdsWindowDays,
-): PaidAdsKpis {
-  const rows = daily.filter((r) => inInclusiveWindow(r.date, asOf, windowDays));
-  const metrics = sumMetrics(rows);
-  const currency = rows[rows.length - 1]?.currency ?? daily[0]?.currency ?? "USD";
-  return { ...metrics, currency, days_in_window: rows.length };
-}
-
-export function rollupCampaignsWindow(
-  campaigns: PaidAdsCampaignDailyRow[],
-  asOf: string,
-  windowDays: PaidAdsWindowDays,
-  limit = 25,
-): PaidAdsCampaignAgg[] {
-  const byId = new Map<string, PaidAdsCampaignDailyRow[]>();
-  for (const row of campaigns) {
-    if (!inInclusiveWindow(row.date, asOf, windowDays)) continue;
-    const list = byId.get(row.campaign_id) ?? [];
-    list.push(row);
-    byId.set(row.campaign_id, list);
-  }
-  const out: PaidAdsCampaignAgg[] = [];
-  for (const [campaign_id, rows] of byId) {
-    rows.sort((a, b) => a.date.localeCompare(b.date));
-    const latest = rows[rows.length - 1];
-    const name = [...rows].reverse().find((r) => r.campaign_name)?.campaign_name
-      ?? latest?.campaign_name
-      ?? campaign_id;
-    out.push({ campaign_id, campaign_name: name, ...sumMetrics(rows) });
-  }
-  out.sort((a, b) => b.spend - a.spend || a.campaign_name.localeCompare(b.campaign_name));
-  return out.slice(0, limit);
-}
-
-function campaignAggFromUnknown(
-  raw: unknown,
-  fallbackId: string,
-): PaidAdsCampaignAgg | null {
-  if (!raw || typeof raw !== "object") return null;
-  const obj = raw as Record<string, unknown>;
-  const campaign_id = String(obj.campaign_id ?? obj.id ?? fallbackId).trim();
-  if (!campaign_id) return null;
-  const campaign_name = String(obj.campaign_name ?? obj.name ?? campaign_id).trim();
-  return { campaign_id, campaign_name, ...metricsFromUnknown(obj) };
-}
-
-function latestDate(dates: string[]): string | null {
-  let max = "";
-  for (const d of dates) {
-    if (d && d > max) max = d;
-  }
-  return max || null;
-}
-
-export function latestAsOf(opts: {
-  daily: Array<{ date?: string | null }>;
-  snapshots: Array<{ as_of?: string | null }>;
-}): string | null {
-  const dates = [
-    ...opts.daily.map((r) => r.date ?? ""),
-    ...opts.snapshots.map((r) => r.as_of ?? ""),
-  ].filter(Boolean);
-  return latestDate(dates);
-}
-
-function snapshotCampaigns(snapshot: PaidAdsSnapshotRow | undefined): PaidAdsCampaignAgg[] {
-  if (!snapshot) return [];
-  const raw = snapshot.metrics?.campaigns;
-  if (!Array.isArray(raw)) return [];
-  const out: PaidAdsCampaignAgg[] = [];
-  raw.forEach((item, i) => {
-    const row = campaignAggFromUnknown(item, `campaign-${i + 1}`);
-    if (row) out.push(row);
-  });
-  out.sort((a, b) => b.spend - a.spend);
-  return out;
-}
-
-export function emptyKpis(currency = "USD"): PaidAdsKpis {
-  return { ...emptyMetrics(), currency, days_in_window: 0 };
-}
-
 /**
- * Prefer a snapshot whose as_of matches the latest available date.
- * Otherwise roll daily rows. Snapshot campaign lists win when present.
+ * Production Ads Ops windows: N days ending the day before as_of.
+ * 2026-08-22 / 7 → 2026-08-15 .. 2026-08-21.
  */
-export function selectChannelWindow(opts: {
-  channel: PaidAdsChannel;
-  windowDays: PaidAdsWindowDays;
-  daily: PaidAdsDailyRow[];
-  campaigns: PaidAdsCampaignDailyRow[];
-  snapshots: PaidAdsSnapshotRow[];
-  asOf?: string | null;
-}): ChannelWindowView {
-  const channelDaily = opts.daily.filter((r) => r.channel === opts.channel);
-  const channelCampaigns = opts.campaigns.filter((r) => r.channel === opts.channel);
-  const channelSnaps = opts.snapshots.filter((r) => r.channel === opts.channel);
-  const asOf = opts.asOf ?? latestAsOf({ daily: channelDaily, snapshots: channelSnaps });
-
-  const date_min = latestDate(
-    [...channelDaily.map((r) => r.date)].sort(),
-  ) && channelDaily.length
-    ? [...channelDaily.map((r) => r.date)].sort()[0]
-    : null;
-  const date_max = latestDate(channelDaily.map((r) => r.date));
-
-  if (!asOf) {
-    return {
-      channel: opts.channel,
-      window_days: opts.windowDays,
-      as_of: null,
-      source: "empty",
-      currency: "USD",
-      kpis: emptyKpis(),
-      campaigns: [],
-      date_min,
-      date_max,
-      ingested_at: null,
-    };
-  }
-
-  const snap = channelSnaps
-    .filter((s) => s.window_days === opts.windowDays && s.as_of === asOf)
-    .sort((a, b) => String(b.ingested_at ?? "").localeCompare(String(a.ingested_at ?? "")))[0];
-
-  const rolled = rollupDailyWindow(channelDaily, asOf, opts.windowDays);
-  const rolledCampaigns = rollupCampaignsWindow(channelCampaigns, asOf, opts.windowDays);
-  const snapCampaigns = snapshotCampaigns(snap);
-
-  const ingested_at = [
-    snap?.ingested_at,
-    ...channelDaily.filter((r) => inInclusiveWindow(r.date, asOf, opts.windowDays)).map((r) => r.ingested_at),
-  ].filter((v): v is string => Boolean(v)).sort().at(-1) ?? null;
-
-  if (snap) {
-    const ratios = deriveRatios(snap);
-    return {
-      channel: opts.channel,
-      window_days: opts.windowDays,
-      as_of: asOf,
-      source: "snapshot",
-      currency: snap.currency || rolled.currency || "USD",
-      kpis: {
-        spend: snap.spend,
-        sales_or_conv_value: snap.sales_or_conv_value,
-        clicks: snap.clicks,
-        impressions: snap.impressions,
-        conversions: snap.conversions,
-        cpc: snap.cpc || ratios.cpc,
-        roas: snap.roas || ratios.roas,
-        currency: snap.currency || "USD",
-        days_in_window: rolled.days_in_window || opts.windowDays,
-      },
-      campaigns: snapCampaigns.length ? snapCampaigns : rolledCampaigns,
-      date_min,
-      date_max,
-      ingested_at,
-    };
-  }
-
-  const hasDaily = rolled.days_in_window > 0;
+export function inferWindowBounds(asOf: string, windowDays: PaidAdsWindowDays): {
+  window_start: string;
+  window_end: string;
+} {
   return {
-    channel: opts.channel,
-    window_days: opts.windowDays,
-    as_of: asOf,
-    source: hasDaily ? "daily_rollup" : "empty",
-    currency: rolled.currency,
-    kpis: hasDaily ? rolled : emptyKpis(rolled.currency),
-    campaigns: rolledCampaigns,
-    date_min,
-    date_max,
-    ingested_at,
+    window_start: shiftDays(asOf, -windowDays),
+    window_end: shiftDays(asOf, -1),
   };
+}
+
+export function notesFromUnknown(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string" && raw.trim()) return [raw.trim()];
+  return [];
+}
+
+export function notesAsStrings(raw: unknown): string[] {
+  return notesFromUnknown(raw)
+    .map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
+    .filter(Boolean);
 }
 
 function asRecord(raw: unknown): Record<string, unknown> {
@@ -441,13 +312,225 @@ function currencyOf(raw: unknown, fallback = "USD"): string {
 
 function sourceOf(raw: unknown): string {
   const value = typeof raw === "string" && raw.trim() ? raw.trim() : PAID_ADS_SOURCE;
-  // Never pretend a scrape landed here.
   if (/scrape|ads.?manager|puppeteer|playwright/i.test(value)) return PAID_ADS_SOURCE;
-  return value.slice(0, 64);
+  return value.slice(0, 80);
+}
+
+function latestDate(dates: string[]): string | null {
+  let max = "";
+  for (const d of dates) {
+    if (d && d > max) max = d;
+  }
+  return max || null;
+}
+
+export function latestAsOf(opts: {
+  snapshots: Array<{ as_of?: string | null }>;
+  campaignWindows?: Array<{ as_of?: string | null }>;
+}): string | null {
+  const dates = [
+    ...opts.snapshots.map((r) => parseIsoDate(r.as_of) ?? ""),
+    ...(opts.campaignWindows ?? []).map((r) => parseIsoDate(r.as_of) ?? ""),
+  ].filter(Boolean);
+  return latestDate(dates);
+}
+
+export function emptyKpis(currency = "USD"): PaidAdsKpis {
+  return { ...emptyMetrics(), currency, days_in_window: 0 };
+}
+
+function campaignFromUnknown(
+  raw: unknown,
+  fallback: { channel: PaidAdsChannel; as_of: string; window_days: PaidAdsWindowDays },
+): PaidAdsCampaignWindowRow | null {
+  const obj = asRecord(raw);
+  const campaign_name = String(obj.campaign_name ?? obj.name ?? "").trim();
+  const campaign_id = String(obj.campaign_id ?? obj.id ?? "").trim() || null;
+  if (!campaign_name && !campaign_id) return null;
+  const name = campaign_name || campaign_id!;
+  const metrics = metricsFromUnknown(obj);
+  const hasConv = pickMetric(obj, [
+    "conv_value", "sales_or_conv_value", "sales", "conversion_value",
+    "conversions_value", "purchase_value", "revenue",
+  ]) != null;
+  const hasClicks = obj.clicks != null && obj.clicks !== "";
+  const hasImpr = pickMetric(obj, ["impressions", "imps"]) != null;
+  const hasConvCount = pickMetric(obj, ["conversions", "conv", "purchases"]) != null;
+  const hasCpc = obj.cpc != null && obj.cpc !== "";
+  const hasRoas = obj.roas != null && obj.roas !== "";
+  const days = normalizePaidAdsWindow(obj.window_days ?? obj.days ?? obj.window)
+    ?? fallback.window_days;
+  return {
+    channel: fallback.channel,
+    as_of: parseIsoDate(obj.as_of) ?? fallback.as_of,
+    window_days: days,
+    campaign_id,
+    campaign_name: name,
+    spend: metrics.spend,
+    conv_value: hasConv ? metrics.sales_or_conv_value : null,
+    roas: hasRoas ? metrics.roas : (metrics.spend > 0 && hasConv ? metrics.roas : null),
+    clicks: hasClicks ? metrics.clicks : null,
+    impressions: hasImpr ? metrics.impressions : null,
+    conversions: hasConvCount ? metrics.conversions : null,
+    cpc: hasCpc ? metrics.cpc : null,
+    status: typeof obj.status === "string" && obj.status.trim() ? obj.status.trim() : null,
+    note: typeof obj.note === "string" && obj.note.trim() ? obj.note.trim() : null,
+  };
+}
+
+function snapshotFromUnknown(
+  raw: unknown,
+  fallback: {
+    channel: PaidAdsChannel;
+    as_of: string;
+    window_days: PaidAdsWindowDays;
+    currency: string;
+    source: string;
+    account_label: string | null;
+    notes: unknown;
+  },
+): PaidAdsSnapshotRow {
+  const obj = asRecord(raw);
+  const days = normalizePaidAdsWindow(obj.window_days ?? obj.days ?? obj.window)
+    ?? fallback.window_days;
+  const as_of = parseIsoDate(obj.as_of) ?? fallback.as_of;
+  const bounds = inferWindowBounds(as_of, days);
+  const metrics = metricsFromUnknown(obj);
+  const notes = obj.notes != null ? notesFromUnknown(obj.notes) : notesFromUnknown(fallback.notes);
+  return {
+    channel: fallback.channel,
+    as_of,
+    window_days: days,
+    window_start: parseIsoDate(obj.window_start) ?? bounds.window_start,
+    window_end: parseIsoDate(obj.window_end) ?? bounds.window_end,
+    account_label: typeof obj.account_label === "string" && obj.account_label.trim()
+      ? obj.account_label.trim()
+      : fallback.account_label,
+    spend: metrics.spend,
+    conv_value: metrics.sales_or_conv_value,
+    roas: metrics.roas,
+    clicks: metrics.clicks,
+    impressions: metrics.impressions,
+    conversions: metrics.conversions,
+    cpc: metrics.cpc,
+    currency: currencyOf(obj.currency, fallback.currency),
+    source: sourceOf(obj.source ?? fallback.source),
+    notes,
+  };
+}
+
+export function campaignWindowToAgg(row: PaidAdsCampaignWindowRow): PaidAdsCampaignAgg {
+  return {
+    campaign_id: row.campaign_id,
+    campaign_name: row.campaign_name,
+    spend: row.spend,
+    sales_or_conv_value: row.conv_value,
+    clicks: row.clicks,
+    impressions: row.impressions,
+    conversions: row.conversions,
+    cpc: row.cpc,
+    roas: row.roas,
+    status: row.status,
+    note: row.note,
+  };
 }
 
 /**
- * Accept a single Ads Ops payload and produce upsert-ready rows.
+ * Prefer the snapshot at the latest as_of for this window.
+ * Campaigns come from paid_ads_campaigns_window at the same grain.
+ */
+export function selectChannelWindow(opts: {
+  channel: PaidAdsChannel;
+  windowDays: PaidAdsWindowDays;
+  snapshots: PaidAdsSnapshotRow[];
+  campaignWindows: PaidAdsCampaignWindowRow[];
+  asOf?: string | null;
+}): ChannelWindowView {
+  const snaps = opts.snapshots.filter((r) => r.channel === opts.channel);
+  const camps = opts.campaignWindows.filter((r) => r.channel === opts.channel);
+  const asOf = opts.asOf ?? latestAsOf({ snapshots: snaps, campaignWindows: camps });
+
+  if (!asOf) {
+    return {
+      channel: opts.channel,
+      window_days: opts.windowDays,
+      as_of: null,
+      source: "empty",
+      currency: "USD",
+      kpis: emptyKpis(),
+      campaigns: [],
+      account_label: null,
+      window_start: null,
+      window_end: null,
+      notes: [],
+      feed_source: null,
+      ingested_at: null,
+    };
+  }
+
+  const snap = snaps
+    .filter((s) => s.window_days === opts.windowDays && parseIsoDate(s.as_of) === asOf)
+    .sort((a, b) => String(b.ingested_at ?? "").localeCompare(String(a.ingested_at ?? "")))[0];
+
+  const campaigns = camps
+    .filter((c) => c.window_days === opts.windowDays && parseIsoDate(c.as_of) === asOf)
+    .map(campaignWindowToAgg)
+    .sort((a, b) => b.spend - a.spend || a.campaign_name.localeCompare(b.campaign_name));
+
+  if (!snap) {
+    return {
+      channel: opts.channel,
+      window_days: opts.windowDays,
+      as_of: asOf,
+      source: "empty",
+      currency: "USD",
+      kpis: emptyKpis(),
+      campaigns,
+      account_label: null,
+      window_start: null,
+      window_end: null,
+      notes: [],
+      feed_source: null,
+      ingested_at: camps.find((c) => parseIsoDate(c.as_of) === asOf)?.ingested_at ?? null,
+    };
+  }
+
+  const ratios = deriveRatios({
+    spend: snap.spend,
+    clicks: snap.clicks,
+    sales_or_conv_value: snap.conv_value,
+  });
+  return {
+    channel: opts.channel,
+    window_days: opts.windowDays,
+    as_of: asOf,
+    source: "snapshot",
+    currency: snap.currency || "USD",
+    kpis: {
+      spend: snap.spend,
+      sales_or_conv_value: snap.conv_value,
+      clicks: snap.clicks,
+      impressions: snap.impressions,
+      conversions: snap.conversions,
+      cpc: snap.cpc ?? ratios.cpc,
+      roas: snap.roas ?? ratios.roas,
+      currency: snap.currency || "USD",
+      days_in_window: opts.windowDays,
+    },
+    campaigns,
+    account_label: snap.account_label,
+    window_start: parseIsoDate(snap.window_start),
+    window_end: parseIsoDate(snap.window_end),
+    notes: notesAsStrings(snap.notes),
+    feed_source: snap.source,
+    ingested_at: snap.ingested_at
+      ?? campaigns.map((c) => camps.find((r) => r.campaign_name === c.campaign_name)?.ingested_at).find(Boolean)
+      ?? null,
+  };
+}
+
+/**
+ * Accept a single Ads Ops payload and produce upsert-ready window rows.
  * Amazon / scrape-shaped sources are rejected, not coerced.
  */
 export function normalizePaidAdsPayload(body: unknown): NormalizeResult {
@@ -460,162 +543,71 @@ export function normalizePaidAdsPayload(body: unknown): NormalizeResult {
     };
   }
 
-  const dailyIn = Array.isArray(root.daily) ? root.daily : [];
   const windowIn = Array.isArray(root.windows) ? root.windows : [];
   const campaignIn = Array.isArray(root.campaigns) ? root.campaigns : [];
-
-  const datedDaily = dailyIn
-    .map((row) => parseIsoDate(asRecord(row).date))
-    .filter((d): d is string => Boolean(d));
   const asOf = parseIsoDate(root.as_of)
-    ?? latestDate(datedDaily)
-    ?? parseIsoDate(root.date);
+    ?? parseIsoDate(root.date)
+    ?? latestDate(windowIn.map((w) => parseIsoDate(asRecord(w).as_of) ?? "").filter(Boolean));
   if (!asOf) {
-    return { ok: false, error: "as_of (YYYY-MM-DD) is required when daily dates are absent" };
+    return { ok: false, error: "as_of (YYYY-MM-DD) is required" };
   }
 
   const currency = currencyOf(root.currency);
   const source = sourceOf(root.source);
-  const account = root.account && typeof root.account === "object" ? root.account : null;
+  const account_label = typeof root.account_label === "string" && root.account_label.trim()
+    ? root.account_label.trim()
+    : null;
+  const notes = notesFromUnknown(root.notes);
+  const fallbackWindow = normalizePaidAdsWindow(
+    root.campaign_window_days ?? root.window_days ?? root.window,
+  );
 
-  const dailyByDate = new Map<string, PaidAdsDailyRow>();
-  for (const item of dailyIn) {
-    const obj = asRecord(item);
-    const date = parseIsoDate(obj.date);
-    if (!date) continue;
-    dailyByDate.set(date, {
-      channel,
-      date,
-      currency: currencyOf(obj.currency, currency),
-      source: sourceOf(obj.source ?? source),
-      ...metricsFromUnknown(obj),
-    });
+  const snapshotsByKey = new Map<string, PaidAdsSnapshotRow>();
+  const campaignsByKey = new Map<string, PaidAdsCampaignWindowRow>();
+
+  function putSnap(row: PaidAdsSnapshotRow) {
+    snapshotsByKey.set(`${row.as_of}:${row.window_days}`, row);
   }
-
-  if (account && !dailyByDate.has(asOf)) {
-    dailyByDate.set(asOf, {
-      channel,
-      date: asOf,
-      currency,
-      source,
-      ...metricsFromUnknown(account),
-    });
+  function putCamp(row: PaidAdsCampaignWindowRow) {
+    campaignsByKey.set(`${row.as_of}:${row.window_days}:${row.campaign_name}`, row);
   }
-
-  // A 1-day window is also a daily account rollup when no daily row exists.
-  for (const item of windowIn) {
-    const obj = asRecord(item);
-    const days = normalizePaidAdsWindow(obj.window_days ?? obj.days ?? obj.window);
-    if (days === 1 && !dailyByDate.has(asOf)) {
-      dailyByDate.set(asOf, {
-        channel,
-        date: asOf,
-        currency: currencyOf(obj.currency, currency),
-        source,
-        ...metricsFromUnknown(obj),
-      });
-    }
-  }
-
-  const snapshots: PaidAdsSnapshotRow[] = [];
-  const snapshotCampaigns = new Map<PaidAdsWindowDays, PaidAdsCampaignAgg[]>();
 
   for (const item of windowIn) {
     const obj = asRecord(item);
     const days = normalizePaidAdsWindow(obj.window_days ?? obj.days ?? obj.window);
     if (!days) continue;
-    const winCampaigns: PaidAdsCampaignAgg[] = [];
+    putSnap(snapshotFromUnknown(obj, {
+      channel, as_of: asOf, window_days: days, currency, source, account_label, notes,
+    }));
     if (Array.isArray(obj.campaigns)) {
-      obj.campaigns.forEach((c, i) => {
-        const row = campaignAggFromUnknown(c, `campaign-${i + 1}`);
-        if (row) winCampaigns.push(row);
-      });
-    }
-    if (winCampaigns.length) snapshotCampaigns.set(days, winCampaigns);
-    snapshots.push({
-      channel,
-      as_of: parseIsoDate(obj.as_of) ?? asOf,
-      window_days: days,
-      currency: currencyOf(obj.currency, currency),
-      source,
-      metrics: winCampaigns.length ? { campaigns: winCampaigns } : {},
-      ...metricsFromUnknown(obj),
-    });
-  }
-
-  const topLevelWindow = normalizePaidAdsWindow(
-    root.campaign_window_days ?? root.window_days ?? root.window,
-  );
-  const campaigns: PaidAdsCampaignDailyRow[] = [];
-  const undatedCampaigns: PaidAdsCampaignAgg[] = [];
-
-  for (const item of campaignIn) {
-    const obj = asRecord(item);
-    const campaign_id = String(obj.campaign_id ?? obj.id ?? "").trim();
-    if (!campaign_id) continue;
-    const campaign_name = String(obj.campaign_name ?? obj.name ?? campaign_id).trim();
-    const date = parseIsoDate(obj.date);
-    const metrics = metricsFromUnknown(obj);
-    if (date) {
-      campaigns.push({
-        channel, date, campaign_id, campaign_name, ...metrics,
-      });
-    } else {
-      const win = normalizePaidAdsWindow(obj.window_days) ?? topLevelWindow;
-      if (win && win !== 1) {
-        const list = snapshotCampaigns.get(win) ?? [];
-        list.push({ campaign_id, campaign_name, ...metrics });
-        snapshotCampaigns.set(win, list);
-      } else {
-        campaigns.push({
-          channel, date: asOf, campaign_id, campaign_name, ...metrics,
-        });
-        undatedCampaigns.push({ campaign_id, campaign_name, ...metrics });
+      for (const c of obj.campaigns) {
+        const row = campaignFromUnknown(c, { channel, as_of: asOf, window_days: days });
+        if (row) putCamp(row);
       }
     }
   }
 
-  if (undatedCampaigns.length && topLevelWindow && topLevelWindow !== 1) {
-    snapshotCampaigns.set(topLevelWindow, [
-      ...(snapshotCampaigns.get(topLevelWindow) ?? []),
-      ...undatedCampaigns,
-    ]);
+  const account = root.account && typeof root.account === "object" ? root.account : null;
+  if (account && !snapshotsByKey.has(`${asOf}:1`)) {
+    putSnap(snapshotFromUnknown(account, {
+      channel, as_of: asOf, window_days: 1, currency, source, account_label, notes,
+    }));
   }
 
-  for (const [days, list] of snapshotCampaigns) {
-    const existing = snapshots.find((s) => s.window_days === days && s.as_of === asOf);
-    if (existing) {
-      existing.metrics = { ...existing.metrics, campaigns: list };
-    } else {
-      const fromDaily = rollupDailyWindow([...dailyByDate.values()], asOf, days);
-      snapshots.push({
-        channel,
-        as_of: asOf,
-        window_days: days,
-        currency,
-        source,
-        metrics: { campaigns: list },
-        spend: fromDaily.spend,
-        sales_or_conv_value: fromDaily.sales_or_conv_value,
-        clicks: fromDaily.clicks,
-        impressions: fromDaily.impressions,
-        conversions: fromDaily.conversions,
-        cpc: fromDaily.cpc,
-        roas: fromDaily.roas,
-      });
-    }
-  }
+  const defaultCampWindow = fallbackWindow
+    ?? (windowIn.length
+      ? Math.max(...[...snapshotsByKey.values()].map((s) => s.window_days)) as PaidAdsWindowDays
+      : 30);
 
-  if (account && !snapshots.some((s) => s.window_days === 1 && s.as_of === asOf)) {
-    snapshots.push({
-      channel,
-      as_of: asOf,
-      window_days: 1,
-      currency,
-      source,
-      metrics: undatedCampaigns.length ? { campaigns: undatedCampaigns } : {},
-      ...metricsFromUnknown(account),
+  for (const item of campaignIn) {
+    const row = campaignFromUnknown(item, {
+      channel, as_of: asOf, window_days: defaultCampWindow,
     });
+    if (row) putCamp(row);
+  }
+
+  if (!snapshotsByKey.size && !campaignsByKey.size) {
+    return { ok: false, error: "windows[] or campaigns[] or account is required" };
   }
 
   return {
@@ -625,35 +617,111 @@ export function normalizePaidAdsPayload(body: unknown): NormalizeResult {
       as_of: asOf,
       currency,
       source,
-      daily: [...dailyByDate.values()].sort((a, b) => a.date.localeCompare(b.date)),
-      campaigns,
-      snapshots,
+      account_label,
+      snapshots: [...snapshotsByKey.values()].sort((a, b) => a.window_days - b.window_days),
+      campaignWindows: [...campaignsByKey.values()]
+        .sort((a, b) => a.window_days - b.window_days || b.spend - a.spend),
     },
   };
 }
 
-/** Rows ready for PostgREST upsert (no generated timestamps required). */
+function compactRow<T extends Record<string, unknown>>(row: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out as T;
+}
+
+/** Rows ready for PostgREST upsert against the production uniques. */
 export function toUpsertRows(data: NormalizedPaidAdsPayload, ingestedAt: string) {
   return {
-    daily: data.daily.map((row) => ({ ...row, ingested_at: ingestedAt })),
-    campaigns: data.campaigns.map((row) => ({ ...row, ingested_at: ingestedAt })),
-    snapshots: data.snapshots.map((row) => ({ ...row, ingested_at: ingestedAt })),
+    snapshots: data.snapshots.map((row) => compactRow({
+      channel: row.channel,
+      as_of: row.as_of,
+      window_days: row.window_days,
+      window_start: row.window_start,
+      window_end: row.window_end,
+      account_label: row.account_label,
+      spend: row.spend,
+      conv_value: row.conv_value,
+      roas: row.roas,
+      clicks: row.clicks,
+      impressions: row.impressions,
+      conversions: row.conversions,
+      cpc: row.cpc,
+      currency: row.currency,
+      source: row.source,
+      notes: row.notes ?? [],
+      ingested_at: ingestedAt,
+    })),
+    campaignWindows: data.campaignWindows.map((row) => compactRow({
+      channel: row.channel,
+      as_of: row.as_of,
+      window_days: row.window_days,
+      campaign_id: row.campaign_id,
+      campaign_name: row.campaign_name,
+      spend: row.spend,
+      conv_value: row.conv_value,
+      roas: row.roas,
+      clicks: row.clicks,
+      impressions: row.impressions,
+      conversions: row.conversions,
+      cpc: row.cpc,
+      status: row.status,
+      note: row.note,
+      ingested_at: ingestedAt,
+    })),
   };
 }
 
-export function emptyChannelBundle() {
+export function rowToSnapshot(raw: Record<string, unknown>): PaidAdsSnapshotRow | null {
+  const channel = normalizePaidAdsChannel(raw.channel);
+  const as_of = parseIsoDate(raw.as_of);
+  const window_days = normalizePaidAdsWindow(raw.window_days);
+  if (!channel || !as_of || !window_days) return null;
   return {
-    daily: [] as PaidAdsDailyRow[],
-    campaigns: [] as PaidAdsCampaignDailyRow[],
-    snapshots: [] as PaidAdsSnapshotRow[],
+    channel,
+    as_of,
+    window_days,
+    window_start: parseIsoDate(raw.window_start),
+    window_end: parseIsoDate(raw.window_end),
+    account_label: typeof raw.account_label === "string" ? raw.account_label : null,
+    spend: num(raw.spend),
+    conv_value: num(raw.conv_value ?? raw.sales_or_conv_value),
+    roas: optionalNum(raw.roas),
+    clicks: num(raw.clicks),
+    impressions: num(raw.impressions),
+    conversions: num(raw.conversions),
+    cpc: optionalNum(raw.cpc),
+    currency: currencyOf(raw.currency),
+    source: typeof raw.source === "string" ? raw.source : null,
+    notes: raw.notes,
+    ingested_at: typeof raw.ingested_at === "string" ? raw.ingested_at : undefined,
   };
 }
 
-/** Inclusive start of a paid-ads window (same math as Amazon PPC windows). */
-export function paidAdsWindowStart(asOf: string, windowDays: PaidAdsWindowDays): string {
-  return windowStart(asOf, windowDays);
-}
-
-export function paidAdsWindowEndExclusive(asOf: string): string {
-  return shiftDays(asOf, 1);
+export function rowToCampaignWindow(raw: Record<string, unknown>): PaidAdsCampaignWindowRow | null {
+  const channel = normalizePaidAdsChannel(raw.channel);
+  const as_of = parseIsoDate(raw.as_of);
+  const window_days = normalizePaidAdsWindow(raw.window_days);
+  const campaign_name = String(raw.campaign_name ?? "").trim();
+  if (!channel || !as_of || !window_days || !campaign_name) return null;
+  return {
+    channel,
+    as_of,
+    window_days,
+    campaign_id: String(raw.campaign_id ?? "").trim() || null,
+    campaign_name,
+    spend: num(raw.spend),
+    conv_value: optionalNum(raw.conv_value ?? raw.sales_or_conv_value),
+    roas: optionalNum(raw.roas),
+    clicks: optionalNum(raw.clicks),
+    impressions: optionalNum(raw.impressions),
+    conversions: optionalNum(raw.conversions),
+    cpc: optionalNum(raw.cpc),
+    status: typeof raw.status === "string" ? raw.status : null,
+    note: typeof raw.note === "string" ? raw.note : null,
+    ingested_at: typeof raw.ingested_at === "string" ? raw.ingested_at : undefined,
+  };
 }

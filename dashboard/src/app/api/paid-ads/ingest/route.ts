@@ -8,12 +8,13 @@ import {
 /**
  * POST /api/paid-ads/ingest
  *
- * Upsert an Ads Ops structured payload into paid_ads_*.
- * Protected by the same dashboard Basic Auth as every other route.
- * Uses the service-role client. Does not scrape Ads Manager.
+ * Upsert an Ads Ops structured payload into the production tables:
+ *   paid_ads_snapshots         on (channel, as_of, window_days)
+ *   paid_ads_campaigns_window  on (channel, as_of, window_days, campaign_name)
  *
- * Dashboard Agent may also upsert these tables directly in Supabase when
- * Ads Ops delivers the same JSON over chat — this route is the HTTP path.
+ * Protected by dashboard Basic Auth. Service-role client. No Ads Manager scrape.
+ * Dashboard Agent may upsert the same uniques in Supabase when Ads Ops
+ * delivers the JSON over chat.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -31,30 +32,6 @@ export async function POST(request: NextRequest) {
     const rows = toUpsertRows(normalized.data, ingestedAt);
     const sb = getServerSupabase();
 
-    if (rows.daily.length) {
-      const { error } = await sb
-        .from("paid_ads_daily")
-        .upsert(rows.daily, { onConflict: "channel,date" });
-      if (error) {
-        return Response.json(
-          { ok: false, error: `paid_ads_daily: ${error.message}` },
-          { status: 500 },
-        );
-      }
-    }
-
-    if (rows.campaigns.length) {
-      const { error } = await sb
-        .from("paid_ads_campaigns_daily")
-        .upsert(rows.campaigns, { onConflict: "channel,date,campaign_id" });
-      if (error) {
-        return Response.json(
-          { ok: false, error: `paid_ads_campaigns_daily: ${error.message}` },
-          { status: 500 },
-        );
-      }
-    }
-
     if (rows.snapshots.length) {
       const { error } = await sb
         .from("paid_ads_snapshots")
@@ -67,14 +44,27 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (rows.campaignWindows.length) {
+      const { error } = await sb
+        .from("paid_ads_campaigns_window")
+        .upsert(rows.campaignWindows, {
+          onConflict: "channel,as_of,window_days,campaign_name",
+        });
+      if (error) {
+        return Response.json(
+          { ok: false, error: `paid_ads_campaigns_window: ${error.message}` },
+          { status: 500 },
+        );
+      }
+    }
+
     return Response.json({
       ok: true,
       channel: normalized.data.channel,
       as_of: normalized.data.as_of,
       source: normalized.data.source,
-      daily_upserted: rows.daily.length,
-      campaigns_upserted: rows.campaigns.length,
       snapshots_upserted: rows.snapshots.length,
+      campaigns_upserted: rows.campaignWindows.length,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

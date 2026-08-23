@@ -3,27 +3,31 @@
 The `/paid-ads` page shows Google Ads (and later Meta) for the Shopify
 storefront. **Amazon PPC stays on `/ppc` and in `ads_*` tables.**
 
-Data is a **structured Ads Ops payload**, upserted into Supabase. This is
-**not** a live scrape of Google Ads Manager or Meta Ads Manager.
+Data is a **structured Ads Ops payload**, upserted into the production
+tables that already hold the first `google_ads` rows (`as_of` 2026-08-22).
+This is **not** a live scrape of Google or Meta Ads Manager.
 
-Dashboard Agent may upsert the same rows directly in Supabase when Ads Ops
-sends the payload in chat. The HTTP path is `POST /api/paid-ads/ingest`
+Dashboard Agent may upsert the same uniques in Supabase when Ads Ops
+sends the payload in chat. HTTP path: `POST /api/paid-ads/ingest`
 (dashboard Basic Auth + service-role key).
 
 ## Channels
 
 `google_ads` | `meta_ads` only. Amazon / PPC aliases are rejected.
 
-## Tables (`supabase/migration_paid_ads.sql`)
+## Tables (production; `supabase/migration_paid_ads.sql` is IF NOT EXISTS)
 
-| Table | Grain |
+| Table | Unique |
 |---|---|
-| `paid_ads_daily` | `(channel, date)` account rollup |
-| `paid_ads_campaigns_daily` | `(channel, date, campaign_id)` |
-| `paid_ads_snapshots` | `(channel, as_of, window_days)` for 1 / 7 / 14 / 30 |
+| `paid_ads_snapshots` | `(channel, as_of, window_days)` |
+| `paid_ads_campaigns_window` | `(channel, as_of, window_days, campaign_name)` |
 
-The GET route prefers a snapshot whose `as_of` is the latest date for that
-channel; otherwise it rolls daily rows for the inclusive window.
+Windows: **1 / 7 / 14 / 30**. Metric column is **`conv_value`** (not
+`sales_or_conv_value`). `as_of` is a `date`. Campaign `campaign_id` is
+optional — the first Google rows key on `campaign_name` only.
+
+Do not drop these tables or truncate rows. The dashboard **reads these
+two tables**. Ingest upserts the same uniques.
 
 ## Payload
 
@@ -32,78 +36,64 @@ channel; otherwise it rolls daily rows for the inclusive window.
   "channel": "google_ads",
   "as_of": "2026-08-22",
   "currency": "USD",
-  "source": "ads_ops",
-  "account": {
-    "spend": 42.15,
-    "sales_or_conv_value": 168.60,
-    "clicks": 30,
-    "impressions": 1200,
-    "conversions": 4
-  },
+  "source": "scheduled_report_baselines",
+  "account_label": "Tallowbourn 533-220-6723",
+  "notes": ["Meta not connected"],
   "windows": [
     {
-      "window_days": 1,
-      "spend": 42.15,
-      "sales_or_conv_value": 168.60,
-      "clicks": 30,
-      "impressions": 1200,
-      "conversions": 4
+      "window_days": 7,
+      "window_start": "2026-08-15",
+      "window_end": "2026-08-21",
+      "spend": 593.47,
+      "conv_value": 721.26,
+      "roas": 1.22,
+      "clicks": 343,
+      "impressions": 55183,
+      "conversions": 30,
+      "cpc": 1.73
     },
     {
-      "window_days": 7,
-      "spend": 280.00,
-      "sales_or_conv_value": 980.00,
-      "clicks": 210,
-      "impressions": 8400,
-      "conversions": 28,
+      "window_days": 30,
+      "spend": 2175.01,
+      "conv_value": 3435.53,
+      "roas": 1.58,
+      "clicks": 1301,
+      "impressions": 212233,
+      "conversions": 119.86,
+      "cpc": 1.67,
       "campaigns": [
         {
-          "campaign_id": "123",
-          "campaign_name": "Brand — Exact",
-          "spend": 90.00,
-          "sales_or_conv_value": 360.00,
-          "clicks": 70,
-          "impressions": 2000,
-          "conversions": 12
+          "campaign_name": "PMAX Max Conversions V4",
+          "spend": 964.80,
+          "roas": 1.37,
+          "status": "active",
+          "note": "dominant last 7d"
         }
       ]
     }
   ],
-  "daily": [
-    {
-      "date": "2026-08-22",
-      "spend": 42.15,
-      "sales_or_conv_value": 168.60,
-      "clicks": 30,
-      "impressions": 1200,
-      "conversions": 4
-    }
-  ],
   "campaigns": [
     {
-      "campaign_id": "123",
-      "campaign_name": "Brand — Exact",
-      "date": "2026-08-22",
-      "spend": 12.00,
-      "sales_or_conv_value": 48.00,
-      "clicks": 8,
-      "impressions": 300,
-      "conversions": 1
+      "campaign_name": "BRANDED Search V1",
+      "window_days": 30,
+      "spend": 378.11,
+      "roas": 2.16,
+      "status": "active"
     }
   ]
 }
 ```
 
-Aliases accepted on metrics: `cost`/`spend`, `sales`/`conversion_value`/
-`sales_or_conv_value`, `imps`/`impressions`, `purchases`/`conversions`.
-`cpc` and `roas` are optional; the dashboard re-derives them from totals
-(`spend/clicks`, `sales_or_conv_value/spend`) when rolling windows.
+Aliases: `cost`/`spend`, `conv_value`/`sales`/`sales_or_conv_value`,
+`imps`/`impressions`. `cpc` and `roas` are optional on ingest; the page
+re-derives them from totals when a snapshot omits them.
 
-- Dated `campaigns[]` write `paid_ads_campaigns_daily`.
-- Undated `campaigns[]` land on `as_of` unless `window_days` / `campaign_window_days`
-  is 7/14/30 — then they attach to that snapshot’s `metrics.campaigns`.
-- `windows[]` write `paid_ads_snapshots`. A 1-day window also fills
-  `paid_ads_daily` when no daily row exists for `as_of`.
+If `window_start` / `window_end` are omitted, they are filled as
+`[as_of − window_days, as_of − 1]` (the grain of the first Google rows).
+
+Top-level `campaigns[]` without `window_days` attach to
+`campaign_window_days` / `window_days`, else the largest window in the
+payload, else 30.
 
 ## Read
 

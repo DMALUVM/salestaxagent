@@ -6,28 +6,34 @@ import {
   latestAsOf,
   normalizePaidAdsChannel,
   normalizePaidAdsWindow,
+  rowToCampaignWindow,
+  rowToSnapshot,
   selectChannelWindow,
-  type PaidAdsCampaignDailyRow,
+  type PaidAdsCampaignWindowRow,
   type PaidAdsChannel,
-  type PaidAdsDailyRow,
   type PaidAdsSnapshotRow,
   type PaidAdsWindowDays,
 } from "@/lib/paid-ads";
 
 const PAGE = 1000;
 
+const SNAPSHOT_COLS =
+  "channel,as_of,window_days,window_start,window_end,account_label,spend,conv_value,roas,clicks,impressions,conversions,cpc,currency,source,notes,ingested_at";
+const CAMPAIGN_COLS =
+  "channel,as_of,window_days,campaign_id,campaign_name,spend,conv_value,roas,clicks,impressions,conversions,cpc,status,note,ingested_at";
+
 function isMissingTable(message: string): boolean {
   return /does not exist|schema cache|PGRST205/i.test(message);
 }
 
-async function selectAll<T>(
+async function selectAll(
   table: string,
   columns: string,
   orderCol: string,
-): Promise<{ rows: T[]; error: string | null; missing: boolean }> {
+): Promise<{ rows: Record<string, unknown>[]; error: string | null; missing: boolean }> {
   try {
     const sb = getServerSupabase();
-    const rows: T[] = [];
+    const rows: Record<string, unknown>[] = [];
     let offset = 0;
     while (true) {
       const { data, error } = await sb
@@ -40,7 +46,7 @@ async function selectAll<T>(
         if (isMissingTable(msg)) return { rows: [], error: null, missing: true };
         return { rows: [], error: `${table}: ${msg}`, missing: false };
       }
-      const page = (data ?? []) as T[];
+      const page = (data ?? []) as unknown as Record<string, unknown>[];
       rows.push(...page);
       if (page.length < PAGE) break;
       offset += PAGE;
@@ -57,17 +63,16 @@ async function selectAll<T>(
 
 function viewsForChannel(
   channel: PaidAdsChannel,
-  daily: PaidAdsDailyRow[],
-  campaigns: PaidAdsCampaignDailyRow[],
   snapshots: PaidAdsSnapshotRow[],
+  campaignWindows: PaidAdsCampaignWindowRow[],
   windowDays?: PaidAdsWindowDays,
 ) {
   const as_of = latestAsOf({
-    daily: daily.filter((r) => r.channel === channel),
     snapshots: snapshots.filter((r) => r.channel === channel),
+    campaignWindows: campaignWindows.filter((r) => r.channel === channel),
   });
   const windows = (windowDays ? [windowDays] : PAID_ADS_WINDOWS).map((days) =>
-    selectChannelWindow({ channel, windowDays: days, daily, campaigns, snapshots, asOf: as_of }),
+    selectChannelWindow({ channel, windowDays: days, snapshots, campaignWindows, asOf: as_of }),
   );
   return { as_of, windows };
 }
@@ -75,7 +80,7 @@ function viewsForChannel(
 /**
  * GET /api/paid-ads?channel=google_ads&window=7
  *
- * Service-role read of paid_ads_*. Default: both channels, all windows.
+ * Service-role read of paid_ads_snapshots + paid_ads_campaigns_window.
  */
 export async function GET(request: Request) {
   try {
@@ -84,34 +89,28 @@ export async function GET(request: Request) {
     const windowFilter = normalizePaidAdsWindow(url.searchParams.get("window"));
     const loadErrors: string[] = [];
 
-    const [dailyRes, campRes, snapRes] = await Promise.all([
-      selectAll<PaidAdsDailyRow>(
-        "paid_ads_daily",
-        "channel,date,spend,sales_or_conv_value,clicks,impressions,cpc,conversions,roas,currency,source,ingested_at",
-        "date",
-      ),
-      selectAll<PaidAdsCampaignDailyRow>(
-        "paid_ads_campaigns_daily",
-        "channel,date,campaign_id,campaign_name,spend,sales_or_conv_value,clicks,impressions,cpc,conversions,roas,ingested_at",
-        "date",
-      ),
-      selectAll<PaidAdsSnapshotRow>(
-        "paid_ads_snapshots",
-        "channel,as_of,window_days,spend,sales_or_conv_value,clicks,impressions,cpc,conversions,roas,currency,metrics,source,ingested_at",
-        "as_of",
-      ),
+    const [snapRes, campRes] = await Promise.all([
+      selectAll("paid_ads_snapshots", SNAPSHOT_COLS, "as_of"),
+      selectAll("paid_ads_campaigns_window", CAMPAIGN_COLS, "as_of"),
     ]);
 
-    const missing = dailyRes.missing && campRes.missing && snapRes.missing;
-    for (const res of [dailyRes, campRes, snapRes]) {
+    const missing = snapRes.missing && campRes.missing;
+    for (const res of [snapRes, campRes]) {
       if (res.error) loadErrors.push(res.error);
     }
+
+    const snapshots = snapRes.rows
+      .map(rowToSnapshot)
+      .filter((r): r is PaidAdsSnapshotRow => Boolean(r));
+    const campaignWindows = campRes.rows
+      .map(rowToCampaignWindow)
+      .filter((r): r is PaidAdsCampaignWindowRow => Boolean(r));
 
     const channels = channelFilter ? [channelFilter] : [...PAID_ADS_CHANNELS];
     const byChannel = Object.fromEntries(
       channels.map((channel) => [
         channel,
-        viewsForChannel(channel, dailyRes.rows, campRes.rows, snapRes.rows, windowFilter ?? undefined),
+        viewsForChannel(channel, snapshots, campaignWindows, windowFilter ?? undefined),
       ]),
     );
 
