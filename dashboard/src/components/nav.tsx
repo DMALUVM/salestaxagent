@@ -21,6 +21,7 @@ import {
   TrendingUp,
   Warehouse,
   RotateCcw,
+  Megaphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -65,6 +66,7 @@ const monitorLinks: NavItem[] = [
   { href: "/costs", label: "COGS", icon: DollarSign },
   { href: "/amazon", label: "Amazon Ops", icon: TrendingUp },
   { href: "/ppc", label: "Amazon PPC", icon: TrendingUp },
+  { href: "/paid-ads", label: "Paid Ads (Shopify)", icon: Megaphone },
   { href: "/sales-map", label: "Sales Map", icon: MapPinned },
   { href: "/skus", label: "SKU Performance", icon: Package },
   { href: "/compliance", label: "Compliance Guides", icon: BookOpen },
