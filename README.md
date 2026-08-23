@@ -711,6 +711,7 @@ python -m src.main test-alert
 | **Nexus Monitor** | `/nexus` | Unregistered exposure: physical + economic nexus by state |
 | **Sales Map** | `/sales-map` | US choropleth by sales volume; year + month + channel filters |
 | **SKU Performance** | `/skus` | Product-level sales, units, refunds by SKU |
+| **Paid Ads (Shopify)** | `/paid-ads` | Google Ads KPIs + campaigns (Meta placeholder). Ads Ops structured feed only — not an Ads Manager scrape. See `dashboard/PAID_ADS.md`. |
 | **Rules & Rulings** | `/rules` | Cited nexus rules, court opinions, admin guidance |
 | **Data & Export** | `/data` | Upload CSV, trigger SP-API refresh, download CPA exports |
 
