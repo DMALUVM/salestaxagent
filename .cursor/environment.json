@@ -1,0 +1,10 @@
+{
+  "name": "Sales Tax Agent",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "dashboard-dev",
+      "command": "cd dashboard && DASHBOARD_USER=\"${DASHBOARD_USER:-admin}\" DASHBOARD_PASSWORD=\"${DASHBOARD_PASSWORD:-devpassword}\" NEXT_PUBLIC_SUPABASE_URL=\"${NEXT_PUBLIC_SUPABASE_URL:-https://placeholder.supabase.co}\" NEXT_PUBLIC_SUPABASE_ANON_KEY=\"${NEXT_PUBLIC_SUPABASE_ANON_KEY:-placeholder-anon-key}\" npm run dev"
+    }
+  ]
+}
