@@ -318,7 +318,7 @@ describe("page / API invariants", () => {
   test("copy names the Ads Ops feed and forbids a live scrape", () => {
     assert.match(page, /Ads Ops structured feed/);
     assert.match(page, /not a live/);
-    assert.match(page, /waiting for Ads Ops Meta payload/i);
+    assert.match(page, /Waiting for Ads Ops Meta payload/);
     assert.equal(PAID_ADS_ATTRIBUTION.includes("not a live"), true);
     assert.doesNotMatch(page, /puppeteer|playwright|ads\.google\.com|business\.facebook\.com/i);
     assert.doesNotMatch(ingest, /puppeteer|playwright|ads\.google\.com/i);
@@ -330,8 +330,8 @@ describe("page / API invariants", () => {
     assert.match(ingest, /paid_ads_snapshots/);
     assert.match(ingest, /getServerSupabase/);
     assert.match(ingest, /normalizePaidAdsPayload/);
-    assert.doesNotMatch(ingest, /ads_campaigns_daily|ads_search_terms_daily|ads_recommendations/);
-    assert.doesNotMatch(read, /ads_campaigns_daily/);
+    assert.doesNotMatch(ingest, /\.from\(["']ads_/);
+    assert.doesNotMatch(read, /\.from\(["']ads_/);
   });
 
   test("migration keeps google_ads|meta_ads and does not enable RLS lockdown", () => {
@@ -341,8 +341,8 @@ describe("page / API invariants", () => {
     assert.match(migration, /paid_ads_campaigns_daily/);
     assert.match(migration, /paid_ads_snapshots/);
     assert.doesNotMatch(migration, /ENABLE ROW LEVEL SECURITY/);
-    assert.doesNotMatch(migration, /migration_rls_lockdown/);
-    assert.doesNotMatch(migration, /ads_campaigns_daily/);
+    assert.doesNotMatch(migration, /CREATE POLICY/i);
+    assert.doesNotMatch(migration, /CREATE TABLE IF NOT EXISTS ads_/);
   });
 
   test("paid-ads page has an error boundary", () => {

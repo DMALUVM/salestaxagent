@@ -11,7 +11,6 @@ import { LoadingState } from "@/components/loading";
 import { QueryError } from "@/components/query-error";
 import { isConfigured } from "@/lib/supabase";
 import {
-  PAID_ADS_ATTRIBUTION,
   PAID_ADS_WINDOWS,
   type ChannelWindowView,
   type PaidAdsChannel,
@@ -232,7 +231,8 @@ export default function PaidAdsPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Paid Ads (Shopify)</h1>
           <p className="text-sm text-muted-foreground">
-            Google Ads now, Meta next — same shape. {PAID_ADS_ATTRIBUTION}
+            Google Ads now, Meta next — same shape. Data from Ads Ops structured feed — not a live
+            Google/Meta Ads Manager scrape.
           </p>
         </div>
         <div className="flex gap-1 rounded-md border p-0.5">
