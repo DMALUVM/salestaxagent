@@ -66,10 +66,65 @@ test("the paid-ads chart gives its bars a definite parent height", () => {
   const chart = src.slice(src.indexOf("function DualChart("), src.indexOf("function IntelCardView("));
   assert.ok(/style=\{\{ height: CHART_HEIGHT \}\}/.test(chart),
     "the chart box needs an explicit pixel height for the percentage fills to resolve");
-  assert.ok(/className="flex h-full min-w-\[8px\] flex-1 items-end/.test(chart),
+  // Accepts a plain string or a template literal — the hover state made the
+  // class list conditional, but the h-full prefix is the load-bearing part.
+  assert.ok(/className=[{"`]*`?flex h-full min-w-\[8px\] flex-1 items-end/.test(chart),
     "each day column must be h-full so its bars have a definite parent height");
   assert.ok(/Math\.max\(\s*0,\s*Math\.min\(\s*100/.test(src),
     "the fill percentage must be clamped to 0..100");
+});
+
+/**
+ * The four series are only distinguishable by colour, so the numbers have to
+ * live somewhere. A native `title` attribute is slow, untouchable on mobile and
+ * unreachable by keyboard — these assert a real hover card that escapes the
+ * clipped bar row, plus printed day totals on short windows.
+ */
+test("the paid-ads charts carry a real hover card, not a title attribute", () => {
+  const src = read("paid-ads-intel.tsx");
+  const dual = src.slice(src.indexOf("function DualChart("), src.indexOf("function ChartSpark("));
+
+  assert.ok(!/title={`\$\{d\.date}/.test(dual),
+    "the day column must not fall back to a native title tooltip");
+  assert.ok(dual.includes("onMouseEnter") && dual.includes("onFocus") && dual.includes("onBlur"),
+    "the hover card must open on both pointer and keyboard focus");
+  assert.ok(/tabIndex={0}/.test(dual),
+    "each day column must be focusable so the figures are reachable without a mouse");
+  assert.ok(/aria-label={`\$\{d\.date}/.test(dual),
+    "each day needs its figures in an aria-label for screen readers");
+
+  // The hover card lives in a `relative` wrapper OUTSIDE the overflow-hidden
+  // bar row, or it gets clipped by the same box that clips the fills.
+  // Match the JSX attribute, not the word "overflow-hidden" in a comment.
+  const wrapper = dual.indexOf('className="relative"');
+  const barRow = dual.indexOf("items-end gap-1 overflow-hidden");
+  assert.ok(wrapper > -1, "the chart needs a relative positioning wrapper");
+  assert.ok(barRow > -1, "the bar row must clip its fills");
+  assert.ok(wrapper < barRow,
+    "the positioning wrapper must come before (and contain) the clipped bar row");
+  assert.ok(/left: `clamp\(/.test(dual),
+    "the hover card must be clamped so it never overhangs the card edges");
+  assert.ok(dual.includes("pointer-events-none"),
+    "the hover card must not eat the pointer events that opened it");
+});
+
+test("the paid-ads chart states its scale and prints day values when they fit", () => {
+  const src = read("paid-ads-intel.tsx");
+  const dual = src.slice(src.indexOf("function DualChart("), src.indexOf("function ChartSpark("));
+  assert.ok(/Scale: top of chart/.test(dual),
+    "a bar height means nothing without the value at full height");
+  assert.ok(/const dense = shown\.length <= 10/.test(dual),
+    "printed per-day values must be gated on the window being short enough to fit");
+  assert.ok(/tickEvery/.test(dual),
+    "date ticks must thin out on longer windows instead of overlapping");
+});
+
+test("the organic sparkline is also hoverable and keyboard reachable", () => {
+  const src = read("paid-ads-intel.tsx");
+  const spark = src.slice(src.indexOf("function ChartSpark("), src.indexOf("function IntelCardView("));
+  assert.ok(spark.includes("tabIndex={0}"), "sparkline days must be focusable");
+  assert.ok(spark.includes("aria-label"), "sparkline days need their figures announced");
+  assert.ok(/left: `clamp\(/.test(spark), "its hover card must be clamped too");
 });
 
 test("the bar fill percentage is clamped to 0..100", () => {

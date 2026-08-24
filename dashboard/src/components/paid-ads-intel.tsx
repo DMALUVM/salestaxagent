@@ -96,7 +96,28 @@ function Bar({ value, max, className }: { value: number; max: number; className:
   );
 }
 
+/** "2026-08-24" → "8/24", so a 30-day axis still fits. */
+function shortDate(iso: string): string {
+  const [, m, d] = iso.split("-");
+  return m && d ? `${Number(m)}/${Number(d)}` : iso;
+}
+
+function compactMoney(n: number): string {
+  if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
+  return `$${Math.round(n)}`;
+}
+
+function TipRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <p className={`flex justify-between gap-3 ${strong ? "font-medium" : ""}`}>
+      <span className="text-muted-foreground">{label}</span>
+      <span className="tabular-nums">{value}</span>
+    </p>
+  );
+}
+
 function DualChart({ daily }: { daily: IntelBundle["daily"] }) {
+  const [hover, setHover] = useState<number | null>(null);
   const shown = daily.slice(-30);
   const max = Math.max(
     0,
@@ -108,56 +129,183 @@ function DualChart({ daily }: { daily: IntelBundle["daily"] }) {
   if (max <= 0) {
     return <p className="text-sm text-muted-foreground">No spend or conversion value in this window.</p>;
   }
+
+  // At 30 columns a printed value per day collides; label every day only when
+  // the window is short enough for the numbers to fit.
+  const dense = shown.length <= 10;
+  const tickEvery = shown.length <= 10 ? 1 : shown.length <= 16 ? 2 : 5;
+  const day = hover != null ? shown[hover] : null;
+  const spend = day ? day.google_spend + day.meta_spend : 0;
+  const value = day ? day.google_revenue + day.meta_revenue : 0;
+
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-blue-500" /> Google spend</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-blue-300" /> Google conv. value</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-violet-500" /> Meta spend</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-violet-300" /> Meta purchases value</span>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted-foreground">
+        <div className="flex flex-wrap gap-3">
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-blue-500" /> Google spend</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-blue-300" /> Google conv. value</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-violet-500" /> Meta spend</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-violet-300" /> Meta purchases value</span>
+        </div>
+        <span className="tabular-nums">Scale: top of chart = {money(max)}</span>
       </div>
-      <div
-        className="flex items-end gap-1 overflow-hidden"
-        style={{ height: CHART_HEIGHT }}
-        role="img"
-        aria-label="Daily Google and Meta spend versus conversion value"
-      >
-        {shown.map((d) => (
+
+      {/* `relative` wrapper, not the bar row: the bar row keeps overflow-hidden
+          so the fills cannot escape, which would also clip the hover card. */}
+      <div className="relative" onMouseLeave={() => setHover(null)}>
+        {/* Half-scale reference line so a bar's height reads as a value. */}
+        <div
+          className="pointer-events-none absolute inset-x-0 z-0 border-t border-dashed border-muted-foreground/20"
+          style={{ top: CHART_HEIGHT / 2 }}
+        />
+        <div
+          className="flex items-end gap-1 overflow-hidden"
+          style={{ height: CHART_HEIGHT }}
+        >
+          {shown.map((d, i) => {
+            const on = hover === i;
+            const dayValue = d.google_revenue + d.meta_revenue;
+            const daySpend = d.google_spend + d.meta_spend;
+            return (
+              <div
+                key={d.date}
+                className={`flex h-full min-w-[8px] flex-1 items-end gap-px rounded-t outline-none ${
+                  on ? "bg-muted-foreground/10" : ""
+                }`}
+                // Focusable so the figures are reachable without a mouse.
+                tabIndex={0}
+                onMouseEnter={() => setHover(i)}
+                onFocus={() => setHover(i)}
+                onBlur={() => setHover(null)}
+                aria-label={`${d.date}: Google spend ${money(d.google_spend)}, Google conversion value ${money(d.google_revenue)}, Meta spend ${money(d.meta_spend)}, Meta purchases value ${money(d.meta_revenue)}. Day total spend ${money(daySpend)}, value ${money(dayValue)}.`}
+              >
+                <Bar value={d.google_spend} max={max} className="bg-blue-500" />
+                <Bar value={d.google_revenue} max={max} className="bg-blue-300" />
+                <Bar value={d.meta_spend} max={max} className="bg-violet-500" />
+                <Bar value={d.meta_revenue} max={max} className="bg-violet-300" />
+              </div>
+            );
+          })}
+        </div>
+
+        {day && (
           <div
-            key={d.date}
-            className="flex h-full min-w-[8px] flex-1 items-end gap-px"
-            title={`${d.date} · Google ${money(d.google_spend)} spend / ${money(d.google_revenue)} value · Meta ${money(d.meta_spend)} spend / ${money(d.meta_revenue)} value`}
+            className="pointer-events-none absolute top-full z-20 mt-1 w-60 -translate-x-1/2 rounded-md border bg-popover p-2 text-[10px] shadow-md"
+            style={{
+              // Centred on the column but never overhanging the card: w-60 is
+              // 240px, so the centre is clamped to [120px, 100% - 120px].
+              left: `clamp(120px, ${((hover! + 0.5) / shown.length) * 100}%, calc(100% - 120px))`,
+            }}
           >
-            <Bar value={d.google_spend} max={max} className="bg-blue-500" />
-            <Bar value={d.google_revenue} max={max} className="bg-blue-300" />
-            <Bar value={d.meta_spend} max={max} className="bg-violet-500" />
-            <Bar value={d.meta_revenue} max={max} className="bg-violet-300" />
+            <p className="font-medium tabular-nums">{day.date}</p>
+            <div className="mt-1 space-y-0.5">
+              <TipRow label="Google spend" value={money(day.google_spend)} />
+              <TipRow label="Google conv. value" value={money(day.google_revenue)} />
+              <TipRow
+                label="Google ROAS"
+                value={day.google_spend > 0 ? `${(day.google_revenue / day.google_spend).toFixed(2)}x` : "—"}
+              />
+              <TipRow label="Meta spend" value={money(day.meta_spend)} />
+              <TipRow label="Meta purchases value" value={money(day.meta_revenue)} />
+              <TipRow
+                label="Meta ROAS"
+                value={day.meta_spend > 0 ? `${(day.meta_revenue / day.meta_spend).toFixed(2)}x` : "—"}
+              />
+            </div>
+            <div className="mt-1 space-y-0.5 border-t pt-1">
+              <TipRow label="Day spend" value={money(spend)} strong />
+              <TipRow label="Day conv. value" value={money(value)} strong />
+              <TipRow
+                label="Day ROAS"
+                value={spend > 0 ? `${(value / spend).toFixed(2)}x` : "—"}
+                strong
+              />
+            </div>
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              Ads-platform conversion value, not GA4 revenue.
+            </p>
           </div>
-        ))}
+        )}
       </div>
-      <div className="flex justify-between text-[10px] text-muted-foreground">
-        <span>{shown[0]?.date}</span>
-        <span>peak {money(max)}</span>
-        <span>{shown[shown.length - 1]?.date}</span>
+
+      {/* Axis: date on every tick, day spend printed when the window is short. */}
+      <div className="flex gap-1">
+        {shown.map((d, i) => {
+          const show = i % tickEvery === 0 || i === shown.length - 1;
+          return (
+            <div key={d.date} className="min-w-[8px] flex-1 text-center leading-tight">
+              {show && (
+                <>
+                  <div className={`text-[9px] tabular-nums ${hover === i ? "text-foreground" : "text-muted-foreground"}`}>
+                    {shortDate(d.date)}
+                  </div>
+                  {dense && (
+                    <div className="text-[9px] tabular-nums text-muted-foreground/70">
+                      {compactMoney(d.google_spend + d.meta_spend)}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
+      <p className="text-[10px] text-muted-foreground">
+        {dense ? "Figure under each day is that day's total ad spend. " : ""}
+        Hover or tab a day for the full breakdown.
+      </p>
     </div>
   );
 }
 
 function ChartSpark({ chart }: { chart: IntelBundle["gsc"]["chart"] }) {
+  const [hover, setHover] = useState<number | null>(null);
   const pts = chart.filter((r) => r.date).slice(-30);
   if (pts.length < 2) return null;
   const max = Math.max(0, ...pts.map((p) => p.clicks));
   if (max <= 0) return null;
+  const point = hover != null ? pts[hover] : null;
   return (
-    <div
-      className="flex items-end gap-px overflow-hidden"
-      style={{ height: 64 }}
-      aria-label="GSC daily organic clicks"
-    >
-      {pts.map((p) => (
-        <Bar key={p.date} value={p.clicks} max={max} className="bg-emerald-500/70" />
-      ))}
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+        <span>Organic clicks per day</span>
+        <span className="tabular-nums">Peak {fmt(max)} clicks</span>
+      </div>
+      <div className="relative" onMouseLeave={() => setHover(null)}>
+        <div className="flex items-end gap-px overflow-hidden" style={{ height: 64 }}>
+          {pts.map((p, i) => (
+            <div
+              key={p.date}
+              className={`flex h-full flex-1 items-end rounded-t outline-none ${hover === i ? "bg-muted-foreground/10" : ""}`}
+              tabIndex={0}
+              onMouseEnter={() => setHover(i)}
+              onFocus={() => setHover(i)}
+              onBlur={() => setHover(null)}
+              aria-label={`${p.date}: ${p.clicks} clicks, ${p.impressions} impressions, CTR ${p.ctr?.toFixed(1) ?? "—"}%, average position ${p.position?.toFixed(1) ?? "—"}`}
+            >
+              <Bar value={p.clicks} max={max} className="bg-emerald-500/70" />
+            </div>
+          ))}
+        </div>
+        {point && (
+          <div
+            className="pointer-events-none absolute top-full z-20 mt-1 w-52 -translate-x-1/2 rounded-md border bg-popover p-2 text-[10px] shadow-md"
+            style={{ left: `clamp(104px, ${((hover! + 0.5) / pts.length) * 100}%, calc(100% - 104px))` }}
+          >
+            <p className="font-medium tabular-nums">{point.date}</p>
+            <div className="mt-1 space-y-0.5">
+              <TipRow label="Clicks" value={fmt(point.clicks)} />
+              <TipRow label="Impressions" value={fmt(point.impressions)} />
+              <TipRow label="CTR" value={point.ctr != null ? `${point.ctr.toFixed(2)}%` : "—"} />
+              <TipRow label="Avg position" value={point.position != null ? point.position.toFixed(1) : "—"} />
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="flex justify-between text-[9px] tabular-nums text-muted-foreground">
+        <span>{shortDate(pts[0].date)}</span>
+        <span>{shortDate(pts[pts.length - 1].date)}</span>
+      </div>
     </div>
   );
 }
