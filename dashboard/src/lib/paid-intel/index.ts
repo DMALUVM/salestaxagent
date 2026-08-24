@@ -5,3 +5,4 @@ export * from "./parse";
 export * from "./window";
 export * from "./intel";
 export * from "./grok";
+export * from "./outcome";

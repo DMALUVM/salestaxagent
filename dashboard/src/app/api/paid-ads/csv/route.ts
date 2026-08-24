@@ -30,6 +30,7 @@ function toCampRow(r: CampaignDaily, ingestedAt: string) {
     lost_is_budget: r.lost_is_budget,
     lost_is_rank: r.lost_is_rank,
     frequency: r.frequency,
+    frequency_peak: r.frequency_peak,
     status: r.status,
     ingested_at: ingestedAt,
   };
