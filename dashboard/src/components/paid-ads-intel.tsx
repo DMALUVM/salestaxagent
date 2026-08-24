@@ -116,6 +116,10 @@ function TipRow({ label, value, strong }: { label: string; value: string; strong
   );
 }
 
+function roasOf(spend: number, value: number): string {
+  return spend > 0 ? `${(value / spend).toFixed(2)}x` : "—";
+}
+
 function DualChart({ daily }: { daily: IntelBundle["daily"] }) {
   const [hover, setHover] = useState<number | null>(null);
   const shown = daily.slice(-30);
@@ -134,9 +138,10 @@ function DualChart({ daily }: { daily: IntelBundle["daily"] }) {
   // the window is short enough for the numbers to fit.
   const dense = shown.length <= 10;
   const tickEvery = shown.length <= 10 ? 1 : shown.length <= 16 ? 2 : 5;
-  const day = hover != null ? shown[hover] : null;
-  const spend = day ? day.google_spend + day.meta_spend : 0;
-  const value = day ? day.google_revenue + day.meta_revenue : 0;
+  // Default to the newest day so the readout is never empty.
+  const day = hover != null ? shown[hover] : shown[shown.length - 1];
+  const spend = day.google_spend + day.meta_spend;
+  const value = day.google_revenue + day.meta_revenue;
 
   return (
     <div className="space-y-2">
@@ -150,8 +155,10 @@ function DualChart({ daily }: { daily: IntelBundle["daily"] }) {
         <span className="tabular-nums">Scale: top of chart = {money(max)}</span>
       </div>
 
-      {/* `relative` wrapper, not the bar row: the bar row keeps overflow-hidden
-          so the fills cannot escape, which would also clip the hover card. */}
+      {/* `relative` wrapper holds the half-scale line. The figures live in an
+          in-flow readout below, NOT an absolute hover card: `Card` ships with
+          overflow-hidden, so anything positioned past the content box gets
+          clipped by the card regardless of how its offset is clamped. */}
       <div className="relative" onMouseLeave={() => setHover(null)}>
         {/* Half-scale reference line so a bar's height reads as a value. */}
         <div
@@ -188,44 +195,6 @@ function DualChart({ daily }: { daily: IntelBundle["daily"] }) {
           })}
         </div>
 
-        {day && (
-          <div
-            className="pointer-events-none absolute top-full z-20 mt-1 w-60 -translate-x-1/2 rounded-md border bg-popover p-2 text-[10px] shadow-md"
-            style={{
-              // Centred on the column but never overhanging the card: w-60 is
-              // 240px, so the centre is clamped to [120px, 100% - 120px].
-              left: `clamp(120px, ${((hover! + 0.5) / shown.length) * 100}%, calc(100% - 120px))`,
-            }}
-          >
-            <p className="font-medium tabular-nums">{day.date}</p>
-            <div className="mt-1 space-y-0.5">
-              <TipRow label="Google spend" value={money(day.google_spend)} />
-              <TipRow label="Google conv. value" value={money(day.google_revenue)} />
-              <TipRow
-                label="Google ROAS"
-                value={day.google_spend > 0 ? `${(day.google_revenue / day.google_spend).toFixed(2)}x` : "—"}
-              />
-              <TipRow label="Meta spend" value={money(day.meta_spend)} />
-              <TipRow label="Meta purchases value" value={money(day.meta_revenue)} />
-              <TipRow
-                label="Meta ROAS"
-                value={day.meta_spend > 0 ? `${(day.meta_revenue / day.meta_spend).toFixed(2)}x` : "—"}
-              />
-            </div>
-            <div className="mt-1 space-y-0.5 border-t pt-1">
-              <TipRow label="Day spend" value={money(spend)} strong />
-              <TipRow label="Day conv. value" value={money(value)} strong />
-              <TipRow
-                label="Day ROAS"
-                value={spend > 0 ? `${(value / spend).toFixed(2)}x` : "—"}
-                strong
-              />
-            </div>
-            <p className="mt-1 text-[9px] text-muted-foreground">
-              Ads-platform conversion value, not GA4 revenue.
-            </p>
-          </div>
-        )}
       </div>
 
       {/* Axis: date on every tick, day spend printed when the window is short. */}
@@ -250,10 +219,35 @@ function DualChart({ daily }: { daily: IntelBundle["daily"] }) {
           );
         })}
       </div>
-      <p className="text-[10px] text-muted-foreground">
-        {dense ? "Figure under each day is that day's total ad spend. " : ""}
-        Hover or tab a day for the full breakdown.
-      </p>
+      {/* In-flow readout. Always populated — defaults to the newest day so the
+          figures are readable on a touch screen with no hover at all. */}
+      <div className="rounded-md border bg-muted/30 p-2">
+        <p className="mb-1 text-[10px] tabular-nums text-muted-foreground">
+          <span className="font-medium text-foreground">{day.date}</span>
+          {hover == null ? " · newest day — hover or tab a bar to inspect another" : ""}
+        </p>
+        <div className="grid gap-x-4 gap-y-0.5 text-[10px] sm:grid-cols-3">
+          <div className="space-y-0.5">
+            <TipRow label="Google spend" value={money(day.google_spend)} />
+            <TipRow label="Google conv. value" value={money(day.google_revenue)} />
+            <TipRow label="Google ROAS" value={roasOf(day.google_spend, day.google_revenue)} />
+          </div>
+          <div className="space-y-0.5">
+            <TipRow label="Meta spend" value={money(day.meta_spend)} />
+            <TipRow label="Meta purchases value" value={money(day.meta_revenue)} />
+            <TipRow label="Meta ROAS" value={roasOf(day.meta_spend, day.meta_revenue)} />
+          </div>
+          <div className="space-y-0.5 sm:border-l sm:pl-4">
+            <TipRow label="Day spend" value={money(spend)} strong />
+            <TipRow label="Day conv. value" value={money(value)} strong />
+            <TipRow label="Day ROAS" value={roasOf(spend, value)} strong />
+          </div>
+        </div>
+        <p className="mt-1 text-[9px] text-muted-foreground">
+          Ads-platform conversion value, not GA4 revenue.
+          {dense ? " The figure under each day is that day's total ad spend." : ""}
+        </p>
+      </div>
     </div>
   );
 }
@@ -264,14 +258,14 @@ function ChartSpark({ chart }: { chart: IntelBundle["gsc"]["chart"] }) {
   if (pts.length < 2) return null;
   const max = Math.max(0, ...pts.map((p) => p.clicks));
   if (max <= 0) return null;
-  const point = hover != null ? pts[hover] : null;
+  const point = hover != null ? pts[hover] : pts[pts.length - 1];
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-[10px] text-muted-foreground">
         <span>Organic clicks per day</span>
         <span className="tabular-nums">Peak {fmt(max)} clicks</span>
       </div>
-      <div className="relative" onMouseLeave={() => setHover(null)}>
+      <div onMouseLeave={() => setHover(null)}>
         <div className="flex items-end gap-px overflow-hidden" style={{ height: 64 }}>
           {pts.map((p, i) => (
             <div
@@ -287,24 +281,23 @@ function ChartSpark({ chart }: { chart: IntelBundle["gsc"]["chart"] }) {
             </div>
           ))}
         </div>
-        {point && (
-          <div
-            className="pointer-events-none absolute top-full z-20 mt-1 w-52 -translate-x-1/2 rounded-md border bg-popover p-2 text-[10px] shadow-md"
-            style={{ left: `clamp(104px, ${((hover! + 0.5) / pts.length) * 100}%, calc(100% - 104px))` }}
-          >
-            <p className="font-medium tabular-nums">{point.date}</p>
-            <div className="mt-1 space-y-0.5">
-              <TipRow label="Clicks" value={fmt(point.clicks)} />
-              <TipRow label="Impressions" value={fmt(point.impressions)} />
-              <TipRow label="CTR" value={point.ctr != null ? `${point.ctr.toFixed(2)}%` : "—"} />
-              <TipRow label="Avg position" value={point.position != null ? point.position.toFixed(1) : "—"} />
-            </div>
-          </div>
-        )}
       </div>
       <div className="flex justify-between text-[9px] tabular-nums text-muted-foreground">
         <span>{shortDate(pts[0].date)}</span>
         <span>{shortDate(pts[pts.length - 1].date)}</span>
+      </div>
+      {/* In-flow readout for the same reason as the spend chart: Card clips. */}
+      <div className="rounded-md border bg-muted/30 p-2">
+        <p className="mb-1 text-[10px] tabular-nums text-muted-foreground">
+          <span className="font-medium text-foreground">{point.date}</span>
+          {hover == null ? " · newest day — hover or tab a bar" : ""}
+        </p>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[10px] sm:grid-cols-4">
+          <TipRow label="Clicks" value={fmt(point.clicks)} />
+          <TipRow label="Impressions" value={fmt(point.impressions)} />
+          <TipRow label="CTR" value={point.ctr != null ? `${point.ctr.toFixed(2)}%` : "—"} />
+          <TipRow label="Avg position" value={point.position != null ? point.position.toFixed(1) : "—"} />
+        </div>
       </div>
     </div>
   );
