@@ -166,6 +166,19 @@ def backfill_amazon_skus(start_str, end_str, dry_run):
     if dry_run:
         click.echo("DRY RUN — no data will be written.\n")
 
+    from src.rules import clamp_orders_report_range, orders_report_floor
+    floor = orders_report_floor()
+    clamped_start, clamped_end, floor_warning = clamp_orders_report_range(start, end)
+    if floor_warning:
+        click.echo(floor_warning)
+    if clamped_start is None:
+        click.echo(
+            f"Skipped Amazon. All Orders floor is {floor.isoformat()}. "
+            "No SKU rows will be written."
+        )
+        return
+    start, end = clamped_start, clamped_end
+
     click.echo(f"Fetching Amazon SKU data: {start} to {end}")
 
     def _on_poll(status, elapsed):

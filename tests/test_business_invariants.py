@@ -170,6 +170,31 @@ class TestRulesModule:
         from src.rules import SPAPI_MAX_CHUNK_DAYS
         assert SPAPI_MAX_CHUNK_DAYS <= 31
 
+    def test_orders_report_floor_is_two_calendar_years(self):
+        from datetime import date
+        from src.rules import orders_report_floor
+        assert orders_report_floor(date(2026, 8, 24)) == date(2024, 8, 24)
+
+    def test_orders_report_range_before_floor_is_skipped(self):
+        from datetime import date
+        from src.rules import clamp_orders_report_range
+        start, end, warning = clamp_orders_report_range(
+            date(2024, 1, 1), date(2024, 7, 31), as_of=date(2026, 8, 24),
+        )
+        assert start is None
+        assert end == date(2024, 7, 31)
+        assert warning and "2024-08-24" in warning
+
+    def test_orders_report_range_is_clamped_to_floor(self):
+        from datetime import date
+        from src.rules import clamp_orders_report_range
+        start, end, warning = clamp_orders_report_range(
+            date(2024, 1, 1), date(2024, 9, 30), as_of=date(2026, 8, 24),
+        )
+        assert start == date(2024, 8, 24)
+        assert end == date(2024, 9, 30)
+        assert warning and "2024-08-24" in warning
+
     def test_pulse_source_is_spapi(self):
         from src.rules import AMAZON_PULSE_SOURCE
         assert AMAZON_PULSE_SOURCE == "amazon_spapi"
@@ -942,6 +967,21 @@ class TestSpapiOrderFreshness:
         assert result["rows_inserted"] == 1
         assert captured["table"] == "sales_by_sku"
         assert captured["rows"][0]["ingested_at"]
+
+    def test_fetch_amazon_skus_skips_range_past_orders_floor(self, monkeypatch):
+        from datetime import date
+        import src.amazon_sp.reports as reports
+        import src.rules as rules
+
+        def boom(*_a, **_k):
+            raise AssertionError("must not request Amazon past the 2-year floor")
+
+        monkeypatch.setattr(rules, "amazon_today", lambda now=None: date(2026, 8, 24))
+        monkeypatch.setattr(reports, "request_and_download", boom)
+        result = reports.fetch_amazon_skus(date(2024, 1, 1), date(2024, 7, 31))
+        assert result["chunks"] == 0
+        assert result["rows_inserted"] == 0
+        assert result["warnings"]
 
 
 # ── 4g. SUMMARY search-term date is a window label, not daily grain ──

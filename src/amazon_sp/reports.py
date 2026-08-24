@@ -15,7 +15,12 @@ from src.channels import AMAZON
 from src.db import delete_rows, log_audit, log_ingestion, upsert_rows
 from src.mappers.fc_to_state import fc_to_state
 from src.models.schema import InventoryEvent, SalesByState
-from src.rules import AMAZON_TZ, SPAPI_MAX_CHUNK_DAYS, is_excluded_status
+from src.rules import (
+    AMAZON_TZ,
+    SPAPI_MAX_CHUNK_DAYS,
+    clamp_orders_report_range,
+    is_excluded_status,
+)
 from src.sku_normalize import normalize_sku
 
 from src.amazon_sp.client import request_and_download
@@ -504,6 +509,25 @@ def fetch_amazon_skus(
     on_poll: callable | None = None,
 ) -> dict:
     """Fetch SP-API orders report, parse SKU-level, upsert to sales_by_sku."""
+    start, end, floor_warning = clamp_orders_report_range(start, end)
+    if start is None:
+        if on_poll:
+            on_poll(floor_warning or "orders report range is past the 2-year floor", 0)
+        return {
+            "report_type": "amazon_skus",
+            "source": SOURCE_LABEL,
+            "period": f"{end} (skipped)",
+            "chunks": 0,
+            "rows_total": 0,
+            "rows_parsed": 0,
+            "rows_skipped": 0,
+            "sku_rows": 0,
+            "unique_skus": 0,
+            "warnings": [floor_warning] if floor_warning else [],
+            "dry_run": dry_run,
+            "rows_inserted": 0,
+        }
+
     chunks = _date_chunks(start, end)
 
     all_rows: list[dict] = []
@@ -511,6 +535,8 @@ def fetch_amazon_skus(
     total_skipped = 0
     total_raw = 0
     warnings: list[str] = []
+    if floor_warning:
+        warnings.append(floor_warning)
 
     for i, (c_start, c_end) in enumerate(chunks, 1):
         label = c_start.strftime("%Y-%m")
