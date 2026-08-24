@@ -2797,6 +2797,44 @@ def pnl_sync_cmd(days, no_skus):
                        f"contribution ${f['contribution']:,.2f}  — {'; '.join(f['issues'])}")
     else:
         click.echo("  Sanity check: all days within expected fee % and revenue/unit bands")
+    skipped = result.get("skipped_days") or []
+    if skipped:
+        click.echo(click.style(
+            f"  ⚠ skipped {len(skipped)} day(s) with units but $0 sales "
+            f"(not stored): {', '.join(skipped[:12])}",
+            fg="yellow",
+        ))
+
+
+@cli.command("pnl-monthly-sync")
+def pnl_monthly_sync_cmd():
+    """Store monthly Amazon contribution from sales_by_sku × sku_costs.
+
+    No SP-API call. Covers every Amazon month already in sales_by_sku
+    (today: 2024-08 through the current month). Months before ads
+    coverage are labelled ads-unknown, not $0 spend.
+    """
+    from src.pnl_monthly import compute_monthly_pnl
+
+    click.echo("Computing monthly Amazon SKU economics from sales_by_sku...")
+    result = compute_monthly_pnl(persist=True)
+    if not result.get("month_count"):
+        click.echo("No Amazon sales_by_sku rows.")
+        return
+    click.echo(f"Months: {result['coverage_min']} → {result['coverage_max']} "
+               f"({result['month_count']} months, {result.get('sku_row_count', 0)} SKU rows)")
+    click.echo(f"  Sales        ${result['total_sales']:>12,.2f}")
+    click.echo(f"  - Fees       ${result['total_fees']:>12,.2f}")
+    click.echo(f"  - Ad spend   ${result['total_ads']:>12,.2f}  "
+               f"({result['ads_known_months']} month(s) with ads, "
+               f"{result['ads_unknown_months']} ads-unknown)")
+    click.echo(f"  - COGS       ${result['total_cogs']:>12,.2f}")
+    click.echo(f"  = Contribution ${result['total_contribution']:>10,.2f}")
+    click.echo(f"Inserted: {result.get('inserted', 0)} month + "
+               f"{result.get('sku_inserted', 0)} SKU rows")
+    if result.get("missing_cost_skus"):
+        click.echo(f"  ⚠ no sku_costs for {len(result['missing_cost_skus'])} SKU(s): "
+                   f"{', '.join(result['missing_cost_skus'][:8])}")
 
 
 @cli.command("paid-ads-freshness")
@@ -5573,25 +5611,37 @@ def _run_pnl_sync():
         # lookback controls are empty. Do not jump to 365: days before ads
         # coverage would store $0 spend and overstate contribution.
         r = compute_pnl(days=90)
+        from src.pnl_monthly import compute_monthly_pnl
+        monthly = compute_monthly_pnl(persist=True)
     except Exception as e:
         print(f"[P&L] Failed: {e}")
         job_finish(run_id, "fail", str(e)[:500])
         _ads_alert("Contribution P&L sync failed", str(e))
         return
 
-    if not r.get("rows"):
+    if not r.get("rows") and not monthly.get("month_count"):
         job_finish(run_id, "success", "no data in window")
         return
 
-    msg = (f"{r['days']}d: sales ${r['total_sales']:,.0f} - fees ${r['total_fees']:,.0f} "
-           f"- ads ${r['total_ads']:,.0f} - COGS ${r['total_cogs']:,.0f} "
-           f"= ${r['total_contribution']:,.0f}")
-    print(f"[P&L] {msg} ({r['settled_days']} settled, {r['estimated_days']} estimated)")
+    if r.get("rows"):
+        msg = (f"{r['days']}d: sales ${r['total_sales']:,.0f} - fees ${r['total_fees']:,.0f} "
+               f"- ads ${r['total_ads']:,.0f} - COGS ${r['total_cogs']:,.0f} "
+               f"= ${r['total_contribution']:,.0f}")
+    else:
+        msg = "no daily rows"
+    if monthly.get("month_count"):
+        msg += (f"; monthly {monthly['coverage_min']}→{monthly['coverage_max']} "
+                f"${monthly['total_contribution']:,.0f}")
+    settled = r.get("settled_days", 0)
+    estimated = r.get("estimated_days", 0)
+    print(f"[P&L] {msg} ({settled} settled, {estimated} estimated)")
     job_finish(run_id, "success", msg, stats={
-        "days": r["days"], "sales": r["total_sales"], "fees": r["total_fees"],
-        "ads": r["total_ads"], "cogs": r["total_cogs"],
-        "contribution": r["total_contribution"],
-        "settled_days": r["settled_days"],
+        "days": r.get("days", 0), "sales": r.get("total_sales", 0),
+        "fees": r.get("total_fees", 0), "ads": r.get("total_ads", 0),
+        "cogs": r.get("total_cogs", 0),
+        "contribution": r.get("total_contribution", 0),
+        "settled_days": settled,
+        "monthly_months": monthly.get("month_count", 0),
     })
 
 

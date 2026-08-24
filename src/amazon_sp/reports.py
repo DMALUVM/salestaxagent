@@ -555,33 +555,7 @@ def fetch_amazon_skus(
     if dry_run or not all_rows:
         return summary
 
-    # Deduplicate on upsert key before writing
-    seen: dict[tuple, dict] = {}
-    for row in all_rows:
-        key = (row["channel"], row["sku"], row["state_code"],
-               row["period_start"], row["source"])
-        existing = seen.get(key)
-        if existing:
-            existing["units"] += row["units"]
-            existing["gross_sales"] = round(existing["gross_sales"] + row["gross_sales"], 2)
-            existing["net_sales"] = round((existing["net_sales"] or 0) + (row["net_sales"] or 0), 2)
-            existing["order_count"] = (existing["order_count"] or 0) + (row["order_count"] or 0)
-            # Keep longest title
-            if row.get("product_title") and (
-                not existing.get("product_title")
-                or len(row["product_title"]) > len(existing["product_title"])
-            ):
-                existing["product_title"] = row["product_title"]
-        else:
-            seen[key] = dict(row)
-
-    deduped = list(seen.values())
-    _stamp_ingested_at(deduped)
-
-    inserted = upsert_rows(
-        "sales_by_sku", deduped,
-        on_conflict="channel,sku,state_code,period_start,source",
-    )
+    inserted, deduped = upsert_amazon_sku_rows(all_rows)
     summary["rows_inserted"] = inserted
 
     log_ingestion(
@@ -604,6 +578,37 @@ def fetch_amazon_skus(
     )
 
     return summary
+
+
+def upsert_amazon_sku_rows(rows: list[dict]) -> tuple[int, list[dict]]:
+    """Dedupe and upsert sales_by_sku rows (SP-API or All Orders CSV)."""
+    if not rows:
+        return 0, []
+    seen: dict[tuple, dict] = {}
+    for row in rows:
+        key = (row["channel"], row["sku"], row["state_code"],
+               row["period_start"], row["source"])
+        existing = seen.get(key)
+        if existing:
+            existing["units"] += row["units"]
+            existing["gross_sales"] = round(existing["gross_sales"] + row["gross_sales"], 2)
+            existing["net_sales"] = round((existing["net_sales"] or 0) + (row["net_sales"] or 0), 2)
+            existing["order_count"] = (existing["order_count"] or 0) + (row["order_count"] or 0)
+            if row.get("product_title") and (
+                not existing.get("product_title")
+                or len(row["product_title"]) > len(existing["product_title"])
+            ):
+                existing["product_title"] = row["product_title"]
+        else:
+            seen[key] = dict(row)
+
+    deduped = list(seen.values())
+    _stamp_ingested_at(deduped)
+    inserted = upsert_rows(
+        "sales_by_sku", deduped,
+        on_conflict="channel,sku,state_code,period_start,source",
+    )
+    return inserted, deduped
 
 
 # ── Inventory Ledger parser ──────────────────────────────────

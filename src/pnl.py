@@ -54,6 +54,16 @@ MAX_REVENUE_PER_UNIT = 200.0  # ASP ceiling; above it, units are missing
 UNALLOCATED_SKU = "__unallocated__"
 
 
+def is_unwritable_day(sales: float, units: float | int) -> bool:
+    """True when units exist but sales are zero — inputs disagree.
+
+    This is how 2026-07-14..16 landed as $0 sales with FBA and COGS still
+    charged: sales_daily was empty while the orders report still had units.
+    Those rows must not become a stored contribution day.
+    """
+    return float(units or 0) > 0 and float(sales or 0) <= 0
+
+
 def _ad_spend_by_day(start: date) -> dict[str, float]:
     """Ad spend per day from ads_campaigns_daily — the table /ppc sums.
 
@@ -269,6 +279,7 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
     sku_rows: list[dict] = []
     missing_cost_skus: set[str] = set()
     flagged_days: list[dict] = []
+    skipped_days: list[str] = []
 
     for d in all_dates:
         sales = round(daily_sales.get(d, 0.0), 2)
@@ -279,6 +290,11 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
             # No per-SKU units (e.g. orders report unavailable): fall back to
             # the order-count estimate the previous implementation used.
             units = round(daily_orders.get(d, 0) * 1.3)
+        if is_unwritable_day(sales, units):
+            log.warning("P&L %s: %s unit(s) with sales=$%.2f — skipping so FBA/COGS "
+                        "are not charged against $0 revenue", d, units, sales)
+            skipped_days.append(d)
+            continue
 
         # ── COGS: sum over SKUs of units x unit cost ──
         cogs = 0.0
@@ -396,8 +412,15 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
                 "meta": json.dumps({"note": "campaign-level ad spend, not attributable to a SKU"}),
             })
 
+    if skipped_days:
+        client = get_client()
+        for d in skipped_days:
+            # Drop stale account + SKU rows so a $0-sales day cannot linger.
+            (client.table("pnl_daily").delete()
+             .eq("date", d).eq("channel", "amazon").execute())
+
     if not account_rows:
-        return {"rows": 0, "inserted": 0, "days": 0}
+        return {"rows": 0, "inserted": 0, "days": 0, "skipped_days": skipped_days}
 
     inserted = upsert_rows("pnl_daily", account_rows, on_conflict="date,grain,sku,channel")
     sku_inserted = 0
@@ -438,6 +461,7 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
         "has_cogs": has_cogs,
         "missing_cost_skus": sorted(missing_cost_skus),
         "flagged_days": flagged_days,
+        "skipped_days": skipped_days,
         "excluded_zero_revenue_units": sum(excluded_units.values()),
         "referral_pct": DEFAULT_REFERRAL_PCT,
         "fba_per_unit": DEFAULT_FBA_FEE_PER_UNIT,

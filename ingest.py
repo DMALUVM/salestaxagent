@@ -10,6 +10,7 @@ Usage:
     python ingest.py --registrations path/to/registrations.csv
 
 The --amazon flag auto-detects the report type:
+  - All Orders              (has amazon-order-id, sku, item-price) → sales_by_sku
   - Inventory Event Detail  (has fulfillment-center-id, date-time)
   - Custom Combined Tax     (has ship_from_state, ship_to_state)
 """
@@ -57,16 +58,34 @@ def ingest(amazon_path, shopify_api, shopify_csv_path, reg_path, dry_run):
         _headers = [h.strip().strip('"') for h in first_line.split(_delim)]
 
         from src.parsers.amazon_tax_report import is_custom_combined_tax
+        from src.parsers.amazon_orders_skus import is_amazon_orders_report
+        from src.parsers.amazon_inventory import is_inventory_event_detail
         if is_custom_combined_tax(_headers):
             click.echo("  Detected: Custom Combined Tax report")
             from src.parsers.amazon_tax_report import ingest_amazon_tax_report
             result = ingest_amazon_tax_report(amazon_path, dry_run=dry_run)
             _print_tax_result(result)
-        else:
+        elif is_amazon_orders_report(_headers):
+            click.echo("  Detected: All Orders report → sales_by_sku")
+            from src.parsers.amazon_orders_skus import ingest_amazon_orders_skus
+            result = ingest_amazon_orders_skus(amazon_path, dry_run=dry_run)
+            click.echo(f"\n  Amazon All Orders → SKU Results:")
+            click.echo(f"  Rows total:    {result.get('rows_total', 0):,}")
+            click.echo(f"  Rows parsed:   {result.get('rows_parsed', 0):,}")
+            click.echo(f"  SKU rows:      {result.get('sku_rows', 0):,}")
+            click.echo(f"  Unique SKUs:   {result.get('unique_skus', 0)}")
+            click.echo(f"  Rows inserted: {result.get('rows_inserted', 0):,}")
+            for w in result.get("warnings") or []:
+                click.echo(f"  Warning: {w}")
+        elif is_inventory_event_detail(_headers):
             click.echo("  Detected: Inventory Event Detail report")
             from src.parsers.amazon_inventory import ingest_amazon_inventory
             result = ingest_amazon_inventory(amazon_path, dry_run=dry_run)
             _print_result("Amazon Inventory", result)
+        else:
+            click.echo("  Could not detect report type from headers.")
+            click.echo(f"  Headers: {', '.join(_headers[:12])}")
+            sys.exit(1)
 
     if shopify_api:
         click.echo("Fetching orders from Shopify API...")

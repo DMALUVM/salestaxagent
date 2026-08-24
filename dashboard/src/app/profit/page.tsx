@@ -9,6 +9,7 @@ import { ShopifyCustomers } from "@/components/shopify-customers";
 import { PnlTable } from "@/components/pnl-table";
 import { isConfigured } from "@/lib/supabase";
 import type { PnlRow } from "@/lib/pnl-periods";
+import type { MonthlySkuLine } from "@/lib/sku-monthly-pnl";
 import { Shield, DollarSign, AlertTriangle } from "lucide-react";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
@@ -16,7 +17,13 @@ function fmtD(n: number) { return n.toLocaleString(undefined, { minimumFractionD
 
 export default function ProfitPage() {
   const [data, setData] = useState<PnlRow[]>([]);
+  const [monthly, setMonthly] = useState<PnlRow[]>([]);
+  const [monthlySkus, setMonthlySkus] = useState<Record<string, MonthlySkuLine[]>>({});
+  const [skuCoverageMin, setSkuCoverageMin] = useState<string | null>(null);
+  const [skuCoverageMax, setSkuCoverageMax] = useState<string | null>(null);
+  const [skuMissingJan2024, setSkuMissingJan2024] = useState(false);
   const [adsDateMax, setAdsDateMax] = useState<string | null>(null);
+  const [adsDateMin, setAdsDateMin] = useState<string | null>(null);
   const [asOf, setAsOf] = useState<string | null>(null);
   const [todayLA, setTodayLA] = useState<string | null>(null);
   const [latestClosed, setLatestClosed] = useState<string | null>(null);
@@ -36,7 +43,13 @@ export default function ProfitPage() {
           return;
         }
         setData(d.daily ?? []);
+        setMonthly(d.monthly ?? []);
+        setMonthlySkus(d.monthlySkus ?? {});
+        setSkuCoverageMin(d.skuCoverageMin ?? null);
+        setSkuCoverageMax(d.skuCoverageMax ?? null);
+        setSkuMissingJan2024(Boolean(d.skuMissingJan2024));
         setAdsDateMax(d.adsDateMax ?? null);
+        setAdsDateMin(d.adsDateMin ?? null);
         setAsOf(d.asOf ?? null);
         setTodayLA(d.today ?? null);
         setLatestClosed(d.latestClosed ?? null);
@@ -105,7 +118,7 @@ export default function ProfitPage() {
   if (loading) return <LoadingState />;
   if (error) return <QueryError message={error} onRetry={loadPnl} />;
 
-  const hasData = data.length > 0;
+  const hasData = data.length > 0 || monthly.length > 0;
   const margin7 = last7.sales > 0 ? (last7.net / last7.sales) * 100 : 0;
   const margin30 = last30.sales > 0 ? (last30.net / last30.sales) * 100 : 0;
   const avgDay = (w: { net: number; days: number }) => (w.days > 0 ? w.net / w.days : 0);
@@ -147,7 +160,8 @@ export default function ProfitPage() {
             <DollarSign className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">No P&L data yet.</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Run: <code>python -m src.main pnl-sync --days 90</code>
+              Monthly SKU economics comes from <code>sales_by_sku</code>. Run{" "}
+              <code>python -m src.main backfill-amazon-skus</code> if that table is empty.
             </p>
           </CardContent>
         </Card>
@@ -164,6 +178,8 @@ export default function ProfitPage() {
             )}
           </p>
 
+          {data.length > 0 && (
+          <>
           {/* Net profit by window — all four from the same stored formula */}
           <div id="windows" className="scroll-mt-14 grid gap-3 grid-cols-2 sm:grid-cols-4">
             {[
@@ -251,16 +267,30 @@ export default function ProfitPage() {
               )}
             </CardContent>
           </Card>
+          </>
+          )}
 
-          <PnlTable rows={data} asOf={asOf} />
+          <PnlTable
+            rows={data}
+            monthly={monthly}
+            monthlySkus={monthlySkus}
+            asOf={asOf}
+            skuCoverageMin={skuCoverageMin}
+            skuCoverageMax={skuCoverageMax}
+            skuMissingJan2024={skuMissingJan2024}
+            adsDateMin={adsDateMin}
+          />
 
           {/* Disclaimer */}
           <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
             <span>
               <strong>Contribution (operating net) = gross sales − referral − FBA − ad spend − COGS</strong>,
-              stored per Amazon day (America/Los_Angeles order date). Gross sales come from the SP-API
-              orders report (all non-cancelled statuses); ad spend from <code>ads_campaigns_daily</code>;
-              COGS from daily units × <code>sku_costs</code> per SKU. Fees are labelled
+              stored per Amazon day (America/Los_Angeles order date) when daily rows exist.
+              Month and year use Amazon SKU economics from <code>sales_by_sku</code> × <code>sku_costs</code>
+              (Aug 2024 onward today). Gross sales come from the SP-API
+              orders report (all non-cancelled statuses); ad spend from <code>ads_campaigns_daily</code>
+              when that month has campaign rows, otherwise ads are labelled unknown;
+              COGS from units × <code>sku_costs</code> per SKU. Fees are labelled
               &ldquo;estimated&rdquo; (referral % + per-unit FBA) or &ldquo;settled&rdquo; (actual Amazon fees).
               Amazon deposits roughly twice a month on a settlement/posted-date basis — that deposit is
               the cash truth to reconcile against, and is shown separately rather than used as a daily

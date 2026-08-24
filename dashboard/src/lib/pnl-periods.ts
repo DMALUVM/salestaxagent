@@ -31,6 +31,9 @@ export interface PnlRow {
   net_after_ads: number;
   status: string;
   fees_basis?: string;
+  ads_basis?: "known" | "unknown";
+  source?: "daily" | "sku_monthly";
+  period_end?: string;
 }
 
 export type FeesBasis = "settled" | "estimated" | "mixed" | "preliminary";
@@ -58,6 +61,9 @@ export interface PnlPeriod {
   /** contribution ÷ days. Null when the period has no closed day. */
   avgDaily: number | null;
   feesBasis: FeesBasis;
+  adsBasis: "known" | "unknown" | "mixed";
+  /** daily = stored pnl_daily days; sku_monthly = sales_by_sku economics. */
+  source: "daily" | "sku_monthly";
   rows: PnlRow[];
   openRows: PnlRow[];
 }
@@ -144,6 +150,28 @@ function feesBasisOf(rows: PnlRow[]): FeesBasis {
   return "mixed";
 }
 
+function adsBasisOf(rows: PnlRow[]): "known" | "unknown" | "mixed" {
+  const bases = new Set(rows.map((r) => (r.ads_basis === "unknown" ? "unknown" : "known")));
+  if (bases.size === 0) return "unknown";
+  if (bases.size === 1) return [...bases][0] as "known" | "unknown";
+  return "mixed";
+}
+
+export function filterMonthlyLookback(
+  rows: PnlRow[],
+  asOf: string | null,
+  lookback: PnlLookback,
+): PnlRow[] {
+  const sorted = [...rows].filter((r) => r?.date).sort((a, b) => b.date.localeCompare(a.date));
+  if (lookback === "all" || !asOf) return sorted;
+  const start = windowStart(asOf, lookback);
+  return sorted.filter((r) => {
+    const mStart = monthStart(r.date);
+    const mEnd = monthEnd(r.date);
+    return mStart <= asOf && mEnd >= start;
+  });
+}
+
 function utcMonthDay(iso: string, withYear = false): string {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleString("en-US", {
@@ -215,20 +243,85 @@ function rollup(
     contribution,
     avgDaily: days > 0 ? money(contribution / days) : null,
     feesBasis: open ? "preliminary" : feesBasisOf(closed),
+    adsBasis: adsBasisOf(source),
+    source: source.some((r) => r.source === "sku_monthly") ? "sku_monthly" : "daily",
     rows: [...closed].sort((a, b) => b.date.localeCompare(a.date)),
     openRows: [...openRows].sort((a, b) => b.date.localeCompare(a.date)),
   };
 }
 
+function rollupMonthlyMonth(row: PnlRow, asOf: string | null): PnlPeriod {
+  const base = rollup("month", [row], [], asOf);
+  // One stored month is a complete month (or MTD), not "1 of 31d".
+  const days = base.calendarDays;
+  const endsShort = Boolean(asOf && asOf < base.end);
+  return {
+    ...base,
+    days,
+    partial: endsShort,
+    avgDaily: days > 0 ? money(base.contribution / days) : null,
+    source: "sku_monthly",
+    adsBasis: row.ads_basis === "unknown" ? "unknown" : "known",
+    rows: [row],
+  };
+}
+
+function rollupMonthlyYear(rows: PnlRow[], asOf: string | null): PnlPeriod {
+  const base = rollup("year", rows, [], asOf);
+  const days = rows.reduce((s, r) => {
+    const bounds = periodBounds(r.date, "month");
+    const cap = asOf && asOf < bounds.end ? asOf : bounds.end;
+    if (asOf && asOf < bounds.start) return s;
+    return s + inclusiveDays(bounds.start, cap);
+  }, 0);
+  const year = (rows[0]?.date ?? base.start).slice(0, 4);
+  const fullYearStart = `${year}-01-01`;
+  const fullYearEnd = `${year}-12-31`;
+  const oldestMonth = [...rows].sort((a, b) => a.date.localeCompare(b.date))[0].date;
+  const startsLate = oldestMonth > fullYearStart;
+  const endsShort = Boolean(asOf && asOf < fullYearEnd);
+  return {
+    ...base,
+    days,
+    calendarDays: inclusiveDays(fullYearStart, asOf && asOf < fullYearEnd ? asOf : fullYearEnd),
+    partial: startsLate || endsShort,
+    avgDaily: days > 0 ? money(base.contribution / days) : null,
+    source: "sku_monthly",
+    adsBasis: adsBasisOf(rows),
+    rows: [...rows].sort((a, b) => b.date.localeCompare(a.date)),
+  };
+}
+
 export function buildPnlPeriods(opts: {
   rows: PnlRow[];
+  monthly?: PnlRow[];
   grain: PnlGrain;
   lookback: PnlLookback;
   asOf: string | null;
 }): PnlPeriod[] {
-  const view = filterLookback(opts.rows, opts.asOf, opts.lookback);
   const asOf = opts.asOf;
   const grain = opts.grain;
+
+  if ((grain === "month" || grain === "year") && opts.monthly && opts.monthly.length > 0) {
+    const view = filterMonthlyLookback(opts.monthly, asOf, opts.lookback);
+    if (grain === "month") {
+      return view
+        .filter((r) => !asOf || r.date <= asOf || monthStart(r.date) <= asOf)
+        .map((r) => rollupMonthlyMonth(r, asOf));
+    }
+    const groups = new Map<string, PnlRow[]>();
+    for (const row of view) {
+      const key = row.date.slice(0, 4);
+      const g = groups.get(key) ?? [];
+      g.push(row);
+      groups.set(key, g);
+    }
+    return [...groups.values()]
+      .map((g) => rollupMonthlyYear(g, asOf))
+      .sort((a, b) => b.end.localeCompare(a.end) || b.start.localeCompare(a.start));
+  }
+
+  const view = filterLookback(opts.rows, opts.asOf, opts.lookback);
 
   if (grain === "day") {
     return view.map((row) => {

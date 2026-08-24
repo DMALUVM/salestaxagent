@@ -1,5 +1,7 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 import { amazonAsOf, amazonToday } from "@/lib/as-of";
+import { buildAmazonMonthlyPnl } from "@/lib/sku-monthly-pnl";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 interface PnlRow {
   date: string;
@@ -17,18 +19,33 @@ interface PnlRow {
   [key: string]: unknown;
 }
 
+async function paginate<T>(
+  load: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  let offset = 0;
+  while (true) {
+    const r = await load(offset, offset + PAGE - 1);
+    if (r.error) break;
+    const page = r.data ?? [];
+    out.push(...page);
+    if (page.length < PAGE) break;
+    offset += PAGE;
+  }
+  return out;
+}
+
 /**
- * GET /api/pnl — stored daily contribution (account grain).
+ * GET /api/pnl — daily stored contribution plus monthly SKU economics.
  *
- *   contribution = gross_sales - referral - fba - ad_spend - cogs
+ * Daily rows: grain=account from pnl_daily (src/pnl.py). Days with units
+ * but $0 sales are dropped — that pattern is a stale/partial write, not a
+ * real $0-revenue day.
  *
- * Every field is read as stored by src/pnl.py, which is the single writer. The
- * route does no arithmetic of its own beyond window sums, so the page and the
- * table can never disagree.
- *
- * `amazon_net_proceeds` is Amazon's settlement payout — carried through for
- * cash reconciliation only. It is NOT the daily grain: deposits land roughly
- * twice a month on a posted-date basis.
+ * Monthly rows: computed from sales_by_sku (Amazon) × sku_costs + ads.
+ * That table already holds 2024-08 → current month, so Month/Year on
+ * /profit can show 2024–2026 without a 2-year orders-report pull.
  */
 export async function GET() {
   try {
@@ -36,30 +53,29 @@ export async function GET() {
 
     let daily: PnlRow[] = [];
     try {
-      // Account grain is one row per Amazon day. Paginate so a year of
-      // history is not silently truncated by PostgREST's default page size
-      // (a hard row cap used to hide anything past about thirteen months).
-      const PAGE = 1000;
-      let offset = 0;
-      while (true) {
-        const r = await sb.from("pnl_daily").select("*").eq("grain", "account")
+      daily = await paginate((from, to) =>
+        sb.from("pnl_daily").select("*").eq("grain", "account")
           .order("date", { ascending: false })
-          .range(offset, offset + PAGE - 1);
-        if (r.error) break;
-        const page = (r.data ?? []) as PnlRow[];
-        daily.push(...page);
-        if (page.length < PAGE) break;
-        offset += PAGE;
-      }
+          .range(from, to),
+      );
     } catch { /* table may not exist */ }
 
-    // Freshness of the ad-spend input, so the page can flag a partial window.
+    daily = daily.filter((r) => !(Number(r.units) > 0 && Number(r.gross_sales) <= 0));
+
     let adsDateMax: string | null = null;
+    let adsByDay: { date: string; spend: number }[] = [];
     try {
-      const r = await sb.from("ads_campaigns_daily").select("date")
-        .order("date", { ascending: false }).limit(1);
-      if (r.data?.[0]) adsDateMax = String(r.data[0].date);
+      adsByDay = await paginate((from, to) =>
+        sb.from("ads_campaigns_daily").select("date,spend")
+          .order("date", { ascending: true })
+          .range(from, to),
+      );
+      if (adsByDay.length) {
+        adsDateMax = adsByDay.reduce((m, r) => (r.date > m ? r.date : m), adsByDay[0].date);
+      }
     } catch { /* */ }
+
+    const monthly = await loadMonthly(sb, adsByDay);
 
     const parseMeta = (m: PnlRow["meta"]): Record<string, unknown> => {
       if (!m) return {};
@@ -74,16 +90,12 @@ export async function GET() {
         fees_basis: typeof meta.fees_basis === "string" ? meta.fees_basis : "estimated",
         cogs_basis: typeof meta.cogs_basis === "string" ? meta.cogs_basis : null,
         settled_payout: typeof meta.settled_payout === "number" ? meta.settled_payout : null,
+        source: "daily" as const,
       };
     });
 
-    // ── Closed-day boundary ──
-    // Every window ends at yesterday-in-LA. Today is always partial: sales are
-    // still landing and the ads sync only covers through yesterday, so including
-    // it would show a day with real COGS and no ad spend.
     const asOf = amazonAsOf();
     const today = amazonToday();
-    // Newest day that is actually closed: has a P&L row and ad spend coverage.
     const latestClosed = rows.find(
       (r) => r.date <= asOf && (!adsDateMax || r.date <= adsDateMax)
     )?.date ?? null;
@@ -94,25 +106,67 @@ export async function GET() {
 
     return Response.json({
       daily: rows,
+      monthly: monthly.months,
+      monthlySkus: monthly.skusByMonth,
+      skuCoverageMin: monthly.coverageMin,
+      skuCoverageMax: monthly.coverageMax,
+      skuMissingJan2024: Boolean(
+        monthly.coverageMin && monthly.coverageMin > "2024-01",
+      ),
+      missingCostSkus: monthly.missingCostSkus,
       salesDateMax: rows.length ? rows[0].date : null,
       historyMin,
       historyMax: rows.length ? rows[0].date : null,
       historyDays: rows.length,
       adsDateMax,
+      adsDateMin: adsByDay.length
+        ? adsByDay.reduce((m, r) => (r.date < m ? r.date : m), adsByDay[0].date)
+        : null,
       asOf,
       today,
       latestClosed,
-      /** True when ad spend has not caught up to as-of yet. */
       adsLagging: Boolean(adsDateMax && adsDateMax < asOf),
       timezone: "America/Los_Angeles",
       formula: "gross_sales - referral - fba - ad_spend - cogs",
       adsSource: "ads_campaigns_daily.spend",
+      monthlySource: "sales_by_sku × sku_costs (Amazon)",
     });
   } catch {
     return Response.json({
-      daily: [], salesDateMax: null, adsDateMax: null,
+      daily: [], monthly: [], monthlySkus: {},
+      salesDateMax: null, adsDateMax: null,
       asOf: null, today: null, latestClosed: null, adsLagging: false,
       formula: "gross_sales - referral - fba - ad_spend - cogs",
     });
+  }
+}
+
+async function loadMonthly(
+  sb: SupabaseClient,
+  adsByDay: { date: string; spend: number }[],
+) {
+  const empty = {
+    months: [],
+    skusByMonth: {} as Record<string, never[]>,
+    coverageMin: null as string | null,
+    coverageMax: null as string | null,
+    missingCostSkus: [] as string[],
+  };
+  try {
+    const skuRows = await paginate((from, to) =>
+      sb.from("sales_by_sku").select("channel,sku,period_start,units,gross_sales,product_title,source")
+        .eq("channel", "amazon")
+        .range(from, to),
+    );
+    const costs = await paginate((from, to) =>
+      sb.from("sku_costs").select("sku,cogs_per_unit").range(from, to),
+    );
+    return buildAmazonMonthlyPnl({
+      skuRows,
+      costs,
+      adsByDay,
+    });
+  } catch {
+    return empty;
   }
 }

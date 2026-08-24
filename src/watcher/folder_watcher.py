@@ -9,7 +9,8 @@ from watchdog.events import FileSystemEventHandler, FileCreatedEvent
 from watchdog.observers import Observer
 
 from src.config import settings
-from src.parsers.amazon_inventory import ingest_amazon_inventory
+from src.parsers.amazon_inventory import ingest_amazon_inventory, is_inventory_event_detail
+from src.parsers.amazon_orders_skus import ingest_amazon_orders_skus, is_amazon_orders_report
 from src.parsers.shopify_orders import ingest_shopify_csv
 
 
@@ -40,9 +41,28 @@ class IncomingFileHandler(FileSystemEventHandler):
         try:
             if parent == "amazon":
                 self.print_fn(f"[Watcher] Processing Amazon file: {path.name}")
-                result = ingest_amazon_inventory(path)
-                self.print_fn(f"[Watcher] Amazon ingestion complete: {result.get('rows_inserted', 0)} rows inserted, "
-                              f"states: {result.get('states_found', [])}")
+                first_line = path.read_text(encoding="utf-8-sig", errors="replace").split("\n", 1)[0]
+                delim = "\t" if "\t" in first_line else ","
+                headers = [h.strip().strip('"') for h in first_line.split(delim)]
+                if is_amazon_orders_report(headers):
+                    result = ingest_amazon_orders_skus(path)
+                    self.print_fn(
+                        f"[Watcher] All Orders → sales_by_sku: "
+                        f"{result.get('rows_inserted', 0)} rows, "
+                        f"{result.get('unique_skus', 0)} SKUs"
+                    )
+                elif is_inventory_event_detail(headers):
+                    result = ingest_amazon_inventory(path)
+                    self.print_fn(
+                        f"[Watcher] Amazon inventory: {result.get('rows_inserted', 0)} rows, "
+                        f"states: {result.get('states_found', [])}"
+                    )
+                else:
+                    self.print_fn(
+                        f"[Watcher] Unrecognized Amazon file {path.name} — "
+                        f"expected All Orders or Inventory Event Detail"
+                    )
+                    return
                 if result.get("warnings"):
                     for w in result["warnings"]:
                         self.print_fn(f"[Watcher] Warning: {w}")

@@ -536,6 +536,11 @@ class TestPNLDefaults:
         from src.rules import PNL_COGS_SOURCE
         assert PNL_COGS_SOURCE == "sku_costs"
 
+    def test_units_without_sales_are_not_a_contribution_day(self):
+        from src.pnl import is_unwritable_day
+        assert is_unwritable_day(0, 62) is True
+        assert is_unwritable_day(907.38, 58) is False
+
 
 class TestAdProductCoverage:
     """Account ad spend must span Sponsored Products, Brands and Display.

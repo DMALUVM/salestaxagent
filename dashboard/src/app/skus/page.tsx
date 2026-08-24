@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Package, Search, ArrowUpDown, Info } from "lucide-react";
+import { buildAmazonMonthlyPnl } from "@/lib/sku-monthly-pnl";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,7 +25,7 @@ import { Package, Search, ArrowUpDown, Info } from "lucide-react";
 
 type ChFilter = "all" | "shopify" | "amazon";
 type TimeGrain = "monthly" | "quarterly" | "yearly";
-type SortKey = "sku" | "units" | "gross" | "refunds" | "net" | "orders";
+type SortKey = "sku" | "units" | "gross" | "refunds" | "net" | "orders" | "cogs" | "contrib";
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -52,6 +53,9 @@ interface SkuAgg {
   channels: Set<string>;
   shopifyGross: number;
   amazonGross: number;
+  cogs: number;
+  fees: number;
+  contribution: number;
 }
 
 // Derive available months from data
@@ -105,6 +109,9 @@ function aggregate(
         channels: new Set(),
         shopifyGross: 0,
         amazonGross: 0,
+        cogs: 0,
+        fees: 0,
+        contribution: 0,
       };
     }
     const a = m[key];
@@ -246,6 +253,16 @@ function DetailDrawer({
             </span>
             <span className="text-muted-foreground">Net</span>
             <span className="text-right tabular-nums font-medium">${fmtD(sku.net)}</span>
+            {sku.contribution !== 0 && (
+              <>
+                <span className="text-muted-foreground">COGS</span>
+                <span className="text-right tabular-nums">${fmtD(sku.cogs)}</span>
+                <span className="text-muted-foreground">Contrib (before ads)</span>
+                <span className={`text-right tabular-nums font-medium ${sku.contribution >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                  ${fmtD(sku.contribution)}
+                </span>
+              </>
+            )}
             <span className="text-muted-foreground">Orders</span>
             <span className="text-right tabular-nums">{fmt(sku.orders)}</span>
             <span className="text-muted-foreground">Channels</span>
@@ -313,22 +330,47 @@ function DetailDrawer({
 // ---------------------------------------------------------------------------
 
 export default function SkusPage() {
-  const [ch, setCh] = useState<ChFilter>("all");
+  const [ch, setCh] = useState<ChFilter>("amazon");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>("gross");
+  const [sortKey, setSortKey] = useState<SortKey>("contrib");
   const [sortAsc, setSortAsc] = useState(false);
   const [fromMonth, setFromMonth] = useState<string | null>(null);
   const [toMonth, setToMonth] = useState<string | null>(null);
 
   const { data: skuData, loading } = useSupabaseQuery<SalesBySku>("sales_by_sku");
+  const { data: costData } = useSupabaseQuery<{ sku: string; cogs_per_unit: number }>("sku_costs");
+
+  const amazonEcon = useMemo(
+    () => buildAmazonMonthlyPnl({ skuRows: skuData, costs: costData, adsByDay: [] }),
+    [skuData, costData],
+  );
 
   const months = useMemo(() => availableMonths(skuData), [skuData]);
 
-  const aggs = useMemo(
-    () => aggregate(skuData, ch, fromMonth, toMonth),
-    [skuData, ch, fromMonth, toMonth],
-  );
+  const aggs = useMemo(() => {
+    const rows = aggregate(skuData, ch, fromMonth, toMonth);
+    const bySku: Record<string, { cogs: number; fees: number; contribution: number }> = {};
+    for (const [ym, lines] of Object.entries(amazonEcon.skusByMonth)) {
+      if (fromMonth && ym < fromMonth) continue;
+      if (toMonth && ym > toMonth) continue;
+      for (const line of lines) {
+        const acc = bySku[line.sku] ?? { cogs: 0, fees: 0, contribution: 0 };
+        acc.cogs += line.est_cogs;
+        acc.fees += line.est_referral_fees + line.est_fba_fees;
+        acc.contribution += line.est_contribution;
+        bySku[line.sku] = acc;
+      }
+    }
+    for (const a of rows) {
+      const e = bySku[a.sku];
+      if (!e) continue;
+      a.cogs = e.cogs;
+      a.fees = e.fees;
+      a.contribution = e.contribution;
+    }
+    return rows;
+  }, [skuData, ch, fromMonth, toMonth, amazonEcon]);
 
   const filtered = useMemo(() => {
     let rows = aggs;
@@ -351,6 +393,8 @@ export default function SkusPage() {
         case "refunds": return (a.refundSales - b.refundSales) * dir;
         case "net": return (a.net - b.net) * dir;
         case "orders": return (a.orders - b.orders) * dir;
+        case "cogs": return (a.cogs - b.cogs) * dir;
+        case "contrib": return (a.contribution - b.contribution) * dir;
         default: return 0;
       }
     });
@@ -397,6 +441,12 @@ export default function SkusPage() {
           <h1 className="text-xl font-semibold tracking-tight">SKU Performance</h1>
           <p className="text-sm text-muted-foreground">
             {fmt(aggs.length)} SKUs &middot; ${fmt(Math.round(totalGross))} gross &middot; {fmt(totalUnits)} units
+            {ch === "amazon" && (
+              <>
+                {" "}&middot; ${fmt(Math.round(aggs.reduce((s, a) => s + a.contribution, 0)))} contrib
+                <span className="text-muted-foreground"> (before ads)</span>
+              </>
+            )}
           </p>
         </div>
         <Toggle
@@ -465,6 +515,12 @@ export default function SkusPage() {
                     <TableHead className="hidden md:table-cell">Title</TableHead>
                     <SortHeader k="units" label="Units" right />
                     <SortHeader k="gross" label="Gross $" right />
+                    {ch === "amazon" && (
+                      <>
+                        <SortHeader k="cogs" label="COGS" right />
+                        <SortHeader k="contrib" label="Contrib" right />
+                      </>
+                    )}
                     <SortHeader k="refunds" label="Refunds" right />
                     <SortHeader k="net" label="Net $" right />
                     <SortHeader k="orders" label="Orders" right />
@@ -491,6 +547,16 @@ export default function SkusPage() {
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{fmt(a.units)}</TableCell>
                       <TableCell className="text-right tabular-nums">${fmtD(a.grossSales)}</TableCell>
+                      {ch === "amazon" && (
+                        <>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            ${fmtD(a.cogs)}
+                          </TableCell>
+                          <TableCell className={`text-right tabular-nums font-medium ${a.contribution >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                            ${fmtD(a.contribution)}
+                          </TableCell>
+                        </>
+                      )}
                       <TableCell className="text-right tabular-nums">
                         {a.hasRefundData ? (
                           <span className="text-red-500">-${fmtD(a.refundSales)}</span>
@@ -527,7 +593,10 @@ export default function SkusPage() {
       <div className="flex items-start gap-2 text-[10px] text-muted-foreground px-1">
         <Info className="mt-0.5 h-3 w-3 shrink-0" />
         <p>
-          <strong>Refunds:</strong> Shopify refunds from order refund line items.
+          <strong>Amazon contribution</strong> = gross − estimated referral (15%) − FBA ($3.50/unit) − COGS
+          from <code>sku_costs</code>. Ads are campaign-level and are not subtracted here.
+          Amazon months in the warehouse start August 2024; Jan–Jul 2024 need an All Orders CSV.
+          <strong> Refunds:</strong> Shopify refunds from order refund line items.
           Amazon refunds only if the SP-API orders report includes return data;
           otherwise shown as &ldquo;—&rdquo;.
           Net = Gross − Refunds when refund data is available.

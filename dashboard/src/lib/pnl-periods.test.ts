@@ -31,6 +31,9 @@ function row(date: string, contrib: number, extra: Partial<PnlRow> = {}): PnlRow
     net_after_ads: contrib,
     status: "preliminary",
     fees_basis: extra.fees_basis ?? "estimated",
+    ads_basis: extra.ads_basis,
+    source: extra.source,
+    period_end: extra.period_end,
   };
 }
 
@@ -190,6 +193,61 @@ describe("buildPnlPeriods", () => {
     ];
     const [w] = buildPnlPeriods({ rows, grain: "week", lookback: "all", asOf: "2026-08-23" });
     assert.equal(w.feesBasis, "mixed");
+  });
+
+  test("month/year prefer SKU monthly rows and average by calendar days", () => {
+    const monthly: PnlRow[] = [
+      row("2026-08-01", 2300, { source: "sku_monthly", ads_basis: "known", gross_sales: 60000 }),
+      row("2026-07-01", 3100, { source: "sku_monthly", ads_basis: "known" }),
+      row("2025-12-01", 4000, { source: "sku_monthly", ads_basis: "unknown" }),
+    ];
+    const months = buildPnlPeriods({
+      rows: [row("2026-08-20", 1)],
+      monthly,
+      grain: "month",
+      lookback: "all",
+      asOf: "2026-08-23",
+    });
+    assert.deepEqual(months.map((p) => p.key), ["2026-08", "2026-07", "2025-12"]);
+    assert.equal(months[0].source, "sku_monthly");
+    assert.equal(months[0].days, 23); // MTD through as-of
+    assert.equal(months[0].avgDaily, 100);
+    assert.equal(months[0].partial, true);
+    assert.equal(months[1].days, 31);
+    assert.equal(months[1].partial, false);
+    assert.equal(months[1].avgDaily, 100);
+
+    const years = buildPnlPeriods({
+      rows: [],
+      monthly,
+      grain: "year",
+      lookback: "all",
+      asOf: "2026-08-23",
+    });
+    assert.equal(years.length, 2);
+    assert.equal(years[0].key, "2026");
+    assert.equal(years[0].contribution, 5400);
+    assert.equal(years[0].days, 23 + 31);
+    assert.equal(years[0].source, "sku_monthly");
+    assert.equal(years[1].contribution, 4000);
+    assert.equal(years[1].days, 31);
+    assert.equal(years[1].partial, true); // 2025 only has December in this fixture
+  });
+
+  test("30d lookback on monthly keeps a month that only overlaps the window", () => {
+    const monthly = [
+      row("2026-08-01", 10, { source: "sku_monthly" }),
+      row("2026-07-01", 20, { source: "sku_monthly" }),
+      row("2026-06-01", 999, { source: "sku_monthly" }),
+    ];
+    const months = buildPnlPeriods({
+      rows: [],
+      monthly,
+      grain: "month",
+      lookback: 30,
+      asOf: "2026-08-23",
+    });
+    assert.deepEqual(months.map((p) => p.key), ["2026-08", "2026-07"]);
   });
 });
 
