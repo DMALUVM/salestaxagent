@@ -2799,6 +2799,37 @@ def pnl_sync_cmd(days, no_skus):
         click.echo("  Sanity check: all days within expected fee % and revenue/unit bands")
 
 
+@cli.command("paid-ads-freshness")
+@click.option("--send/--dry-run", default=False,
+              help="Actually send the Telegram nudge (default: print only).")
+def paid_ads_freshness_cmd(send):
+    """Report how stale each Shopify paid-ads CSV export is."""
+    from src.alerts.paid_ads_freshness import (
+        STALE_AFTER_DAYS, build_message, check_paid_ads_freshness,
+        run_paid_ads_freshness_check,
+    )
+
+    if send:
+        run_paid_ads_freshness_check()
+        return
+
+    result = check_paid_ads_freshness()
+    click.echo(f"Today: {result['today']}  (stale after {STALE_AFTER_DAYS} days)")
+    for s in result["sources"]:
+        if s["missing"]:
+            state = "never uploaded"
+        elif s["stale"]:
+            state = f"STALE {s['days_behind']}d"
+        else:
+            state = f"{s['days_behind']}d old"
+        click.echo(f"  {s['label']:16} {str(s['max_date']):12} {state}")
+    message = build_message(result)
+    if message:
+        click.echo("\nWould send:\n" + message)
+    else:
+        click.echo("\nNothing to send — every source is current.")
+
+
 @cli.command("pulse-audit")
 @click.option("--date", "target_date", required=True, help="PST date to audit YYYY-MM-DD")
 def pulse_audit_cmd(target_date):
@@ -4358,6 +4389,22 @@ def run():
         )
         click.echo("[Scheduler] Source monitoring every Monday at 07:00")
 
+        # Paid Ads CSV freshness: Monday 07:15 ET.
+        #
+        # /paid-ads is fed by manual exports, so its staleness banner only
+        # appears once the page is already open. This is the nudge that arrives
+        # without being asked for, at the start of the week when the exports
+        # would be pulled anyway. Read-only: it never writes paid_* rows.
+        scheduler.add_job(
+            _run_paid_ads_freshness,
+            "cron",
+            day_of_week="mon",
+            hour=7,
+            minute=15,
+            id="paid_ads_freshness",
+        )
+        click.echo("[Scheduler] Paid Ads CSV freshness every Monday at 07:15")
+
         # CPA export: daily at 06:30 ET
         scheduler.add_job(
             _run_cpa_exports,
@@ -4999,6 +5046,16 @@ def _run_spapi_refresh():
             pass
     else:
         job_finish(run_id, status, message)
+
+
+def _run_paid_ads_freshness():
+    """Nudge when a Shopify paid-ads CSV export has gone stale."""
+    from src.alerts.paid_ads_freshness import run_paid_ads_freshness_check
+
+    try:
+        run_paid_ads_freshness_check()
+    except Exception as e:
+        print(f"[Paid Ads Freshness] error: {e}")
 
 
 def _run_source_monitoring():
