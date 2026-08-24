@@ -293,6 +293,7 @@ describe("page / API invariants", () => {
     assert.match(intelUi, /newest date/);
     assert.match(intelUi, /Upload CSVs/);
     assert.match(intelUi, /Copy for Grok/);
+    assert.match(intelUi, /EMPTY_BRIEF|brief \?\?/);
     assert.equal(PAID_ADS_ATTRIBUTION.includes("not a live"), true);
     assert.doesNotMatch(page, /puppeteer|playwright|ads\.google\.com|business\.facebook\.com/i);
     assert.doesNotMatch(intelUi, /puppeteer|playwright|ads\.google\.com/i);

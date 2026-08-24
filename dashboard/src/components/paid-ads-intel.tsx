@@ -119,7 +119,7 @@ function IntelCardView({ card, index }: { card: IntelCard; index: number }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-semibold tabular-nums text-muted-foreground">{index + 1}</span>
           <Badge variant="outline" className={SEV[card.severity]}>{card.severity}</Badge>
-          <Badge variant="outline">{card.owner === "ads" ? "ADS" : "SITE"}</Badge>
+          <Badge variant="outline">{card.owner === "site" ? "SITE" : "ADS"}</Badge>
           <Badge variant="outline">{ACTION[card.action]}</Badge>
           <span className="text-[10px] tabular-nums text-muted-foreground">{money(card.stake)} at stake</span>
           <span className="text-[10px] text-muted-foreground">{card.metric}</span>
@@ -150,6 +150,8 @@ function pctDelta(curr: number, prev: number): string {
   const sign = d > 0 ? "+" : "";
   return `${sign}${d.toFixed(0)}%`;
 }
+
+const EMPTY_BRIEF = { headline: "", ads: "", site: "" };
 
 export function PaidAdsIntel({
   data,
@@ -199,17 +201,34 @@ export function PaidAdsIntel({
   }
 
   async function copyGrok() {
+    const text = data.grok?.markdown ?? "";
+    if (!text) {
+      setMsg("Nothing to copy yet.");
+      return;
+    }
     try {
-      await navigator.clipboard.writeText(data.grok.markdown);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      window.setTimeout(() => setCopied(false), 2500);
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Clipboard blocked");
+      setMsg(e instanceof Error ? e.message : "Clipboard blocked — use the .md download.");
     }
   }
 
   function downloadGrok() {
-    const blob = new Blob([data.grok.markdown], { type: "text/markdown" });
+    const blob = new Blob([data.grok?.markdown ?? ""], { type: "text/markdown" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `tallowbourn-ads-intel-${data.as_of ?? "empty"}.md`;
@@ -220,7 +239,8 @@ export function PaidAdsIntel({
   const g = data.kpis.google;
   const m = data.kpis.meta;
   const b = data.kpis.blended;
-  const wow = data.wow;
+  const wow = data.wow ?? { last: b, prior: b };
+  const brief = data.brief ?? EMPTY_BRIEF;
   const googleWins = g.spend >= 1 && m.spend >= 1 && g.roas > m.roas;
   const metaWins = g.spend >= 1 && m.spend >= 1 && m.roas > g.roas;
 
@@ -398,13 +418,13 @@ export function PaidAdsIntel({
             <h2 className="text-sm font-semibold tracking-tight">This week</h2>
             <Card>
               <CardContent className="space-y-3 p-4">
-                <p className="text-sm leading-relaxed">{data.brief.headline}</p>
+                <p className="text-sm leading-relaxed">{brief.headline || "Upload CSVs to build this week’s brief."}</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <p className="text-[13px] text-muted-foreground">
-                    <span className="font-medium text-foreground">Ads lead. </span>{data.brief.ads}
+                    <span className="font-medium text-foreground">Ads lead. </span>{brief.ads || "No paid-media stack yet."}
                   </p>
                   <p className="text-[13px] text-muted-foreground">
-                    <span className="font-medium text-foreground">Web team. </span>{data.brief.site}
+                    <span className="font-medium text-foreground">Web team. </span>{brief.site || "No site stack yet."}
                   </p>
                 </div>
               </CardContent>
@@ -416,9 +436,9 @@ export function PaidAdsIntel({
             <p className="text-[11px] text-muted-foreground">
               7-day keep/kill tests, ranked by $ at stake. Never move Meta or PMax onto Brand Search. Success metric is on every card.
             </p>
-            {data.cards.filter((c) => c.owner === "ads").length === 0 ? (
+            {data.cards.filter((c) => (c.owner ?? "ads") === "ads").length === 0 ? (
               <p className="text-sm text-muted-foreground">No paid-media cards for this filter.</p>
-            ) : data.cards.filter((c) => c.owner === "ads").map((c, i) => (
+            ) : data.cards.filter((c) => (c.owner ?? "ads") === "ads").map((c, i) => (
               <IntelCardView key={c.id} card={c} index={i} />
             ))}
           </section>
@@ -637,7 +657,13 @@ export function usePaidIntel(range: IntelRangeDays, filter: IntelFilter) {
       .then(async (r) => {
         const json = await r.json();
         if (json.fatalError) throw new Error(json.fatalError);
-        setData(json as IntelBundle);
+        const raw = json as IntelBundle;
+        setData({
+          ...raw,
+          brief: raw.brief ?? EMPTY_BRIEF,
+          wow: raw.wow ?? { last: raw.kpis?.blended, prior: raw.kpis?.blended },
+          cards: (raw.cards ?? []).map((c) => ({ ...c, owner: c.owner === "site" ? "site" : "ads" })),
+        });
         setError(json.loadErrors?.length ? json.loadErrors.join(" · ") : null);
       })
       .catch((e) => {
