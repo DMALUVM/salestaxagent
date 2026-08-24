@@ -25,7 +25,13 @@ SOURCE_SKU_ECON = "sku_economics"
 SOURCE_ADS_CONSOLE = "ads_console"
 IMPORT_CAMPAIGN_TYPE = "IMPORT"
 
+# Real SKU Economics (2026-04 file): "Sponsored Products charge total"
+# plus per-unit / quantity siblings we must not sum. Older exports used
+# "Sponsored Products Ad Fee".
 _AD_HEADER_FRAGMENTS = (
+    "sponsored products charge",
+    "sponsored brands charge",
+    "sponsored display charge",
     "sponsored products ad fee",
     "sponsored brands ad fee",
     "sponsored display ad fee",
@@ -126,17 +132,30 @@ def _first_idx(lookup: dict[str, int], names: tuple[str, ...]) -> int | None:
     return None
 
 
+def _is_ad_column(name: str) -> bool:
+    return any(frag in name for frag in _AD_HEADER_FRAGMENTS)
+
+
+def _is_ad_spend_total(name: str) -> bool:
+    """True for the money column, not per-unit or quantity."""
+    if not _is_ad_column(name):
+        return False
+    if "per unit" in name or name.endswith(" quantity") or name.endswith(" qty"):
+        return False
+    return True
+
+
 def _ad_fee_indexes(normalized: list[str]) -> list[int]:
-    out: list[int] = []
-    for i, name in enumerate(normalized):
-        if any(frag in name for frag in _AD_HEADER_FRAGMENTS):
-            out.append(i)
-    return out
+    return [i for i, name in enumerate(normalized) if _is_ad_spend_total(name)]
+
+
+def _has_ad_column(normalized: list[str]) -> bool:
+    return any(_is_ad_column(n) for n in normalized)
 
 
 def is_sku_economics_report(headers: list[str]) -> bool:
     names = [_norm(h) for h in headers]
-    has_ad = bool(_ad_fee_indexes(names))
+    has_ad = _has_ad_column(names)
     has_id = any(n in names for n in _SKU_ECON_ID_HEADERS)
     has_sales = any("ordered product sales" in n or n in {"sales", "ordered sales"} for n in names)
     return has_ad and (has_id or has_sales)

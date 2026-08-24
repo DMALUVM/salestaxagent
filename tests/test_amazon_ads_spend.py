@@ -52,6 +52,27 @@ def test_sku_economics_refuses_multi_month_lump():
     assert "Monthly" in parsed["warnings"][0]
 
 
+def test_real_sku_economics_april_2026_headers():
+    """Seller Central uses 'Sponsored Products charge total', not Ad Fee."""
+    headers = (
+        "Amazon store,Start date,End date,Parent ASIN,ASIN,FNSKU,MSKU,"
+        "Currency code,Average sales price,Units sold,Sales,Net sales,"
+        "Sponsored Products charge per unit,"
+        "Sponsored Products charge quantity,"
+        "Sponsored Products charge total,Net proceeds total"
+    ).split(",")
+    assert is_sku_economics_report(headers)
+    rows = [
+        ["US", "04/01/2026", "04/30/2026", "B0", "B0", "", "AA",
+         "USD", "10", "2", "20", "20", "1.5", "10", "818.26", "100"],
+        ["US", "04/01/2026", "04/30/2026", "B0", "B0", "", "BB",
+         "USD", "10", "1", "10", "10", "1.4", "5", "3443.43", "50"],
+    ]
+    parsed = parse_sku_economics_monthly(headers, rows)
+    assert parsed["months"][0]["period_start"] == "2026-04-01"
+    assert parsed["months"][0]["spend"] == 4261.69
+
+
 def test_ads_console_daily_groups_to_month():
     rows = [
         ["2025-01-02", "SP - Lip", "111", "12.00", "4"],

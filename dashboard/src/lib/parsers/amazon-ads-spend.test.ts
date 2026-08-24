@@ -39,6 +39,18 @@ describe("Amazon ads spend CSV", () => {
     assert.match(parsed.warnings[0] ?? "", /Monthly/);
   });
 
+  test("real SKU Economics charge-total column, not Ad Fee", () => {
+    const csv = [
+      "Amazon store,Start date,End date,Parent ASIN,ASIN,MSKU,Sales,Sponsored Products charge per unit,Sponsored Products charge quantity,Sponsored Products charge total",
+      "US,04/01/2026,04/30/2026,B0,B0,AA,20,1.5,10,818.26",
+      "US,04/01/2026,04/30/2026,B0,B0,BB,10,1.4,5,3443.43",
+    ].join("\n");
+    const parsed = parseAmazonAdsSpendCsv(csv);
+    assert.equal(parsed.kind, "sku_economics");
+    assert.equal(parsed.months[0]?.period_start, "2026-04-01");
+    assert.equal(parsed.months[0]?.spend, 4261.69);
+  });
+
   test("Ads Console daily rolls to a month", () => {
     const parsed = parseAmazonAdsSpendCsv(CONSOLE);
     assert.equal(parsed.kind, "ads_console");

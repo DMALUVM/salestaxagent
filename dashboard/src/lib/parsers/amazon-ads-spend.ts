@@ -31,6 +31,9 @@ export interface AdsSpendParseResult {
 }
 
 const AD_FRAGMENTS = [
+  "sponsored products charge",
+  "sponsored brands charge",
+  "sponsored display charge",
   "sponsored products ad fee",
   "sponsored brands ad fee",
   "sponsored display ad fee",
@@ -42,6 +45,18 @@ const AD_FRAGMENTS = [
   "ads cost",
   "cost of advertising",
 ];
+
+function isAdColumn(name: string): boolean {
+  return AD_FRAGMENTS.some((f) => name.includes(f));
+}
+
+function isAdSpendTotal(name: string): boolean {
+  if (!isAdColumn(name)) return false;
+  if (name.includes("per unit") || name.endsWith(" quantity") || name.endsWith(" qty")) {
+    return false;
+  }
+  return true;
+}
 
 function norm(h: string): string {
   return h.replace(/^["']|["']$/g, "").trim().toLowerCase().replace(/[\s_\-/]+/g, " ");
@@ -84,7 +99,7 @@ function monthEnd(iso: string): string {
 
 function detectKind(headers: string[]): AdsSpendKind | null {
   const names = headers.map(norm);
-  const hasAd = names.some((n) => AD_FRAGMENTS.some((f) => n.includes(f)));
+  const hasAd = names.some(isAdColumn);
   const hasId = names.some((n) =>
     ["msku", "merchant sku", "child asin", "fnsku", "parent asin", "seller sku"].includes(n),
   );
@@ -153,7 +168,7 @@ export function parseAmazonAdsSpendCsv(content: string): AdsSpendParseResult {
     const monthIdx = names.findIndex((n) =>
       ["month", "year month", "year-month", "reporting month"].includes(n));
     const adIdxs = names
-      .map((n, i) => (AD_FRAGMENTS.some((f) => n.includes(f)) ? i : -1))
+      .map((n, i) => (isAdSpendTotal(n) ? i : -1))
       .filter((i) => i >= 0);
     const spend: Record<string, number> = {};
     let skipped = 0;
