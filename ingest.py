@@ -11,6 +11,7 @@ Usage:
 
 The --amazon flag auto-detects the report type:
   - All Orders              (has amazon-order-id, sku, item-price) → sales_by_sku
+  - SKU Economics / Ads     (ad fee or campaign spend) → ads_monthly_spend
   - Inventory Event Detail  (has fulfillment-center-id, date-time)
   - Custom Combined Tax     (has ship_from_state, ship_to_state)
 """
@@ -51,16 +52,32 @@ def ingest(amazon_path, shopify_api, shopify_csv_path, reg_path, dry_run):
 
     if amazon_path:
         click.echo(f"Ingesting Amazon report: {amazon_path}")
-        # Auto-detect report type from headers
-        with open(amazon_path, "r", encoding="utf-8-sig") as _f:
-            first_line = _f.readline()
-        _delim = "\t" if "\t" in first_line else ","
-        _headers = [h.strip().strip('"') for h in first_line.split(_delim)]
-
         from src.parsers.amazon_tax_report import is_custom_combined_tax
         from src.parsers.amazon_orders_skus import is_amazon_orders_report
         from src.parsers.amazon_inventory import is_inventory_event_detail
-        if is_custom_combined_tax(_headers):
+        from src.parsers.amazon_ads_spend import (
+            detect_ads_spend_report,
+            ingest_amazon_ads_spend,
+            peek_ads_spend_headers,
+        )
+        if Path(amazon_path).suffix.lower() in {".xlsx", ".xlsm"}:
+            _headers = peek_ads_spend_headers(amazon_path)
+        else:
+            with open(amazon_path, "r", encoding="utf-8-sig") as _f:
+                first_line = _f.readline()
+            _delim = "\t" if "\t" in first_line else ","
+            _headers = [h.strip().strip('"') for h in first_line.split(_delim)]
+        if detect_ads_spend_report(_headers):
+            click.echo("  Detected: Amazon ads spend (SKU Economics or Ads Console)")
+            result = ingest_amazon_ads_spend(amazon_path, dry_run=dry_run)
+            click.echo(f"\n  Amazon ads spend:")
+            click.echo(f"  Kind:          {result.get('kind')}")
+            click.echo(f"  Months:        {result.get('months', 0)}")
+            click.echo(f"  Spend:         ${result.get('total_spend', 0):,.2f}")
+            click.echo(f"  Rows inserted: {result.get('rows_inserted', 0)}")
+            for w in result.get("warnings") or []:
+                click.echo(f"  Warning: {w}")
+        elif is_custom_combined_tax(_headers):
             click.echo("  Detected: Custom Combined Tax report")
             from src.parsers.amazon_tax_report import ingest_amazon_tax_report
             result = ingest_amazon_tax_report(amazon_path, dry_run=dry_run)

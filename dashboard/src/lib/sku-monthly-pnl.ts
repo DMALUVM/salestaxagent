@@ -4,8 +4,10 @@
  * Mirrors src/pnl_monthly.py. Constants must match
  * config/business_rules.json → pnl.default_referral_pct / default_fba_fee_per_unit.
  *
- * Ads are campaign-level. A month with no ads_campaigns_daily rows is
- * ads-unknown (spend shown as 0, basis "unknown") — not "after $0 ads".
+ * Ads: an imported ads_monthly_spend row wins for that month (full
+ * SKU Economics / Ads Console month). Otherwise campaign days from
+ * ads_campaigns_daily. A month with neither is ads-unknown — not
+ * "after $0 ads".
  */
 
 import { monthStart } from "./as-of";
@@ -31,6 +33,11 @@ export interface SkuCostRow {
 
 export interface AdsDaySpend {
   date: string;
+  spend: number;
+}
+
+export interface AdsMonthSpend {
+  period_start: string;
   spend: number;
 }
 
@@ -80,6 +87,7 @@ export function buildAmazonMonthlyPnl(opts: {
   skuRows: SkuSalesRow[];
   costs: SkuCostRow[];
   adsByDay: AdsDaySpend[];
+  adsByMonth?: AdsMonthSpend[];
   referralPct?: number;
   fbaPerUnit?: number;
 }): MonthlyPnlResult {
@@ -106,6 +114,12 @@ export function buildAmazonMonthlyPnl(opts: {
     const set = adsDays[ym] ?? new Set<string>();
     set.add(a.date);
     adsDays[ym] = set;
+  }
+  for (const a of opts.adsByMonth ?? []) {
+    const ym = ymOf(a.period_start);
+    if (ym.length !== 7) continue;
+    adsSpend[ym] = Number(a.spend) || 0;
+    adsDays[ym] = new Set([`${ym}-01`]);
   }
 
   const byMonthSku = new Map<string, {

@@ -876,9 +876,9 @@ export default function DataPage() {
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="text-sm font-medium">Amazon Reports</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Drop CSV/TXT into{" "}
-                <code className="rounded bg-muted px-1">incoming/amazon/</code>{" "}
-                for automatic processing by the folder watcher.
+                Drop CSV/TXT/XLSX into{" "}
+                <code className="rounded bg-muted px-1">incoming/amazon/</code>
+                {" "}(SKU Economics monthly, Ads Console, All Orders, or Inventory).
               </p>
             </div>
             <div className="rounded-lg border bg-muted/30 p-3">

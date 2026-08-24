@@ -9,9 +9,10 @@ daily writer uses, without another SP-API pull:
 
 Shopify is ignored — SKU economics here is Amazon-only.
 
-Ads: summed from `ads_campaigns_daily` when that month has any campaign
-row. Months before ads coverage store $0 spend with ads_basis=unknown so
-the figure is labelled *before ads*, not "after $0 spend".
+Ads: `ads_monthly_spend` (SKU Economics / Ads Console import) wins for
+that month; otherwise `ads_campaigns_daily`. Months with neither store
+$0 spend with ads_basis=unknown so the figure is labelled *before ads*,
+not "after $0 spend".
 
 COGS is `sku_costs` only (business rule 6). Missing SKUs use the average
 unit cost of priced SKUs, same as the daily writer.
@@ -209,6 +210,18 @@ def _ads_by_month() -> tuple[dict[str, float], dict[str, int]]:
             continue
         spend[ym] += float(r.get("spend") or 0)
         days[ym].add(d)
+    try:
+        imported = fetch_all("ads_monthly_spend")
+    except Exception:
+        imported = []
+    # An imported month wins so a full SKU Economics May does not sit
+    # on top of the partial Ads API days (this account: May 21+).
+    for r in imported:
+        ym = month_key(r.get("period_start") or "")
+        if len(ym) != 7:
+            continue
+        spend[ym] = float(r.get("spend") or 0)
+        days[ym] = {f"{ym}-01"}
     return {k: money(v) for k, v in spend.items()}, {k: len(v) for k, v in days.items()}
 
 

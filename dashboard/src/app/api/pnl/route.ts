@@ -75,7 +75,16 @@ export async function GET() {
       }
     } catch { /* */ }
 
-    const monthly = await loadMonthly(sb, adsByDay);
+    let adsByMonth: { period_start: string; spend: number }[] = [];
+    try {
+      adsByMonth = await paginate((from, to) =>
+        sb.from("ads_monthly_spend").select("period_start,spend")
+          .order("period_start", { ascending: true })
+          .range(from, to),
+      );
+    } catch { /* table may not exist yet */ }
+
+    const monthly = await loadMonthly(sb, adsByDay, adsByMonth);
 
     const parseMeta = (m: PnlRow["meta"]): Record<string, unknown> => {
       if (!m) return {};
@@ -128,8 +137,11 @@ export async function GET() {
       adsLagging: Boolean(adsDateMax && adsDateMax < asOf),
       timezone: "America/Los_Angeles",
       formula: "gross_sales - referral - fba - ad_spend - cogs",
-      adsSource: "ads_campaigns_daily.spend",
+      adsSource: adsByMonth.length
+        ? "ads_monthly_spend (import) then ads_campaigns_daily.spend"
+        : "ads_campaigns_daily.spend",
       monthlySource: "sales_by_sku × sku_costs (Amazon)",
+      adsImportedMonths: adsByMonth.map((r) => r.period_start),
     });
   } catch {
     return Response.json({
@@ -144,6 +156,7 @@ export async function GET() {
 async function loadMonthly(
   sb: SupabaseClient,
   adsByDay: { date: string; spend: number }[],
+  adsByMonth: { period_start: string; spend: number }[] = [],
 ) {
   const empty = {
     months: [],
@@ -165,6 +178,7 @@ async function loadMonthly(
       skuRows,
       costs,
       adsByDay,
+      adsByMonth,
     });
   } catch {
     return empty;

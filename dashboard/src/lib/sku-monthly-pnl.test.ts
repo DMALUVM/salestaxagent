@@ -60,6 +60,17 @@ describe("SKU monthly contribution", () => {
     assert.equal(unknown.months[0].ad_spend, 0);
   });
 
+  test("imported monthly spend wins over partial API days", () => {
+    const result = buildAmazonMonthlyPnl({
+      skuRows: [{ channel: "amazon", sku: "AA", period_start: "2026-05-01", units: 10, gross_sales: 200 }],
+      costs: [{ sku: "AA", cogs_per_unit: 2 }],
+      adsByDay: [{ date: "2026-05-21", spend: 5450.96 }],
+      adsByMonth: [{ period_start: "2026-05-01", spend: 18000 }],
+    });
+    assert.equal(result.months[0].ad_spend, 18000);
+    assert.equal(result.months[0].ads_basis, "known");
+  });
+
   test("missing cost uses average of priced SKUs", () => {
     const result = buildAmazonMonthlyPnl({
       skuRows: [

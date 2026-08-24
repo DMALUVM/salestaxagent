@@ -198,6 +198,26 @@ def backfill_amazon_skus(start_str, end_str, dry_run):
         click.echo(f"  Warning: {w}")
 
 
+@cli.command("ads-import")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--dry-run", is_flag=True)
+def ads_import_cmd(path, dry_run):
+    """Load monthly Amazon ad spend from SKU Economics or an Ads Console CSV.
+
+    Ads API only keeps ~95 days. Drop the file in incoming/amazon/ or pass
+    the path here. SKU Economics must be Monthly aggregation (or one month
+    per file) — a multi-month custom range is one lump and is refused.
+    """
+    from src.parsers.amazon_ads_spend import ingest_amazon_ads_spend
+    result = ingest_amazon_ads_spend(path, dry_run=dry_run)
+    click.echo(f"Kind:    {result.get('kind')}")
+    click.echo(f"Months:  {result.get('months', 0)}  {result.get('month_starts')}")
+    click.echo(f"Spend:   ${result.get('total_spend', 0):,.2f}")
+    click.echo(f"Inserted:{result.get('rows_inserted', 0)}")
+    for w in result.get("warnings") or []:
+        click.echo(f"Warning: {w}")
+
+
 @cli.command("export-csv")
 @click.option("--table", type=click.Choice(["sales_by_state", "sales_by_sku"]),
               default="sales_by_state", help="Table to export")

@@ -2,6 +2,10 @@ import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
 import { parseAmazonInventoryCSV } from "@/lib/parsers/amazon";
 import {
+  isAmazonAdsSpendCsv,
+  parseAmazonAdsSpendCsv,
+} from "@/lib/parsers/amazon-ads-spend";
+import {
   isCustomCombinedTax,
   parseAmazonTaxReportCSV,
 } from "@/lib/parsers/amazon-tax-report";
@@ -36,12 +40,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
+      return Response.json({
+        error: "Excel SKU Economics files go on the Mini: drop them in incoming/amazon/. Save as CSV to upload here.",
+      }, { status: 400 });
+    }
+
     const content = await file.text();
 
     // Auto-detect: read first line of CSV to determine report type
     const firstLine = content.split(/\r?\n/)[0] ?? "";
     const isTaxReport = isCustomCombinedTax(firstLine);
 
+    if (isAmazonAdsSpendCsv(content)) {
+      return handleAdsSpend(content, file.name);
+    }
     if (isTaxReport) {
       return handleTaxReport(content, file.name);
     }
@@ -54,6 +68,65 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+async function handleAdsSpend(content: string, filename: string) {
+  const parsed = parseAmazonAdsSpendCsv(content);
+  if (!parsed.kind || (!parsed.months.length && !parsed.daily.length)) {
+    return Response.json({
+      success: false,
+      report_type: "amazon_ads_spend",
+      filename,
+      ...parsed,
+      rows_inserted: 0,
+    });
+  }
+
+  const sb = getServerSupabase();
+  let inserted = 0;
+  if (parsed.months.length) {
+    const { data, error } = await sb.from("ads_monthly_spend").upsert(
+      parsed.months.map((m) => ({ ...m, filename })),
+      { onConflict: "period_start" },
+    ).select("period_start");
+    if (error) {
+      return Response.json({ error: `ads_monthly_spend: ${error.message}` }, { status: 500 });
+    }
+    inserted += data?.length ?? parsed.months.length;
+  }
+  if (parsed.daily.length) {
+    const { data, error } = await sb.from("ads_campaigns_daily").upsert(
+      parsed.daily,
+      { onConflict: "date,campaign_id" },
+    ).select("campaign_id");
+    if (error) {
+      parsed.warnings.push(`ads_campaigns_daily: ${error.message}`);
+    } else {
+      inserted += data?.length ?? parsed.daily.length;
+    }
+  }
+
+  await sb.from("ingestion_log").insert({
+    filename,
+    file_type: "amazon_ads",
+    rows_total: parsed.rows_total,
+    rows_inserted: inserted,
+    rows_skipped: parsed.rows_skipped,
+    warnings: parsed.warnings.length ? parsed.warnings : null,
+    status: parsed.warnings.length ? "partial" : "success",
+  });
+
+  return Response.json({
+    success: true,
+    report_type: "amazon_ads_spend",
+    filename,
+    kind: parsed.kind,
+    months: parsed.months.length,
+    month_starts: parsed.months.map((m) => m.period_start),
+    total_spend: parsed.months.reduce((s, m) => s + m.spend, 0),
+    rows_inserted: inserted,
+    warnings: parsed.warnings,
+  });
 }
 
 // ---------------------------------------------------------------------------
