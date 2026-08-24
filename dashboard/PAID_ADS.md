@@ -1,101 +1,32 @@
-# Paid Ads (Shopify) — Ads Ops feed
+# Paid Ads (Shopify) — Tallowbourn ads Intel
 
-The `/paid-ads` page shows Google Ads (and later Meta) for the Shopify
-storefront. **Amazon PPC stays on `/ppc` and in `ads_*` tables.**
+`/paid-ads` is the Shopify storefront ads desk. **Amazon PPC stays on `/ppc`.**
 
-Data is a **structured Ads Ops payload**, upserted into the production
-tables that already hold the first `google_ads` rows (`as_of` 2026-08-22).
-This is **not** a live scrape of Google or Meta Ads Manager.
+Primary path: **upload the four CSV types**. No OAuth. No demo data.
+Range 7/14/30/90/365/all is relative to the **max date in the files**, not today.
 
-Dashboard Agent may upsert the same uniques in Supabase when Ads Ops
-sends the payload in chat. HTTP path: `POST /api/paid-ads/ingest`
-(dashboard Basic Auth + service-role key).
+| Source | File | Warehouse |
+|---|---|---|
+| Google Ads Daily (Campaign × Day, typed columns or Cost/Impr./Clicks/Conv.) | `paid_campaign_daily` `platform=google` | Upsert `platform\|date\|campaign_name` |
+| Meta Ads Manager campaign export | `paid_campaign_daily` `platform=meta` | Skip $0 **and** 0-impression days. Never map CPC / cost-per-purchase as spend or revenue. |
+| GSC `Queries.csv` + `Pages.csv` + `Chart.csv` (or a zip of those) | `paid_search_query_daily` | Queries/Pages are snapshots (`date=''`) and replace other empty-date rows of that kind only. Chart is daily. Do not invent Δ position from Queries.csv. |
+| GA4 Explore | `paid_ga_daily` | Skip `#` comments and Grand total. Do not treat Total revenue as ads conversion value. Cross-network ≈ PMax. |
 
-## Channels
+HTTP: `POST /api/paid-ads/csv` (multipart files or JSON `{ files: [{ name, content }] }`).
+Read: `GET /api/paid-ads/intel?range=7&filter=all`.
 
-`google_ads` | `meta_ads` only. Amazon / PPC aliases are rejected.
+Intel cards (max 12, ranked by $ at stake) are 7-day tests with a keep/kill metric.
+Never move Meta/PMax onto Brand Search. Win/lose tables require spend ≥ $1.
 
-## Tables (production; `supabase/migration_paid_ads.sql` is IF NOT EXISTS)
+Copy for Grok = keep/kill prompt + numbered stack + JSON snapshot.
 
-| Table | Unique |
-|---|---|
-| `paid_ads_snapshots` | `(channel, as_of, window_days)` |
-| `paid_ads_campaigns_window` | `(channel, as_of, window_days, campaign_name)` |
+Migration: `supabase/migration_paid_intel.sql` (additive, no DROP, no RLS).
 
-Windows: **1 / 7 / 14 / 30**. Metric column is **`conv_value`** (not
-`sales_or_conv_value`). `as_of` is a `date`. Campaign `campaign_id` is
-optional — the first Google rows key on `campaign_name` only.
+---
 
-Do not drop these tables or truncate rows. The dashboard **reads these
-two tables**. Ingest upserts the same uniques.
+# Ads Ops window feed (still supported)
 
-## Payload
-
-```json
-{
-  "channel": "google_ads",
-  "as_of": "2026-08-22",
-  "currency": "USD",
-  "source": "scheduled_report_baselines",
-  "account_label": "Tallowbourn 533-220-6723",
-  "notes": ["Meta not connected"],
-  "windows": [
-    {
-      "window_days": 7,
-      "window_start": "2026-08-15",
-      "window_end": "2026-08-21",
-      "spend": 593.47,
-      "conv_value": 721.26,
-      "roas": 1.22,
-      "clicks": 343,
-      "impressions": 55183,
-      "conversions": 30,
-      "cpc": 1.73
-    },
-    {
-      "window_days": 30,
-      "spend": 2175.01,
-      "conv_value": 3435.53,
-      "roas": 1.58,
-      "clicks": 1301,
-      "impressions": 212233,
-      "conversions": 119.86,
-      "cpc": 1.67,
-      "campaigns": [
-        {
-          "campaign_name": "PMAX Max Conversions V4",
-          "spend": 964.80,
-          "roas": 1.37,
-          "status": "active",
-          "note": "dominant last 7d"
-        }
-      ]
-    }
-  ],
-  "campaigns": [
-    {
-      "campaign_name": "BRANDED Search V1",
-      "window_days": 30,
-      "spend": 378.11,
-      "roas": 2.16,
-      "status": "active"
-    }
-  ]
-}
-```
-
-Aliases: `cost`/`spend`, `conv_value`/`sales`/`sales_or_conv_value`,
-`imps`/`impressions`. `cpc` and `roas` are optional on ingest; the page
-re-derives them from totals when a snapshot omits them.
-
-If `window_start` / `window_end` are omitted, they are filled as
-`[as_of − window_days, as_of − 1]` (the grain of the first Google rows).
-
-Top-level `campaigns[]` without `window_days` attach to
-`campaign_window_days` / `window_days`, else the largest window in the
-payload, else 30.
-
-## Read
-
-`GET /api/paid-ads` (optional `?channel=google_ads&window=7`) — service role.
-The page never queries these tables from the browser anon client.
+Structured JSON may still be upserted into `paid_ads_snapshots` /
+`paid_ads_campaigns_window` via `POST /api/paid-ads/ingest`. That path is
+**not** a live scrape. See git history for the payload shape. The page
+now reads the daily warehouse first.

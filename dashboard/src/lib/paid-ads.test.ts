@@ -270,10 +270,14 @@ describe("selectChannelWindow", () => {
 describe("page / API invariants", () => {
   const root = process.cwd();
   const page = readFileSync(path.join(root, "src/app/paid-ads/page.tsx"), "utf8");
+  const intelUi = readFileSync(path.join(root, "src/components/paid-ads-intel.tsx"), "utf8");
   const ingest = readFileSync(path.join(root, "src/app/api/paid-ads/ingest/route.ts"), "utf8");
+  const csvIngest = readFileSync(path.join(root, "src/app/api/paid-ads/csv/route.ts"), "utf8");
   const read = readFileSync(path.join(root, "src/app/api/paid-ads/route.ts"), "utf8");
+  const intelRead = readFileSync(path.join(root, "src/app/api/paid-ads/intel/route.ts"), "utf8");
   const nav = readFileSync(path.join(root, "src/components/nav.tsx"), "utf8");
   const migration = readFileSync(path.join(root, "../supabase/migration_paid_ads.sql"), "utf8");
+  const intelMig = readFileSync(path.join(root, "../supabase/migration_paid_intel.sql"), "utf8");
 
   test("nav lists Paid Ads under MONITORING near Amazon PPC", () => {
     assert.match(nav, /href: "\/ppc"/);
@@ -284,13 +288,17 @@ describe("page / API invariants", () => {
     assert.ok(paid > ppc && paid - ppc < 400);
   });
 
-  test("copy names the Ads Ops feed and forbids a live scrape", () => {
-    assert.match(page, /Ads Ops structured feed/);
-    assert.match(page, /not a live/);
-    assert.match(page, /Waiting for Ads Ops Meta payload/);
+  test("copy names CSV intel and forbids a live scrape", () => {
+    assert.match(intelUi, /Tallowbourn ads Intel/);
+    assert.match(intelUi, /newest date/);
+    assert.match(intelUi, /Upload CSVs/);
+    assert.match(intelUi, /Copy for Grok/);
     assert.equal(PAID_ADS_ATTRIBUTION.includes("not a live"), true);
     assert.doesNotMatch(page, /puppeteer|playwright|ads\.google\.com|business\.facebook\.com/i);
+    assert.doesNotMatch(intelUi, /puppeteer|playwright|ads\.google\.com/i);
+    assert.match(intelUi, /No OAuth/);
     assert.doesNotMatch(ingest, /puppeteer|playwright|ads\.google\.com/i);
+    assert.doesNotMatch(csvIngest, /puppeteer|playwright|ads\.google\.com/i);
   });
 
   test("ingest/read use production window tables and uniques", () => {
@@ -305,6 +313,13 @@ describe("page / API invariants", () => {
     assert.doesNotMatch(read, /paid_ads_daily|paid_ads_campaigns_daily/);
     assert.doesNotMatch(ingest, /\.from\(["']ads_/);
     assert.doesNotMatch(read, /\.from\(["']ads_/);
+    assert.match(csvIngest, /paid_campaign_daily/);
+    assert.match(csvIngest, /paid_search_query_daily/);
+    assert.match(csvIngest, /paid_ga_daily/);
+    assert.match(intelRead, /buildIntel/);
+    assert.match(intelMig, /CREATE TABLE IF NOT EXISTS paid_campaign_daily/);
+    assert.doesNotMatch(intelMig, /DROP TABLE|TRUNCATE TABLE/i);
+    assert.doesNotMatch(intelMig, /ENABLE ROW LEVEL SECURITY/);
   });
 
   test("migration matches production and does not drop or lock down", () => {

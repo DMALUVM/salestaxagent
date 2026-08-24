@@ -1,0 +1,191 @@
+import { shiftDays } from "../as-of";
+import { deriveCpc, deriveRoas, round2 } from "./csv";
+import type {
+  CampaignAgg, CampaignDaily, GaDaily, IntelFilter, IntelRangeDays,
+  PlatformKpis, ProductAgg, ProductLine, SearchQueryDaily,
+} from "./types";
+
+export function maxPaidDate(rows: Array<{ date: string }>): string | null {
+  let max = "";
+  for (const r of rows) {
+    if (r.date && r.date > max) max = r.date;
+  }
+  return max || null;
+}
+
+/** Range is relative to max date IN THE FILES, not today. 0 = all. */
+export function rangeStart(asOf: string, days: IntelRangeDays): string {
+  if (!days) return "0001-01-01";
+  return shiftDays(asOf, -(days - 1));
+}
+
+export function inRange(date: string, start: string, end: string): boolean {
+  return !!date && date >= start && date <= end;
+}
+
+export function filterCampaigns(
+  rows: CampaignDaily[],
+  asOf: string,
+  days: IntelRangeDays,
+  filter: IntelFilter,
+): CampaignDaily[] {
+  const start = rangeStart(asOf, days);
+  return rows.filter((r) => {
+    if (!inRange(r.date, start, asOf)) return false;
+    if (filter === "google") return r.platform === "google";
+    if (filter === "meta") return r.platform === "meta";
+    return true;
+  });
+}
+
+export function priorWindow(
+  rows: CampaignDaily[],
+  asOf: string,
+  days: IntelRangeDays,
+  filter: IntelFilter,
+): CampaignDaily[] {
+  if (!days) return [];
+  const end = shiftDays(asOf, -days);
+  const start = rangeStart(end, days);
+  return rows.filter((r) => {
+    if (!inRange(r.date, start, end)) return false;
+    if (filter === "google") return r.platform === "google";
+    if (filter === "meta") return r.platform === "meta";
+    return true;
+  });
+}
+
+export function kpisOf(rows: CampaignDaily[], platform: PlatformKpis["platform"]): PlatformKpis {
+  let spend = 0, conv = 0, clicks = 0, impressions = 0, conversions = 0;
+  const days = new Set<string>();
+  for (const r of rows) {
+    if (platform !== "blended" && r.platform !== platform) continue;
+    spend += r.spend;
+    conv += r.conv_value;
+    clicks += r.clicks;
+    impressions += r.impressions;
+    conversions += r.conversions;
+    days.add(r.date);
+  }
+  return {
+    platform,
+    spend: round2(spend),
+    conv_value: round2(conv),
+    clicks,
+    impressions,
+    conversions: round2(conversions),
+    roas: deriveRoas(spend, conv),
+    cpc: deriveCpc(spend, clicks),
+    days: days.size,
+  };
+}
+
+export function aggregateCampaigns(rows: CampaignDaily[]): CampaignAgg[] {
+  const map = new Map<string, CampaignDaily[]>();
+  for (const r of rows) {
+    const k = `${r.platform}|${r.campaign_name}`;
+    const list = map.get(k) ?? [];
+    list.push(r);
+    map.set(k, list);
+  }
+  const out: CampaignAgg[] = [];
+  for (const list of map.values()) {
+    const first = list[0];
+    let spend = 0, conv = 0, clicks = 0, impressions = 0, conversions = 0;
+    let lostNum = 0, lostDen = 0, freqNum = 0, freqDen = 0;
+    const dates = new Set<string>();
+    let status: string | null = first.status;
+    for (const r of list) {
+      spend += r.spend;
+      conv += r.conv_value;
+      clicks += r.clicks;
+      impressions += r.impressions;
+      conversions += r.conversions;
+      dates.add(r.date);
+      if (r.lost_is_budget != null && r.impressions > 0) {
+        lostNum += r.lost_is_budget * r.impressions;
+        lostDen += r.impressions;
+      }
+      if (r.frequency != null && r.impressions > 0) {
+        freqNum += r.frequency * r.impressions;
+        freqDen += r.impressions;
+      }
+      if (r.status) status = r.status;
+    }
+    out.push({
+      platform: first.platform,
+      campaign_name: first.campaign_name,
+      campaign_type: first.campaign_type,
+      product: first.product,
+      is_brand: first.is_brand,
+      audience: first.audience,
+      spend: round2(spend),
+      conv_value: round2(conv),
+      clicks,
+      impressions,
+      conversions: round2(conversions),
+      roas: deriveRoas(spend, conv),
+      cpc: deriveCpc(spend, clicks),
+      lost_is_budget: lostDen ? lostNum / lostDen : null,
+      frequency: freqDen ? freqNum / freqDen : null,
+      status,
+      days_live: dates.size,
+    });
+  }
+  return out.sort((a, b) => b.spend - a.spend || a.campaign_name.localeCompare(b.campaign_name));
+}
+
+export function aggregateProducts(rows: CampaignDaily[]): ProductAgg[] {
+  const map = new Map<ProductLine, { spend: number; conv: number; conversions: number }>();
+  for (const r of rows) {
+    const cur = map.get(r.product) ?? { spend: 0, conv: 0, conversions: 0 };
+    cur.spend += r.spend;
+    cur.conv += r.conv_value;
+    cur.conversions += r.conversions;
+    map.set(r.product, cur);
+  }
+  return [...map.entries()]
+    .map(([product, v]) => ({
+      product,
+      spend: round2(v.spend),
+      conv_value: round2(v.conv),
+      roas: deriveRoas(v.spend, v.conv),
+      conversions: round2(v.conversions),
+    }))
+    .sort((a, b) => b.spend - a.spend);
+}
+
+export function dailySeries(rows: CampaignDaily[], asOf: string, days: IntelRangeDays) {
+  const start = rangeStart(asOf, days);
+  const by = new Map<string, { google_spend: number; google_revenue: number; meta_spend: number; meta_revenue: number }>();
+  for (const r of rows) {
+    if (!inRange(r.date, start, asOf)) continue;
+    const cur = by.get(r.date) ?? { google_spend: 0, google_revenue: 0, meta_spend: 0, meta_revenue: 0 };
+    if (r.platform === "google") {
+      cur.google_spend += r.spend;
+      cur.google_revenue += r.conv_value;
+    } else {
+      cur.meta_spend += r.spend;
+      cur.meta_revenue += r.conv_value;
+    }
+    by.set(r.date, cur);
+  }
+  return [...by.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, v]) => ({
+      date,
+      google_spend: round2(v.google_spend),
+      google_revenue: round2(v.google_revenue),
+      meta_spend: round2(v.meta_spend),
+      meta_revenue: round2(v.meta_revenue),
+    }));
+}
+
+export function snapshotQueries(rows: SearchQueryDaily[], kind: SearchQueryDaily["kind"]): SearchQueryDaily[] {
+  return rows.filter((r) => r.kind === kind).sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions);
+}
+
+export function gaInRange(rows: GaDaily[], asOf: string, days: IntelRangeDays): GaDaily[] {
+  const start = rangeStart(asOf, days);
+  return rows.filter((r) => inRange(r.date, start, asOf));
+}

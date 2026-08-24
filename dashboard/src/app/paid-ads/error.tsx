@@ -24,7 +24,7 @@ export default function PaidAdsError({
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Paid Ads (Shopify)</h1>
         <p className="text-sm text-muted-foreground">
-          Data from Ads Ops structured feed — not a live Ads Manager scrape.
+          Tallowbourn ads Intel — CSV warehouse, not a live Ads Manager scrape.
         </p>
       </div>
 
@@ -34,7 +34,7 @@ export default function PaidAdsError({
             The Paid Ads page hit an error while rendering
           </p>
           <p className="text-xs text-muted-foreground">
-            This is a fault in the page, not an empty Ads Ops feed.
+            This is a fault in the page, not an empty upload.
           </p>
           <pre className="whitespace-pre-wrap rounded bg-muted p-2 text-[10px]">
             {error.message}
