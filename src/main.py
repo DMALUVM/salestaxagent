@@ -218,9 +218,35 @@ def ads_import_cmd(path, dry_run):
         click.echo(f"Warning: {w}")
 
 
+@cli.command("ads-monthly-restore")
+@click.option("--seed", "seed_path", type=click.Path(exists=True), default=None,
+              help="Seed CSV (default: config/ads_monthly_spend_seed.csv)")
+@click.option("--dry-run", is_flag=True)
+def ads_monthly_restore(seed_path, dry_run):
+    """Restore ads_monthly_spend from the committed seed file."""
+    from src.parsers.amazon_ads_spend import restore_ads_monthly_from_seed
+    result = restore_ads_monthly_from_seed(seed_path, dry_run=dry_run)
+    if result.get("error"):
+        click.echo(result["error"], err=True)
+        return
+    click.echo(f"Seed: {result.get('seed')}")
+    click.echo(f"Rows: {result.get('rows', 0)}  Inserted: {result.get('inserted', 0)}")
+
+
+@cli.command("ads-monthly-export-seed")
+@click.option("--output", "seed_path", type=click.Path(), default=None,
+              help="Output path (default: config/ads_monthly_spend_seed.csv)")
+def ads_monthly_export_seed(seed_path):
+    """Export ads_monthly_spend to the git-tracked seed CSV."""
+    from src.parsers.amazon_ads_spend import export_ads_monthly_seed
+    result = export_ads_monthly_seed(seed_path)
+    click.echo(f"Wrote {result.get('rows', 0)} month(s) to {result.get('path')}")
+
+
 @cli.command("export-csv")
-@click.option("--table", type=click.Choice(["sales_by_state", "sales_by_sku"]),
-              default="sales_by_state", help="Table to export")
+@click.option("--table", type=click.Choice([
+    "sales_by_state", "sales_by_sku", "ads_monthly_spend",
+]), default="sales_by_state", help="Table to export")
 @click.option("--start", "start_str", default=None, help="Start date (YYYY-MM-DD)")
 @click.option("--end", "end_str", default=None, help="End date (YYYY-MM-DD)")
 @click.option("--output", default=None, help="Output file path")
@@ -231,10 +257,11 @@ def export_csv_cmd(table, start_str, end_str, output):
     from src.db import fetch_all
 
     rows = fetch_all(table)
+    date_key = "period_start"
     if start_str:
-        rows = [r for r in rows if (r.get("period_start") or "") >= start_str]
+        rows = [r for r in rows if (r.get(date_key) or "") >= start_str]
     if end_str:
-        rows = [r for r in rows if (r.get("period_start") or "") <= end_str]
+        rows = [r for r in rows if (r.get(date_key) or "") <= end_str]
 
     if not rows:
         click.echo("No rows match the filter.")

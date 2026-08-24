@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.parsers.amazon_ads_spend import (
+    SOURCE_SKU_ECON,
     detect_ads_spend_report,
     is_ads_console_campaign_report,
     is_sku_economics_report,
@@ -71,6 +72,28 @@ def test_real_sku_economics_april_2026_headers():
     parsed = parse_sku_economics_monthly(headers, rows)
     assert parsed["months"][0]["period_start"] == "2026-04-01"
     assert parsed["months"][0]["spend"] == 4261.69
+
+
+def test_seed_roundtrip_fields(tmp_path, monkeypatch):
+    import src.parsers.amazon_ads_spend as mod
+    seed = tmp_path / "seed.csv"
+    seed.write_text(
+        "period_start,period_end,spend,source,filename\n"
+        "2026-03-01,2026-03-31,22413.30,sku_economics,March.csv\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mod, "SEED_PATH", seed)
+    mod.merge_ads_monthly_seed([{
+        "period_start": "2026-05-01",
+        "period_end": "2026-05-31",
+        "spend": 100.0,
+        "source": SOURCE_SKU_ECON,
+        "filename": "test.csv",
+    }])
+    rows = mod._read_seed_rows()
+    assert len(rows) == 2
+    dry = mod.restore_ads_monthly_from_seed(dry_run=True)
+    assert dry["rows"] == 2
 
 
 def test_ads_console_daily_groups_to_month():

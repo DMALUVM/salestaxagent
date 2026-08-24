@@ -19,11 +19,14 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from src.config import PROJECT_ROOT
 from src.db import log_audit, log_ingestion, upsert_rows
 
 SOURCE_SKU_ECON = "sku_economics"
 SOURCE_ADS_CONSOLE = "ads_console"
 IMPORT_CAMPAIGN_TYPE = "IMPORT"
+SEED_PATH = PROJECT_ROOT / "config" / "ads_monthly_spend_seed.csv"
+SEED_COLUMNS = ("period_start", "period_end", "spend", "source", "filename")
 
 # Real SKU Economics (2026-04 file): "Sponsored Products charge total"
 # plus per-unit / quantity siblings we must not sum. Older exports used
@@ -337,6 +340,101 @@ def peek_ads_spend_headers(file_path: str | Path) -> list[str]:
     return headers
 
 
+def _read_seed_rows() -> list[dict]:
+    if not SEED_PATH.exists():
+        return []
+    with SEED_PATH.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def merge_ads_monthly_seed(months: list[dict]) -> int:
+    """Append imported months to config/ads_monthly_spend_seed.csv (git backup)."""
+    if not months:
+        return 0
+    by_start: dict[str, dict] = {
+        r["period_start"]: r for r in _read_seed_rows()
+    }
+    for m in months:
+        by_start[m["period_start"]] = {
+            "period_start": m["period_start"],
+            "period_end": m["period_end"],
+            "spend": f"{_money(m['spend']):.2f}",
+            "source": m.get("source") or SOURCE_SKU_ECON,
+            "filename": m.get("filename") or "",
+        }
+    rows = sorted(by_start.values(), key=lambda r: r["period_start"])
+    SEED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with SEED_PATH.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(SEED_COLUMNS))
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(months)
+
+
+def restore_ads_monthly_from_seed(
+    seed_path: str | Path | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Upsert ads_monthly_spend from the committed seed CSV."""
+    path = Path(seed_path) if seed_path else SEED_PATH
+    if not path.exists():
+        return {"rows": 0, "inserted": 0, "error": f"seed not found: {path}"}
+    rows: list[dict] = []
+    for r in csv.DictReader(path.open(encoding="utf-8")):
+        start = (r.get("period_start") or "").strip()
+        if len(start) < 10:
+            continue
+        rows.append({
+            "period_start": start,
+            "period_end": (r.get("period_end") or "").strip(),
+            "spend": _money(r.get("spend")),
+            "source": (r.get("source") or SOURCE_SKU_ECON).strip(),
+            "filename": (r.get("filename") or "").strip() or None,
+        })
+    if dry_run or not rows:
+        return {"rows": len(rows), "inserted": 0, "dry_run": dry_run}
+    inserted = upsert_rows("ads_monthly_spend", rows, on_conflict="period_start")
+    log_audit(
+        action="restore_ads_monthly_seed",
+        category="ingestion",
+        details={
+            "seed": str(path),
+            "months": [r["period_start"] for r in rows],
+            "spend": round(sum(r["spend"] for r in rows), 2),
+        },
+        rows_affected=inserted,
+    )
+    return {"rows": len(rows), "inserted": inserted, "seed": str(path)}
+
+
+def export_ads_monthly_seed(
+    seed_path: str | Path | None = None,
+) -> dict:
+    """Write warehouse ads_monthly_spend back to the seed CSV."""
+    from src.db import fetch_all
+    rows = fetch_all("ads_monthly_spend")
+    if not rows:
+        return {"rows": 0, "path": str(seed_path or SEED_PATH)}
+    months = sorted(rows, key=lambda r: r.get("period_start") or "")
+    payload = [
+        {
+            "period_start": r["period_start"],
+            "period_end": r["period_end"],
+            "spend": f"{_money(r.get('spend')):.2f}",
+            "source": r.get("source") or SOURCE_SKU_ECON,
+            "filename": r.get("filename") or "",
+        }
+        for r in months
+    ]
+    path = Path(seed_path) if seed_path else SEED_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(SEED_COLUMNS))
+        writer.writeheader()
+        writer.writerows(payload)
+    return {"rows": len(payload), "path": str(path)}
+
+
 def ingest_amazon_ads_spend(file_path: str | Path, dry_run: bool = False) -> dict:
     path = Path(file_path)
     if not path.exists():
@@ -399,6 +497,8 @@ def ingest_amazon_ads_spend(file_path: str | Path, dry_run: bool = False) -> dic
             },
             rows_affected=inserted,
         )
+        if months:
+            merge_ads_monthly_seed(months)
 
     return {
         "filename": path.name,
