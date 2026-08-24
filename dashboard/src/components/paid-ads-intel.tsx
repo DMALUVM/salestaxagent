@@ -14,6 +14,7 @@ import type {
 import { INTEL_FILTERS, INTEL_RANGES } from "@/lib/paid-intel/types";
 import {
   ClipboardCopy, Download, Megaphone, Upload, AlertTriangle, CheckCircle2, Undo2, X,
+  PencilLine,
 } from "lucide-react";
 
 async function copyText(text: string): Promise<void> {
@@ -166,15 +167,33 @@ const STATUS_STYLE: Record<string, string> = {
   dismissed: "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700",
 };
 
+const VERDICT_STYLE: Record<string, string> = {
+  worked: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
+  worse: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900",
+  no_change: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
+  too_early: "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700",
+  unmeasurable: "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700",
+};
+
+const VERDICT_LABEL: Record<string, string> = {
+  worked: "WORKED",
+  worse: "WENT WRONG WAY",
+  no_change: "NO CHANGE",
+  too_early: "TOO EARLY",
+  unmeasurable: "CAN'T MEASURE",
+};
+
 function IntelCardView({
   card, index, onDecide, busy,
 }: {
   card: IntelCard;
   index: number;
-  onDecide: (card: IntelCard, status: "applied" | "dismissed" | "open") => void;
+  onDecide: (card: IntelCard, status: "applied" | "dismissed" | "open", note?: string) => void;
   busy: boolean;
 }) {
   const [copied, setCopied] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState(card.note ?? "");
   const decided = card.status === "applied" || card.status === "dismissed";
 
   async function copyPrompt() {
@@ -214,19 +233,73 @@ function IntelCardView({
           <p><span className="font-medium text-foreground">If it works. </span>{card.ifItWorks}</p>
         </div>
         <p className="text-[11px] text-muted-foreground">Evidence — {card.evidence}</p>
+
+        {card.outcome && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 p-2">
+            <Badge variant="outline" className={VERDICT_STYLE[card.outcome.verdict]}>
+              {VERDICT_LABEL[card.outcome.verdict]}
+            </Badge>
+            <span className="text-[12px]">{card.outcome.summary}</span>
+          </div>
+        )}
+
+        {card.note && !noteOpen && (
+          <p className="text-[11px] italic text-muted-foreground">Note — {card.note}</p>
+        )}
+
+        {noteOpen && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              autoFocus
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="What did you actually change? (e.g. AI MAX daily $32 → $22)"
+              aria-label="What did you change"
+              className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-[12px]"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  onDecide(card, "applied", note.trim() || undefined);
+                  setNoteOpen(false);
+                }
+                if (e.key === "Escape") setNoteOpen(false);
+              }}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                onDecide(card, "applied", note.trim() || undefined);
+                setNoteOpen(false);
+              }}
+            >
+              Save
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setNoteOpen(false)}>Cancel</Button>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button variant="outline" size="sm" onClick={copyPrompt}>
             <ClipboardCopy className="mr-1.5 h-3.5 w-3.5" />
             {copied ? "Copied" : "Copy prompt"}
           </Button>
           {decided ? (
-            <Button variant="ghost" size="sm" disabled={busy} onClick={() => onDecide(card, "open")}>
-              <Undo2 className="mr-1.5 h-3.5 w-3.5" />
-              Reopen
-            </Button>
+            <>
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => onDecide(card, "open")}>
+                <Undo2 className="mr-1.5 h-3.5 w-3.5" />
+                Reopen
+              </Button>
+              {card.status === "applied" && (
+                <Button variant="ghost" size="sm" onClick={() => setNoteOpen(true)}>
+                  <PencilLine className="mr-1.5 h-3.5 w-3.5" />
+                  {card.note ? "Edit note" : "Add note"}
+                </Button>
+              )}
+            </>
           ) : (
             <>
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => onDecide(card, "applied")}>
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => setNoteOpen(true)}>
                 <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
                 I did this
               </Button>
@@ -235,6 +308,12 @@ function IntelCardView({
                 Not doing it
               </Button>
             </>
+          )}
+          {card.check && (
+            <span className="text-[10px] text-muted-foreground">
+              Graded on: {card.check.label}
+              {card.check.target != null ? ` ${card.check.direction === "up" ? "≥" : "≤"} ${card.check.target}` : ""}
+            </span>
           )}
         </div>
       </CardContent>
@@ -539,7 +618,11 @@ export function PaidAdsIntel({
   const adsCards = data.cards.filter((c) => (c.owner ?? "ads") === "ads");
   const siteCards = data.cards.filter((c) => c.owner === "site");
 
-  async function decide(card: IntelCard, status: "applied" | "dismissed" | "open") {
+  async function decide(
+    card: IntelCard,
+    status: "applied" | "dismissed" | "open",
+    note?: string,
+  ) {
     if (!data.as_of) return;
     setDeciding(card.id);
     setMsg(null);
@@ -555,6 +638,9 @@ export function PaidAdsIntel({
           title: card.title,
           stake: card.stake,
           metric: card.metric,
+          note: note ?? card.note ?? undefined,
+          check: card.check,
+          baseline_value: card.check_value,
         }),
       });
       const json = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;

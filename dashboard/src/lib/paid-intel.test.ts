@@ -20,6 +20,9 @@ import {
   isBrandCampaign,
   campaignTypeOf,
   productOf,
+  round2,
+  gradeOutcome,
+  type GaDaily,
 } from "./paid-intel";
 
 const UP = "/home/ubuntu/.cursor/projects/workspace/uploads";
@@ -187,6 +190,7 @@ describe("multi-file upload, receipts, freshness, and decisions", { skip: !haveU
       decisions: [{
         card_id: target.id, as_of: before.as_of!, status: "applied",
         note: null, applied_at: "2026-08-25T00:00:00Z", dismissed_at: null,
+        check: target.check, baseline_value: target.check_value, baseline_as_of: before.as_of!,
       }],
     });
     assert.ok(!after.cards.some((c) => c.id === target.id), "applied card leaves the open stack");
@@ -200,6 +204,7 @@ describe("multi-file upload, receipts, freshness, and decisions", { skip: !haveU
       decisions: [{
         card_id: target.id, as_of: "2026-07-01", status: "applied",
         note: null, applied_at: "2026-07-01T00:00:00Z", dismissed_at: null,
+        check: target.check, baseline_value: target.check_value, baseline_as_of: "2026-07-01",
       }],
     });
     assert.ok(otherWeek.cards.some((c) => c.id === target.id));
@@ -263,6 +268,321 @@ describe("multi-file upload, receipts, freshness, and decisions", { skip: !haveU
   });
 });
 
+describe("outcome loop", () => {
+  const camp = (name: string, spend: number, conv: number, extra: Partial<{ lost: number; freq: number }> = {}) => ({
+    platform: "google" as const,
+    campaign_name: name,
+    campaign_type: "Search" as const,
+    product: "other" as const,
+    is_brand: false,
+    audience: "unknown" as const,
+    spend,
+    conv_value: conv,
+    clicks: 10,
+    impressions: 100,
+    conversions: 1,
+    roas: spend > 0 ? conv / spend : 0,
+    cpc: 1,
+    lost_is_budget: extra.lost ?? null,
+    frequency: extra.freq ?? null,
+    frequency_peak: null,
+    status: null,
+    days_live: 7,
+  });
+  const ctx = (camps: ReturnType<typeof camp>[]) => ({
+    camps,
+    ga: [] as GaDaily[],
+    queries: [],
+    google: { platform: "google" as const, spend: 0, conv_value: 0, clicks: 0, impressions: 0, conversions: 0, roas: 0, cpc: 0, days: 0 },
+    meta: { platform: "meta" as const, spend: 0, conv_value: 0, clicks: 0, impressions: 0, conversions: 0, roas: 0, cpc: 0, days: 0 },
+    blended: { platform: "blended" as const, spend: 0, conv_value: 0, clicks: 0, impressions: 0, conversions: 0, roas: 0, cpc: 0, days: 0 },
+  });
+  const roasCheck = {
+    kind: "campaign_roas" as const, subject: "AI MAX", direction: "up" as const,
+    target: 1.0, unit: "roas" as const, label: "AI MAX ROAS",
+  };
+
+  test("a real improvement reads as worked", () => {
+    const out = gradeOutcome({
+      check: roasCheck,
+      baseline: 0.64,
+      baselineAsOf: "2026-08-24",
+      currentAsOf: "2026-08-31",
+      ctx: ctx([camp("AI MAX", 70, 84)]), // 1.2x
+    });
+    assert.equal(out.verdict, "worked");
+    assert.match(out.summary, /0\.64x → 1\.20x/);
+    assert.match(out.summary, /met/);
+  });
+
+  test("a hold card that did not move says holding, not worked", () => {
+    // PMax at 1.05x against a ≥1.0x target: passing by staying put is not a win.
+    const out = gradeOutcome({
+      check: { ...roasCheck, subject: "PMAX", label: "PMAX ROAS" },
+      baseline: 1.05,
+      baselineAsOf: "2026-08-17",
+      currentAsOf: "2026-08-24",
+      ctx: ctx([camp("PMAX", 100, 105)]),
+    });
+    assert.equal(out.verdict, "worked");
+    assert.match(out.summary, /Holding at 1\.05x/);
+    assert.doesNotMatch(out.summary, /1\.05x → 1\.05x/, "do not print a no-op arrow");
+  });
+
+  test("progress short of the target is called improving", () => {
+    const out = gradeOutcome({
+      check: roasCheck,
+      baseline: 0.50,
+      baselineAsOf: "2026-08-17",
+      currentAsOf: "2026-08-24",
+      ctx: ctx([camp("AI MAX", 100, 80)]), // 0.80x — better, still under 1.0
+    });
+    assert.equal(out.verdict, "worked");
+    assert.match(out.summary, /Improving/);
+    assert.match(out.summary, /not met/);
+  });
+
+  test("noise is not a result", () => {
+    const out = gradeOutcome({
+      check: roasCheck,
+      baseline: 0.64,
+      baselineAsOf: "2026-08-24",
+      currentAsOf: "2026-08-31",
+      ctx: ctx([camp("AI MAX", 100, 65)]), // 0.65x
+    });
+    assert.equal(out.verdict, "no_change");
+  });
+
+  test("a decline is called out, not buried", () => {
+    const out = gradeOutcome({
+      check: roasCheck,
+      baseline: 0.64,
+      baselineAsOf: "2026-08-24",
+      currentAsOf: "2026-08-31",
+      ctx: ctx([camp("AI MAX", 100, 40)]), // 0.40x
+    });
+    assert.equal(out.verdict, "worse");
+    assert.match(out.summary, /wrong way/i);
+    assert.match(out.summary, /revert/i);
+  });
+
+  test("same window cannot be graded yet", () => {
+    const out = gradeOutcome({
+      check: roasCheck,
+      baseline: 0.64,
+      baselineAsOf: "2026-08-24",
+      currentAsOf: "2026-08-24",
+      ctx: ctx([camp("AI MAX", 100, 64)]),
+    });
+    assert.equal(out.verdict, "too_early");
+    assert.match(out.summary, /next week/i);
+  });
+
+  test("a paused campaign is a result for spend, unmeasurable for ROAS", () => {
+    const gone = ctx([camp("SOMETHING ELSE", 50, 50)]);
+    const spendOut = gradeOutcome({
+      check: { kind: "campaign_spend", subject: "AI MAX", direction: "down", target: 10, unit: "usd", label: "AI MAX spend" },
+      baseline: 94,
+      baselineAsOf: "2026-08-24",
+      currentAsOf: "2026-08-31",
+      ctx: gone,
+    });
+    assert.equal(spendOut.current, 0, "no rows means it stopped spending");
+    assert.equal(spendOut.verdict, "worked");
+
+    const roasOut = gradeOutcome({
+      check: roasCheck,
+      baseline: 0.64,
+      baselineAsOf: "2026-08-24",
+      currentAsOf: "2026-08-31",
+      ctx: gone,
+    });
+    assert.equal(roasOut.verdict, "unmeasurable");
+    assert.match(roasOut.summary, /paused/i);
+  });
+
+  test("lower-is-better checks are not graded backwards", () => {
+    const out = gradeOutcome({
+      check: { kind: "unassigned_share", subject: null, direction: "down", target: 0.12, unit: "ratio", label: "Unassigned share" },
+      baseline: 0.31,
+      baselineAsOf: "2026-08-24",
+      currentAsOf: "2026-08-31",
+      ctx: {
+        ...ctx([]),
+        ga: [
+          { date: "2026-08-31", channel_group: "Unassigned", landing_page: "/", device: "mobile", sessions: 8, active_users: 8, key_events: 0, revenue: 0, bounce_rate: 1 },
+          { date: "2026-08-31", channel_group: "Organic Search", landing_page: "/", device: "mobile", sessions: 92, active_users: 90, key_events: 3, revenue: 90, bounce_rate: 0.4 },
+        ],
+      },
+    });
+    assert.equal(out.verdict, "worked");
+    assert.match(out.summary, /31\.0% → 8\.0%/);
+  });
+
+  test("every card ships a measurable check and a current value", { skip: !haveUploads }, () => {
+    const parsed = mergeParsed([
+      parseNamedFile("Google Ads Daily.csv", readFileSync(GOOGLE, "utf8")),
+      parseNamedFile("meta.csv", readFileSync(META, "utf8")),
+      parseNamedFile("download.csv", readFileSync(GA4, "utf8")),
+      parseNamedFile("Queries.csv", readFileSync(QUERIES, "utf8")),
+      parseNamedFile("Pages.csv", readFileSync(PAGES, "utf8")),
+      parseNamedFile("Chart.csv", readFileSync(CHART, "utf8")),
+    ]);
+    const intel = buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range: 7, filter: "all",
+    });
+    for (const c of intel.cards) {
+      assert.ok(c.check, `card ${c.id} has no check — it cannot be graded`);
+      assert.ok(c.check!.label.length > 0);
+    }
+    // At least one check must resolve to a live number, else grading is theatre.
+    assert.ok(intel.cards.some((c) => c.check_value != null));
+  });
+
+  test("applying grades on the next window, and the note survives", { skip: !haveUploads }, () => {
+    const parsed = mergeParsed([
+      parseNamedFile("Google Ads Daily.csv", readFileSync(GOOGLE, "utf8")),
+      parseNamedFile("meta.csv", readFileSync(META, "utf8")),
+      parseNamedFile("download.csv", readFileSync(GA4, "utf8")),
+    ]);
+    const first = buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range: 7, filter: "all",
+    });
+    const target = first.cards.find((c) => c.check?.kind === "campaign_roas")
+      ?? first.cards[0];
+    // Applied in an EARLIER window, so this window can grade it.
+    const graded = buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range: 7, filter: "all",
+      decisions: [{
+        card_id: target.id, as_of: "2026-08-17", status: "applied",
+        note: "cut daily budget to $22", applied_at: "2026-08-17T12:00:00Z",
+        dismissed_at: null, check: target.check,
+        baseline_value: target.check_value, baseline_as_of: "2026-08-17",
+      }],
+    });
+    const card = [...graded.cards, ...graded.log].find((c) => c.id === target.id);
+    assert.ok(card, "the card is still visible after being applied last week");
+    assert.ok(card!.outcome, "an earlier application must be graded");
+    assert.notEqual(card!.outcome!.verdict, "too_early");
+    assert.equal(card!.note, "cut daily budget to $22");
+  });
+});
+
+describe("Meta ad-set exports", () => {
+  const header = '"Reporting starts","Campaign name","Ad set name","Amount spent (USD)",Impressions,Frequency,Purchases,"Purchases conversion value"';
+
+  test("sub-campaign rows are summed, not last-wins", () => {
+    // A campaign-keyed warehouse must not silently keep one ad set's spend.
+    const csv = [
+      header,
+      '2026-08-20,"SALES | CBO","Ad set A",10.00,1000,1.5,1,50.00',
+      '2026-08-20,"SALES | CBO","Ad set B",15.00,3000,4.0,2,90.00',
+    ].join("\n");
+    const rows = parseMetaCsv(csv);
+    assert.equal(rows.length, 1, "one campaign-day row");
+    assert.equal(rows[0].spend, 25);
+    assert.equal(rows[0].conv_value, 140);
+    assert.equal(rows[0].impressions, 4000);
+    assert.equal(rows[0].conversions, 3);
+    // Impression-weighted average, and the worst ad set kept separately.
+    assert.ok(Math.abs(rows[0].frequency! - 3.375) < 0.001);
+    assert.equal(rows[0].frequency_peak, 4);
+  });
+
+  test("a campaign-level export has no peak to report", () => {
+    const csv = [
+      '"Reporting starts","Campaign name","Amount spent (USD)",Impressions,Frequency',
+      '2026-08-20,"SALES | CBO",25.00,4000,2.0',
+    ].join("\n");
+    const rows = parseMetaCsv(csv);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].frequency, 2);
+    assert.equal(rows[0].frequency_peak, null);
+  });
+
+  test("fatigue reads the worst ad set, and says so", () => {
+    const csv = [
+      header,
+      '2026-08-20,"SALES | CBO","Ad set A",40.00,1000,1.2,1,50.00',
+      '2026-08-20,"SALES | CBO","Ad set B",40.00,1000,3.6,1,50.00',
+    ].join("\n");
+    const intel = buildIntel({
+      campaigns: parseMetaCsv(csv), queries: [], ga: [], range: 7, filter: "all",
+    });
+    const freq = [...intel.cards, ...intel.log].find((c) => c.id === "meta-freq");
+    assert.ok(freq, "peak 3.6 must trip the fatigue card even though the average is 2.4");
+    assert.match(freq!.metric, /worst ad set/);
+    assert.match(freq!.body, /worst ad set/i);
+  });
+});
+
+describe("product attribution", () => {
+  test("PMax spend is split by where paid traffic landed, and labelled estimated", () => {
+    const camp = {
+      platform: "google" as const, date: "2026-08-20",
+      campaign_name: "TALLOWBOURN- PMAX - Max Conversions - Campaign V4",
+      campaign_type: "PMax" as const, product: "other" as const, is_brand: false,
+      audience: "unknown" as const, spend: 100, conv_value: 200, clicks: 50,
+      impressions: 1000, conversions: 4, lost_is_budget: null, lost_is_rank: null,
+      frequency: null, frequency_peak: null, status: null,
+    };
+    const ga = (landing: string, key_events: number): GaDaily => ({
+      date: "2026-08-20", channel_group: "Cross-network", landing_page: landing,
+      device: "mobile", sessions: 100, active_users: 90, key_events,
+      revenue: key_events * 30, bounce_rate: 0.4,
+    });
+    const intel = buildIntel({
+      campaigns: [camp],
+      queries: [],
+      ga: [
+        ga("/products/natural-tallow-deodorant-extra-strength", 6),
+        ga("/products/tallow-balm", 2),
+      ],
+      range: 7,
+      filter: "all",
+    });
+    const byProduct = new Map(intel.products.map((p) => [p.product, p]));
+    // 6:2 key events → 75/25 split of the PMax spend.
+    assert.equal(byProduct.get("deodorant")!.spend, 75);
+    assert.equal(byProduct.get("balm")!.spend, 25);
+    assert.ok(byProduct.get("deodorant")!.estimated);
+    // Ads conversion value is only redistributed, never replaced by GA4 revenue.
+    const totalConv = intel.products.reduce((s, p) => s + p.conv_value, 0);
+    assert.equal(round2(totalConv), 200);
+    assert.ok(!intel.products.some((p) => p.product === "other" && p.spend > 0));
+  });
+
+  test("a campaign that names its product is not re-attributed", () => {
+    const camp = {
+      platform: "meta" as const, date: "2026-08-20",
+      campaign_name: "UGC | Tallow Balm | CBO",
+      campaign_type: "Other" as const, product: "balm" as const, is_brand: false,
+      audience: "prospect" as const, spend: 60, conv_value: 30, clicks: 20,
+      impressions: 500, conversions: 1, lost_is_budget: null, lost_is_rank: null,
+      frequency: null, frequency_peak: null, status: null,
+    };
+    const intel = buildIntel({
+      campaigns: [camp],
+      queries: [],
+      ga: [{
+        date: "2026-08-20", channel_group: "Paid Social",
+        landing_page: "/products/natural-tallow-deodorant-extra-strength",
+        device: "mobile", sessions: 50, active_users: 40, key_events: 5,
+        revenue: 150, bounce_rate: 0.4,
+      }],
+      range: 7,
+      filter: "all",
+    });
+    const balm = intel.products.find((p) => p.product === "balm")!;
+    assert.equal(balm.spend, 60, "a named campaign keeps its own product");
+    assert.equal(balm.estimated, false);
+    assert.ok(!intel.products.some((p) => p.product === "deodorant"));
+  });
+});
+
 describe("upsert key: a 7-day upload only touches its own days", () => {
   const key = (r: { platform: string; date: string; campaign_name: string }) =>
     `${r.platform}|${r.date}|${r.campaign_name}`;
@@ -272,7 +592,8 @@ describe("upsert key: a 7-day upload only touches its own days", () => {
       platform: "google" as const, date: "2026-07-01", campaign_name: "BRANDED - Search - Campaign V1",
       campaign_type: "Search" as const, product: "other" as const, is_brand: true,
       audience: "unknown" as const, spend: 10, conv_value: 30, clicks: 5, impressions: 50,
-      conversions: 1, lost_is_budget: null, lost_is_rank: null, frequency: null, status: null,
+      conversions: 1, lost_is_budget: null, lost_is_rank: null, frequency: null,
+      frequency_peak: null, status: null,
     };
     const staleToday = { ...older, date: "2026-08-24", spend: 999, conv_value: 0 };
     const freshToday = { ...older, date: "2026-08-24", spend: 8.85, conv_value: 47.9 };

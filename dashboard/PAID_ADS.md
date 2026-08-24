@@ -44,7 +44,38 @@ lead and **Site & conversion** for the web team. Every card is a 7-day test with
 a keep/kill metric. Never move Meta/PMax onto Brand Search. Win/lose tables
 require spend ≥ $1.
 
-Copy for Grok = keep/kill prompt + numbered stack + JSON snapshot.
+Copy for Grok = keep/kill prompt + numbered stack + JSON snapshot. Each desk
+also exports on its own, and each card carries a self-contained prompt.
+
+## Outcome loop
+
+Every card declares an `IntelCheck` — one number, a direction, and the value
+that counts as a pass. **I did this** freezes that number as the baseline in
+`paid_intel_decisions`. The next upload with a newer as-of re-measures it and
+grades the change: worked / holding / improving / no change / went wrong way.
+A card applied in an earlier week keeps its grade even when it re-fires, so
+"we cut this three weeks running and nothing moved" is visible.
+
+Decisions are keyed `(card_id, as_of)`, so last week's decision is never
+overwritten by this week's. Applied/dismissed cards move to `log` and stop
+consuming the 12 open recommendation slots.
+
+## Meta ad-set exports
+
+An ad-set or ad-level export carries several rows per campaign per day. Those
+are **summed** into the campaign-day, never last-wins — the warehouse key is
+`platform|date|campaign_name`, so keeping one row would silently drop the rest
+of the campaign's spend. Ad-set frequency is also kept as `frequency_peak`,
+because a campaign-weighted average hides one burnt-out ad set.
+
+## Product attribution
+
+PMax and Brand Search campaign names carry no product, which left ~70% of spend
+as "other". Those campaigns are now split across product lines by where paid
+GA4 traffic actually landed (`/products/...` key events, then revenue, then
+sessions). The ads conversion-value **total is never replaced** by GA4 revenue —
+only its distribution across products is estimated, and every estimated row is
+flagged `estimated: true`.
 
 Migration: `supabase/migration_paid_intel.sql` (additive, no DROP, no RLS).
 
