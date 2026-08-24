@@ -1,12 +1,15 @@
 import { agentToday, shiftDays } from "../as-of";
 import { deriveCpc, deriveRoas, round2 } from "./csv";
 import type {
-  CampaignAgg, CampaignDaily, GaDaily, IntelFilter, IntelFreshness, IntelRangeDays,
-  PlatformKpis, ProductAgg, ProductLine, SearchQueryDaily, SourceFreshness,
+  CampaignAgg, CampaignDaily, FreshnessSource, GaDaily, IntelFilter, IntelFreshness,
+  IntelRangeDays, PlatformKpis, ProductAgg, ProductLine, SearchQueryDaily, SourceFreshness,
 } from "./types";
 
 /** Upload a fresh export once the newest paid row is this many days behind today. */
 export const STALE_AFTER_DAYS = 7;
+
+/** A window this thin is not worth trusting as a "30 day" read. */
+const PARTIAL_BELOW = 0.8;
 
 export function daysBetween(from: string, to: string): number {
   const a = Date.parse(`${from}T12:00:00Z`);
@@ -17,43 +20,103 @@ export function daysBetween(from: string, to: string): number {
 
 /**
  * Freshness is measured against the real calendar, not the file as-of.
- * `as_of` drives the range windows; this drives the "upload fresh data" nudge.
+ * `as_of` drives the range windows; this drives the "upload fresh data" nudge
+ * and the per-source coverage of the selected window.
  */
 export function buildFreshness(opts: {
-  campaigns: Array<{ date: string }>;
-  queries: Array<{ date: string }>;
+  campaigns: Array<{ date: string; platform?: string }>;
+  queries: Array<{ date: string; kind?: string }>;
   ga: Array<{ date: string }>;
   today?: string;
+  asOf?: string | null;
+  range?: IntelRangeDays;
 }): IntelFreshness {
   const today = opts.today ?? agentToday();
-  const paidMax = maxPaidDate(opts.campaigns);
-  const gscMax = maxPaidDate(opts.queries.filter((q) => q.date));
-  const gaMax = maxPaidDate(opts.ga);
-  const source = (
-    key: SourceFreshness["source"],
+  const range = opts.range ?? 7;
+  const google = opts.campaigns.filter((r) => r.platform !== "meta");
+  const meta = opts.campaigns.filter((r) => r.platform === "meta");
+  const trend = opts.queries.filter((q) => q.kind === "chart" || (q.date && !q.kind));
+  const snapshot = opts.queries.filter((q) => !q.date);
+
+  const asOf = opts.asOf
+    ?? maxPaidDate(opts.campaigns)
+    ?? maxPaidDate(opts.ga)
+    ?? maxPaidDate(trend);
+  const windowStart = asOf && range ? rangeStart(asOf, range) : null;
+
+  const dated = (
+    key: FreshnessSource,
     label: string,
-    max: string | null,
+    file: string,
+    rows: Array<{ date: string }>,
   ): SourceFreshness => {
+    const days = new Set<string>();
+    let min = "";
+    let max = "";
+    for (const r of rows) {
+      if (!r.date) continue;
+      days.add(r.date);
+      if (!min || r.date < min) min = r.date;
+      if (r.date > max) max = r.date;
+    }
+    const inWindow = windowStart && asOf
+      ? [...days].filter((d) => d >= windowStart && d <= asOf).length
+      : days.size;
     const behind = max ? daysBetween(max, today) : null;
+    // A source that reports on a lag cannot fill the newest days of the window.
+    // Judge it against what it could have, so GSC's 2-day trail is not a "gap".
+    const lag = Math.max(0, Math.min(behind ?? 0, range ? range - 1 : 0));
+    const expected = range ? Math.max(1, range - lag) : 0;
     return {
       source: key,
       label,
-      max_date: max,
+      file,
+      rows: rows.length,
+      min_date: min || null,
+      max_date: max || null,
       days_behind: behind,
       stale: behind == null || behind >= STALE_AFTER_DAYS,
+      dated: true,
+      days_in_range: inWindow,
+      range_days: range,
+      expected_days: expected,
+      coverage: range && rows.length ? Math.min(1, inWindow / expected) : null,
     };
   };
+
+  const sources: SourceFreshness[] = [
+    dated("google", "Google Ads", "Google Ads Daily (Campaign × Day)", google),
+    dated("meta", "Meta Ads", "Ads Manager campaign export", meta),
+    dated("ga4", "GA4 Explore", "GA4 Explore (Free form)", opts.ga),
+    dated("gsc_trend", "Search Console trend", "Chart.csv", trend),
+    {
+      source: "gsc_snapshot",
+      label: "Search Console snapshot",
+      file: "Queries.csv + Pages.csv",
+      rows: snapshot.length,
+      min_date: null,
+      max_date: null,
+      days_behind: null,
+      stale: false,
+      dated: false,
+      days_in_range: 0,
+      range_days: range,
+      expected_days: 0,
+      coverage: null,
+    },
+  ];
+
+  const paidMax = maxPaidDate(opts.campaigns);
   const paidBehind = paidMax ? daysBetween(paidMax, today) : null;
   return {
     today,
     days_behind: paidBehind,
     stale: paidBehind == null ? false : paidBehind >= STALE_AFTER_DAYS,
     stale_after_days: STALE_AFTER_DAYS,
-    sources: [
-      source("paid", "Google + Meta", paidMax),
-      source("gsc", "Search Console", gscMax),
-      source("ga4", "GA4 Explore", gaMax),
-    ],
+    partial_sources: sources
+      .filter((s) => s.dated && s.rows > 0 && s.coverage != null && s.coverage < PARTIAL_BELOW)
+      .map((s) => s.source),
+    sources,
   };
 }
 

@@ -102,6 +102,77 @@ describe("multi-file upload, receipts, freshness, and decisions", { skip: !haveU
     assert.ok(stale.kpis.google.spend > 0);
   });
 
+  test("the data panel reports every source, its history, and window coverage", () => {
+    const parsed = readAll();
+    const at = (range: 7 | 30 | 90 | 365) => buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range, filter: "all", today: "2026-08-24",
+    }).freshness;
+
+    const w7 = at(7);
+    const kinds = w7.sources.map((s) => s.source);
+    assert.deepEqual(kinds, ["google", "meta", "ga4", "gsc_trend", "gsc_snapshot"]);
+
+    const g7 = w7.sources.find((s) => s.source === "google")!;
+    assert.equal(g7.max_date, "2026-08-24");
+    assert.equal(g7.min_date, "2023-11-11");
+    assert.equal(g7.days_in_range, 7, "Google has every day of the last 7");
+    assert.equal(g7.coverage, 1);
+    assert.equal(g7.days_behind, 0);
+    assert.equal(g7.stale, false);
+
+    // Undated snapshots must never be aged or given fake coverage.
+    const snap = w7.sources.find((s) => s.source === "gsc_snapshot")!;
+    assert.equal(snap.dated, false);
+    assert.equal(snap.days_behind, null);
+    assert.equal(snap.coverage, null);
+    assert.equal(snap.stale, false);
+    assert.ok(snap.rows > 1000, "Queries + Pages rows are counted");
+
+    // GA4 only covers ~30 days, so a 90-day window is honestly reported as thin.
+    const ga90 = at(90).sources.find((s) => s.source === "ga4")!;
+    assert.ok(ga90.coverage != null && ga90.coverage < 0.8,
+      "a 30-day GA4 export cannot fill a 90-day window");
+    assert.ok(at(90).partial_sources.includes("ga4"));
+    const ga7 = w7.sources.find((s) => s.source === "ga4")!;
+    assert.ok((ga7.coverage ?? 0) >= 0.8, "GA4 does cover the last 7 days");
+    assert.ok(!w7.partial_sources.includes("ga4"));
+
+    // GSC trails ~2 days by design. That lag must not read as a missing-data gap.
+    const trend7 = w7.sources.find((s) => s.source === "gsc_trend")!;
+    assert.ok(trend7.days_behind != null && trend7.days_behind >= 1);
+    assert.equal(trend7.expected_days, 7 - trend7.days_behind);
+    assert.equal(trend7.coverage, 1, "a lagging source that is complete up to its own max is not thin");
+    assert.ok(!w7.partial_sources.includes("gsc_trend"));
+
+    // Google has years of history, so it is never the thin one.
+    assert.ok(!at(365).partial_sources.includes("google"));
+  });
+
+  test("weekly 7-day uploads accumulate into the longer windows", () => {
+    const parsed = readAll();
+    const all = parsed.campaigns.filter((r) => r.platform === "google");
+    // Simulate having only ever uploaded two separate 7-day exports.
+    const weekA = all.filter((r) => r.date >= "2026-08-11" && r.date <= "2026-08-17");
+    const weekB = all.filter((r) => r.date >= "2026-08-18" && r.date <= "2026-08-24");
+    const merged = dedupeCampaigns([...weekA, ...weekB]);
+
+    const fourteen = buildIntel({
+      campaigns: merged, queries: [], ga: [], range: 14, filter: "all", today: "2026-08-24",
+    });
+    const g = fourteen.freshness.sources.find((s) => s.source === "google")!;
+    assert.equal(g.days_in_range, 14, "two 7-day uploads make a full 14-day window");
+    assert.equal(g.coverage, 1);
+    assert.ok(fourteen.kpis.google.spend > 0);
+
+    // The same data cannot honestly fill 30 days.
+    const thirty = buildIntel({
+      campaigns: merged, queries: [], ga: [], range: 30, filter: "all", today: "2026-08-24",
+    });
+    assert.ok(thirty.freshness.partial_sources.includes("google"));
+    assert.equal(thirty.freshness.sources.find((s) => s.source === "google")!.days_in_range, 14);
+  });
+
   test("applying a card moves it out of the open stack into the log", () => {
     const parsed = readAll();
     const before = buildIntel({

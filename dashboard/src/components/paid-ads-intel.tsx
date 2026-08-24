@@ -323,8 +323,10 @@ function FreshnessBanner({ freshness }: { freshness: IntelBundle["freshness"] })
   const behind = freshness.days_behind;
   if (behind == null) return null;
   const stale = freshness.stale;
-  const laggards = (freshness.sources ?? []).filter((s) => s.stale && s.max_date);
   if (!stale && behind < 3) return null;
+  const laggards = (freshness.sources ?? [])
+    .filter((s) => s.dated && s.rows > 0 && s.stale)
+    .map((s) => s.file);
   return (
     <Card className={stale
       ? "border-amber-300 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/30"
@@ -334,13 +336,123 @@ function FreshnessBanner({ freshness }: { freshness: IntelBundle["freshness"] })
         <AlertTriangle className={`h-4 w-4 ${stale ? "text-amber-600" : "text-muted-foreground"}`} />
         <p className="text-[13px]">
           {stale
-            ? `Data is ${behind} days behind — upload a fresh export. Everything below still describes the week ending ${freshness.sources?.[0]?.max_date ?? ""}.`
-            : `Newest paid row is ${behind} day${behind === 1 ? "" : "s"} old.`}
+            ? `Paid data is ${behind} days behind — send a fresh export${laggards.length ? `: ${laggards.join(", ")}` : ""}. The numbers below still describe the window ending ${freshness.sources?.[0]?.max_date ?? ""}.`
+            : `Newest paid row is ${behind} day${behind === 1 ? "" : "s"} old. Fresh enough — the nudge starts at ${freshness.stale_after_days} days.`}
         </p>
-        <span className="text-[11px] text-muted-foreground">
-          {(freshness.sources ?? []).map((s) => `${s.label} ${s.max_date ?? "none"}`).join(" · ")}
-          {laggards.length ? ` · stale after ${freshness.stale_after_days}d` : ""}
-        </span>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CoverageBar({ source }: { source: IntelBundle["freshness"]["sources"][number] }) {
+  if (!source.dated || !source.rows) return <span className="text-[11px] text-muted-foreground">—</span>;
+  if (source.coverage == null) {
+    return <span className="text-[11px] text-muted-foreground">{fmt(source.days_in_range)} days</span>;
+  }
+  const pct = Math.round(source.coverage * 100);
+  const thin = source.coverage < 0.8;
+  return (
+    <span className="flex items-center gap-2">
+      <span className="relative h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+        <span
+          className={`absolute inset-y-0 left-0 rounded-full ${thin ? "bg-amber-500" : "bg-emerald-500"}`}
+          style={{ width: `${Math.max(2, pct)}%` }}
+        />
+      </span>
+      <span className={`text-[11px] tabular-nums ${thin ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}>
+        {source.days_in_range}/{source.expected_days || source.range_days}d
+      </span>
+    </span>
+  );
+}
+
+function DataStatus({
+  freshness, rangeLabel, onUpload,
+}: {
+  freshness: IntelBundle["freshness"];
+  rangeLabel: string;
+  onUpload: () => void;
+}) {
+  if (!freshness) return null;
+  const sources = freshness.sources ?? [];
+  const missing = sources.filter((s) => s.rows === 0);
+  const thin = sources.filter((s) => s.dated && s.rows > 0 && (s.coverage ?? 1) < 0.8);
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 border-b">
+        <CardTitle className="text-sm">What data is loaded</CardTitle>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">
+            Today {freshness.today} · window {rangeLabel}
+          </span>
+          <Button variant="outline" size="sm" onClick={onUpload}>
+            <Upload className="mr-1.5 h-3.5 w-3.5" />
+            Upload
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Source</TableHead>
+              <TableHead className="text-right">Rows</TableHead>
+              <TableHead>History</TableHead>
+              <TableHead>Newest</TableHead>
+              <TableHead>Age</TableHead>
+              <TableHead>Covers {rangeLabel}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sources.map((s) => (
+              <TableRow key={s.source}>
+                <TableCell>
+                  <div className="font-medium">{s.label}</div>
+                  <div className="text-[10px] text-muted-foreground">{s.file}</div>
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{fmt(s.rows)}</TableCell>
+                <TableCell className="text-[11px] tabular-nums text-muted-foreground">
+                  {s.rows === 0 ? "not uploaded"
+                    : s.dated ? `${s.min_date} → ${s.max_date}`
+                    : "snapshot (no dates)"}
+                </TableCell>
+                <TableCell className="text-[11px] tabular-nums">
+                  {s.dated ? (s.max_date ?? "—") : "—"}
+                </TableCell>
+                <TableCell className="text-[11px] tabular-nums">
+                  {s.rows === 0 ? (
+                    <span className="text-muted-foreground">—</span>
+                  ) : !s.dated ? (
+                    <span className="text-muted-foreground">replaced each upload</span>
+                  ) : s.stale ? (
+                    <span className="text-amber-700 dark:text-amber-400">{s.days_behind}d — re-export</span>
+                  ) : (
+                    <span className="text-muted-foreground">{s.days_behind}d</span>
+                  )}
+                </TableCell>
+                <TableCell><CoverageBar source={s} /></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <div className="space-y-1 border-t p-3">
+          <p className="text-[11px] text-muted-foreground">
+            Every upload adds to this history. Uploading 7 days each week builds the 14 / 30 / 90 / 365 windows
+            over time — matching days are overwritten, older days are kept.
+          </p>
+          {thin.length > 0 && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-400">
+              Thin for {rangeLabel}: {thin.map((s) => `${s.label} has ${s.days_in_range} of ${s.expected_days || s.range_days} days`).join("; ")}.
+              That window is real but incomplete — upload a longer export to fill it.
+              Reporting lag is already accounted for.
+            </p>
+          )}
+          {missing.length > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              Not uploaded yet: {missing.map((s) => s.file).join(", ")}.
+            </p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -524,6 +636,7 @@ export function PaidAdsIntel({
   const sections = empty
     ? []
     : [
+        { id: "data", label: "Data" },
         { id: "command", label: "Command" },
         { id: "intel", label: "This week" },
         { id: "ads-desk", label: "Ads lead" },
@@ -624,6 +737,16 @@ export function PaidAdsIntel({
       {receipt && <UploadReceiptCard receipt={receipt} onDismiss={() => setReceipt(null)} />}
 
       <FreshnessBanner freshness={data.freshness} />
+
+      {!empty && (
+        <section id="data" className="scroll-mt-12">
+          <DataStatus
+            freshness={data.freshness}
+            rangeLabel={range === 0 ? "all history" : `${range} days`}
+            onUpload={() => inputRef.current?.click()}
+          />
+        </section>
+      )}
 
       {empty ? (
         <Card>

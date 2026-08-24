@@ -30,6 +30,15 @@ of that same kind — they carry no date to key on.
 file as-of: once the newest paid row is `STALE_AFTER_DAYS` (7) behind, the page
 asks for a fresh export. Range windows still key off the file as-of.
 
+The **Data** panel is the answer to "what is loaded and is it current?" — per
+source it shows row count, full history span, newest date, age in days, and how
+much of the selected window that source actually covers. Coverage is
+lag-adjusted: Search Console trails ~2 days, so a complete-to-its-own-max source
+reads 100%, while a genuinely thin window (a 30-day GA4 export asked to fill 90
+days) is flagged amber and listed in `freshness.partial_sources`. Longer windows
+are built by accumulation — upload 7 days a week and the 14 / 30 / 90 / 365
+windows fill in over time.
+
 Intel is two desks (max 6 each, ranked by $ at stake): **Paid media** for the ads
 lead and **Site & conversion** for the web team. Every card is a 7-day test with
 a keep/kill metric. Never move Meta/PMax onto Brand Search. Win/lose tables

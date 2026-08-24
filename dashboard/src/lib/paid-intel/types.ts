@@ -74,12 +74,31 @@ export interface ParsedFiles {
   accepted: AcceptedFile[];
 }
 
+export type FreshnessSource = "google" | "meta" | "ga4" | "gsc_trend" | "gsc_snapshot";
+
 export interface SourceFreshness {
-  source: "paid" | "gsc" | "ga4";
+  source: FreshnessSource;
   label: string;
+  /** What to re-export when this source goes stale. */
+  file: string;
+  rows: number;
+  min_date: string | null;
   max_date: string | null;
   days_behind: number | null;
   stale: boolean;
+  /** Undated snapshots (Queries.csv / Pages.csv) have no date to age. */
+  dated: boolean;
+  /** Distinct days present inside the selected range. */
+  days_in_range: number;
+  /** Days the selected range asked for (0 = all history). */
+  range_days: number;
+  /**
+   * Days this source could plausibly have, i.e. the window minus its own
+   * reporting lag. GSC always trails ~2 days; that is a lag, not a gap.
+   */
+  expected_days: number;
+  /** days_in_range / expected_days, or null for snapshots and the All range. */
+  coverage: number | null;
 }
 
 export interface IntelFreshness {
@@ -88,6 +107,8 @@ export interface IntelFreshness {
   days_behind: number | null;
   stale: boolean;
   stale_after_days: number;
+  /** Windows are built from whatever days exist — this flags a thin window. */
+  partial_sources: FreshnessSource[];
   sources: SourceFreshness[];
 }
 

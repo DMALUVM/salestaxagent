@@ -781,7 +781,12 @@ export function buildIntel(opts: {
   today?: string;
 }): IntelBundle {
   const freshness = buildFreshness({
-    campaigns: opts.campaigns, queries: opts.queries, ga: opts.ga, today: opts.today,
+    campaigns: opts.campaigns,
+    queries: opts.queries,
+    ga: opts.ga,
+    today: opts.today,
+    asOf: maxPaidDate(opts.campaigns) || maxPaidDate(opts.ga),
+    range: opts.range,
   });
   const paidMax = maxPaidDate(opts.campaigns);
   const gscMax = maxPaidDate(opts.queries.filter((q) => q.date));
