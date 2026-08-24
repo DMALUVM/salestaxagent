@@ -62,6 +62,18 @@ class TestBusinessRulesConfig:
         assert ads["campaign_chunk_days"] == 7
         assert ads["campaign_chunk_days"] <= ads["max_chunk_days"]
 
+    def test_ads_sb_sd_scheduled_windows_are_one_chunk(self):
+        """Scheduled SB/SD must stay inside a single 7-day chunk.
+
+        2026-08-24: five SB/SD chunks × 900s PENDING pinned campaigns for
+        3.9h; placements/search terms then waited 180 minutes and paged.
+        """
+        ads = self.cfg["ads"]
+        assert ads["campaign_sb_sd_daily_days"] == 7
+        assert ads["campaign_sb_sd_backfill_days"] == 7
+        assert ads["campaign_sb_sd_daily_days"] <= ads["campaign_chunk_days"]
+        assert ads["campaign_sb_sd_backfill_days"] <= ads["campaign_chunk_days"]
+
     def test_spapi_chunk_limit(self):
         assert self.cfg["spapi"]["max_chunk_days"] <= 31
 
@@ -142,6 +154,17 @@ class TestRulesModule:
         from src.rules import ADS_CAMPAIGN_CHUNK_DAYS, ADS_MAX_CHUNK_DAYS
         assert 1 <= ADS_CAMPAIGN_CHUNK_DAYS <= ADS_MAX_CHUNK_DAYS
         assert ADS_CAMPAIGN_CHUNK_DAYS == 7
+
+    def test_ads_sb_sd_windows_from_config(self):
+        from src.rules import (
+            ADS_CAMPAIGN_CHUNK_DAYS,
+            ADS_SB_SD_BACKFILL_DAYS,
+            ADS_SB_SD_DAILY_DAYS,
+        )
+        assert ADS_SB_SD_DAILY_DAYS == 7
+        assert ADS_SB_SD_BACKFILL_DAYS == 7
+        assert ADS_SB_SD_DAILY_DAYS <= ADS_CAMPAIGN_CHUNK_DAYS
+        assert ADS_SB_SD_BACKFILL_DAYS <= ADS_CAMPAIGN_CHUNK_DAYS
 
     def test_spapi_chunk_size_within_limit(self):
         from src.rules import SPAPI_MAX_CHUNK_DAYS
@@ -652,8 +675,61 @@ class TestAdProductCoverage:
         sp = [(cs, ce) for product, cs, ce in calls if product == "SP"]
         assert len(sp) == 5
         assert all((ce - cs).days + 1 <= 7 for cs, ce in sp)
-        assert sp[0][0] == date(2026, 8, 1)
-        assert sp[-1][1] == date(2026, 8, 30)
+        # Newest first: if a later chunk times out we still have yesterday.
+        assert sp[0][1] == date(2026, 8, 30)
+        assert sp[-1][0] == date(2026, 8, 1)
+
+    def test_daily_sb_sd_uses_short_window(self, monkeypatch):
+        """Nightly 30d SP must not also request 30d of SB/SD."""
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        calls: list[tuple[str, date, date]] = []
+
+        def fake_chunk(cs, ce, product="SP"):
+            calls.append((product, cs, ce))
+            return [{"date": ce.isoformat(), "campaignId": f"{product}-1",
+                     "campaignName": product, "impressions": 1, "clicks": 1,
+                     "spend": 1.0}]
+
+        monkeypatch.setattr(reports, "_fetch_campaigns_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows",
+                            lambda *a, **k: 1)
+
+        r = reports.fetch_campaigns_daily(
+            date(2026, 8, 1), date(2026, 8, 30), sb_sd_days=7)
+        sp = [(cs, ce) for product, cs, ce in calls if product == "SP"]
+        sb = [(cs, ce) for product, cs, ce in calls if product == "SB"]
+        sd = [(cs, ce) for product, cs, ce in calls if product == "SD"]
+        assert len(sp) == 5
+        assert len(sb) == 1 and len(sd) == 1
+        assert sb[0][1] == date(2026, 8, 30)
+        assert (sb[0][1] - sb[0][0]).days + 1 <= 7
+        assert (sd[0][1] - sd[0][0]).days + 1 <= 7
+        assert r["by_type"]["SB"]["ok"] is True
+
+    def test_sb_rows_count_as_present_even_with_chunk_errors(self, monkeypatch):
+        """A timed-out older SB chunk is a gap, not 'SB missing'."""
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        def fake_chunk(cs, ce, product="SP"):
+            if product == "SB" and cs <= date(2026, 8, 1):
+                raise TimeoutError("old chunk timed out after 900s")
+            return [{"date": ce.isoformat(), "campaignId": f"{product}-{ce}",
+                     "campaignName": product, "impressions": 1, "clicks": 1,
+                     "spend": 993.71 if product == "SB" else 1.0}]
+
+        monkeypatch.setattr(reports, "_fetch_campaigns_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows",
+                            lambda *a, **k: 1)
+
+        r = reports.fetch_campaigns_daily(date(2026, 8, 1), date(2026, 8, 14))
+        assert r["by_type"]["SB"]["ok"] is True
+        assert r["by_type"]["SB"]["spend"] > 0
+        assert r["by_type"]["SB"]["errors"]
+        assert "SB" not in r["products_failed"]
+        assert "SB" in r["products_ok"]
 
 
 class TestAdsPollResilience:
@@ -721,10 +797,47 @@ class TestAdsPollResilience:
         assert reports._SYNC_LOCK.acquire(blocking=False)
         try:
             monkeypatch.setattr(reports, "_SYNC_LOCK_TIMEOUT", 0.05)
-            with pytest.raises(TimeoutError, match="another ads pull"):
+            with pytest.raises(reports.AdsSyncBusy, match="another ads pull"):
                 reports.sync_ads(days=1, campaigns_only=True)
         finally:
             reports._SYNC_LOCK.release()
+
+    def test_lock_wait_is_seconds_not_hours(self):
+        """Waiters must skip quickly. 180 minutes + Telegram was 2026-08-24."""
+        from src.amazon_ads.reports import _SYNC_LOCK_TIMEOUT
+        assert 1 <= _SYNC_LOCK_TIMEOUT <= 60
+
+    def test_daily_campaigns_job_caps_sb_sd_and_chains(self):
+        import inspect
+        from src.main import _run_ads_campaigns_sync
+        src = inspect.getsource(_run_ads_campaigns_sync)
+        assert "sb_sd_days" in src
+        assert "ADS_SB_SD_DAILY_DAYS" in src
+        assert "_run_ads_placements_sync" in src
+        assert "_run_ads_search_terms_sync" in src
+        assert 'status == "skipped"' in src
+
+    def test_sunday_backfill_caps_sb_sd(self):
+        import inspect
+        from src.main import _run_ads_campaigns_backfill
+        src = inspect.getsource(_run_ads_campaigns_backfill)
+        assert "sb_sd_days" in src
+        assert "ADS_SB_SD_BACKFILL_DAYS" in src
+
+    def test_busy_ads_job_is_skipped_not_failed(self):
+        import inspect
+        from src.main import _run_ads_sync_job
+        src = inspect.getsource(_run_ads_sync_job)
+        assert "AdsSyncBusy" in src
+        assert "skipped" in src
+        assert "_schedule_ads_retry" in src
+        assert "_ads_alert" not in src.split("except AdsSyncBusy")[1].split("except Exception")[0]
+
+    def test_busy_retry_window_covers_a_sunday_overrun(self):
+        """Three 20-minute retries from 05:15 would have given up at 06:15
+        on 2026-08-24 while campaigns still held the lock at 08:51."""
+        from src.main import _ADS_RETRY_MAX, _ADS_RETRY_SECONDS
+        assert _ADS_RETRY_MAX * _ADS_RETRY_SECONDS >= 6 * 3600
 
     def test_spapi_refresh_does_not_pull_ads(self):
         import inspect

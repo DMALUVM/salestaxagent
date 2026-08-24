@@ -173,7 +173,8 @@ def collect(cfg: dict | None = None, now: datetime | None = None) -> dict:
             from src.amazon_ads.export_brief import ADS_JOBS
         except Exception:
             ADS_JOBS = ["ads_sync", "ads_campaigns_sync",
-                        "ads_search_terms_sync", "ads_placements_sync"]
+                        "ads_search_terms_sync", "ads_placements_sync",
+                        "ads_campaigns_backfill"]
         try:
             # Partial is a real completed pull (SP committed, SB/SD missed).
             # Counting only success made a nightly SB timeout look like
@@ -185,6 +186,16 @@ def collect(cfg: dict | None = None, now: datetime | None = None) -> dict:
                 facts["ads_last_sync"] = r[0]["started_at"]
                 facts["ads_last_job"] = r[0]["job_name"]
                 facts["ads_sync_age_hours"] = _age_hours(r[0]["started_at"], now)
+            running = (client.table("job_runs")
+                       .select("job_name,started_at,status")
+                       .in_("job_name", ADS_JOBS).eq("status", "running")
+                       .order("started_at", desc=True).limit(1)
+                       .execute().data) or []
+            if running:
+                facts["ads_sync_in_progress"] = True
+                facts["ads_sync_in_progress_job"] = running[0]["job_name"]
+                facts["ads_sync_running_age_hours"] = _age_hours(
+                    running[0]["started_at"], now)
         except Exception as e:
             facts.setdefault("errors", []).append(f"job_runs: {str(e)[:80]}")
 
@@ -372,7 +383,15 @@ def evaluate(facts: dict, cfg: dict | None = None) -> Health:
 
     age = facts.get("ads_sync_age_hours")
     limit = t["ads_sync_stale_hours"]
-    if age is None:
+    running_age = facts.get("ads_sync_running_age_hours")
+    # 2026-08-24 08:10 ET: campaigns had been running since 05:00, so the
+    # last finished row was yesterday 09:30 and this fired at 27h. An
+    # in-flight pull is not a stale feed.
+    in_flight = (facts.get("ads_sync_in_progress")
+                 and running_age is not None and running_age < 6)
+    if in_flight:
+        pass
+    elif age is None:
         h.faults.append(Fault("ads_sync", WARN,
                               "No successful ads sync on record"))
     elif age > limit:

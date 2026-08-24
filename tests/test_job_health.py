@@ -53,6 +53,13 @@ class TestNonFailures:
                     "SD FAILED, SP kept")]
         assert current_failures(rows, SINCE) == []
 
+    def test_skipped_lock_wait_is_not_a_failure(self):
+        """Overlapping ads jobs skip; they must not page as failures."""
+        rows = [run("ads_placements_sync", "skipped", "2026-08-24T09:15:00",
+                    "another ads pull is running — skipped so this job does not "
+                    "wait hours and page Telegram")]
+        assert current_failures(rows, SINCE) == []
+
     def test_success_is_not_a_failure(self):
         assert current_failures([run("x", "success", "2026-08-20T10:00:00")], SINCE) == []
 
@@ -74,6 +81,8 @@ class TestInterruptions:
     def test_marker_matching_is_case_insensitive(self):
         assert is_interruption("KeyboardInterrupt during sync")
         assert not is_interruption("connection reset by peer")
+        assert is_interruption("another ads pull is running — skipped")
+        assert is_interruption("another ads pull is still running after 180 minutes")
 
     def test_real_breakage_sorts_above_interruptions(self):
         rows = [

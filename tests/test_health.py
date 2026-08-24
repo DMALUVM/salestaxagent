@@ -158,6 +158,27 @@ def test_severity_escalates_with_how_stale_the_sync_is():
     assert bad.severity == CRITICAL
 
 
+def test_in_flight_ads_sync_is_not_stale():
+    """2026-08-24 08:10 ET: campaigns had been running since 05:00, last
+    finished success was yesterday, and health paged 'stale 27h'."""
+    h = health.evaluate(healthy_facts(
+        ads_sync_age_hours=27.0,
+        ads_sync_in_progress=True,
+        ads_sync_running_age_hours=3.5,
+    ))
+    assert "ads_sync" not in [f.key for f in h.faults]
+
+
+def test_stuck_in_flight_ads_sync_still_alerts():
+    """A pull that has been 'running' for 6h+ is stuck, not in-flight."""
+    h = health.evaluate(healthy_facts(
+        ads_sync_age_hours=27.0,
+        ads_sync_in_progress=True,
+        ads_sync_running_age_hours=7.0,
+    ))
+    assert "ads_sync" in [f.key for f in h.faults]
+
+
 # ── debounce ─────────────────────────────────────────────────────────────
 
 def test_one_routine_message_per_calendar_day():

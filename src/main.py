@@ -4226,6 +4226,8 @@ def run():
         # laptop that travels or a changed system setting cannot silently move
         # the sync window. Amazon day boundaries stay on America/Los_Angeles.
         scheduler = BlockingScheduler(timezone=AGENT_TZ)
+        global _SCHEDULER
+        _SCHEDULER = scheduler
         click.echo(f"[Scheduler] Timezone: {AGENT_TZ_NAME}")
 
         # ── Liveness, before anything else ──
@@ -4440,7 +4442,7 @@ def run():
                 coalesce=True,
                 max_instances=1,
             )
-            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (30d, 7d chunks)")
+            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (SP 30d, SB/SD 7d, then placements + search terms)")
 
             scheduler.add_job(
                 _run_ads_search_terms_sync,
@@ -4477,7 +4479,7 @@ def run():
                 coalesce=True,
                 max_instances=1,
             )
-            click.echo("[Scheduler] Ads campaigns backfill weekly Sunday 03:00 (90d, 7d chunks)")
+            click.echo("[Scheduler] Ads campaigns backfill weekly Sunday 03:00 (SP 90d, SB/SD 7d)")
 
             # Placement performance at 05:15 — between campaigns and search
             # terms. Second spCampaigns report, so it is its own job rather
@@ -5199,19 +5201,48 @@ def _ads_alert(subject: str, detail: str) -> None:
         print(f"[Ads] Telegram alert failed: {e}")
 
 
+_SCHEDULER = None
+# 2026-08-24: campaigns held the lock past 08:51 ET. Three 20-minute
+# retries from 05:15 would have given up at 06:15. Eighteen covers a
+# Sunday backfill that overruns the 05:00 window (6 hours).
+_ADS_RETRY_MAX = 18
+_ADS_RETRY_SECONDS = 20 * 60
+
+
+def _schedule_ads_retry(fn, retry: int, job_id: str) -> None:
+    """Re-run a skipped ads job after the lock holder finishes."""
+    if _SCHEDULER is None or retry >= _ADS_RETRY_MAX:
+        return
+    from datetime import datetime, timedelta
+    from src.rules import AGENT_TZ
+    when = datetime.now(AGENT_TZ) + timedelta(seconds=_ADS_RETRY_SECONDS)
+    rid = f"{job_id}_retry_{retry + 1}"
+    try:
+        _SCHEDULER.add_job(
+            fn, "date", run_date=when, id=rid,
+            misfire_grace_time=3600, replace_existing=True)
+        print(f"[Ads] Scheduled {rid} at {when.isoformat(timespec='minutes')}")
+    except Exception as e:
+        print(f"[Ads] Could not schedule {rid}: {e}")
+
+
 def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
                       search_terms_only: bool = False,
-                      placements_only: bool = False, label: str) -> None:
-    """Shared body for the ads sync jobs."""
+                      placements_only: bool = False, label: str,
+                      sb_sd_days: int | None = None,
+                      retry: int = 0) -> str:
+    """Shared body for the ads sync jobs. Returns the settled status."""
     from src.db import job_start, job_finish
-    from src.amazon_ads.reports import sync_ads
+    from src.amazon_ads.reports import AdsSyncBusy, sync_ads
 
+    status = "fail"
     run_id = job_start(job_name)
     finished = False
     try:
         result = sync_ads(days=days, campaigns_only=campaigns_only,
                           search_terms_only=search_terms_only,
-                          placements_only=placements_only)
+                          placements_only=placements_only,
+                          sb_sd_days=sb_sd_days)
         status, message = _ads_sync_outcome(result, days)
         camp = result.get("campaigns")
         if isinstance(camp, dict):
@@ -5237,23 +5268,50 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
         # product that dropped out entirely — the latter under-reports account
         # spend against the Amazon console for as long as it goes unnoticed, which
         # is exactly how the SP-only sync hid ~6% of spend.
-        lost_products = (camp.get("products_failed") or []) if isinstance(camp, dict) else []
+        lost_products = []
+        if isinstance(camp, dict):
+            for p in (camp.get("products_failed") or []):
+                v = (camp.get("by_type") or {}).get(p) or {}
+                if not v.get("rows") and not v.get("spend"):
+                    lost_products.append(p)
         if status == "fail":
             _ads_alert(f"Ads {label} sync failed", message)
         elif lost_products:
             _ads_alert(f"Ads {label} sync partial — {'+'.join(lost_products)} missing",
                        message)
+        return status
+    except AdsSyncBusy as e:
+        print(f"[Ads {label}] Skipped: {e}")
+        status = "skipped"
+        job_finish(run_id, status, str(e)[:500])
+        finished = True
+        nxt = retry + 1
+        if job_name == "ads_campaigns_sync":
+            _schedule_ads_retry(
+                lambda n=nxt: _run_ads_campaigns_sync(retry=n), retry, job_name)
+        else:
+            _schedule_ads_retry(
+                lambda n=nxt: _run_ads_sync_job(
+                    job_name, days=days, campaigns_only=campaigns_only,
+                    search_terms_only=search_terms_only,
+                    placements_only=placements_only, label=label,
+                    sb_sd_days=sb_sd_days, retry=n),
+                retry, job_name)
+        return status
     except Exception as e:
         print(f"[Ads {label}] Failed: {e}")
-        job_finish(run_id, "fail", str(e)[:500])
+        status = "fail"
+        job_finish(run_id, status, str(e)[:500])
         finished = True
         _ads_alert(f"Ads {label} sync failed", str(e))
+        return status
     finally:
         # SIGTERM / scheduler shutdown used to leave status=running for days
         # ("stuck running since …"). Mark those so the next night is not
         # mistaken for an in-flight pull.
         if not finished:
             job_finish(run_id, "fail", "interrupted before job_finish")
+    return status
 
 
 def _run_sqp_sync():
@@ -5310,14 +5368,26 @@ def _run_sqp_sync():
             print(f"[SQP] Recommendation refresh failed: {e}")
 
 
-def _run_ads_campaigns_sync():
+def _run_ads_campaigns_sync(retry: int = 0):
     """05:00 — campaign dailies for the KPI cards and trend chart.
 
-    Returns without ever calling the search-term endpoint, so the numbers on
-    /ppc are current by ~05:05 regardless of what search terms do at 05:30.
+    SB/SD use a 7-day window so five 900s timeouts cannot pin the lock
+    through the 05:15/05:30 jobs. After campaigns release the lock this
+    job runs placements and search terms itself, so those crons are a
+    backup — they skip in seconds if the lock is still held, they do not
+    wait three hours and page Telegram.
     """
-    _run_ads_sync_job("ads_campaigns_sync", days=30, campaigns_only=True,
-                      label="campaigns")
+    from src.rules import ADS_SB_SD_DAILY_DAYS
+    status = _run_ads_sync_job(
+        "ads_campaigns_sync", days=30, campaigns_only=True,
+        label="campaigns", sb_sd_days=ADS_SB_SD_DAILY_DAYS, retry=retry)
+    # A skipped run is Sunday-backfill (or a late leftover) still holding
+    # the lock. Chaining here would just skip twice more. The retry of
+    # this wrapper re-chains once campaigns actually run.
+    if status == "skipped":
+        return
+    _run_ads_placements_sync()
+    _run_ads_search_terms_sync()
 
 
 def _run_ads_search_terms_sync():
@@ -5327,9 +5397,14 @@ def _run_ads_search_terms_sync():
 
 
 def _run_ads_campaigns_backfill():
-    """Sunday 03:00 — 90 days of campaigns (3 × 30-day chunks) for long trends."""
+    """Sunday 03:00 — 90 days of SP campaigns for long trends.
+
+    SB/SD stay on the short backfill window so this job cannot still be
+    holding the process lock when the 05:00 daily jobs fire.
+    """
+    from src.rules import ADS_SB_SD_BACKFILL_DAYS
     _run_ads_sync_job("ads_campaigns_backfill", days=90, campaigns_only=True,
-                      label="campaigns 90d")
+                      label="campaigns 90d", sb_sd_days=ADS_SB_SD_BACKFILL_DAYS)
 
 
 def _run_ads_placements_sync():

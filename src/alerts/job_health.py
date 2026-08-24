@@ -21,13 +21,16 @@ INTERRUPTION_MARKERS = (
     "keyboardinterrupt",
     "systemexit",
     "shutting down",
+    "another ads pull is still running",
+    "another ads pull is running",
+    "not stacking reports",
 )
 
 # Statuses that are not a failure to report. `partial` is deliberately here:
 # it means some data landed and the shortfall is already described in the run
 # message (e.g. an ad product that timed out), so it is a status to read on the
 # dashboard, not a nightly push.
-NON_FAILURE_STATUSES = frozenset({"success", "running", "partial", "cancelled"})
+NON_FAILURE_STATUSES = frozenset({"success", "running", "partial", "cancelled", "skipped"})
 
 
 @dataclass

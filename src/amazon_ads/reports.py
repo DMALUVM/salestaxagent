@@ -28,14 +28,17 @@ MAX_CHUNK_DAYS = ADS_MAX_CHUNK_DAYS
 SEARCH_TERM_CHUNK_DAYS = ADS_SEARCH_TERM_CHUNK_DAYS
 CAMPAIGN_CHUNK_DAYS = ADS_CAMPAIGN_CHUNK_DAYS
 
-# One Ads Reporting v3 pull at a time. The 05:00 campaigns job, 05:15
-# placements job, 05:30 search-term job, Sunday 90d backfill, and any CLI
-# retry all hit the same queue. Overlapping them is how a 15-minute SB
-# timeout turned into a 50-hour "stuck running" row: a second pull piled
-# onto a first that Amazon had not finished, then the process was killed
-# without job_finish.
+# One Ads Reporting v3 pull at a time so we do not stack reports on a
+# slow Amazon queue. Waiters must NOT sit for hours: on 2026-08-24
+# campaigns held this lock for 231 minutes, and placements/search terms
+# waited 180 minutes then Telegram'd a failure. A short wait + skip lets
+# the scheduler retry after campaigns release the lock.
 _SYNC_LOCK = threading.Lock()
-_SYNC_LOCK_TIMEOUT = 3 * 3600  # seconds — wait for the other pull, then fail
+_SYNC_LOCK_TIMEOUT = 45  # seconds — then skip, do not page
+
+
+class AdsSyncBusy(RuntimeError):
+    """Another ads pull holds the process lock. Retry; do not alert."""
 
 
 def _safe(v, default=0):
@@ -391,6 +394,7 @@ def _fetch_search_terms_chunk(start: date, end: date) -> list[dict]:
 def fetch_campaigns_daily(start: date, end: date,
                           ad_products: tuple[str, ...] | None = None,
                           chunk_days: int | None = None,
+                          sb_sd_days: int | None = None,
                           on_progress=None) -> dict:
     """Fetch campaign daily metrics for each ad product, chunked to ≤30 days.
 
@@ -425,16 +429,23 @@ def fetch_campaigns_daily(start: date, end: date,
         product_errors: list[str] = []
         product_inserted = 0
 
-        for i, (cs, ce) in enumerate(chunks, 1):
+        product_chunks = chunks
+        if product in ("SB", "SD") and sb_sd_days:
+            product_start = max(start, end - timedelta(days=sb_sd_days - 1))
+            product_chunks = _date_chunks(product_start, end, size)
+        # Newest first: if a later chunk times out we still have yesterday.
+        product_chunks = list(reversed(product_chunks))
+
+        for i, (cs, ce) in enumerate(product_chunks, 1):
             log.info("%s campaigns chunk %d/%d: %s → %s",
-                     product, i, len(chunks), cs, ce)
+                     product, i, len(product_chunks), cs, ce)
             try:
                 rows = _fetch_campaigns_chunk(cs, ce, product)
             except Exception as e:
                 msg = f"{product} chunk {i} ({cs}→{ce}): {str(e)[:120]}"
                 log.warning("Campaign %s", msg)
                 product_errors.append(msg)
-                say(f"    {product} chunk {i}/{len(chunks)} {cs}→{ce}: FAILED — {str(e)[:80]}")
+                say(f"    {product} chunk {i}/{len(product_chunks)} {cs}→{ce}: FAILED — {str(e)[:80]}")
                 continue
 
             chunk_rows = []
@@ -474,10 +485,10 @@ def fetch_campaigns_daily(start: date, end: date,
                     msg = f"{product} chunk {i} upsert: {str(e)[:120]}"
                     log.warning("Campaign %s", msg)
                     product_errors.append(msg)
-                    say(f"    {product} chunk {i}/{len(chunks)} upsert FAILED — {str(e)[:80]}")
+                    say(f"    {product} chunk {i}/{len(product_chunks)} upsert FAILED — {str(e)[:80]}")
 
             parsed.extend(chunk_rows)
-            say(f"    {product} chunk {i}/{len(chunks)} {cs}→{ce}: "
+            say(f"    {product} chunk {i}/{len(product_chunks)} {cs}→{ce}: "
                 f"{len(chunk_rows)} row(s), ${chunk_spend:,.2f} — committed")
 
         spend = round(sum(r["spend"] for r in parsed), 2)
@@ -487,7 +498,10 @@ def fetch_campaigns_daily(start: date, end: date,
             "spend": spend,
             "clicks": sum(r["clicks"] for r in parsed),
             "errors": product_errors,
-            "ok": not product_errors,
+            # Rows landed = the product is present. A timed-out older chunk
+            # is a gap, not "SB missing" — 2026-08-24 Telegram'd SB+SD
+            # missing while SB had already written $993.71.
+            "ok": bool(parsed),
         }
         log.info("%s campaigns: %d row(s), $%.2f spend, %d error(s)",
                  product, len(parsed), spend, len(product_errors))
@@ -588,6 +602,7 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
              search_term_chunk_days: int | None = None,
              ad_products: tuple[str, ...] | None = None,
              campaign_chunk_days: int | None = None,
+             sb_sd_days: int | None = None,
              on_progress=None) -> dict:
     """Ads sync: campaigns and/or search terms, auto-chunked.
 
@@ -613,15 +628,16 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
 
     acquired = _SYNC_LOCK.acquire(timeout=_SYNC_LOCK_TIMEOUT)
     if not acquired:
-        raise TimeoutError(
-            "another ads pull is still running after "
-            f"{int(_SYNC_LOCK_TIMEOUT / 60)} minutes — not stacking reports")
+        raise AdsSyncBusy(
+            "another ads pull is running — skipped so this job does not "
+            "wait hours and page Telegram")
     try:
         return _sync_ads_body(
             days=days,
             search_term_chunk_days=search_term_chunk_days,
             ad_products=ad_products,
             campaign_chunk_days=campaign_chunk_days,
+            sb_sd_days=sb_sd_days,
             on_progress=on_progress,
             do_campaigns=campaigns_only or not any(only_flags),
             do_search_terms=search_terms_only or not any(only_flags),
@@ -635,6 +651,7 @@ def _sync_ads_body(*, days: int,
                    search_term_chunk_days: int | None,
                    ad_products: tuple[str, ...] | None,
                    campaign_chunk_days: int | None,
+                   sb_sd_days: int | None,
                    on_progress, do_campaigns: bool, do_search_terms: bool,
                    do_placements: bool) -> dict:
     end = amazon_as_of()
@@ -654,7 +671,8 @@ def _sync_ads_body(*, days: int,
         try:
             results["campaigns"] = fetch_campaigns_daily(
                 start, end, ad_products=ad_products,
-                chunk_days=campaign_chunk_days, on_progress=on_progress)
+                chunk_days=campaign_chunk_days, sb_sd_days=sb_sd_days,
+                on_progress=on_progress)
         except Exception as e:
             log.exception("Campaign sync failed")
             results["campaigns"] = {"error": str(e)[:200]}

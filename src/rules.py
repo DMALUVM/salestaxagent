@@ -52,6 +52,14 @@ ADS_MANDATORY_CHUNKING: bool = _RULES["ads"]["mandatory_chunking"]
 # this account sits PENDING past the 900s cap; the same window in 7-day
 # chunks completes. Still clamped to ADS_MAX_CHUNK_DAYS at request time.
 ADS_CAMPAIGN_CHUNK_DAYS: int = int(_RULES["ads"].get("campaign_chunk_days", 7))
+# Nightly SB/SD only pull this many closed days. Five 7-day SB/SD chunks
+# each sitting PENDING for 900s is what turned 2026-08-24 into a 3.9h
+# campaigns job that blocked placements and search terms. Sunday backfill
+# still covers the long window. SP keeps the full nightly range.
+ADS_SB_SD_DAILY_DAYS: int = int(_RULES["ads"].get("campaign_sb_sd_daily_days", 7))
+# Sunday backfill is 90d for SP. SB/SD stay short so 03:00 cannot still
+# hold the process lock when the 05:00 daily jobs fire.
+ADS_SB_SD_BACKFILL_DAYS: int = int(_RULES["ads"].get("campaign_sb_sd_backfill_days", 7))
 # Search-term reports are far heavier than campaign reports; they are chunked
 # smaller so a single request cannot sit past its poll timeout.
 ADS_SEARCH_TERM_CHUNK_DAYS: int = _RULES["ads"]["search_term_chunk_days"]
