@@ -8,18 +8,30 @@ function money(n: number): string {
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
-const HARD_RULES = [
+const ADS_RULES = [
   "- Never move Meta or PMax budget onto Brand Search.",
-  "- Never invent a Δ position from Queries.csv (it is a snapshot with no date).",
   "- Never treat GA4 revenue as Google/Meta ads conversion value.",
   "- Ignore $0 / 0-impression Meta rows.",
+  "- Judge a change on 7 days of conversion value, not on one day.",
 ];
 
-function cardContext(ctx: PromptContext): string[] {
-  return [
-    `Account as-of (max date in the files): ${ctx.asOf}.`,
-    `Last 7 days: Google ${money(ctx.google.spend)} at ${ctx.google.roas.toFixed(2)}x · Meta ${money(ctx.meta.spend)} at ${ctx.meta.roas.toFixed(2)}x · blended ${ctx.blended.roas.toFixed(2)}x.`,
-  ];
+const SITE_RULES = [
+  "- Never invent a Δ position from Queries.csv — it is an undated snapshot, so there is no before/after.",
+  "- GA4 figures are last-click sessions and revenue, not ad-platform conversion value. Do not reconcile them to ad spend.",
+  "- Do not touch ad campaigns, budgets, or bids. That is the paid-media desk's job.",
+  "- Do not redesign a page that is already converting. Fix the pages that leak.",
+];
+
+export interface SitePromptContext {
+  sessions: number;
+  key_events: number;
+  revenue: number;
+  cvr: number;
+  mobile: { sessions: number; cvr: number };
+  desktop: { sessions: number; cvr: number };
+  unassigned_share: number;
+  organic_clicks: number | null;
+  top_pages: Array<{ page: string; revenue: number; key_events: number }>;
 }
 
 export interface PromptContext {
@@ -27,21 +39,52 @@ export interface PromptContext {
   google: PlatformKpis;
   meta: PlatformKpis;
   blended: PlatformKpis;
+  site?: SitePromptContext;
+}
+
+function pct(n: number): string {
+  return `${(n * 100).toFixed(1)}%`;
+}
+
+/** Ads desk gets spend/ROAS. Site desk gets sessions/CVR — never the other way round. */
+function cardContext(ctx: PromptContext, owner: "ads" | "site"): string[] {
+  if (owner === "ads") {
+    return [
+      `Account as-of (max date in the files): ${ctx.asOf}.`,
+      `Last 7 days: Google ${money(ctx.google.spend)} at ${ctx.google.roas.toFixed(2)}x · Meta ${money(ctx.meta.spend)} at ${ctx.meta.roas.toFixed(2)}x · blended ${ctx.blended.roas.toFixed(2)}x.`,
+    ];
+  }
+  const s = ctx.site;
+  const lines = [`Storefront as-of (max date in the analytics export): ${ctx.asOf}.`];
+  if (s) {
+    lines.push(
+      `Last 7 days on site: ${s.sessions.toLocaleString()} sessions, ${s.key_events.toLocaleString()} key events (${pct(s.cvr)} of sessions), ${money(s.revenue)} last-click revenue.`,
+      `Mobile ${s.mobile.sessions.toLocaleString()} sessions at ${pct(s.mobile.cvr)} vs desktop ${s.desktop.sessions.toLocaleString()} at ${pct(s.desktop.cvr)}.`,
+      `${pct(s.unassigned_share)} of sessions have no channel attribution${s.organic_clicks != null ? ` · ${s.organic_clicks.toLocaleString()} organic Search clicks` : ""}.`,
+    );
+    if (s.top_pages.length) {
+      lines.push(
+        `Pages that already convert (do not break these): ${s.top_pages.map((p) => `${p.page} ${money(p.revenue)}`).join(" · ")}.`,
+      );
+    }
+  }
+  return lines;
 }
 
 /** Self-contained prompt for ONE card. Paste into an agent, no other context needed. */
 export function buildCardPrompt(card: IntelCard, ctx: PromptContext): string {
-  const role = card.owner === "ads"
+  const owner = card.owner === "site" ? "site" : "ads";
+  const role = owner === "ads"
     ? "You are the Shopify paid-media agent for Tallowbourn (Google Ads + Meta)."
-    : "You are the Shopify site/conversion agent for Tallowbourn (Shopify theme + GA4 + Search Console).";
+    : "You are the Shopify storefront agent for Tallowbourn (Shopify theme, product pages, GA4 and Search Console). You do not manage ad campaigns.";
   return [
     `# ${card.title}`,
     "",
     role,
-    ...cardContext(ctx),
+    ...cardContext(ctx, owner),
     "",
     "Hard rules:",
-    ...HARD_RULES,
+    ...(owner === "ads" ? ADS_RULES : SITE_RULES),
     "",
     `Action: ${card.action.toUpperCase()} · $ at stake: ${money(card.stake)} · Kill/keep metric: ${card.metric}`,
     "",
@@ -67,22 +110,22 @@ export function buildCardPrompt(card: IntelCard, ctx: PromptContext): string {
 
 /** One desk's whole stack as a single prompt. */
 export function buildDeskPrompt(
-  label: string,
+  label: "ads" | "site",
   cards: IntelCard[],
   ctx: PromptContext,
   brief?: string,
 ): string {
   const role = label === "ads"
     ? "You are the Shopify paid-media agent for Tallowbourn (Google Ads + Meta)."
-    : "You are the Shopify site/conversion agent for Tallowbourn (Shopify theme + GA4 + Search Console).";
+    : "You are the Shopify storefront agent for Tallowbourn (Shopify theme, product pages, GA4 and Search Console). You do not manage ad campaigns.";
   const lines = [
-    label === "ads" ? "# Tallowbourn paid media — this week" : "# Tallowbourn site & conversion — this week",
+    label === "ads" ? "# Tallowbourn paid media — this week" : "# Tallowbourn storefront & conversion — this week",
     "",
     role,
-    ...cardContext(ctx),
+    ...cardContext(ctx, label),
     "",
     "Hard rules:",
-    ...HARD_RULES,
+    ...(label === "ads" ? ADS_RULES : SITE_RULES),
   ];
   if (brief) lines.push("", brief);
   lines.push("", "## Stack (ranked by $ at stake)");
@@ -115,6 +158,7 @@ export function buildGrok(opts: {
   blended: PlatformKpis;
   wow?: { last: PlatformKpis; prior: PlatformKpis };
   brief?: IntelBrief;
+  site?: SitePromptContext;
   camps: CampaignAgg[];
   products: ProductAgg[];
   cards: IntelCard[];
@@ -174,8 +218,8 @@ export function buildGrok(opts: {
   if (opts.brief?.headline) {
     lines.push("", "## This week", opts.brief.headline, "", opts.brief.ads, opts.brief.site);
   }
-  const ads = opts.cards.filter((c) => c.owner === "ads");
   const site = opts.cards.filter((c) => c.owner === "site");
+  const ads = opts.cards.filter((c) => c.owner !== "site");
   function dump(title: string, list: IntelCard[], start: number) {
     lines.push("", `## ${title}`);
     if (!list.length) {
@@ -198,11 +242,12 @@ export function buildGrok(opts: {
   lines.push("", "## JSON snapshot", "```json", JSON.stringify(snapshot, null, 2), "```", "");
   const ctx: PromptContext = {
     asOf: opts.asOf, google: opts.google, meta: opts.meta, blended: opts.blended,
+    site: opts.site,
   };
   return {
     markdown: lines.join("\n"),
     snapshot,
-    adsDesk: buildDeskPrompt("ads", ads, ctx, opts.brief?.headline),
-    siteDesk: buildDeskPrompt("site", site, ctx, opts.brief?.headline),
+    adsDesk: buildDeskPrompt("ads", ads, ctx, opts.brief?.adsHeadline || opts.brief?.headline),
+    siteDesk: buildDeskPrompt("site", site, ctx, opts.brief?.siteHeadline),
   };
 }

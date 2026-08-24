@@ -189,6 +189,10 @@ export interface IntelBrief {
   headline: string;
   ads: string;
   site: string;
+  /** Ads-only framing for the paid-media export. */
+  adsHeadline: string;
+  /** Storefront-only framing — no spend or ROAS. */
+  siteHeadline: string;
 }
 
 export interface WinLoseRow {

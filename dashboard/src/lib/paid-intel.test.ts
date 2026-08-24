@@ -213,20 +213,53 @@ describe("multi-file upload, receipts, freshness, and decisions", { skip: !haveU
     });
     const { adsDesk, siteDesk } = intel.grok;
     assert.match(adsDesk, /paid-media agent/i);
-    assert.match(siteDesk, /site\/conversion agent/i);
-    assert.doesNotMatch(adsDesk, /site & conversion/i);
+    assert.match(siteDesk, /storefront agent/i);
     for (const c of intel.cards.filter((x) => x.owner === "site")) {
       assert.ok(!adsDesk.includes(c.title), `ads export must not carry site card "${c.title}"`);
     }
     for (const c of intel.cards.filter((x) => x.owner === "ads")) {
       assert.ok(!siteDesk.includes(c.title), `site export must not carry ads card "${c.title}"`);
     }
-    const card = intel.cards[0];
-    const prompt = buildCardPrompt(card, {
-      asOf: intel.as_of!, google: intel.kpis.google, meta: intel.kpis.meta, blended: intel.kpis.blended,
+  });
+
+  test("the storefront export carries no ad-spend context", () => {
+    const parsed = readAll();
+    const intel = buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range: 7, filter: "all",
     });
-    assert.match(prompt, /Never move Meta or PMax budget onto Brand Search/);
-    assert.match(prompt, /What to return/);
+    const { siteDesk, adsDesk } = intel.grok;
+
+    // The web team must not be handed budget guardrails or ROAS it cannot act on.
+    assert.doesNotMatch(siteDesk, /Brand Search/i, "site export must not mention Brand Search");
+    assert.doesNotMatch(siteDesk, /PMax/i);
+    assert.doesNotMatch(siteDesk, /ROAS/i);
+    assert.doesNotMatch(siteDesk, /\dx\b/, "no ROAS multiples in the storefront export");
+    assert.doesNotMatch(siteDesk, /ads conversion value/i);
+    assert.doesNotMatch(siteDesk, /spend held/i);
+    // It must instead carry storefront context and its own guardrails.
+    assert.match(siteDesk, /sessions/i);
+    assert.match(siteDesk, /Mobile .* vs desktop/i);
+    assert.match(siteDesk, /Do not touch ad campaigns, budgets, or bids/i);
+    assert.match(siteDesk, /undated snapshot/i);
+
+    // The ads export keeps its own framing.
+    assert.match(adsDesk, /Brand Search/i);
+    assert.match(adsDesk, /ROAS|[\d.]+x/);
+
+    // Per-card prompts follow the same split.
+    const siteCard = intel.cards.find((c) => c.owner === "site")!;
+    const adsCard = intel.cards.find((c) => c.owner === "ads")!;
+    const ctx = {
+      asOf: intel.as_of!, google: intel.kpis.google, meta: intel.kpis.meta,
+      blended: intel.kpis.blended,
+    };
+    const sitePrompt = buildCardPrompt(siteCard, ctx);
+    assert.doesNotMatch(sitePrompt, /Brand Search/i);
+    assert.match(sitePrompt, /storefront agent/i);
+    assert.match(sitePrompt, /What to return/);
+    const adsPrompt = buildCardPrompt(adsCard, ctx);
+    assert.match(adsPrompt, /Never move Meta or PMax budget onto Brand Search/);
   });
 });
 

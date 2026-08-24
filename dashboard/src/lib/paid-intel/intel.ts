@@ -1,9 +1,9 @@
 import { deriveRoas, round2 } from "./csv";
 import {
   aggregateCampaigns, aggregateProducts, buildFreshness, dailySeries, filterCampaigns,
-  gaInRange, kpisOf, maxPaidDate, priorWindow, snapshotQueries,
+  gaInRange, kpisOf, maxPaidDate, priorWindow, rangeStart, snapshotQueries,
 } from "./window";
-import { buildCardPrompt, buildGrok } from "./grok";
+import { buildCardPrompt, buildGrok, type SitePromptContext } from "./grok";
 import type {
   CampaignAgg, CampaignDaily, DecisionStatus, GaDaily, IntelBrief, IntelBundle,
   IntelCard, IntelDecision, IntelFilter, IntelOwner, IntelRangeDays,
@@ -432,7 +432,7 @@ function detectGscTitleTrap(queries: SearchQueryDaily[]): IntelCard | null {
     owner: "site",
     title: `"${top.query}" is already on page one — the title is the leak`,
     body: `Snapshot rank ${top.position?.toFixed(1)} with ${fmtInt(top.impressions)} impressions and CTR ${top.ctr?.toFixed(2)}%. This is not a ranking problem. Do not invent a Δ position from Queries.csv.`,
-    doThis: `7-day test: rewrite title + meta + first 120 characters to match "${top.query}" exactly (include the product noun). Point an above-the-fold CTA at the matching PDP. No paid bid changes.`,
+    doThis: `7-day test: rewrite title + meta + first 120 characters to match "${top.query}" exactly (include the product noun). Point an above-the-fold CTA at the matching PDP. Organic only — no ad changes.`,
     ifItWorks: `CTR on "${top.query}" doubles on the next Queries.csv snapshot.`,
     evidence: hits.slice(0, 4).map((q) => `"${q.query}" pos ${q.position?.toFixed(1)} · ${q.impressions} impr · CTR ${q.ctr?.toFixed(2)}%`).join("; "),
     stake: round2(Math.max(top.impressions * 0.02, 40)),
@@ -452,7 +452,7 @@ function detectGscClimb(queries: SearchQueryDaily[]): IntelCard | null {
     owner: "site",
     title: `"${top.query}" already earns the click — help it climb`,
     body: `CTR ${top.ctr?.toFixed(1)}% at position ${top.position?.toFixed(1)} on ${fmtInt(top.impressions)} impressions. The snippet works. Rank is the constraint. Snapshot only — no invented Δ.`,
-    doThis: `7-day test: add two internal links with the exact anchor "${top.query}" from the homepage and the closest blog. Strengthen the matching PDP H1. No Brand Search bid changes.`,
+    doThis: `7-day test: add two internal links with the exact anchor "${top.query}" from the homepage and the closest blog. Strengthen the matching PDP H1. Organic only — no ad changes.`,
     ifItWorks: "Clicks on that query rise on the next snapshot. Position may or may not move.",
     evidence: hits.slice(0, 3).map((q) => `"${q.query}" pos ${q.position?.toFixed(1)} · CTR ${q.ctr?.toFixed(1)}% · ${q.clicks} clicks`).join("; "),
     stake: round2(top.clicks * 12),
@@ -471,8 +471,8 @@ function detectGscPosition(queries: SearchQueryDaily[]): IntelCard | null {
     id: "gsc-striking",
     owner: "site",
     title: `${hits.length} queries sitting in positions 4–15`,
-    body: "Snapshot ranks from Queries.csv — not a measured drop. Do not invent a Δ position. Prioritize title work (pos 4–8, low CTR) over paid bids.",
-    doThis: `7-day test: rewrite title + first paragraph for "${top[0].query}" and one sibling. No paid bid changes on Brand Search.`,
+    body: "Snapshot ranks from Queries.csv — not a measured drop. Do not invent a Δ position. Start with the pos 4–8 queries whose CTR is low; those are title problems, not ranking problems.",
+    doThis: `7-day test: rewrite title + first paragraph for "${top[0].query}" and one sibling. Organic only — no ad changes.`,
     ifItWorks: "Clicks on those queries rise on the next GSC snapshot.",
     evidence: top.map((q) => `"${q.query}" pos ${q.position?.toFixed(1)} · ${q.impressions} impr`).join("; "),
     stake: 25,
@@ -524,7 +524,7 @@ function detectMobileLeak(ga: GaDaily[]): IntelCard | null {
     title: "Mobile conversion is leaking vs desktop",
     body: `Mobile CVR ${(mCvr * 100).toFixed(1)}% on ${mS} sessions vs desktop ${(dCvr * 100).toFixed(1)}%.`,
     owner: "site",
-    doThis: "7-day test: fix the top mobile landing (balm or deodorant PDP) — speed, ATC, sticky add-to-cart. Do not raise ads until CVR moves.",
+    doThis: "7-day test: fix the top mobile landing (balm or deodorant PDP) — speed, above-the-fold price, sticky add-to-cart. Report the CVR before and after.",
     ifItWorks: "Mobile CVR closes at least a third of the gap to desktop.",
     evidence: `Mobile ${mK}/${mS}; desktop ${dK}/${dS}.`,
     stake: Math.max(stake, 40),
@@ -672,7 +672,7 @@ function detectUnassigned(ga: GaDaily[]): IntelCard | null {
     id: "unassigned",
     owner: "site",
     title: `Unassigned is ${Math.round(share * 100)}% of GA4 sessions — and they do not convert`,
-    body: `${un} of ${total} sessions have no channel and ${ga.filter((r) => /unassigned/i.test(r.channel_group)).reduce((s, r) => s + r.key_events, 0)} key events. Last-click ROAS and “Meta is free” reads are lying until this is tagged.`,
+    body: `${un} of ${total} sessions arrive with no channel and produce ${ga.filter((r) => /unassigned/i.test(r.channel_group)).reduce((s, r) => s + r.key_events, 0)} key events. Until these are tagged, every channel report under-credits its real source and this traffic looks like it came from nowhere.`,
     doThis: `7-day test: add UTMs to Google + Meta landing URLs. Then add a session-channel override for ${landings[0]?.page ?? "the top Unassigned URL"}. The Unassigned pile is mostly blogs and /pages/tallow-101 — tag those templates.`,
     ifItWorks: "Unassigned share falls under 12% on the next Explore export.",
     evidence: `${un} / ${total} Unassigned. Top: ${landings.map((l) => `${l.page} ${l.sessions}`).join("; ")}.`,
@@ -808,7 +808,7 @@ export function buildIntel(opts: {
         paid_social_sessions: 0, paid_search_sessions: 0, cross_network_sessions: 0, paid_revenue: 0,
       },
       grok: { markdown: "No paid rows uploaded yet.", snapshot: emptySnapshot(), adsDesk: "", siteDesk: "" },
-      brief: { headline: "", ads: "", site: "" },
+      brief: { headline: "", ads: "", site: "", adsHeadline: "", siteHeadline: "" },
       freshness,
       sources: { campaigns: 0, queries: opts.queries.length, ga: opts.ga.length },
     };
@@ -864,7 +864,8 @@ export function buildIntel(opts: {
   for (const d of opts.decisions ?? []) {
     if (d.as_of === asOf) decided.set(d.card_id, d);
   }
-  const promptCtx = { asOf, google, meta, blended };
+  const siteCtx = buildSiteContext(ga7, opts.queries, asOf, 7);
+  const promptCtx = { asOf, google, meta, blended, site: siteCtx };
   const withState = rawCards.map((c) => {
     const d = decided.get(c.id);
     const status: DecisionStatus = d?.status ?? "open";
@@ -884,11 +885,13 @@ export function buildIntel(opts: {
   const siteCards = open.filter((c) => c.owner === "site").sort(order).slice(0, 6);
   const cards = [...adsCards, ...siteCards];
   const log = withState.filter((c) => c.status !== "open").sort(order);
-  const brief = buildBrief({ asOf, google, meta, blended, wow, cards: adsCards, siteCards });
+  const brief = buildBrief({
+    asOf, google, meta, blended, wow, cards: adsCards, siteCards, site: siteCtx,
+  });
 
   const grok = buildGrok({
     asOf, range, google, meta, blended, wow, camps, products, cards, brief,
-    queries, pages, ga4,
+    site: siteCtx, queries, pages, ga4,
   });
   const chartRows = opts.campaigns.filter((r) => filter === "all" || r.platform === filter);
 
@@ -926,21 +929,79 @@ function buildBrief(opts: {
   wow: { last: { spend: number; roas: number; conv_value: number }; prior: { spend: number; roas: number; conv_value: number } };
   cards: IntelCard[];
   siteCards: IntelCard[];
+  site?: SitePromptContext;
 }): IntelBrief {
-  const { wow, google, meta, cards, siteCards } = opts;
+  const { wow, google, meta, cards, siteCards, site: s } = opts;
   const revDrop = wow.prior.conv_value > 0
     ? Math.round((1 - wow.last.conv_value / wow.prior.conv_value) * 100)
     : 0;
-  const headline = revDrop >= 15
+  const adsHeadline = revDrop >= 15
     ? `As-of ${opts.asOf}: spend held near ${money(wow.last.spend)} while ads conversion value fell ${revDrop}% (${money(wow.prior.conv_value)} → ${money(wow.last.conv_value)}). Brand Search is the only ≥1.5x keep. Do not raise it to “make the week.”`
     : `As-of ${opts.asOf}: blended ${money(opts.blended.spend)} at ${roas(opts.blended.roas)}. Google ${roas(google.roas)} vs Meta ${roas(meta.roas)}.`;
+
+  // Storefront framing: sessions and conversion, never spend or ROAS.
+  let siteHeadline = `As-of ${opts.asOf}: storefront work below is ranked by the revenue it is leaking.`;
+  if (s && s.sessions > 0) {
+    const parts = [
+      `As-of ${opts.asOf}: ${s.sessions.toLocaleString()} sessions converted at ${(s.cvr * 100).toFixed(1)}% for ${money(s.revenue)}.`,
+    ];
+    if (s.unassigned_share > 0.12) {
+      parts.push(`${Math.round(s.unassigned_share * 100)}% of those sessions have no channel attribution, so the reporting under-credits every source.`);
+    }
+    if (s.desktop.cvr > 0 && s.mobile.cvr > 0) {
+      const better = s.mobile.cvr >= s.desktop.cvr ? "Mobile" : "Desktop";
+      const worse = better === "Mobile" ? "desktop" : "mobile";
+      const bCvr = better === "Mobile" ? s.mobile.cvr : s.desktop.cvr;
+      const wCvr = better === "Mobile" ? s.desktop.cvr : s.mobile.cvr;
+      parts.push(`${better} converts at ${(bCvr * 100).toFixed(1)}% vs ${worse} at ${(wCvr * 100).toFixed(1)}%.`);
+    }
+    siteHeadline = parts.join(" ");
+  }
+
   const ads = cards.length
     ? `Ads lead this week: ${cards.slice(0, 3).map((c) => c.title).join(" · ")}.`
     : "No open paid-media cards — everything in this window is applied or dismissed.";
   const site = siteCards.length
     ? `Web team this week: ${siteCards.slice(0, 3).map((c) => c.title).join(" · ")}.`
     : "No open site/conversion cards — everything in this window is applied or dismissed.";
-  return { headline, ads, site };
+  return { headline: adsHeadline, adsHeadline, siteHeadline, ads, site };
+}
+
+function buildSiteContext(ga: GaDaily[], queries: SearchQueryDaily[], asOf: string, range: IntelRangeDays): SitePromptContext {
+  let sessions = 0, key_events = 0, revenue = 0, un = 0;
+  const dev = new Map<string, { sessions: number; ke: number }>();
+  for (const r of ga) {
+    sessions += r.sessions;
+    key_events += r.key_events;
+    revenue += r.revenue;
+    if (/unassigned/i.test(r.channel_group)) un += r.sessions;
+    const d = dev.get(r.device) ?? { sessions: 0, ke: 0 };
+    d.sessions += r.sessions;
+    d.ke += r.key_events;
+    dev.set(r.device, d);
+  }
+  const of = (name: string) => {
+    const d = dev.get(name) ?? { sessions: 0, ke: 0 };
+    return { sessions: d.sessions, cvr: d.sessions ? d.ke / d.sessions : 0 };
+  };
+  const start = range ? rangeStart(asOf, range) : null;
+  const chart = queries.filter((q) => q.kind === "chart" && q.date && (!start || q.date >= start));
+  const pages = landingRollup(ga)
+    .filter((p) => /\/products\//.test(p.page) && p.rev > 0)
+    .sort((a, b) => b.rev - a.rev)
+    .slice(0, 3)
+    .map((p) => ({ page: p.page, revenue: round2(p.rev), key_events: p.ke }));
+  return {
+    sessions,
+    key_events,
+    revenue: round2(revenue),
+    cvr: sessions ? key_events / sessions : 0,
+    mobile: of("mobile"),
+    desktop: of("desktop"),
+    unassigned_share: sessions ? un / sessions : 0,
+    organic_clicks: chart.length ? chart.reduce((s, q) => s + q.clicks, 0) : null,
+    top_pages: pages,
+  };
 }
 
 function emptySnapshot() {
