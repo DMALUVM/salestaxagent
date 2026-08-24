@@ -7,6 +7,7 @@ import { QueryError } from "@/components/query-error";
 import { SectionNav } from "@/components/section-nav";
 import { ShopifyCustomers } from "@/components/shopify-customers";
 import { PnlTable } from "@/components/pnl-table";
+import { AdsMonthlyUpload } from "@/components/ads-monthly-upload";
 import { isConfigured } from "@/lib/supabase";
 import type { PnlRow } from "@/lib/pnl-periods";
 import type { MonthlySkuLine } from "@/lib/sku-monthly-pnl";
@@ -269,6 +270,8 @@ export default function ProfitPage() {
           </Card>
           </>
           )}
+
+          <AdsMonthlyUpload onComplete={loadPnl} />
 
           <PnlTable
             rows={data}

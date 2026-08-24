@@ -1,10 +1,8 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { ingestAdsMonthlyCsv } from "@/lib/ads-monthly-ingest";
+import { isAmazonAdsSpendCsv } from "@/lib/parsers/amazon-ads-spend";
 import { parseAmazonInventoryCSV } from "@/lib/parsers/amazon";
-import {
-  isAmazonAdsSpendCsv,
-  parseAmazonAdsSpendCsv,
-} from "@/lib/parsers/amazon-ads-spend";
 import {
   isCustomCombinedTax,
   parseAmazonTaxReportCSV,
@@ -71,61 +69,30 @@ export async function POST(request: NextRequest) {
 }
 
 async function handleAdsSpend(content: string, filename: string) {
-  const parsed = parseAmazonAdsSpendCsv(content);
-  if (!parsed.kind || (!parsed.months.length && !parsed.daily.length)) {
+  const sb = getServerSupabase();
+  const result = await ingestAdsMonthlyCsv(sb, filename, content);
+  if (!result.ok) {
     return Response.json({
       success: false,
       report_type: "amazon_ads_spend",
       filename,
-      ...parsed,
+      error: result.error,
+      warnings: result.warnings,
       rows_inserted: 0,
     });
   }
-
-  const sb = getServerSupabase();
-  let inserted = 0;
-  if (parsed.months.length) {
-    const { data, error } = await sb.from("ads_monthly_spend").upsert(
-      parsed.months.map((m) => ({ ...m, filename })),
-      { onConflict: "period_start" },
-    ).select("period_start");
-    if (error) {
-      return Response.json({ error: `ads_monthly_spend: ${error.message}` }, { status: 500 });
-    }
-    inserted += data?.length ?? parsed.months.length;
-  }
-  if (parsed.daily.length) {
-    const { data, error } = await sb.from("ads_campaigns_daily").upsert(
-      parsed.daily,
-      { onConflict: "date,campaign_id" },
-    ).select("campaign_id");
-    if (error) {
-      parsed.warnings.push(`ads_campaigns_daily: ${error.message}`);
-    } else {
-      inserted += data?.length ?? parsed.daily.length;
-    }
-  }
-
-  await sb.from("ingestion_log").insert({
-    filename,
-    file_type: "amazon_ads",
-    rows_total: parsed.rows_total,
-    rows_inserted: inserted,
-    rows_skipped: parsed.rows_skipped,
-    warnings: parsed.warnings.length ? parsed.warnings : null,
-    status: parsed.warnings.length ? "partial" : "success",
-  });
-
   return Response.json({
     success: true,
     report_type: "amazon_ads_spend",
     filename,
-    kind: parsed.kind,
-    months: parsed.months.length,
-    month_starts: parsed.months.map((m) => m.period_start),
-    total_spend: parsed.months.reduce((s, m) => s + m.spend, 0),
-    rows_inserted: inserted,
-    warnings: parsed.warnings,
+    kind: result.kind,
+    months: result.months,
+    month_starts: result.month_starts,
+    total_spend: result.total_spend,
+    rows_inserted: result.rows_inserted,
+    rows_parsed: result.rows_parsed,
+    rows_skipped: result.rows_skipped,
+    warnings: result.warnings,
   });
 }
 

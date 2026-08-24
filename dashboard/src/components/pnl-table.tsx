@@ -222,8 +222,8 @@ export function PnlTable({
               Showing {lookbackHint}. Average is contribution ÷ calendar days in the visible months.
               Fees are estimated (15% referral + $3.50 FBA / unit). COGS is units × <code>sku_costs</code>.
               {adsDateMin
-                ? ` Ad spend from the Ads API starts ${adsDateMin} (~95-day ceiling). Earlier months stay ads unknown until you drop a monthly SKU Economics or Ads Console file in incoming/amazon/.`
-                : " Ad spend is unknown on these months — drop a monthly SKU Economics file in incoming/amazon/."}
+                ? ` Ad spend from the Ads API starts ${adsDateMin} (~95-day ceiling). Upload monthly SKU Economics CSVs below (or Data page) for earlier months.`
+                : " Ad spend is unknown — upload monthly SKU Economics CSVs below."}
               {skuMissingJan2024 && (
                 <> Jan–Jul 2024 are not in the warehouse — SP-API keeps ~2 years. Drop a Seller Central All Orders report for those months into <code>incoming/amazon/</code>.</>
               )}
