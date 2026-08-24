@@ -1,0 +1,205 @@
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+import {
+  buildPnlPeriods,
+  coverageLabel,
+  filterLookback,
+  inclusiveDays,
+  monthEnd,
+  periodBounds,
+  periodKey,
+  periodLabel,
+  summarizePeriods,
+  weekStartSunday,
+  type PnlRow,
+} from "./pnl-periods";
+
+function row(date: string, contrib: number, extra: Partial<PnlRow> = {}): PnlRow {
+  return {
+    date,
+    gross_sales: extra.gross_sales ?? contrib + 20,
+    units: extra.units ?? 10,
+    ad_spend: extra.ad_spend ?? 5,
+    est_referral_fees: extra.est_referral_fees ?? 8,
+    est_fba_fees: extra.est_fba_fees ?? 4,
+    est_cogs: extra.est_cogs ?? 3,
+    est_contribution: contrib,
+    amazon_net_proceeds: null,
+    net_after_ads: contrib,
+    status: "preliminary",
+    fees_basis: extra.fees_basis ?? "estimated",
+  };
+}
+
+describe("Amazon week / month bounds", () => {
+  test("weeks start Sunday, not ISO Monday", () => {
+    // 2026-08-24 is a Monday.
+    assert.equal(weekStartSunday("2026-08-24"), "2026-08-23");
+    assert.equal(weekStartSunday("2026-08-23"), "2026-08-23");
+    assert.equal(weekStartSunday("2026-08-29"), "2026-08-23");
+  });
+
+  test("DST spring-forward does not shift the Sunday", () => {
+    // US springs forward 2026-03-08. Midday UTC stays on the intended date.
+    assert.equal(weekStartSunday("2026-03-11"), "2026-03-08");
+    assert.equal(periodBounds("2026-03-11", "week").end, "2026-03-14");
+  });
+
+  test("monthEnd handles February", () => {
+    assert.equal(monthEnd("2026-02-10"), "2026-02-28");
+    assert.equal(monthEnd("2028-02-10"), "2028-02-29");
+    assert.equal(monthEnd("2026-08-24"), "2026-08-31");
+  });
+
+  test("periodKey is stable for every day in the period", () => {
+    // 2026-08-24 is Monday, so the week is Sun 23 – Sat 29.
+    assert.equal(periodKey("2026-08-23", "week"), periodKey("2026-08-29", "week"));
+    assert.equal(periodKey("2026-08-01", "month"), periodKey("2026-08-31", "month"));
+    assert.equal(periodKey("2026-01-01", "year"), periodKey("2026-12-31", "year"));
+  });
+
+  test("week label is Sunday–Saturday", () => {
+    assert.equal(periodLabel("2026-08-17", "2026-08-23", "week"), "Aug 17–23, 2026");
+    assert.match(periodLabel("2026-12-28", "2027-01-03", "week"), /Dec 28, 2026/);
+    assert.equal(periodLabel("2026-08-01", "2026-08-31", "month"), "August 2026");
+  });
+});
+
+describe("lookback and inclusive days", () => {
+  test("30d lookback is inclusive of as-of and drops older rows", () => {
+    // windowStart(asOf, 30) is asOf minus 29 days = 2026-07-25.
+    const rows = [row("2026-08-23", 1), row("2026-07-25", 2), row("2026-07-24", 3)];
+    const kept = filterLookback(rows, "2026-08-23", 30).map((r) => r.date);
+    assert.deepEqual(kept, ["2026-08-23", "2026-07-25"]);
+    assert.equal(inclusiveDays("2026-07-25", "2026-08-23"), 30);
+  });
+
+  test("all lookback keeps every stored day", () => {
+    const rows = [row("2026-08-23", 1), row("2025-07-10", 2)];
+    assert.equal(filterLookback(rows, "2026-08-23", "all").length, 2);
+  });
+});
+
+describe("buildPnlPeriods", () => {
+  test("week sums stored contribution and averages by days with a row", () => {
+    // Sun 16, Mon 17, Tue 18. Missing the rest of the week on purpose.
+    const rows = [
+      row("2026-08-18", 100, { gross_sales: 300, units: 20 }),
+      row("2026-08-17", 200, { gross_sales: 400, units: 30 }),
+      row("2026-08-16", 50, { gross_sales: 100, units: 10 }),
+    ];
+    const periods = buildPnlPeriods({ rows, grain: "week", lookback: "all", asOf: "2026-08-23" });
+    assert.equal(periods.length, 1);
+    const w = periods[0];
+    assert.equal(w.key, "2026-08-16");
+    assert.equal(w.contribution, 350);
+    assert.equal(w.sales, 800);
+    assert.equal(w.units, 60);
+    assert.equal(w.days, 3);
+    assert.equal(w.calendarDays, 7);
+    assert.equal(w.avgDaily, 116.67);
+    assert.equal(w.partial, true);
+    assert.equal(coverageLabel(w), "partial · 3 of 7d");
+  });
+
+  test("does not invent $0 days for gaps", () => {
+    const rows = [row("2026-08-16", 10), row("2026-08-22", 20)];
+    const [w] = buildPnlPeriods({ rows, grain: "week", lookback: "all", asOf: "2026-08-23" });
+    assert.equal(w.days, 2);
+    assert.equal(w.contribution, 30);
+    assert.equal(w.avgDaily, 15);
+  });
+
+  test("a day after as-of never enters a week / month / year average", () => {
+    const rows = [
+      row("2026-08-20", 999), // after as-of — preliminary
+      row("2026-08-19", 100),
+      row("2026-08-18", 50),
+    ];
+    const weeks = buildPnlPeriods({ rows, grain: "week", lookback: "all", asOf: "2026-08-19" });
+    // All three dates sit in Sun 16 – Sat 22; only the two closed days count.
+    assert.equal(weeks.length, 1);
+    assert.equal(weeks[0].key, "2026-08-16");
+    assert.equal(weeks[0].contribution, 150);
+    assert.equal(weeks[0].avgDaily, 75);
+    assert.deepEqual(weeks[0].openRows.map((r) => r.date), ["2026-08-20"]);
+
+    const days = buildPnlPeriods({ rows, grain: "day", lookback: "all", asOf: "2026-08-19" });
+    assert.equal(days[0].open, true);
+    assert.equal(days[0].start, "2026-08-20");
+    assert.equal(days[0].contribution, 999);
+    assert.equal(days[0].avgDaily, null);
+    const summary = summarizePeriods(days);
+    assert.equal(summary.contribution, 150);
+    assert.equal(summary.days, 2);
+    assert.equal(summary.avgDaily, 75);
+  });
+
+  test("month and year group across the stored span", () => {
+    const rows = [
+      row("2026-08-02", 10),
+      row("2026-07-20", 30),
+      row("2025-12-31", 40),
+    ];
+    const months = buildPnlPeriods({ rows, grain: "month", lookback: "all", asOf: "2026-08-23" });
+    assert.deepEqual(months.map((p) => p.key), ["2026-08", "2026-07", "2025-12"]);
+    assert.equal(months[0].avgDaily, 10);
+    assert.equal(months[1].avgDaily, 30);
+
+    const years = buildPnlPeriods({ rows, grain: "year", lookback: "all", asOf: "2026-08-23" });
+    assert.equal(years.length, 2);
+    assert.equal(years[0].key, "2026");
+    assert.equal(years[0].contribution, 40);
+    assert.equal(years[0].avgDaily, 20);
+    assert.equal(years[1].key, "2025");
+    assert.equal(years[1].avgDaily, 40);
+  });
+
+  test("lookback 30 drops a week that sits entirely outside the window", () => {
+    const rows = [
+      row("2026-08-23", 10),
+      row("2026-07-01", 999),
+    ];
+    const weeks = buildPnlPeriods({ rows, grain: "week", lookback: 30, asOf: "2026-08-23" });
+    assert.equal(weeks.length, 1);
+    assert.equal(weeks[0].contribution, 10);
+  });
+
+  test("empty input stays empty", () => {
+    assert.deepEqual(buildPnlPeriods({ rows: [], grain: "week", lookback: "all", asOf: "2026-08-23" }), []);
+    assert.equal(summarizePeriods([]).avgDaily, null);
+  });
+
+  test("averages use stored net_after_ads, not a re-derived formula", () => {
+    // sales/fees/ads/cogs deliberately do not add up to contribution.
+    const rows = [row("2026-08-20", 77, {
+      gross_sales: 1, ad_spend: 1, est_referral_fees: 1, est_fba_fees: 1, est_cogs: 1,
+    })];
+    const [d] = buildPnlPeriods({ rows, grain: "day", lookback: "all", asOf: "2026-08-23" });
+    assert.equal(d.contribution, 77);
+    assert.equal(d.avgDaily, 77);
+  });
+
+  test("mixed fee bases roll up as mixed", () => {
+    const rows = [
+      row("2026-08-20", 10, { fees_basis: "settled" }),
+      row("2026-08-21", 10, { fees_basis: "estimated" }),
+    ];
+    const [w] = buildPnlPeriods({ rows, grain: "week", lookback: "all", asOf: "2026-08-23" });
+    assert.equal(w.feesBasis, "mixed");
+  });
+});
+
+describe("table no longer hides history behind a 35-day slice", () => {
+  test("profit page and API read every stored account day", () => {
+    const page = readFileSync(path.join(process.cwd(), "src/app/profit/page.tsx"), "utf8");
+    const api = readFileSync(path.join(process.cwd(), "src/app/api/pnl/route.ts"), "utf8");
+    assert.doesNotMatch(page, /slice\(0,\s*35\)/, "the table used to drop everything past day 35");
+    assert.match(page, /PnlTable|buildPnlPeriods/);
+    assert.doesNotMatch(api, /\.limit\(400\)/, "400-row cap would hide a year of account days");
+    assert.match(api, /\.range\(/);
+  });
+});

@@ -5567,7 +5567,12 @@ def _run_pnl_sync():
 
     run_id = job_start("pnl_sync")
     try:
-        r = compute_pnl(days=35)
+        # 90 days covers the ads_campaigns_daily span this account actually
+        # has. The profit table now reads every stored day (week / month /
+        # year rollups), so the writer has to keep more than a month or the
+        # lookback controls are empty. Do not jump to 365: days before ads
+        # coverage would store $0 spend and overstate contribution.
+        r = compute_pnl(days=90)
     except Exception as e:
         print(f"[P&L] Failed: {e}")
         job_finish(run_id, "fail", str(e)[:500])

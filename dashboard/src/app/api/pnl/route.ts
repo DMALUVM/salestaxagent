@@ -36,9 +36,21 @@ export async function GET() {
 
     let daily: PnlRow[] = [];
     try {
-      const r = await sb.from("pnl_daily").select("*").eq("grain", "account")
-        .order("date", { ascending: false }).limit(400);
-      daily = (r.data ?? []) as PnlRow[];
+      // Account grain is one row per Amazon day. Paginate so a year of
+      // history is not silently truncated by PostgREST's default page size
+      // (a hard row cap used to hide anything past about thirteen months).
+      const PAGE = 1000;
+      let offset = 0;
+      while (true) {
+        const r = await sb.from("pnl_daily").select("*").eq("grain", "account")
+          .order("date", { ascending: false })
+          .range(offset, offset + PAGE - 1);
+        if (r.error) break;
+        const page = (r.data ?? []) as PnlRow[];
+        daily.push(...page);
+        if (page.length < PAGE) break;
+        offset += PAGE;
+      }
     } catch { /* table may not exist */ }
 
     // Freshness of the ad-spend input, so the page can flag a partial window.
@@ -76,9 +88,16 @@ export async function GET() {
       (r) => r.date <= asOf && (!adsDateMax || r.date <= adsDateMax)
     )?.date ?? null;
 
+    const historyMin = rows.length
+      ? rows.reduce((m, r) => (r.date < m ? r.date : m), rows[0].date)
+      : null;
+
     return Response.json({
       daily: rows,
       salesDateMax: rows.length ? rows[0].date : null,
+      historyMin,
+      historyMax: rows.length ? rows[0].date : null,
+      historyDays: rows.length,
       adsDateMax,
       asOf,
       today,
