@@ -46,4 +46,18 @@ export function isNonBrandGoogle(name: string, type: CampaignType, isBrand: bool
   return !isBrand && (type === "Search" || type === "Shopping" || type === "PMax" || type === "Other");
 }
 
+/**
+ * Product line for a storefront URL. Order matters: `grass-fed-tallow-lip-balm`
+ * is lip, not balm, and `tallow-sun-balm` is balm, not soap.
+ */
+export function productOfPath(path: string): ProductLine {
+  const p = path.toLowerCase();
+  if (!p.includes("/products/")) return "other";
+  if (/lip/.test(p)) return "lip";
+  if (/deodorant|deo\b/.test(p)) return "deodorant";
+  if (/soap/.test(p)) return "soap";
+  if (/balm|moisturi/.test(p)) return "balm";
+  return "other";
+}
+
 export { PMAX };

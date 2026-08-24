@@ -1,13 +1,15 @@
-import { deriveRoas, round2 } from "./csv";
+import { deriveRoas, round2, round4 } from "./csv";
 import {
   aggregateCampaigns, aggregateProducts, buildFreshness, dailySeries, filterCampaigns,
-  gaInRange, kpisOf, maxPaidDate, priorWindow, rangeStart, snapshotQueries,
+  gaInRange, kpisOf, maxPaidDate, priorWindow, productWeightsFromGa, rangeStart,
+  snapshotQueries, type SourceStats,
 } from "./window";
 import { buildCardPrompt, buildGrok, type SitePromptContext } from "./grok";
+import { gradeOutcome, measureCheck, type MeasureContext } from "./outcome";
 import type {
   CampaignAgg, CampaignDaily, DecisionStatus, GaDaily, IntelBrief, IntelBundle,
-  IntelCard, IntelDecision, IntelFilter, IntelOwner, IntelRangeDays,
-  SearchQueryDaily, WinLoseRow,
+  IntelCard, IntelCheck, IntelDecision, IntelFilter, IntelOwner, IntelRangeDays,
+  PlatformKpis, SearchQueryDaily, WinLoseRow,
 } from "./types";
 
 const PAID_GA = /^(paid search|paid social|cross-network|display|paid other)$/i;
@@ -20,20 +22,48 @@ function roas(n: number): string {
   return `${n.toFixed(2)}x`;
 }
 
-function card(partial: Omit<IntelCard, "severity" | "owner" | "prompt" | "status" | "decided_at"> & {
-  severity?: IntelCard["severity"];
-  owner?: IntelOwner;
-}): IntelCard {
+function card(
+  partial: Omit<
+    IntelCard,
+    "severity" | "owner" | "prompt" | "status" | "decided_at" | "note" | "outcome" | "check" | "check_value"
+  > & {
+    severity?: IntelCard["severity"];
+    owner?: IntelOwner;
+    check?: IntelCheck | null;
+  },
+): IntelCard {
   const stake = partial.stake;
   const severity = partial.severity ?? (stake >= 200 ? "critical" : stake >= 50 ? "warn" : "info");
   return {
     owner: "ads",
+    check: null,
     ...partial,
     severity,
     prompt: "",
     status: "open",
     decided_at: null,
+    note: null,
+    check_value: null,
+    outcome: null,
   };
+}
+
+/** A mix cut should at least beat where the blend already was. */
+function blendedTarget(g: PlatformKpis, m: PlatformKpis): number {
+  const spend = g.spend + m.spend;
+  const value = g.conv_value + m.conv_value;
+  return spend > 0 ? (value / spend) * 1.1 : 1;
+}
+
+function check(
+  kind: IntelCheck["kind"],
+  subject: string | null,
+  direction: IntelCheck["direction"],
+  target: number | null,
+  unit: IntelCheck["unit"],
+  label: string,
+): IntelCheck {
+  return { kind, subject, direction, target, unit, label };
 }
 
 function nonBrandGoogle(camps: CampaignAgg[]): CampaignAgg[] {
@@ -85,6 +115,7 @@ function detectMixCut(last: CampaignDaily[], camps: CampaignAgg[]): IntelCard | 
     stake,
     metric: `${loser.platform} ${roas(loser.roas)} — cut`,
     action: "shift",
+    check: check("blended_roas", null, "up", round4(Math.max(winner.roas * 0.9, blendedTarget(g, m))), "roas", "Blended ads ROAS"),
   });
 }
 
@@ -139,6 +170,7 @@ function detectDeadSpend(last: CampaignDaily[], camps: CampaignAgg[], asOf: stri
     stake: round2(dead.reduce((s, c) => s + c.spend, 0)),
     metric: `${money(top.spend)} @ 0 conv — kill`,
     action: "kill",
+    check: check("campaign_spend", top.campaign_name, "down", round2(top.spend * 0.5), "usd", `${top.campaign_name} spend`),
   });
 }
 
@@ -148,7 +180,11 @@ function shiftBack(asOf: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function detectProductMix(products: ReturnType<typeof aggregateProducts>, camps: CampaignAgg[]): IntelCard | null {
+function detectProductMix(
+  products: ReturnType<typeof aggregateProducts>,
+  camps: CampaignAgg[],
+  weights?: { basis: string; sample: number },
+): IntelCard | null {
   const real = products.filter((p) => p.product !== "other" && p.spend >= 20);
   if (real.length < 2) return null;
   const sorted = [...real].sort((a, b) => b.roas - a.roas);
@@ -157,16 +193,21 @@ function detectProductMix(products: ReturnType<typeof aggregateProducts>, camps:
   if (win.roas - lose.roas < 0.4 || lose.spend < 25) return null;
   const stake = round2(lose.spend * 0.3);
   const target = camps.find((c) => c.product === win.product && !c.is_brand && c.spend >= 1);
+  const estimated = real.some((p) => p.estimated);
+  const note = estimated
+    ? ` PMax and Brand Search carry no product in their names, so their share is allocated by where paid GA4 traffic landed (${weights?.basis ?? "landing mix"}); the ads conversion-value total is unchanged.`
+    : "";
   return card({
     id: "product-mix",
     title: `${win.product} is carrying ${lose.product}`,
-    body: `${win.product} ROAS ${roas(win.roas)} vs ${lose.product} ${roas(lose.roas)} on ${money(lose.spend)}. Shift creative and budget toward ${win.product}.`,
+    body: `${win.product} ROAS ${roas(win.roas)} vs ${lose.product} ${roas(lose.roas)} on ${money(lose.spend)}. Shift creative and budget toward ${win.product}.${note}`,
     doThis: `7-day test: cut ${lose.product} prospecting ~30% (${money(stake)}) and put it on ${target?.campaign_name ?? win.product + " non-brand"}.`,
     ifItWorks: `${win.product} spend share rises and blended product ROAS moves toward ${roas(win.roas)}.`,
-    evidence: real.map((p) => `${p.product} ${money(p.spend)} ${roas(p.roas)}`).join("; "),
+    evidence: `${real.map((p) => `${p.product} ${money(p.spend)} ${roas(p.roas)}${p.estimated ? " (est.)" : ""}`).join("; ")}`,
     stake,
     metric: `${lose.product} ${roas(lose.roas)} — shift`,
     action: "shift",
+    check: check("blended_roas", null, "up", null, "roas", "Blended ads ROAS"),
   });
 }
 
@@ -194,6 +235,7 @@ function detectCollapse(last: CampaignDaily[], prior: CampaignDaily[]): IntelCar
     stake: Math.max(stake, 40),
     metric: `ROAS ${roas(a.roas)} vs ${roas(b.roas)} — diagnose`,
     action: "fix",
+    check: check("blended_roas", null, "up", round4(b.roas * 0.75), "roas", "Blended ads ROAS"),
     severity: "critical",
   });
 }
@@ -223,6 +265,7 @@ function detectBrandSplit(camps: CampaignAgg[]): IntelCard | null {
       stake: round2(Math.max(nSpend * 0.15, bSpend * 0.2)),
       metric: `brand ${roas(bRoas)} keep · do not scale`,
       action: "keep",
+    check: check("campaign_spend", brand.sort((x, y) => y.spend - x.spend)[0]?.campaign_name ?? null, "down", round2(bSpend * 1.1), "usd", "Brand Search spend"),
     });
   }
   if (bSpend > nSpend && bRoas < 1.4) {
@@ -236,25 +279,41 @@ function detectBrandSplit(camps: CampaignAgg[]): IntelCard | null {
       stake: round2(bSpend * 0.2),
       metric: `brand share high — cap`,
       action: "shift",
+    check: check("campaign_spend", brand.sort((x, y) => y.spend - x.spend)[0]?.campaign_name ?? null, "down", round2(bSpend), "usd", "Brand Search spend"),
     });
   }
   return null;
 }
 
+/**
+ * Fatigue lives at ad-set level. A campaign-weighted average of 2.0 can hide
+ * one ad set at 4.0, so prefer the peak when an ad-set export supplied it and
+ * hold the campaign-only threshold lower, labelled for what it is.
+ */
 function detectFrequency(camps: CampaignAgg[]): IntelCard | null {
-  const hot = camps.filter((c) => c.platform === "meta" && (c.frequency ?? 0) > 2.4 && c.spend >= 15);
+  const meta = camps.filter((c) => c.platform === "meta" && c.spend >= 15);
+  const hasPeak = meta.some((c) => c.frequency_peak != null);
+  const freqOf = (c: CampaignAgg) => (hasPeak ? c.frequency_peak ?? c.frequency ?? 0 : c.frequency ?? 0);
+  const threshold = hasPeak ? 2.4 : 1.9;
+  const hot = meta.filter((c) => freqOf(c) > threshold);
   if (!hot.length) return null;
-  const top = hot.sort((a, b) => (b.frequency ?? 0) - (a.frequency ?? 0))[0];
+  const top = hot.sort((a, b) => freqOf(b) - freqOf(a))[0];
+  const level = hasPeak ? "worst ad set" : "campaign-weighted";
   return card({
     id: "meta-freq",
-    title: `Meta frequency ${top.frequency!.toFixed(2)} on ${top.campaign_name}`,
-    body: `Weighted frequency is above 2.4. That is fatigue, not reach. Refresh or tighten before you add budget.`,
-    doThis: `7-day test: new creative on ${top.campaign_name}, or cut audience overlap. Do not raise spend until frequency is ≤ 2.2.`,
-    ifItWorks: "Frequency falls toward 2.0 and CPA/ROAS stops sliding.",
-    evidence: hot.map((c) => `${c.campaign_name} freq ${c.frequency!.toFixed(2)} ${money(c.spend)}`).join("; "),
+    title: `Meta frequency ${freqOf(top).toFixed(2)} on ${top.campaign_name}`,
+    body: hasPeak
+      ? `The worst ad set inside ${top.campaign_name} is at ${freqOf(top).toFixed(2)}. That is fatigue, not reach. Refresh or tighten before adding budget.`
+      : `Campaign-weighted frequency is ${freqOf(top).toFixed(2)} and climbing. This export is campaign level, so a single burnt ad set is averaged away — the real number is higher. Export ad sets to see it.`,
+    doThis: hasPeak
+      ? `7-day test: new creative on the worst ad set in ${top.campaign_name}, or cut the audience overlap. Do not raise spend until it is ≤ 2.2.`
+      : `7-day test: pull the Ads Manager export at ad-set level and upload it, then refresh creative on whichever ad set is above 2.4. Do not raise ${top.campaign_name} spend meanwhile.`,
+    ifItWorks: "Frequency falls toward 2.0 and CPA stops sliding on the same spend.",
+    evidence: hot.map((c) => `${c.campaign_name} ${level} freq ${freqOf(c).toFixed(2)} on ${money(c.spend)}`).join("; "),
     stake: round2(hot.reduce((s, c) => s + c.spend, 0) * 0.25),
-    metric: `freq ${top.frequency!.toFixed(2)} — refresh`,
+    metric: `freq ${freqOf(top).toFixed(2)} (${level}) — refresh`,
     action: "fix",
+    check: check("campaign_frequency", top.campaign_name, "down", 2.2, "count", `${top.campaign_name} frequency`),
   });
 }
 
@@ -282,6 +341,7 @@ function detectProspectRetarget(camps: CampaignAgg[]): IntelCard | null {
     stake,
     metric: `${loserIsRetarget ? "retarget" : "prospect"} ${roas(loserIsRetarget ? rR : pR)} — cut`,
     action: "shift",
+    check: check("platform_roas", "meta", "up", round4(Math.max(pR, rR) * 0.9), "roas", "Meta ROAS"),
   });
 }
 
@@ -300,6 +360,7 @@ function detectLostIsTrap(camps: CampaignAgg[]): IntelCard | null {
     stake: round2(top.spend * 0.25),
     metric: `lost IS ${(top.lost_is_budget ?? 0).toFixed(0)}% · ROAS ${roas(top.roas)} — cut`,
     action: "kill",
+    check: check("campaign_roas", top.campaign_name, "up", 1.0, "roas", `${top.campaign_name} ROAS`),
     severity: "critical",
   });
 }
@@ -346,6 +407,7 @@ function detectPmaxHold(camps: CampaignAgg[]): IntelCard | null {
     stake: round2(spend * 0.1),
     metric: `PMax ${roas(r)} — hold`,
     action: "keep",
+    check: check("campaign_roas", name, "up", 1.0, "roas", `${name} ROAS`),
   });
 }
 
@@ -365,6 +427,7 @@ function detectLostIs(camps: CampaignAgg[]): IntelCard | null {
     stake: Math.max(stake, 30),
     metric: `lost IS ${ (top.lost_is_budget ?? 0).toFixed(0)}% · ROAS ${roas(top.roas)} — raise`,
     action: "keep",
+    check: check("campaign_lost_is_budget", top.campaign_name, "down", 12, "pct", `${top.campaign_name} lost IS (budget)`),
   });
 }
 
@@ -393,6 +456,7 @@ function detectPmaxVsSearch(camps: CampaignAgg[]): IntelCard | null {
     stake,
     metric: `${pmaxWorse ? "PMax" : "Search"} ${roas(pmaxWorse ? pR : sR)} — shift`,
     action: "shift",
+    check: check("platform_roas", "google", "up", round4(Math.max(pR, sR) * 0.9), "roas", "Google ROAS"),
   });
 }
 
@@ -418,6 +482,7 @@ function detectShoppingVsPmax(camps: CampaignAgg[]): IntelCard | null {
     stake: round2((shopWorse ? sS : pS) * 0.2),
     metric: `${shopWorse ? "Shopping" : "PMax"} weaker — shift`,
     action: "shift",
+    check: check("platform_roas", "google", "up", round4(Math.max(sR, pR) * 0.9), "roas", "Google ROAS"),
   });
 }
 
@@ -438,6 +503,7 @@ function detectGscTitleTrap(queries: SearchQueryDaily[]): IntelCard | null {
     stake: round2(Math.max(top.impressions * 0.02, 40)),
     metric: `CTR ${top.ctr?.toFixed(2)}% at pos ${top.position?.toFixed(1)} — rewrite`,
     action: "fix",
+    check: check("query_ctr", top.query, "up", round4((top.ctr ?? 0) * 2 || 1), "pct", `CTR on "${top.query}"`),
   });
 }
 
@@ -458,6 +524,7 @@ function detectGscClimb(queries: SearchQueryDaily[]): IntelCard | null {
     stake: round2(top.clicks * 12),
     metric: `pos ${top.position?.toFixed(1)} · CTR ${top.ctr?.toFixed(1)}% — links`,
     action: "fix",
+    check: check("query_ctr", top.query, "up", null, "pct", `CTR on "${top.query}"`),
     severity: "info",
   });
 }
@@ -478,6 +545,7 @@ function detectGscPosition(queries: SearchQueryDaily[]): IntelCard | null {
     stake: 25,
     metric: `${hits.length} queries in pos 4–15`,
     action: "fix",
+    check: check("query_ctr", top[0].query, "up", null, "pct", `CTR on "${top[0].query}"`),
     severity: "info",
   });
 }
@@ -498,6 +566,7 @@ function detectLowCtrTitles(pages: SearchQueryDaily[]): IntelCard | null {
     stake: round2(Math.min(top[0].impressions * 0.004, 180)),
     metric: `CTR ${top[0].ctr?.toFixed(2)}% — rewrite`,
     action: "fix",
+    check: check("url_ctr", path, "up", round4((top[0].ctr ?? 0) * 2 || 1), "pct", `CTR on ${path}`),
   });
 }
 
@@ -530,6 +599,7 @@ function detectMobileLeak(ga: GaDaily[]): IntelCard | null {
     stake: Math.max(stake, 40),
     metric: `mobile CVR ${(mCvr * 100).toFixed(1)}% vs ${(dCvr * 100).toFixed(1)}%`,
     action: "fix",
+    check: check("mobile_cvr", null, "up", round4(mCvr + (dCvr - mCvr) / 3), "ratio", "Mobile conversion rate"),
   });
 }
 
@@ -578,6 +648,7 @@ function detectBounce(ga: GaDaily[]): IntelCard | null {
       stake: round2(sess * 2.5),
       metric: `${sess} sess · 0 key events — fix`,
       action: "fix",
+    check: check("page_key_events", edu[0].page, "up", 1, "count", `Key events on ${edu[0].page}`),
     });
   }
   const sinks = rows.filter((x) => x.sessions >= 20 && (x.bounce ?? 0) >= 0.7).sort((a, b) => b.sessions - a.sessions);
@@ -594,6 +665,7 @@ function detectBounce(ga: GaDaily[]): IntelCard | null {
     stake: round2(top.sessions * 2.5),
     metric: `${Math.round((top.bounce ?? 0) * 100)}% bounce — fix`,
     action: "fix",
+    check: check("page_bounce", top.page, "down", 0.6, "ratio", `Bounce on ${top.page}`),
   });
 }
 
@@ -613,6 +685,7 @@ function detectPdpWinners(ga: GaDaily[]): IntelCard | null {
     stake: round2(top.rev * 0.25),
     metric: `${(top.cvr * 100).toFixed(1)}% CVR — protect`,
     action: "keep",
+    check: check("page_key_events", top.page, "up", top.ke, "count", `Key events on ${top.page}`),
     severity: "info",
   });
 }
@@ -634,6 +707,7 @@ function detectDeadPdp(ga: GaDaily[]): IntelCard | null {
     stake: round2(top.sessions * 3),
     metric: `${top.sessions} sess · 0 conv — fix`,
     action: "fix",
+    check: check("page_key_events", top.page, "up", 1, "count", `Key events on ${top.page}`),
   });
 }
 
@@ -654,6 +728,7 @@ function detectTrackingHole(last: CampaignDaily[], ga: GaDaily[]): IntelCard | n
     stake: round2(metaSpend),
     metric: "Paid Social ≈ 0 — fix tracking",
     action: "fix",
+    check: check("paid_social_sessions", null, "up", 25, "count", "GA4 Paid Social sessions"),
     owner: "ads",
     severity: "critical",
   });
@@ -679,6 +754,7 @@ function detectUnassigned(ga: GaDaily[]): IntelCard | null {
     stake: round2(Math.min(un * 1.5, 400)),
     metric: `${Math.round(share * 100)}% Unassigned — fix`,
     action: "fix",
+    check: check("unassigned_share", null, "down", 0.12, "ratio", "Unassigned share of sessions"),
     severity: share > 0.2 ? "critical" : "warn",
   });
 }
@@ -699,6 +775,7 @@ function detectLastClick(last: CampaignDaily[], ga: GaDaily[]): IntelCard | null
     stake: round2(spend * (1.5 - lc) * 0.3),
     metric: `last-click ${lc.toFixed(2)}x — mix cut`,
     action: "shift",
+    check: check("blended_roas", null, "up", null, "roas", "Blended ads ROAS"),
     severity: "warn",
   });
 }
@@ -779,6 +856,7 @@ export function buildIntel(opts: {
   filter: IntelFilter;
   decisions?: IntelDecision[];
   today?: string;
+  stats?: SourceStats;
 }): IntelBundle {
   const freshness = buildFreshness({
     campaigns: opts.campaigns,
@@ -787,6 +865,7 @@ export function buildIntel(opts: {
     today: opts.today,
     asOf: maxPaidDate(opts.campaigns) || maxPaidDate(opts.ga),
     range: opts.range,
+    stats: opts.stats,
   });
   const paidMax = maxPaidDate(opts.campaigns);
   const gscMax = maxPaidDate(opts.queries.filter((q) => q.date));
@@ -818,7 +897,9 @@ export function buildIntel(opts: {
   const last7 = filterCampaigns(opts.campaigns, asOf, 7, filter);
   const prior7 = priorWindow(opts.campaigns, asOf, 7, filter);
   const camps = aggregateCampaigns(last);
-  const products = aggregateProducts(last);
+  const gaWindow = gaInRange(opts.ga, asOf, range || 7);
+  const productWeights = productWeightsFromGa(gaWindow);
+  const products = aggregateProducts(last, productWeights);
   const google = kpisOf(last, "google");
   const meta = kpisOf(last, "meta");
   const blended = kpisOf(last, "blended");
@@ -837,7 +918,7 @@ export function buildIntel(opts: {
     detectMixCut(last7, last7Camps),
     detectReallocate(last7Camps),
     detectDeadSpend(last7, last7Camps, asOf),
-    detectProductMix(aggregateProducts(last7), last7Camps),
+    detectProductMix(aggregateProducts(last7, productWeights), last7Camps, productWeights),
     detectCollapse(last7, prior7),
     detectBrandSplit(last7Camps),
     detectFrequency(last7Camps),
@@ -860,19 +941,55 @@ export function buildIntel(opts: {
     detectUnassigned(ga7),
     detectLastClick(last7, ga7),
   ].filter((c): c is IntelCard => Boolean(c));
+  // Two different questions, two different lookups:
+  //   decided  — was THIS week's card already handled? (exact as_of)
+  //   priorApplied — was it applied in an EARLIER week, so it can be graded now?
   const decided = new Map<string, IntelDecision>();
+  const priorApplied = new Map<string, IntelDecision>();
   for (const d of opts.decisions ?? []) {
-    if (d.as_of === asOf) decided.set(d.card_id, d);
+    if (d.as_of === asOf) {
+      decided.set(d.card_id, d);
+      continue;
+    }
+    if (d.status !== "applied" || d.as_of > asOf) continue;
+    const prev = priorApplied.get(d.card_id);
+    if (!prev || d.as_of > prev.as_of) priorApplied.set(d.card_id, d);
   }
   const siteCtx = buildSiteContext(ga7, opts.queries, asOf, 7);
   const promptCtx = { asOf, google, meta, blended, site: siteCtx };
+  const measureCtx: MeasureContext = {
+    camps: last7Camps,
+    ga: ga7,
+    queries: opts.queries,
+    google: kpisOf(last7, "google"),
+    meta: kpisOf(last7, "meta"),
+    blended: kpisOf(last7, "blended"),
+  };
   const withState = rawCards.map((c) => {
     const d = decided.get(c.id);
+    const earlier = priorApplied.get(c.id);
     const status: DecisionStatus = d?.status ?? "open";
+    // Grade the oldest measurable application: an earlier week if there is one,
+    // otherwise this week's (which reads "too early" until new data lands).
+    const source = earlier ?? (status === "applied" ? d : undefined);
+    const chk = source?.check ?? c.check;
     return {
       ...c,
       status,
-      decided_at: d?.applied_at ?? d?.dismissed_at ?? null,
+      decided_at: d?.applied_at ?? d?.dismissed_at ?? earlier?.applied_at ?? null,
+      note: d?.note ?? earlier?.note ?? null,
+      check: c.check,
+      check_value: c.check ? measureCheck(c.check, measureCtx) : null,
+      // Only applied cards get graded; a dismissed card has no claim to test.
+      outcome: source && chk
+        ? gradeOutcome({
+            check: chk,
+            baseline: source.baseline_value,
+            baselineAsOf: source.baseline_as_of ?? source.as_of,
+            currentAsOf: asOf,
+            ctx: measureCtx,
+          })
+        : null,
       prompt: buildCardPrompt(c, promptCtx),
     };
   });

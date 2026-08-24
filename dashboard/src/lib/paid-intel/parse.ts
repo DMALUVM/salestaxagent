@@ -181,12 +181,22 @@ export function parseGoogleCsv(text: string): CampaignDaily[] {
       lost_is_budget,
       lost_is_rank,
       frequency: null,
+      frequency_peak: null,
       status: col(idx, row, "campaign status", "status") || null,
     });
   }
   return out;
 }
 
+/**
+ * Meta export → campaign-days.
+ *
+ * An ad-set (or ad) level export carries several rows per campaign per day.
+ * Those MUST be summed, not last-wins: the warehouse key is
+ * platform|date|campaign_name, so keeping one row would silently drop the
+ * rest of the campaign's spend. Ad-set frequency is also kept as a peak,
+ * because a campaign-weighted average hides one burnt-out ad set.
+ */
 export function parseMetaCsv(text: string): CampaignDaily[] {
   const rows = parseCsv(text);
   const hi = findHeaderRow(rows, (h) => h.includes("campaign name") || (
@@ -195,12 +205,14 @@ export function parseMetaCsv(text: string): CampaignDaily[] {
   if (hi < 0) return [];
   const headers = rows[hi];
   const idx = headerIndex(headers);
-  const out: CampaignDaily[] = [];
+  const normalized = headers.map(normHeader);
+  const subCampaign = normalized.some((h) => h === "ad set name" || h === "ad name");
 
+  const acc = new Map<string, CampaignDaily & { _freqNum: number; _freqDen: number }>();
   for (const row of rows.slice(hi + 1)) {
     const name = col(idx, row, "campaign name", "campaign").trim();
     if (!name || isTotalLabel(name)) continue;
-    const date = parseDate(col(idx, row, "reporting starts", "day", "date", "reporting starts"));
+    const date = parseDate(col(idx, row, "reporting starts", "day", "date"));
     if (!date) continue;
     // Never treat CPC / cost-per-purchase as spend or revenue.
     const spend = parseMoney(col(idx, row, "amount spent (usd)", "amount spent"));
@@ -212,26 +224,59 @@ export function parseMetaCsv(text: string): CampaignDaily[] {
     const conversions = parseMoney(col(idx, row, "purchases", "website purchases"));
     const clicks = parseMoney(col(idx, row, "link clicks", "clicks"));
     const frequency = parseMoney(col(idx, row, "frequency"));
-    out.push({
-      platform: "meta",
-      date,
-      campaign_name: name,
-      campaign_type: "Other",
-      product: productOf(name),
-      is_brand: isBrandCampaign(name),
-      audience: audienceOf(name, "meta"),
-      spend: round2(spend),
-      conv_value: round2(conv_value),
-      clicks,
-      impressions,
-      conversions: round2(conversions),
-      lost_is_budget: null,
-      lost_is_rank: null,
-      frequency: frequency > 0 ? frequency : null,
-      status: col(idx, row, "campaign delivery", "delivery") || null,
-    });
+    const status = col(idx, row, "campaign delivery", "delivery") || null;
+
+    const key = `${date}|${name}`;
+    const prev = acc.get(key);
+    if (!prev) {
+      acc.set(key, {
+        platform: "meta",
+        date,
+        campaign_name: name,
+        campaign_type: "Other",
+        product: productOf(name),
+        is_brand: isBrandCampaign(name),
+        audience: audienceOf(name, "meta"),
+        spend: spend,
+        conv_value: conv_value,
+        clicks,
+        impressions,
+        conversions,
+        lost_is_budget: null,
+        lost_is_rank: null,
+        frequency: frequency > 0 ? frequency : null,
+        frequency_peak: subCampaign && frequency > 0 ? frequency : null,
+        status,
+        _freqNum: frequency > 0 ? frequency * impressions : 0,
+        _freqDen: frequency > 0 ? impressions : 0,
+      });
+      continue;
+    }
+    prev.spend += spend;
+    prev.conv_value += conv_value;
+    prev.clicks += clicks;
+    prev.impressions += impressions;
+    prev.conversions += conversions;
+    if (frequency > 0) {
+      prev._freqNum += frequency * impressions;
+      prev._freqDen += impressions;
+      prev.frequency_peak = Math.max(prev.frequency_peak ?? 0, frequency);
+    }
+    if (status) prev.status = status;
+    // Sub-campaign rows share a product/audience; keep the campaign's own read.
   }
-  return out;
+
+  return [...acc.values()].map((r) => {
+    const { _freqNum, _freqDen, ...rest } = r;
+    return {
+      ...rest,
+      spend: round2(rest.spend),
+      conv_value: round2(rest.conv_value),
+      conversions: round2(rest.conversions),
+      frequency: _freqDen > 0 ? _freqNum / _freqDen : rest.frequency,
+      frequency_peak: rest.frequency_peak,
+    };
+  });
 }
 
 function parseGscTable(text: string, kind: "query" | "page", nameCol: string): SearchQueryDaily[] {

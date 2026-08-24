@@ -30,6 +30,8 @@ export interface CampaignDaily {
   lost_is_budget: number | null;
   lost_is_rank: number | null;
   frequency: number | null;
+  /** Worst ad set inside the campaign that day. Only set by ad-set exports. */
+  frequency_peak: number | null;
   status: string | null;
 }
 
@@ -128,6 +130,7 @@ export interface CampaignAgg {
   cpc: number;
   lost_is_budget: number | null;
   frequency: number | null;
+  frequency_peak: number | null;
   status: string | null;
   days_live: number;
 }
@@ -150,12 +153,71 @@ export interface ProductAgg {
   conv_value: number;
   roas: number;
   conversions: number;
+  /**
+   * True when part of this row came from campaigns whose name carries no
+   * product (PMax, Brand Search) and was allocated using the GA4 landing-page
+   * mix. Ads conversion-value totals are never replaced by GA4 revenue — only
+   * their split across products is estimated.
+   */
+  estimated: boolean;
+}
+
+/** Share of paid product demand per line, derived from GA4 product landings. */
+export interface ProductWeights {
+  weights: Partial<Record<ProductLine, number>>;
+  basis: "key_events" | "revenue" | "sessions" | "none";
+  sample: number;
 }
 
 export type IntelOwner = "ads" | "site";
 
 export const DECISION_STATUSES = ["applied", "dismissed", "open"] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];
+
+/** What a card's success claim reduces to, so it can be re-measured later. */
+export const CHECK_KINDS = [
+  "campaign_roas",
+  "campaign_spend",
+  "campaign_lost_is_budget",
+  "campaign_frequency",
+  "blended_roas",
+  "platform_roas",
+  "paid_social_sessions",
+  "unassigned_share",
+  "mobile_cvr",
+  "page_bounce",
+  "page_key_events",
+  "query_ctr",
+  "url_ctr",
+] as const;
+export type CheckKind = (typeof CHECK_KINDS)[number];
+
+export interface IntelCheck {
+  kind: CheckKind;
+  /** Campaign name, landing path, query, or platform — whatever the kind needs. */
+  subject: string | null;
+  /** "up" = the number should rise to pass. */
+  direction: "up" | "down";
+  /** Value that counts as a pass, when the card names one. */
+  target: number | null;
+  unit: "roas" | "usd" | "pct" | "count" | "ratio";
+  label: string;
+}
+
+export type OutcomeVerdict = "worked" | "no_change" | "worse" | "too_early" | "unmeasurable";
+
+export interface IntelOutcome {
+  verdict: OutcomeVerdict;
+  baseline: number | null;
+  baseline_as_of: string | null;
+  current: number | null;
+  target: number | null;
+  direction: "up" | "down";
+  unit: IntelCheck["unit"];
+  label: string;
+  /** Human sentence for the card and the export. */
+  summary: string;
+}
 
 export interface IntelDecision {
   card_id: string;
@@ -164,6 +226,9 @@ export interface IntelDecision {
   note: string | null;
   applied_at: string | null;
   dismissed_at: string | null;
+  check: IntelCheck | null;
+  baseline_value: number | null;
+  baseline_as_of: string | null;
 }
 
 export interface IntelCard {
@@ -183,6 +248,13 @@ export interface IntelCard {
   /** Implementation status for this as-of week. */
   status: DecisionStatus;
   decided_at: string | null;
+  note: string | null;
+  /** What to re-measure to decide whether this actually worked. */
+  check: IntelCheck | null;
+  /** The check's value right now — frozen as the baseline when applied. */
+  check_value: number | null;
+  /** Present once the card was applied in an earlier window and can be graded. */
+  outcome: IntelOutcome | null;
 }
 
 export interface IntelBrief {

@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS paid_campaign_daily (
   PRIMARY KEY (platform, date, campaign_name)
 );
 
+-- Highest ad-set frequency inside the campaign that day. Campaign-weighted
+-- frequency hides fatigue: one burnt ad set at 4.0 averages away against
+-- three fresh ones. Only set when an ad-set level export is uploaded.
+ALTER TABLE paid_campaign_daily
+  ADD COLUMN IF NOT EXISTS frequency_peak numeric;
+
 CREATE TABLE IF NOT EXISTS paid_search_query_daily (
   kind text NOT NULL CHECK (kind IN ('query', 'page', 'chart')),
   date text NOT NULL DEFAULT '',
@@ -67,6 +73,14 @@ CREATE TABLE IF NOT EXISTS paid_intel_decisions (
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (card_id, as_of)
 );
+
+-- Outcome loop: what to re-measure, and the value at the moment the change
+-- was applied. Graded on the next upload with a newer as-of, so a card can
+-- be shown as worked / no change / worse instead of just "I did it".
+ALTER TABLE paid_intel_decisions
+  ADD COLUMN IF NOT EXISTS check_json jsonb,
+  ADD COLUMN IF NOT EXISTS baseline_value numeric,
+  ADD COLUMN IF NOT EXISTS baseline_as_of text;
 
 CREATE INDEX IF NOT EXISTS paid_intel_decisions_as_of_idx
   ON paid_intel_decisions (as_of DESC, status);

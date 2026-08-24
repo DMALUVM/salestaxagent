@@ -1,9 +1,14 @@
 import { agentToday, shiftDays } from "../as-of";
+import { productOfPath } from "./classify";
 import { deriveCpc, deriveRoas, round2 } from "./csv";
 import type {
   CampaignAgg, CampaignDaily, FreshnessSource, GaDaily, IntelFilter, IntelFreshness,
-  IntelRangeDays, PlatformKpis, ProductAgg, ProductLine, SearchQueryDaily, SourceFreshness,
+  IntelRangeDays, PlatformKpis, ProductAgg, ProductLine, ProductWeights,
+  SearchQueryDaily, SourceFreshness,
 } from "./types";
+
+/** GA4 channel groups that represent paid traffic. Cross-network ≈ PMax. */
+const PAID_CHANNELS = /^(paid search|paid social|cross-network|display|paid other|paid shopping)$/i;
 
 /** Upload a fresh export once the newest paid row is this many days behind today. */
 export const STALE_AFTER_DAYS = 7;
@@ -23,6 +28,12 @@ export function daysBetween(from: string, to: string): number {
  * `as_of` drives the range windows; this drives the "upload fresh data" nudge
  * and the per-source coverage of the selected window.
  */
+/** True table-wide totals, so a windowed read still reports real history. */
+export type SourceStats = Partial<Record<
+  FreshnessSource,
+  { rows: number; min_date: string | null; max_date: string | null }
+>>;
+
 export function buildFreshness(opts: {
   campaigns: Array<{ date: string; platform?: string }>;
   queries: Array<{ date: string; kind?: string }>;
@@ -30,6 +41,7 @@ export function buildFreshness(opts: {
   today?: string;
   asOf?: string | null;
   range?: IntelRangeDays;
+  stats?: SourceStats;
 }): IntelFreshness {
   const today = opts.today ?? agentToday();
   const range = opts.range ?? 7;
@@ -62,6 +74,14 @@ export function buildFreshness(opts: {
     const inWindow = windowStart && asOf
       ? [...days].filter((d) => d >= windowStart && d <= asOf).length
       : days.size;
+    // Rows here may be a windowed read; the table-wide stats keep the history
+    // span honest without loading every row on every request.
+    const stat = opts.stats?.[key];
+    if (stat) {
+      if (stat.min_date && (!min || stat.min_date < min)) min = stat.min_date;
+      if (stat.max_date && stat.max_date > max) max = stat.max_date;
+    }
+    const totalRows = stat ? stat.rows : rows.length;
     const behind = max ? daysBetween(max, today) : null;
     // A source that reports on a lag cannot fill the newest days of the window.
     // Judge it against what it could have, so GSC's 2-day trail is not a "gap".
@@ -71,7 +91,7 @@ export function buildFreshness(opts: {
       source: key,
       label,
       file,
-      rows: rows.length,
+      rows: totalRows,
       min_date: min || null,
       max_date: max || null,
       days_behind: behind,
@@ -80,7 +100,7 @@ export function buildFreshness(opts: {
       days_in_range: inWindow,
       range_days: range,
       expected_days: expected,
-      coverage: range && rows.length ? Math.min(1, inWindow / expected) : null,
+      coverage: range && totalRows ? Math.min(1, inWindow / expected) : null,
     };
   };
 
@@ -93,7 +113,7 @@ export function buildFreshness(opts: {
       source: "gsc_snapshot",
       label: "Search Console snapshot",
       file: "Queries.csv + Pages.csv",
-      rows: snapshot.length,
+      rows: opts.stats?.gsc_snapshot?.rows ?? snapshot.length,
       min_date: null,
       max_date: null,
       days_behind: null,
@@ -207,7 +227,7 @@ export function aggregateCampaigns(rows: CampaignDaily[]): CampaignAgg[] {
   for (const list of map.values()) {
     const first = list[0];
     let spend = 0, conv = 0, clicks = 0, impressions = 0, conversions = 0;
-    let lostNum = 0, lostDen = 0, freqNum = 0, freqDen = 0;
+    let lostNum = 0, lostDen = 0, freqNum = 0, freqDen = 0, freqPeak: number | null = null;
     const dates = new Set<string>();
     let status: string | null = first.status;
     for (const r of list) {
@@ -224,6 +244,9 @@ export function aggregateCampaigns(rows: CampaignDaily[]): CampaignAgg[] {
       if (r.frequency != null && r.impressions > 0) {
         freqNum += r.frequency * r.impressions;
         freqDen += r.impressions;
+      }
+      if (r.frequency_peak != null) {
+        freqPeak = Math.max(freqPeak ?? 0, r.frequency_peak);
       }
       if (r.status) status = r.status;
     }
@@ -243,6 +266,7 @@ export function aggregateCampaigns(rows: CampaignDaily[]): CampaignAgg[] {
       cpc: deriveCpc(spend, clicks),
       lost_is_budget: lostDen ? lostNum / lostDen : null,
       frequency: freqDen ? freqNum / freqDen : null,
+      frequency_peak: freqPeak,
       status,
       days_live: dates.size,
     });
@@ -250,14 +274,63 @@ export function aggregateCampaigns(rows: CampaignDaily[]): CampaignAgg[] {
   return out.sort((a, b) => b.spend - a.spend || a.campaign_name.localeCompare(b.campaign_name));
 }
 
-export function aggregateProducts(rows: CampaignDaily[]): ProductAgg[] {
-  const map = new Map<ProductLine, { spend: number; conv: number; conversions: number }>();
+/**
+ * Which products paid traffic actually lands on, from GA4 product pages.
+ * PMax and Brand Search campaign names carry no product, so without this the
+ * product view only sees the Meta campaigns that happen to be named.
+ */
+export function productWeightsFromGa(ga: GaDaily[]): ProductWeights {
+  const paid = ga.filter((r) => PAID_CHANNELS.test(r.channel_group));
+  const pool = paid.length ? paid : ga;
+  const ke = new Map<ProductLine, number>();
+  const rev = new Map<ProductLine, number>();
+  const sess = new Map<ProductLine, number>();
+  for (const r of pool) {
+    const product = productOfPath(r.landing_page);
+    if (product === "other") continue;
+    ke.set(product, (ke.get(product) ?? 0) + r.key_events);
+    rev.set(product, (rev.get(product) ?? 0) + r.revenue);
+    sess.set(product, (sess.get(product) ?? 0) + r.sessions);
+  }
+  const pick = (): { map: Map<ProductLine, number>; basis: ProductWeights["basis"] } => {
+    const total = (m: Map<ProductLine, number>) => [...m.values()].reduce((s, v) => s + v, 0);
+    if (total(ke) > 0) return { map: ke, basis: "key_events" };
+    if (total(rev) > 0) return { map: rev, basis: "revenue" };
+    if (total(sess) > 0) return { map: sess, basis: "sessions" };
+    return { map: new Map(), basis: "none" };
+  };
+  const { map, basis } = pick();
+  const total = [...map.values()].reduce((s, v) => s + v, 0);
+  if (!total) return { weights: {}, basis: "none", sample: 0 };
+  const weights: Partial<Record<ProductLine, number>> = {};
+  for (const [product, v] of map) weights[product] = v / total;
+  return { weights, basis, sample: total };
+}
+
+export function aggregateProducts(rows: CampaignDaily[], weights?: ProductWeights): ProductAgg[] {
+  const map = new Map<ProductLine, { spend: number; conv: number; conversions: number; est: boolean }>();
+  const add = (product: ProductLine, spend: number, conv: number, conversions: number, est: boolean) => {
+    const cur = map.get(product) ?? { spend: 0, conv: 0, conversions: 0, est: false };
+    cur.spend += spend;
+    cur.conv += conv;
+    cur.conversions += conversions;
+    cur.est = cur.est || est;
+    map.set(product, cur);
+  };
+  const w = weights?.weights ?? {};
+  const entries = Object.entries(w) as Array<[ProductLine, number]>;
+  const usable = entries.filter(([, share]) => share > 0);
+
   for (const r of rows) {
-    const cur = map.get(r.product) ?? { spend: 0, conv: 0, conversions: 0 };
-    cur.spend += r.spend;
-    cur.conv += r.conv_value;
-    cur.conversions += r.conversions;
-    map.set(r.product, cur);
+    // A campaign that names its product is attributed directly. One that does
+    // not (PMax, Brand Search) is split by where paid traffic actually landed.
+    if (r.product !== "other" || !usable.length) {
+      add(r.product, r.spend, r.conv_value, r.conversions, false);
+      continue;
+    }
+    for (const [product, share] of usable) {
+      add(product, r.spend * share, r.conv_value * share, r.conversions * share, true);
+    }
   }
   return [...map.entries()]
     .map(([product, v]) => ({
@@ -266,6 +339,7 @@ export function aggregateProducts(rows: CampaignDaily[]): ProductAgg[] {
       conv_value: round2(v.conv),
       roas: deriveRoas(v.spend, v.conv),
       conversions: round2(v.conversions),
+      estimated: v.est,
     }))
     .sort((a, b) => b.spend - a.spend);
 }
