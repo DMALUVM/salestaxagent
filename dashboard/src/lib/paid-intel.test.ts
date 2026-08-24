@@ -160,8 +160,15 @@ describe("parsers on the attached Tallowbourn files", { skip: !haveUploads }, ()
     assert.equal(intel.as_of, "2026-08-24");
     assert.ok(intel.cards.length <= 12);
     assert.ok(intel.cards.length >= 1);
-    for (let i = 1; i < intel.cards.length; i++) {
-      assert.ok(intel.cards[i - 1].stake >= intel.cards[i].stake);
+    const ads = intel.cards.filter((c) => c.owner === "ads");
+    const site = intel.cards.filter((c) => c.owner === "site");
+    assert.ok(ads.length >= 1, "ads desk must have keep/kill work");
+    assert.ok(site.length >= 1, "site desk must have conversion work");
+    for (let i = 1; i < ads.length; i++) {
+      assert.ok(ads[i - 1].stake >= ads[i].stake);
+    }
+    for (let i = 1; i < site.length; i++) {
+      assert.ok(site[i - 1].stake >= site[i].stake);
     }
     const copy = intel.cards.map((c) => `${c.doThis} ${c.body}`).join("\n").toLowerCase();
     assert.match(copy, /brand search/);
@@ -169,6 +176,8 @@ describe("parsers on the attached Tallowbourn files", { skip: !haveUploads }, ()
     assert.ok(intel.wins.every((w) => w.spend >= 1));
     assert.ok(intel.losses.every((w) => w.spend >= 1));
     assert.match(intel.grok.markdown, /keep \/ kill/i);
+    assert.match(intel.grok.markdown, /paid media/i);
+    assert.match(intel.grok.markdown, /site & conversion/i);
     assert.ok(intel.grok.snapshot.campaigns.length <= 24);
     assert.ok(intel.kpis.google.spend > 0);
     assert.ok(intel.kpis.meta.spend > 0);
@@ -176,6 +185,9 @@ describe("parsers on the attached Tallowbourn files", { skip: !haveUploads }, ()
     assert.ok(brand, "Brand Search is a hold — card must fire when brand ROAS is high");
     assert.match(brand!.doThis, /do not raise Brand Search/i);
     assert.ok(intel.wow.last.spend > 0);
+    assert.match(intel.brief.headline, /2026-08-24/);
+    assert.ok(ads.some((c) => c.id === "lost-is-trap" || c.id === "worst-google" || c.id === "mix-cut"));
+    assert.ok(site.some((c) => c.id === "bounce-sink" || c.id === "gsc-title-trap" || c.id === "unassigned"));
   });
 
   test("win/lose hides $0 Meta; GA4 revenue is not ads conv value", () => {

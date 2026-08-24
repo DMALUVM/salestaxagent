@@ -1,6 +1,6 @@
 import { deriveRoas } from "./csv";
 import type {
-  CampaignAgg, GrokSnapshot, IntelCard, IntelRangeDays, PlatformKpis,
+  CampaignAgg, GrokSnapshot, IntelBrief, IntelCard, IntelRangeDays, PlatformKpis,
   ProductAgg, SearchQueryDaily,
 } from "./types";
 
@@ -15,6 +15,7 @@ export function buildGrok(opts: {
   meta: PlatformKpis;
   blended: PlatformKpis;
   wow?: { last: PlatformKpis; prior: PlatformKpis };
+  brief?: IntelBrief;
   camps: CampaignAgg[];
   products: ProductAgg[];
   cards: IntelCard[];
@@ -71,19 +72,30 @@ export function buildGrok(opts: {
       `- Last 7 blended ${money(opts.wow.last.spend)} at ${opts.wow.last.roas.toFixed(2)}x vs prior 7 ${money(opts.wow.prior.spend)} at ${opts.wow.prior.roas.toFixed(2)}x.`,
     );
   }
-  lines.push(
-    "",
-    "## Stack (ranked by $ at stake)",
-  );
-  if (!opts.cards.length) lines.push("1. No keep/kill cards — upload a Google or Meta CSV.");
-  opts.cards.forEach((c, i) => {
-    lines.push(`${i + 1}. [${c.action.toUpperCase()} · ${money(c.stake)}] ${c.title}`);
-    lines.push(`   Metric: ${c.metric}`);
-    lines.push(`   ${c.body}`);
-    lines.push(`   Do this (7 days): ${c.doThis}`);
-    lines.push(`   If it works: ${c.ifItWorks}`);
-    lines.push(`   Evidence: ${c.evidence}`);
-  });
+  if (opts.brief?.headline) {
+    lines.push("", "## This week", opts.brief.headline, "", opts.brief.ads, opts.brief.site);
+  }
+  const ads = opts.cards.filter((c) => c.owner === "ads");
+  const site = opts.cards.filter((c) => c.owner === "site");
+  function dump(title: string, list: IntelCard[], start: number) {
+    lines.push("", `## ${title}`);
+    if (!list.length) {
+      lines.push("None for this filter.");
+      return start;
+    }
+    list.forEach((c, i) => {
+      lines.push(`${start + i}. [${c.action.toUpperCase()} · ${c.owner.toUpperCase()} · ${money(c.stake)}] ${c.title}`);
+      lines.push(`   Metric: ${c.metric}`);
+      lines.push(`   ${c.body}`);
+      lines.push(`   Do this (7 days): ${c.doThis}`);
+      lines.push(`   If it works: ${c.ifItWorks}`);
+      lines.push(`   Evidence: ${c.evidence}`);
+    });
+    return start + list.length;
+  }
+  const next = dump("Paid media — ads lead (ranked by $ at stake)", ads, 1);
+  dump("Site & conversion — web team (ranked by $ at stake)", site, next);
+  if (!opts.cards.length) lines.push("", "1. No keep/kill cards — upload a Google or Meta CSV.");
   lines.push("", "## JSON snapshot", "```json", JSON.stringify(snapshot, null, 2), "```", "");
   return { markdown: lines.join("\n"), snapshot };
 }

@@ -5,8 +5,8 @@ import {
 } from "./window";
 import { buildGrok } from "./grok";
 import type {
-  CampaignAgg, CampaignDaily, GaDaily, IntelBundle, IntelCard, IntelFilter,
-  IntelRangeDays, SearchQueryDaily, WinLoseRow,
+  CampaignAgg, CampaignDaily, GaDaily, IntelBrief, IntelBundle, IntelCard,
+  IntelFilter, IntelOwner, IntelRangeDays, SearchQueryDaily, WinLoseRow,
 } from "./types";
 
 const PAID_GA = /^(paid search|paid social|cross-network|display|paid other)$/i;
@@ -19,10 +19,13 @@ function roas(n: number): string {
   return `${n.toFixed(2)}x`;
 }
 
-function card(partial: Omit<IntelCard, "severity"> & { severity?: IntelCard["severity"] }): IntelCard {
+function card(partial: Omit<IntelCard, "severity" | "owner"> & {
+  severity?: IntelCard["severity"];
+  owner?: IntelOwner;
+}): IntelCard {
   const stake = partial.stake;
   const severity = partial.severity ?? (stake >= 200 ? "critical" : stake >= 50 ? "warn" : "info");
-  return { ...partial, severity };
+  return { owner: "ads", ...partial, severity };
 }
 
 function nonBrandGoogle(camps: CampaignAgg[]): CampaignAgg[] {
@@ -38,8 +41,14 @@ function scaleTargetName(camps: CampaignAgg[]): string {
   const t = bestNonBrandTarget(camps);
   if (t) return t.campaign_name;
   const pmax = camps.find((c) => c.platform === "google" && c.campaign_type === "PMax" && !c.is_brand);
-  if (pmax) return pmax.campaign_name;
-  return "the best non-brand Google campaign (never Brand Search)";
+  if (pmax && pmax.roas >= 1.0) return pmax.campaign_name;
+  return "";
+}
+
+function worstNamed(camps: CampaignAgg[], platform: CampaignAgg["platform"]): CampaignAgg | null {
+  return camps
+    .filter((c) => c.platform === platform && c.spend >= 1 && !c.is_brand)
+    .sort((a, b) => a.roas - b.roas || b.spend - a.spend)[0] ?? null;
 }
 
 function detectMixCut(last: CampaignDaily[], camps: CampaignAgg[]): IntelCard | null {
@@ -52,11 +61,17 @@ function detectMixCut(last: CampaignDaily[], camps: CampaignAgg[]): IntelCard | 
   const stake = round2(loser.spend * Math.min(0.4, Math.max(0.15, 1 - loser.roas / Math.max(winner.roas, 0.01))));
   if (stake < 20) return null;
   const target = scaleTargetName(camps);
+  const cutFrom = loser.platform === "meta"
+    ? (worstNamed(camps, "meta")?.campaign_name ?? "Meta prospecting")
+    : (worstNamed(camps, "google")?.campaign_name ?? "Google non-brand");
+  const redeploy = target
+    ? `Move at most half of that to ${target}. Pocket the rest.`
+    : "Pocket the cut — no non-brand campaign is strong enough to absorb it.";
   return card({
     id: "mix-cut",
     title: `${loser.platform === "google" ? "Google" : "Meta"} is the expensive half of the mix`,
-    body: `Last 7 days: Google ${money(g.spend)} at ${roas(g.roas)} vs Meta ${money(m.spend)} at ${roas(m.roas)}. Cut the loser — do not park the dollars on Brand Search.`,
-    doThis: `7-day test: pull ${money(stake)} off ${loser.platform === "google" ? "Google non-brand / PMax" : "Meta prospecting"} and add it to ${target}. Leave Brand Search untouched.`,
+    body: `Last 7 days: Google ${money(g.spend)} at ${roas(g.roas)} vs Meta ${money(m.spend)} at ${roas(m.roas)}. Cut the loser. Do not park the dollars on Brand Search or on a sub-1x Search campaign.`,
+    doThis: `7-day test: pull ${money(stake)} off ${cutFrom}. ${redeploy} Leave Brand Search untouched.`,
     ifItWorks: `Blended ads ROAS rises toward ${roas(winner.roas)} without a Brand Search spend spike.`,
     evidence: `Google ROAS ${roas(g.roas)} on ${money(g.spend)}; Meta ROAS ${roas(m.roas)} on ${money(m.spend)}.`,
     stake,
@@ -153,14 +168,20 @@ function detectCollapse(last: CampaignDaily[], prior: CampaignDaily[]): IntelCar
   if (b.spend < 40 || a.spend < 20) return null;
   const revDrop = b.conv_value > 0 ? (b.conv_value - a.conv_value) / b.conv_value : 0;
   const roasDrop = b.roas > 0 ? (b.roas - a.roas) / b.roas : 0;
-  if (revDrop < 0.25 && roasDrop < 0.3) return null;
+  const spendFlat = Math.abs(a.spend - b.spend) / Math.max(b.spend, 1) <= 0.15;
+  if (revDrop < 0.18 && roasDrop < 0.2) return null;
   const stake = round2(Math.max(0, b.conv_value - a.conv_value));
+  const worst = [...aggregateCampaigns(last)]
+    .filter((c) => !c.is_brand && c.spend >= 20)
+    .sort((x, y) => x.roas - y.roas)[0];
   return card({
     id: "wow-collapse",
-    title: "Last 7 days collapsed vs the prior 7",
-    body: `Conv. value ${money(a.conv_value)} vs ${money(b.conv_value)} prior (${Math.round(revDrop * 100)}%). ROAS ${roas(a.roas)} vs ${roas(b.roas)}.`,
-    doThis: "7-day test: freeze new tests, hold Brand Search, cut the worst non-brand loser 30%, and keep the best PMax/non-brand Search live.",
-    ifItWorks: "This week's conv. value recovers at least halfway to the prior week.",
+    title: spendFlat
+      ? "Spend held. Conversion value did not."
+      : "Last 7 days collapsed vs the prior 7",
+    body: `Conv. value ${money(a.conv_value)} vs ${money(b.conv_value)} prior (${Math.round(revDrop * 100)}% drop). ROAS ${roas(a.roas)} vs ${roas(b.roas)}. ${spendFlat ? "This is an efficiency problem, not a budget problem." : ""}`.trim(),
+    doThis: `7-day test: freeze new tests. Hold Brand Search. Cut ${worst?.campaign_name ?? "the worst non-brand loser"} ~30%. Keep PMax live at the current daily. Do not raise anything to "make up" the week.`,
+    ifItWorks: "This week's conv. value recovers at least halfway to the prior week on the same or less spend.",
     evidence: `Last7 spend ${money(a.spend)} ROAS ${roas(a.roas)}; prior7 spend ${money(b.spend)} ROAS ${roas(b.roas)}.`,
     stake: Math.max(stake, 40),
     metric: `ROAS ${roas(a.roas)} vs ${roas(b.roas)} — diagnose`,
@@ -181,15 +202,18 @@ function detectBrandSplit(camps: CampaignAgg[]): IntelCard | null {
   const nRoas = deriveRoas(nSpend, nConv);
   const target = scaleTargetName(camps);
   if (bRoas >= 1.8) {
+    const scale = target && nRoas >= 1.2
+      ? `Add ~15% budget to ${target}.`
+      : `Do not add budget to non-brand until a campaign clears 1.2x. ${target ? `Closest is ${target}.` : ""} Keep Brand Search spend flat.`;
     return card({
       id: "brand-split",
-      title: "Hold Brand Search — scale non-brand Google",
-      body: `Brand is ${roas(bRoas)} on ${money(bSpend)}. Non-brand is ${roas(nRoas)} on ${money(nSpend)}. Brand is a hold, not a growth lever.`,
-      doThis: `7-day test: do not raise Brand Search. Add ~15% budget to ${target}.`,
-      ifItWorks: "Non-brand spend rises; brand spend stays flat; blended Google ROAS holds.",
+      title: "Hold Brand Search — it is harvest, not growth",
+      body: `Brand is ${roas(bRoas)} on ${money(bSpend)}. Non-brand is ${roas(nRoas)} on ${money(nSpend)}. Raising Brand Search steals cheap returning demand and will not fix the week.`,
+      doThis: `7-day test: do not raise Brand Search. Cap it at last week's spend. ${scale}`,
+      ifItWorks: "Brand spend stays flat; incremental conversions come from a non-brand campaign at ≥ 1.2x, or spend simply falls.",
       evidence: `Brand ${money(bSpend)} ${roas(bRoas)}; non-brand ${money(nSpend)} ${roas(nRoas)}.`,
-      stake: round2(nSpend * 0.15),
-      metric: `brand ${roas(bRoas)} keep · non-brand scale`,
+      stake: round2(Math.max(nSpend * 0.15, bSpend * 0.2)),
+      metric: `brand ${roas(bRoas)} keep · do not scale`,
       action: "keep",
     });
   }
@@ -250,6 +274,70 @@ function detectProspectRetarget(camps: CampaignAgg[]): IntelCard | null {
     stake,
     metric: `${loserIsRetarget ? "retarget" : "prospect"} ${roas(loserIsRetarget ? rR : pR)} — cut`,
     action: "shift",
+  });
+}
+
+function detectLostIsTrap(camps: CampaignAgg[]): IntelCard | null {
+  const hits = camps.filter((c) =>
+    c.platform === "google" && !c.is_brand && (c.lost_is_budget ?? 0) > 12 && c.roas < 1.2 && c.spend >= 25);
+  if (!hits.length) return null;
+  const top = hits.sort((a, b) => a.roas - b.roas || b.spend - a.spend)[0];
+  return card({
+    id: "lost-is-trap",
+    title: `Do not raise ${top.campaign_name} — lost IS is not a budget signal`,
+    body: `Lost IS (budget) ${(top.lost_is_budget ?? 0).toFixed(0)}% looks like “constrained demand.” It is not. ROAS is ${roas(top.roas)} on ${money(top.spend)}. Raising daily budget here buys more of a losing query mix.`,
+    doThis: `7-day test: cut ${top.campaign_name} ~25% (${money(round2(top.spend * 0.25))}). Tighten the asset group / search theme. Do not move that money to Brand Search.`,
+    ifItWorks: `ROAS on ${top.campaign_name} rises above 1.0x, or the spend is gone and blended Google ROAS ticks up.`,
+    evidence: hits.map((c) => `${c.campaign_name} lost-IS ${(c.lost_is_budget ?? 0).toFixed(0)}% ROAS ${roas(c.roas)} ${money(c.spend)}`).join("; "),
+    stake: round2(top.spend * 0.25),
+    metric: `lost IS ${(top.lost_is_budget ?? 0).toFixed(0)}% · ROAS ${roas(top.roas)} — cut`,
+    action: "kill",
+    severity: "critical",
+  });
+}
+
+function detectWorstLive(camps: CampaignAgg[]): IntelCard[] {
+  const out: IntelCard[] = [];
+  for (const platform of ["google", "meta"] as const) {
+    const worst = camps
+      .filter((c) => c.platform === platform && !c.is_brand && c.spend >= 40 && c.roas < 0.85)
+      .sort((a, b) => a.roas - b.roas || b.spend - a.spend)[0];
+    if (!worst) continue;
+    if (platform === "google" && (worst.lost_is_budget ?? 0) > 12) continue; // lost-is-trap owns it
+    const cut = round2(worst.spend * 0.3);
+    out.push(card({
+      id: `worst-${platform}`,
+      title: `Cut ${worst.campaign_name} first`,
+      body: `${worst.campaign_name} spent ${money(worst.spend)} at ${roas(worst.roas)} with ${worst.conversions} conversions. That is the weakest live ${platform === "google" ? "Google" : "Meta"} campaign. Do not “refresh and scale.”`,
+      doThis: `7-day test: cut daily budget ~30% (${money(cut)}) on ${worst.campaign_name}. Keep the better sibling live. Do not send the leftover to Brand Search.`,
+      ifItWorks: `${worst.campaign_name} ROAS ≥ 1.0x on the remaining spend, or it is paused and account ROAS rises.`,
+      evidence: `${worst.campaign_name} ${money(worst.spend)} / ${roas(worst.roas)} / ${worst.conversions} conv · ${worst.product} · ${worst.audience !== "unknown" ? worst.audience : worst.campaign_type}.`,
+      stake: cut,
+      metric: `${roas(worst.roas)} — cut 30%`,
+      action: "kill",
+    }));
+  }
+  return out;
+}
+
+function detectPmaxHold(camps: CampaignAgg[]): IntelCard | null {
+  const pmax = camps.filter((c) => c.platform === "google" && c.campaign_type === "PMax" && !c.is_brand);
+  const spend = pmax.reduce((s, c) => s + c.spend, 0);
+  const conv = pmax.reduce((s, c) => s + c.conv_value, 0);
+  if (spend < 80) return null;
+  const r = deriveRoas(spend, conv);
+  if (r < 0.8 || r > 1.8) return null;
+  const name = pmax.sort((a, b) => b.spend - a.spend)[0]?.campaign_name ?? "PMax";
+  return card({
+    id: "pmax-hold",
+    title: `${name} is the only non-brand engine near 1x — hold`,
+    body: `PMax is ${roas(r)} on ${money(spend)}. That is not a scale signal and not a kill signal. Daily results are lumpy. Do not chase a $0 day by raising Brand Search or AI MAX.`,
+    doThis: `7-day test: hold ${name} at the current daily. No new asset groups. No Brand Search dump. Review one week of conv. value, not one day.`,
+    ifItWorks: "PMax weekly ROAS stays ≥ 1.0x and Brand Search spend does not rise.",
+    evidence: pmax.map((c) => `${c.campaign_name} ${money(c.spend)} ${roas(c.roas)}`).join("; "),
+    stake: round2(spend * 0.1),
+    metric: `PMax ${roas(r)} — hold`,
+    action: "keep",
   });
 }
 
@@ -325,20 +413,61 @@ function detectShoppingVsPmax(camps: CampaignAgg[]): IntelCard | null {
   });
 }
 
+function detectGscTitleTrap(queries: SearchQueryDaily[]): IntelCard | null {
+  const hits = queries.filter((q) =>
+    q.kind === "query" && q.date === "" && (q.position ?? 99) >= 4 && (q.position ?? 99) <= 8
+    && q.impressions >= 400 && (q.ctr ?? 100) < 1);
+  if (!hits.length) return null;
+  const top = [...hits].sort((a, b) => b.impressions - a.impressions)[0];
+  return card({
+    id: "gsc-title-trap",
+    owner: "site",
+    title: `"${top.query}" is already on page one — the title is the leak`,
+    body: `Snapshot rank ${top.position?.toFixed(1)} with ${fmtInt(top.impressions)} impressions and CTR ${top.ctr?.toFixed(2)}%. This is not a ranking problem. Do not invent a Δ position from Queries.csv.`,
+    doThis: `7-day test: rewrite title + meta + first 120 characters to match "${top.query}" exactly (include the product noun). Point an above-the-fold CTA at the matching PDP. No paid bid changes.`,
+    ifItWorks: `CTR on "${top.query}" doubles on the next Queries.csv snapshot.`,
+    evidence: hits.slice(0, 4).map((q) => `"${q.query}" pos ${q.position?.toFixed(1)} · ${q.impressions} impr · CTR ${q.ctr?.toFixed(2)}%`).join("; "),
+    stake: round2(Math.max(top.impressions * 0.02, 40)),
+    metric: `CTR ${top.ctr?.toFixed(2)}% at pos ${top.position?.toFixed(1)} — rewrite`,
+    action: "fix",
+  });
+}
+
+function detectGscClimb(queries: SearchQueryDaily[]): IntelCard | null {
+  const hits = queries.filter((q) =>
+    q.kind === "query" && q.date === "" && (q.position ?? 0) >= 8 && (q.position ?? 0) <= 15
+    && q.impressions >= 200 && (q.ctr ?? 0) >= 2);
+  if (!hits.length) return null;
+  const top = [...hits].sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions)[0];
+  return card({
+    id: "gsc-climb",
+    owner: "site",
+    title: `"${top.query}" already earns the click — help it climb`,
+    body: `CTR ${top.ctr?.toFixed(1)}% at position ${top.position?.toFixed(1)} on ${fmtInt(top.impressions)} impressions. The snippet works. Rank is the constraint. Snapshot only — no invented Δ.`,
+    doThis: `7-day test: add two internal links with the exact anchor "${top.query}" from the homepage and the closest blog. Strengthen the matching PDP H1. No Brand Search bid changes.`,
+    ifItWorks: "Clicks on that query rise on the next snapshot. Position may or may not move.",
+    evidence: hits.slice(0, 3).map((q) => `"${q.query}" pos ${q.position?.toFixed(1)} · CTR ${q.ctr?.toFixed(1)}% · ${q.clicks} clicks`).join("; "),
+    stake: round2(top.clicks * 12),
+    metric: `pos ${top.position?.toFixed(1)} · CTR ${top.ctr?.toFixed(1)}% — links`,
+    action: "fix",
+    severity: "info",
+  });
+}
+
 function detectGscPosition(queries: SearchQueryDaily[]): IntelCard | null {
   const hits = queries.filter((q) =>
     q.kind === "query" && q.date === "" && (q.position ?? 0) >= 4 && (q.position ?? 0) <= 15 && q.impressions >= 80);
-  if (!hits.length) return null;
+  if (hits.length < 8) return null;
   const top = [...hits].sort((a, b) => b.impressions - a.impressions).slice(0, 5);
-  const stake = round2(top.reduce((s, q) => s + q.impressions, 0) * 0.02);
   return card({
     id: "gsc-striking",
-    title: "Queries sitting in positions 4–15",
-    body: "These are snapshot ranks from Queries.csv — not a measured drop. Do not invent a Δ position. They are in striking distance for title/internal-link work.",
+    owner: "site",
+    title: `${hits.length} queries sitting in positions 4–15`,
+    body: "Snapshot ranks from Queries.csv — not a measured drop. Do not invent a Δ position. Prioritize title work (pos 4–8, low CTR) over paid bids.",
     doThis: `7-day test: rewrite title + first paragraph for "${top[0].query}" and one sibling. No paid bid changes on Brand Search.`,
-    ifItWorks: "Clicks on those queries rise on the next GSC snapshot. Position may or may not move.",
+    ifItWorks: "Clicks on those queries rise on the next GSC snapshot.",
     evidence: top.map((q) => `"${q.query}" pos ${q.position?.toFixed(1)} · ${q.impressions} impr`).join("; "),
-    stake: Math.max(stake, 25),
+    stake: 25,
     metric: `${hits.length} queries in pos 4–15`,
     action: "fix",
     severity: "info",
@@ -349,17 +478,23 @@ function detectLowCtrTitles(pages: SearchQueryDaily[]): IntelCard | null {
   const hits = pages.filter((p) => p.kind === "page" && p.impressions >= 2000 && (p.ctr ?? 100) < 1);
   if (!hits.length) return null;
   const top = [...hits].sort((a, b) => b.impressions - a.impressions).slice(0, 4);
+  const path = top[0].query.replace(/^https?:\/\/[^/]+/, "");
   return card({
     id: "gsc-ctr",
-    title: "High-impression pages with CTR under 1%",
-    body: "Search is showing the URL. The title/meta is not earning the click.",
-    doThis: `7-day test: new title + meta on ${top[0].query.replace(/^https?:\/\//, "")}.`,
-    ifItWorks: "CTR on that URL rises on the next Pages.csv snapshot.",
-    evidence: top.map((p) => `${p.query} ${p.impressions} impr CTR ${p.ctr?.toFixed(2)}%`).join("; "),
-    stake: round2(top[0].impressions * 0.01),
+    owner: "site",
+    title: "PDPs and blogs are showing in Search with CTR under 1%",
+    body: `${path} has ${fmtInt(top[0].impressions)} impressions at CTR ${top[0].ctr?.toFixed(2)}%. Google is showing the URL. The title/meta is not earning the click.`,
+    doThis: `7-day test: new title + meta on ${path} — lead with the product noun + "grass-fed tallow". Repeat on the next two URLs in evidence.`,
+    ifItWorks: "CTR on those URLs rises on the next Pages.csv snapshot.",
+    evidence: top.map((p) => `${p.query.replace(/^https?:\/\/[^/]+/, "")} ${p.impressions} impr CTR ${p.ctr?.toFixed(2)}%`).join("; "),
+    stake: round2(Math.min(top[0].impressions * 0.004, 180)),
     metric: `CTR ${top[0].ctr?.toFixed(2)}% — rewrite`,
     action: "fix",
   });
+}
+
+function fmtInt(n: number): string {
+  return Math.round(n).toLocaleString();
 }
 
 function detectMobileLeak(ga: GaDaily[]): IntelCard | null {
@@ -380,6 +515,7 @@ function detectMobileLeak(ga: GaDaily[]): IntelCard | null {
     id: "mobile-cvr",
     title: "Mobile conversion is leaking vs desktop",
     body: `Mobile CVR ${(mCvr * 100).toFixed(1)}% on ${mS} sessions vs desktop ${(dCvr * 100).toFixed(1)}%.`,
+    owner: "site",
     doThis: "7-day test: fix the top mobile landing (balm or deodorant PDP) — speed, ATC, sticky add-to-cart. Do not raise ads until CVR moves.",
     ifItWorks: "Mobile CVR closes at least a third of the gap to desktop.",
     evidence: `Mobile ${mK}/${mS}; desktop ${dK}/${dS}.`,
@@ -389,32 +525,106 @@ function detectMobileLeak(ga: GaDaily[]): IntelCard | null {
   });
 }
 
-function detectBounce(ga: GaDaily[]): IntelCard | null {
-  const by = new Map<string, { sessions: number; bounce: number; rev: number; n: number }>();
+function landingRollup(ga: GaDaily[]) {
+  const by = new Map<string, { sessions: number; bounce: number; bn: number; rev: number; ke: number }>();
   for (const r of ga) {
-    if (r.bounce_rate == null || r.sessions < 1) continue;
-    const cur = by.get(r.landing_page) ?? { sessions: 0, bounce: 0, rev: 0, n: 0 };
+    const cur = by.get(r.landing_page) ?? { sessions: 0, bounce: 0, bn: 0, rev: 0, ke: 0 };
     cur.sessions += r.sessions;
-    cur.bounce += r.bounce_rate * r.sessions;
     cur.rev += r.revenue;
-    cur.n += r.sessions;
+    cur.ke += r.key_events;
+    if (r.bounce_rate != null) {
+      cur.bounce += r.bounce_rate * r.sessions;
+      cur.bn += r.sessions;
+    }
     by.set(r.landing_page, cur);
   }
-  const sinks = [...by.entries()]
-    .map(([page, v]) => ({ page, sessions: v.sessions, bounce: v.bounce / v.n, rev: v.rev }))
-    .filter((x) => x.sessions >= 20 && x.bounce >= 0.7)
-    .sort((a, b) => b.sessions - a.sessions);
+  return [...by.entries()].map(([page, v]) => ({
+    page,
+    sessions: v.sessions,
+    bounce: v.bn ? v.bounce / v.bn : null,
+    rev: v.rev,
+    ke: v.ke,
+    cvr: v.sessions ? v.ke / v.sessions : 0,
+  }));
+}
+
+function detectBounce(ga: GaDaily[]): IntelCard | null {
+  const rows = landingRollup(ga);
+  const edu = rows.filter((x) =>
+    x.sessions >= 20 && (x.bounce ?? 0) >= 0.85 && x.ke < 1
+    && (/\/blogs\/|\/pages\/tallow|\/pages\/about/i.test(x.page)));
+  const winners = rows.filter((x) => /\/products\//.test(x.page) && x.rev >= 40)
+    .sort((a, b) => b.rev - a.rev);
+  const dest = winners[0]?.page ?? "/products/tallow-balm";
+  const dest2 = winners[1]?.page ?? "/products/natural-tallow-deodorant-extra-strength";
+  if (edu.length >= 2) {
+    const sess = edu.reduce((s, x) => s + x.sessions, 0);
+    return card({
+      id: "bounce-sink",
+      owner: "site",
+      title: "Educational pages are a conversion dead-end",
+      body: `${edu.length} content URLs bounced ${Math.round((edu[0].bounce ?? 0) * 100)}%+ with zero key events (${sess} sessions). Deodorant and balm PDPs are where money happens. The blogs are not a funnel until they point at a product.`,
+      doThis: `7-day test: add a sticky product module above the fold on ${edu[0].page} and ${edu[1]?.page ?? "tallow-101"} — CTA to ${dest} and ${dest2}. One product, one button, no newsletter first.`,
+      ifItWorks: "Those URLs record key events next Explore export, and bounce falls under 70%.",
+      evidence: edu.slice(0, 5).map((s) => `${s.page} ${Math.round((s.bounce ?? 0) * 100)}% · ${s.sessions} sess · ${s.ke} ke`).join("; "),
+      stake: round2(sess * 2.5),
+      metric: `${sess} sess · 0 key events — fix`,
+      action: "fix",
+    });
+  }
+  const sinks = rows.filter((x) => x.sessions >= 20 && (x.bounce ?? 0) >= 0.7).sort((a, b) => b.sessions - a.sessions);
   if (!sinks.length) return null;
   const top = sinks[0];
   return card({
     id: "bounce-sink",
+    owner: "site",
     title: `Bounce sink: ${top.page}`,
-    body: `${Math.round(top.bounce * 100)}% bounce on ${top.sessions} sessions. Paid and organic are paying for exits.`,
-    doThis: `7-day test: tighten the hero + one CTA on ${top.page}. If it is a blog, add a product module above the fold.`,
+    body: `${Math.round((top.bounce ?? 0) * 100)}% bounce on ${top.sessions} sessions. Paid and organic are paying for exits.`,
+    doThis: `7-day test: tighten the hero + one CTA on ${top.page} pointing at ${dest}.`,
     ifItWorks: "Bounce on that URL falls below 60% next Explore export.",
-    evidence: sinks.slice(0, 3).map((s) => `${s.page} ${Math.round(s.bounce * 100)}% · ${s.sessions} sess`).join("; "),
-    stake: round2(top.sessions * 8),
-    metric: `${Math.round(top.bounce * 100)}% bounce — fix`,
+    evidence: sinks.slice(0, 3).map((s) => `${s.page} ${Math.round((s.bounce ?? 0) * 100)}% · ${s.sessions} sess`).join("; "),
+    stake: round2(top.sessions * 2.5),
+    metric: `${Math.round((top.bounce ?? 0) * 100)}% bounce — fix`,
+    action: "fix",
+  });
+}
+
+function detectPdpWinners(ga: GaDaily[]): IntelCard | null {
+  const rows = landingRollup(ga).filter((x) => /\/products\//.test(x.page) && x.sessions >= 20);
+  const win = rows.filter((x) => x.rev >= 40 && x.ke >= 2).sort((a, b) => b.rev - a.rev);
+  if (!win.length) return null;
+  const top = win[0];
+  return card({
+    id: "pdp-winners",
+    owner: "site",
+    title: `${top.page} is already converting — protect it`,
+    body: `${top.page} did ${money(top.rev)} and ${top.ke} key events on ${top.sessions} sessions (${(top.cvr * 100).toFixed(1)}% CVR). Do not redesign this PDP this week. Point the leaking blogs at it.`,
+    doThis: `7-day test: every blog CTA and /pages/tallow-101 button goes to ${top.page}${win[1] ? ` or ${win[1].page}` : ""}. No theme overhaul.`,
+    ifItWorks: "Blog-origin sessions start showing key events; PDP revenue holds or rises.",
+    evidence: win.slice(0, 3).map((p) => `${p.page} ${money(p.rev)} · ${p.ke} ke · ${p.sessions} sess`).join("; "),
+    stake: round2(top.rev * 0.25),
+    metric: `${(top.cvr * 100).toFixed(1)}% CVR — protect`,
+    action: "keep",
+    severity: "info",
+  });
+}
+
+function detectDeadPdp(ga: GaDaily[]): IntelCard | null {
+  const dead = landingRollup(ga)
+    .filter((x) => /\/products\//.test(x.page) && x.sessions >= 25 && x.ke < 1 && x.rev < 1)
+    .sort((a, b) => b.sessions - a.sessions);
+  if (!dead.length) return null;
+  const top = dead[0];
+  return card({
+    id: "dead-pdp",
+    owner: "site",
+    title: `${top.page} gets traffic and zero conversions`,
+    body: `${top.sessions} sessions, ${top.ke} key events, ${money(top.rev)}. Ads or organic are paying for a PDP that does not close.`,
+    doThis: `7-day test: price/ATC visibility, first-image review, and a 2-product bundle on ${top.page}. If it is soap, cross-link deodorant + balm above the fold.`,
+    ifItWorks: "That PDP records at least one key event next Explore export.",
+    evidence: dead.slice(0, 3).map((p) => `${p.page} ${p.sessions} sess · ${p.ke} ke`).join("; "),
+    stake: round2(top.sessions * 3),
+    metric: `${top.sessions} sess · 0 conv — fix`,
     action: "fix",
   });
 }
@@ -430,12 +640,13 @@ function detectTrackingHole(last: CampaignDaily[], ga: GaDaily[]): IntelCard | n
     id: "meta-tracking",
     title: "Meta is spending; GA4 Paid Social is almost empty",
     body: `Meta ads conversion value is not GA4 revenue. Last 7d Meta spend ${money(metaSpend)} vs GA4 Paid Social ${sess} sessions / ${money(rev)}. That is a tracking hole, not a “Meta is free” story.`,
-    doThis: "7-day test: verify Meta pixel + GA4 ads links + UTMs on every live Meta URL. Do not scale Meta until Paid Social sessions show up.",
-    ifItWorks: "Next GA4 Explore shows Paid Social sessions in line with Meta clicks.",
+    doThis: "7-day test: ads lead + site — add `utm_source=facebook&utm_medium=paid` (or the Ads Manager UTMs) on every live Meta URL, verify the pixel fires on Purchase, and do not scale Meta until Paid Social sessions show up.",
+    ifItWorks: "Next GA4 Explore shows Paid Social sessions in line with Meta clicks (not Organic Social).",
     evidence: `Meta spend ${money(metaSpend)}; GA4 Paid Social sessions ${sess}, revenue ${money(rev)}.`,
     stake: round2(metaSpend),
     metric: "Paid Social ≈ 0 — fix tracking",
     action: "fix",
+    owner: "ads",
     severity: "critical",
   });
 }
@@ -446,14 +657,18 @@ function detectUnassigned(ga: GaDaily[]): IntelCard | null {
   if (total < 80) return null;
   const share = un / total;
   if (share <= 0.12) return null;
+  const landings = landingRollup(ga.filter((r) => /unassigned/i.test(r.channel_group)))
+    .sort((a, b) => b.sessions - a.sessions)
+    .slice(0, 3);
   return card({
     id: "unassigned",
-    title: `Unassigned is ${Math.round(share * 100)}% of GA4 sessions`,
-    body: "More than 12% of sessions have no channel. Last-click ROAS and Paid Social reads are lying until this is fixed.",
-    doThis: "7-day test: audit UTMs on Google + Meta landing URLs; set session channel group overrides for the worst Unassigned landings.",
+    owner: "site",
+    title: `Unassigned is ${Math.round(share * 100)}% of GA4 sessions — and they do not convert`,
+    body: `${un} of ${total} sessions have no channel and ${ga.filter((r) => /unassigned/i.test(r.channel_group)).reduce((s, r) => s + r.key_events, 0)} key events. Last-click ROAS and “Meta is free” reads are lying until this is tagged.`,
+    doThis: `7-day test: add UTMs to Google + Meta landing URLs. Then add a session-channel override for ${landings[0]?.page ?? "the top Unassigned URL"}. The Unassigned pile is mostly blogs and /pages/tallow-101 — tag those templates.`,
     ifItWorks: "Unassigned share falls under 12% on the next Explore export.",
-    evidence: `${un} / ${total} sessions Unassigned.`,
-    stake: round2(un * 4),
+    evidence: `${un} / ${total} Unassigned. Top: ${landings.map((l) => `${l.page} ${l.sessions}`).join("; ")}.`,
+    stake: round2(Math.min(un * 1.5, 400)),
     metric: `${Math.round(share * 100)}% Unassigned — fix`,
     action: "fix",
     severity: share > 0.2 ? "critical" : "warn",
@@ -470,7 +685,7 @@ function detectLastClick(last: CampaignDaily[], ga: GaDaily[]): IntelCard | null
     id: "last-click",
     title: `Blended last-click is ${lc.toFixed(2)}x — mix cut`,
     body: `GA4 paid-channel revenue ${money(paidRev)} ÷ ads spend ${money(spend)} = ${lc.toFixed(2)}x. This is last-click, not ads conversion value. Do not use it as a campaign ROAS. It is a mix-cut trigger.`,
-    doThis: "7-day test: cut the weaker platform 20% (see Google vs Meta) and hold Brand Search. Re-export GA4 in a week.",
+    doThis: "7-day test: cut the weaker platform 20% (see Google vs Meta Command) and hold Brand Search. Re-export GA4 in a week. Do not treat this last-click number as campaign ROAS.",
     ifItWorks: "Last-click paid ROAS ≥ 1.5x or ads-platform ROAS rises enough to justify the mix.",
     evidence: `GA4 paid revenue ${money(paidRev)}; ads spend ${money(spend)}.`,
     stake: round2(spend * (1.5 - lc) * 0.3),
@@ -575,6 +790,7 @@ export function buildIntel(opts: {
         paid_social_sessions: 0, paid_search_sessions: 0, cross_network_sessions: 0, paid_revenue: 0,
       },
       grok: { markdown: "No paid rows uploaded yet.", snapshot: emptySnapshot() },
+      brief: { headline: "", ads: "", site: "" },
       sources: { campaigns: 0, queries: opts.queries.length, ga: opts.ga.length },
     };
   }
@@ -597,31 +813,45 @@ export function buildIntel(opts: {
   const pages = hideGsc ? [] : snapshotQueries(opts.queries, "page").slice(0, 40);
   const chart = hideGsc ? [] : snapshotQueries(opts.queries, "chart");
 
-  const cards = [
-    detectMixCut(last7, aggregateCampaigns(last7)),
-    detectReallocate(aggregateCampaigns(last7)),
-    detectDeadSpend(last7, aggregateCampaigns(last7), asOf),
-    detectProductMix(aggregateProducts(last7), aggregateCampaigns(last7)),
+  const last7Camps = aggregateCampaigns(last7);
+  const rawCards = [
+    detectMixCut(last7, last7Camps),
+    detectReallocate(last7Camps),
+    detectDeadSpend(last7, last7Camps, asOf),
+    detectProductMix(aggregateProducts(last7), last7Camps),
     detectCollapse(last7, prior7),
-    detectBrandSplit(aggregateCampaigns(last7)),
-    detectFrequency(aggregateCampaigns(last7)),
-    detectProspectRetarget(aggregateCampaigns(last7)),
-    detectLostIs(aggregateCampaigns(last7)),
-    detectPmaxVsSearch(aggregateCampaigns(last7)),
-    detectShoppingVsPmax(aggregateCampaigns(last7)),
+    detectBrandSplit(last7Camps),
+    detectFrequency(last7Camps),
+    detectProspectRetarget(last7Camps),
+    detectLostIsTrap(last7Camps),
+    detectLostIs(last7Camps),
+    detectPmaxHold(last7Camps),
+    detectPmaxVsSearch(last7Camps),
+    detectShoppingVsPmax(last7Camps),
+    ...detectWorstLive(last7Camps),
+    hideGsc ? null : detectGscTitleTrap(opts.queries),
+    hideGsc ? null : detectGscClimb(opts.queries),
     hideGsc ? null : detectGscPosition(opts.queries),
     hideGsc ? null : detectLowCtrTitles(opts.queries),
     detectMobileLeak(ga7),
     detectBounce(ga7),
+    detectPdpWinners(ga7),
+    detectDeadPdp(ga7),
     detectTrackingHole(last7, ga7),
     detectUnassigned(ga7),
     detectLastClick(last7, ga7),
-  ].filter((c): c is IntelCard => Boolean(c))
+  ].filter((c): c is IntelCard => Boolean(c));
+  const adsCards = rawCards.filter((c) => c.owner === "ads")
     .sort((a, b) => b.stake - a.stake || a.title.localeCompare(b.title))
-    .slice(0, 12);
+    .slice(0, 6);
+  const siteCards = rawCards.filter((c) => c.owner === "site")
+    .sort((a, b) => b.stake - a.stake || a.title.localeCompare(b.title))
+    .slice(0, 6);
+  const cards = [...adsCards, ...siteCards];
+  const brief = buildBrief({ asOf, google, meta, blended, wow, cards: adsCards, siteCards });
 
   const grok = buildGrok({
-    asOf, range, google, meta, blended, wow, camps, products, cards,
+    asOf, range, google, meta, blended, wow, camps, products, cards, brief,
     queries, pages, ga4,
   });
   const chartRows = opts.campaigns.filter((r) => filter === "all" || r.platform === filter);
@@ -632,6 +862,7 @@ export function buildIntel(opts: {
     filter,
     kpis: { google, meta, blended },
     wow,
+    brief,
     campaigns: camps,
     products,
     cards,
@@ -647,6 +878,31 @@ export function buildIntel(opts: {
       ga: opts.ga.length,
     },
   };
+}
+
+function buildBrief(opts: {
+  asOf: string;
+  google: { spend: number; roas: number; conv_value: number };
+  meta: { spend: number; roas: number; conv_value: number };
+  blended: { spend: number; roas: number; conv_value: number };
+  wow: { last: { spend: number; roas: number; conv_value: number }; prior: { spend: number; roas: number; conv_value: number } };
+  cards: IntelCard[];
+  siteCards: IntelCard[];
+}): IntelBrief {
+  const { wow, google, meta, cards, siteCards } = opts;
+  const revDrop = wow.prior.conv_value > 0
+    ? Math.round((1 - wow.last.conv_value / wow.prior.conv_value) * 100)
+    : 0;
+  const headline = revDrop >= 15
+    ? `As-of ${opts.asOf}: spend held near ${money(wow.last.spend)} while ads conversion value fell ${revDrop}% (${money(wow.prior.conv_value)} → ${money(wow.last.conv_value)}). Brand Search is the only ≥1.5x keep. Do not raise it to “make the week.”`
+    : `As-of ${opts.asOf}: blended ${money(opts.blended.spend)} at ${roas(opts.blended.roas)}. Google ${roas(google.roas)} vs Meta ${roas(meta.roas)}.`;
+  const ads = cards.length
+    ? `Ads lead this week: ${cards.slice(0, 3).map((c) => c.title).join(" · ")}.`
+    : "No paid-media keep/kill cards for this filter.";
+  const site = siteCards.length
+    ? `Web team this week: ${siteCards.slice(0, 3).map((c) => c.title).join(" · ")}.`
+    : "No site/conversion cards for this filter.";
+  return { headline, ads, site };
 }
 
 function emptySnapshot() {

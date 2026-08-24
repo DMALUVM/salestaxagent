@@ -15,8 +15,10 @@ Range 7/14/30/90/365/all is relative to the **max date in the files**, not today
 HTTP: `POST /api/paid-ads/csv` (multipart files or JSON `{ files: [{ name, content }] }`).
 Read: `GET /api/paid-ads/intel?range=7&filter=all`.
 
-Intel cards (max 12, ranked by $ at stake) are 7-day tests with a keep/kill metric.
-Never move Meta/PMax onto Brand Search. Win/lose tables require spend ≥ $1.
+Intel is two desks (max 6 each, ranked by $ at stake): **Paid media** for the ads
+lead and **Site & conversion** for the web team. Every card is a 7-day test with
+a keep/kill metric. Never move Meta/PMax onto Brand Search. Win/lose tables
+require spend ≥ $1.
 
 Copy for Grok = keep/kill prompt + numbered stack + JSON snapshot.
 

@@ -104,8 +104,11 @@ export interface ProductAgg {
   conversions: number;
 }
 
+export type IntelOwner = "ads" | "site";
+
 export interface IntelCard {
   id: string;
+  owner: IntelOwner;
   severity: "critical" | "warn" | "info";
   title: string;
   body: string;
@@ -115,6 +118,12 @@ export interface IntelCard {
   stake: number;
   metric: string;
   action: "kill" | "keep" | "shift" | "fix";
+}
+
+export interface IntelBrief {
+  headline: string;
+  ads: string;
+  site: string;
 }
 
 export interface WinLoseRow {
@@ -167,6 +176,7 @@ export interface IntelBundle {
   filter: IntelFilter;
   kpis: { google: PlatformKpis; meta: PlatformKpis; blended: PlatformKpis };
   wow: { last: PlatformKpis; prior: PlatformKpis };
+  brief: IntelBrief;
   campaigns: CampaignAgg[];
   products: ProductAgg[];
   cards: IntelCard[];

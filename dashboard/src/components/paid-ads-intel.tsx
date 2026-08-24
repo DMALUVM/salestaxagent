@@ -119,6 +119,7 @@ function IntelCardView({ card, index }: { card: IntelCard; index: number }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-semibold tabular-nums text-muted-foreground">{index + 1}</span>
           <Badge variant="outline" className={SEV[card.severity]}>{card.severity}</Badge>
+          <Badge variant="outline">{card.owner === "ads" ? "ADS" : "SITE"}</Badge>
           <Badge variant="outline">{ACTION[card.action]}</Badge>
           <span className="text-[10px] tabular-nums text-muted-foreground">{money(card.stake)} at stake</span>
           <span className="text-[10px] text-muted-foreground">{card.metric}</span>
@@ -227,7 +228,9 @@ export function PaidAdsIntel({
     ? []
     : [
         { id: "command", label: "Command" },
-        { id: "intel", label: "Intel" },
+        { id: "intel", label: "This week" },
+        { id: "ads-desk", label: "Ads lead" },
+        { id: "site-desk", label: "Web team" },
         { id: "campaigns", label: "Campaigns" },
         ...(data.gsc.hidden ? [] : [{ id: "gsc", label: "Search" }]),
         { id: "ga4", label: "GA4" },
@@ -392,13 +395,44 @@ export function PaidAdsIntel({
           </section>
 
           <section id="intel" className="space-y-3 scroll-mt-12">
-            <h2 className="text-sm font-semibold tracking-tight">Intel · 7-day tests, ranked by $ at stake</h2>
+            <h2 className="text-sm font-semibold tracking-tight">This week</h2>
+            <Card>
+              <CardContent className="space-y-3 p-4">
+                <p className="text-sm leading-relaxed">{data.brief.headline}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <p className="text-[13px] text-muted-foreground">
+                    <span className="font-medium text-foreground">Ads lead. </span>{data.brief.ads}
+                  </p>
+                  <p className="text-[13px] text-muted-foreground">
+                    <span className="font-medium text-foreground">Web team. </span>{data.brief.site}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          <section id="ads-desk" className="space-y-3 scroll-mt-12">
+            <h2 className="text-sm font-semibold tracking-tight">Paid media · for the ads lead</h2>
             <p className="text-[11px] text-muted-foreground">
-              Each card is a 7-day keep/kill test. Never move Meta or PMax onto Brand Search.
+              7-day keep/kill tests, ranked by $ at stake. Never move Meta or PMax onto Brand Search. Success metric is on every card.
             </p>
-            {data.cards.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No keep/kill cards for this filter.</p>
-            ) : data.cards.map((c, i) => <IntelCardView key={c.id} card={c} index={i} />)}
+            {data.cards.filter((c) => c.owner === "ads").length === 0 ? (
+              <p className="text-sm text-muted-foreground">No paid-media cards for this filter.</p>
+            ) : data.cards.filter((c) => c.owner === "ads").map((c, i) => (
+              <IntelCardView key={c.id} card={c} index={i} />
+            ))}
+          </section>
+
+          <section id="site-desk" className="space-y-3 scroll-mt-12">
+            <h2 className="text-sm font-semibold tracking-tight">Site &amp; conversion · for the web team</h2>
+            <p className="text-[11px] text-muted-foreground">
+              Tracking, bounce, titles, and PDP leaks. Send this block as-is. Do not invent a position change from Queries.csv.
+            </p>
+            {data.cards.filter((c) => c.owner === "site").length === 0 ? (
+              <p className="text-sm text-muted-foreground">No site cards for this filter.</p>
+            ) : data.cards.filter((c) => c.owner === "site").map((c, i) => (
+              <IntelCardView key={c.id} card={c} index={i} />
+            ))}
           </section>
 
           <section id="campaigns" className="space-y-3 scroll-mt-12">
