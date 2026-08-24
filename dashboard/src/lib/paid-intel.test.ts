@@ -5,6 +5,8 @@ import path from "path";
 
 import {
   buildIntel,
+  buildCardPrompt,
+  dedupeCampaigns,
   detectKind,
   parseGa4Csv,
   parseGoogleCsv,
@@ -13,6 +15,7 @@ import {
   parseGscQueries,
   parseMetaCsv,
   parseNamedFile,
+  mergeParsed,
   rangeStart,
   isBrandCampaign,
   campaignTypeOf,
@@ -39,6 +42,149 @@ describe("classify", () => {
     assert.equal(productOf("SALES | Tallow Balm + Deo"), "deodorant");
     assert.equal(productOf("LIP BALM - Testing"), "lip");
     assert.equal(productOf("TALLOW SOAP - Testing"), "soap");
+  });
+});
+
+describe("multi-file upload, receipts, freshness, and decisions", { skip: !haveUploads }, () => {
+  function readAll() {
+    return mergeParsed([
+      parseNamedFile("Google Ads Daily.csv", readFileSync(GOOGLE, "utf8")),
+      parseNamedFile("meta-campaigns.csv", readFileSync(META, "utf8")),
+      parseNamedFile("download.csv", readFileSync(GA4, "utf8")),
+      parseNamedFile("Queries.csv", readFileSync(QUERIES, "utf8")),
+      parseNamedFile("Pages.csv", readFileSync(PAGES, "utf8")),
+      parseNamedFile("Chart.csv", readFileSync(CHART, "utf8")),
+    ]);
+  }
+
+  test("all six files in one upload are each recognised with a receipt", () => {
+    const parsed = readAll();
+    assert.equal(parsed.skipped.length, 0, `nothing should be skipped: ${parsed.warnings.join("; ")}`);
+    assert.equal(parsed.accepted.length, 6, "one receipt line per file");
+    const kinds = parsed.accepted.map((a) => a.kind).sort();
+    assert.deepEqual(kinds, ["ga4", "google", "gsc_chart", "gsc_pages", "gsc_queries", "meta"]);
+    for (const a of parsed.accepted) assert.ok(a.rows > 0, `${a.name} parsed 0 rows`);
+    const google = parsed.accepted.find((a) => a.kind === "google")!;
+    assert.equal(google.max_date, "2026-08-24");
+    // Queries/Pages are undated snapshots — the receipt must not invent a date.
+    const q = parsed.accepted.find((a) => a.kind === "gsc_queries")!;
+    assert.equal(q.min_date, null);
+    assert.equal(q.max_date, null);
+  });
+
+  test("an unrecognised file is reported, not silently dropped", () => {
+    const parsed = mergeParsed([
+      parseNamedFile("random.csv", "foo,bar\n1,2"),
+      parseNamedFile("Chart.csv", readFileSync(CHART, "utf8")),
+    ]);
+    assert.deepEqual(parsed.skipped, ["random.csv"]);
+    assert.equal(parsed.accepted.length, 1);
+    assert.match(parsed.warnings.join(" "), /random\.csv/);
+  });
+
+  test("freshness counts days behind the real calendar, not the file as-of", () => {
+    const parsed = readAll();
+    const fresh = buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range: 7, filter: "all", today: "2026-08-25",
+    });
+    assert.equal(fresh.freshness.days_behind, 1);
+    assert.equal(fresh.freshness.stale, false);
+
+    const stale = buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range: 7, filter: "all", today: "2026-09-02",
+    });
+    assert.equal(stale.freshness.days_behind, 9);
+    assert.equal(stale.freshness.stale, true, "9 days behind must nag for a fresh upload");
+    // Windows still key off the file as-of, not today.
+    assert.equal(stale.as_of, "2026-08-24");
+    assert.ok(stale.kpis.google.spend > 0);
+  });
+
+  test("applying a card moves it out of the open stack into the log", () => {
+    const parsed = readAll();
+    const before = buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range: 7, filter: "all",
+    });
+    const target = before.cards[0];
+    assert.ok(target);
+    const after = buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range: 7, filter: "all",
+      decisions: [{
+        card_id: target.id, as_of: before.as_of!, status: "applied",
+        note: null, applied_at: "2026-08-25T00:00:00Z", dismissed_at: null,
+      }],
+    });
+    assert.ok(!after.cards.some((c) => c.id === target.id), "applied card leaves the open stack");
+    const logged = after.log.find((c) => c.id === target.id);
+    assert.ok(logged, "applied card is kept as a log entry");
+    assert.equal(logged!.status, "applied");
+    // A decision for a different week must not hide this week's card.
+    const otherWeek = buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range: 7, filter: "all",
+      decisions: [{
+        card_id: target.id, as_of: "2026-07-01", status: "applied",
+        note: null, applied_at: "2026-07-01T00:00:00Z", dismissed_at: null,
+      }],
+    });
+    assert.ok(otherWeek.cards.some((c) => c.id === target.id));
+  });
+
+  test("each desk exports on its own", () => {
+    const parsed = readAll();
+    const intel = buildIntel({
+      campaigns: parsed.campaigns, queries: parsed.queries, ga: parsed.ga,
+      range: 7, filter: "all",
+    });
+    const { adsDesk, siteDesk } = intel.grok;
+    assert.match(adsDesk, /paid-media agent/i);
+    assert.match(siteDesk, /site\/conversion agent/i);
+    assert.doesNotMatch(adsDesk, /site & conversion/i);
+    for (const c of intel.cards.filter((x) => x.owner === "site")) {
+      assert.ok(!adsDesk.includes(c.title), `ads export must not carry site card "${c.title}"`);
+    }
+    for (const c of intel.cards.filter((x) => x.owner === "ads")) {
+      assert.ok(!siteDesk.includes(c.title), `site export must not carry ads card "${c.title}"`);
+    }
+    const card = intel.cards[0];
+    const prompt = buildCardPrompt(card, {
+      asOf: intel.as_of!, google: intel.kpis.google, meta: intel.kpis.meta, blended: intel.kpis.blended,
+    });
+    assert.match(prompt, /Never move Meta or PMax budget onto Brand Search/);
+    assert.match(prompt, /What to return/);
+  });
+});
+
+describe("upsert key: a 7-day upload only touches its own days", () => {
+  const key = (r: { platform: string; date: string; campaign_name: string }) =>
+    `${r.platform}|${r.date}|${r.campaign_name}`;
+
+  test("re-uploading 7 days replaces only matching platform|date|campaign keys", () => {
+    const older = {
+      platform: "google" as const, date: "2026-07-01", campaign_name: "BRANDED - Search - Campaign V1",
+      campaign_type: "Search" as const, product: "other" as const, is_brand: true,
+      audience: "unknown" as const, spend: 10, conv_value: 30, clicks: 5, impressions: 50,
+      conversions: 1, lost_is_budget: null, lost_is_rank: null, frequency: null, status: null,
+    };
+    const staleToday = { ...older, date: "2026-08-24", spend: 999, conv_value: 0 };
+    const freshToday = { ...older, date: "2026-08-24", spend: 8.85, conv_value: 47.9 };
+
+    // One upload containing the same key twice: last wins, older day untouched.
+    const merged = dedupeCampaigns([older, staleToday, freshToday]);
+    assert.equal(merged.length, 2, "two distinct keys survive");
+    const byKey = new Map(merged.map((r) => [key(r), r]));
+    assert.equal(byKey.get("google|2026-07-01|BRANDED - Search - Campaign V1")!.spend, 10);
+    assert.equal(byKey.get("google|2026-08-24|BRANDED - Search - Campaign V1")!.spend, 8.85);
+  });
+
+  test("a campaign present on an older day is not deleted by a newer upload", () => {
+    const week1 = { platform: "meta" as const, date: "2026-08-01", campaign_name: "RETARGETING | CBO | Campaign V3" };
+    const week2 = { platform: "meta" as const, date: "2026-08-20", campaign_name: "RETARGETING | CBO | Campaign V3" };
+    assert.notEqual(key(week1), key(week2), "different dates are different rows, so neither overwrites the other");
   });
 });
 
@@ -158,8 +304,11 @@ describe("parsers on the attached Tallowbourn files", { skip: !haveUploads }, ()
       filter: "all",
     });
     assert.equal(intel.as_of, "2026-08-24");
-    assert.ok(intel.cards.length <= 12);
+    assert.ok(intel.cards.length <= 12, "max 12 open recommendations");
     assert.ok(intel.cards.length >= 1);
+    assert.ok(intel.cards.every((c) => c.status === "open"));
+    assert.ok(intel.cards.every((c) => c.prompt.includes(c.doThis)),
+      "every card carries a self-contained copy prompt");
     const ads = intel.cards.filter((c) => c.owner === "ads");
     const site = intel.cards.filter((c) => c.owner === "site");
     assert.ok(ads.length >= 1, "ads desk must have keep/kill work");

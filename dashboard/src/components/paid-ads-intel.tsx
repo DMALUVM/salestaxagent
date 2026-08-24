@@ -13,8 +13,24 @@ import type {
 } from "@/lib/paid-intel/types";
 import { INTEL_FILTERS, INTEL_RANGES } from "@/lib/paid-intel/types";
 import {
-  ClipboardCopy, Download, Megaphone, Upload, AlertTriangle, CheckCircle2,
+  ClipboardCopy, Download, Megaphone, Upload, AlertTriangle, CheckCircle2, Undo2, X,
 } from "lucide-react";
+
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  ta.remove();
+}
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -57,37 +73,70 @@ function Kpi({ label, value, hint }: { label: string; value: string; hint?: stri
   );
 }
 
-function DualChart({ daily }: { daily: IntelBundle["daily"] }) {
-  const max = Math.max(
-    1,
-    ...daily.flatMap((d) => [d.google_spend, d.google_revenue, d.meta_spend, d.meta_revenue]),
+const CHART_HEIGHT = 144;
+
+/** Fill height as 0..100 of its own column. Percentages need a definite parent height. */
+function fillPct(value: number, max: number): number {
+  if (!(max > 0) || !(value > 0)) return 0;
+  return Math.max(0, Math.min(100, (value / max) * 100));
+}
+
+function Bar({ value, max, className }: { value: number; max: number; className: string }) {
+  const pct = fillPct(value, max);
+  return (
+    <div className="relative h-full flex-1 overflow-hidden">
+      {pct > 0 && (
+        <div
+          className={`absolute inset-x-0 bottom-0 ${className}`}
+          style={{ height: `${pct}%`, minHeight: 1 }}
+        />
+      )}
+    </div>
   );
+}
+
+function DualChart({ daily }: { daily: IntelBundle["daily"] }) {
   const shown = daily.slice(-30);
-  if (!shown.length) return null;
+  const max = Math.max(
+    0,
+    ...shown.flatMap((d) => [d.google_spend, d.google_revenue, d.meta_spend, d.meta_revenue]),
+  );
+  if (!shown.length) {
+    return <p className="text-sm text-muted-foreground">No daily rows in this window.</p>;
+  }
+  if (max <= 0) {
+    return <p className="text-sm text-muted-foreground">No spend or conversion value in this window.</p>;
+  }
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-blue-500" /> Google spend</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-blue-200 dark:bg-blue-300" /> Google conv. value</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-blue-300" /> Google conv. value</span>
         <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-violet-500" /> Meta spend</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-violet-200 dark:bg-violet-300" /> Meta purchases value</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-violet-300" /> Meta purchases value</span>
       </div>
-      <div className="flex h-36 items-end gap-px overflow-x-auto" role="img" aria-label="Daily Google and Meta spend versus conversion value">
+      <div
+        className="flex items-end gap-1 overflow-hidden"
+        style={{ height: CHART_HEIGHT }}
+        role="img"
+        aria-label="Daily Google and Meta spend versus conversion value"
+      >
         {shown.map((d) => (
           <div
             key={d.date}
-            className="flex min-w-[10px] flex-1 items-end gap-px"
-            title={`${d.date} · G ${money(d.google_spend)} / ${money(d.google_revenue)} · M ${money(d.meta_spend)} / ${money(d.meta_revenue)}`}
+            className="flex h-full min-w-[8px] flex-1 items-end gap-px"
+            title={`${d.date} · Google ${money(d.google_spend)} spend / ${money(d.google_revenue)} value · Meta ${money(d.meta_spend)} spend / ${money(d.meta_revenue)} value`}
           >
-            <div className="w-1/4 bg-blue-500" style={{ height: `${(d.google_spend / max) * 100}%` }} />
-            <div className="w-1/4 bg-blue-200 dark:bg-blue-300" style={{ height: `${(d.google_revenue / max) * 100}%` }} />
-            <div className="w-1/4 bg-violet-500" style={{ height: `${(d.meta_spend / max) * 100}%` }} />
-            <div className="w-1/4 bg-violet-200 dark:bg-violet-300" style={{ height: `${(d.meta_revenue / max) * 100}%` }} />
+            <Bar value={d.google_spend} max={max} className="bg-blue-500" />
+            <Bar value={d.google_revenue} max={max} className="bg-blue-300" />
+            <Bar value={d.meta_spend} max={max} className="bg-violet-500" />
+            <Bar value={d.meta_revenue} max={max} className="bg-violet-300" />
           </div>
         ))}
       </div>
       <div className="flex justify-between text-[10px] text-muted-foreground">
         <span>{shown[0]?.date}</span>
+        <span>peak {money(max)}</span>
         <span>{shown[shown.length - 1]?.date}</span>
       </div>
     </div>
@@ -97,30 +146,64 @@ function DualChart({ daily }: { daily: IntelBundle["daily"] }) {
 function ChartSpark({ chart }: { chart: IntelBundle["gsc"]["chart"] }) {
   const pts = chart.filter((r) => r.date).slice(-30);
   if (pts.length < 2) return null;
-  const max = Math.max(1, ...pts.map((p) => p.clicks));
+  const max = Math.max(0, ...pts.map((p) => p.clicks));
+  if (max <= 0) return null;
   return (
-    <div className="flex h-16 items-end gap-px" aria-label="GSC daily organic clicks">
+    <div
+      className="flex items-end gap-px overflow-hidden"
+      style={{ height: 64 }}
+      aria-label="GSC daily organic clicks"
+    >
       {pts.map((p) => (
-        <div
-          key={p.date}
-          className="flex-1 bg-emerald-500/70"
-          style={{ height: `${(p.clicks / max) * 100}%` }}
-          title={`${p.date} · ${p.clicks} clicks`}
-        />
+        <Bar key={p.date} value={p.clicks} max={max} className="bg-emerald-500/70" />
       ))}
     </div>
   );
 }
 
-function IntelCardView({ card, index }: { card: IntelCard; index: number }) {
+const STATUS_STYLE: Record<string, string> = {
+  applied: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
+  dismissed: "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700",
+};
+
+function IntelCardView({
+  card, index, onDecide, busy,
+}: {
+  card: IntelCard;
+  index: number;
+  onDecide: (card: IntelCard, status: "applied" | "dismissed" | "open") => void;
+  busy: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const decided = card.status === "applied" || card.status === "dismissed";
+
+  async function copyPrompt() {
+    try {
+      await copyText(card.prompt);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
   return (
-    <Card className="border-l-4" style={{ borderLeftColor: LEFT_BORDER[card.severity] }}>
+    <Card
+      className={`border-l-4 ${decided ? "opacity-70" : ""}`}
+      style={{ borderLeftColor: decided ? "#94a3b8" : LEFT_BORDER[card.severity] }}
+    >
       <CardContent className="space-y-2 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-semibold tabular-nums text-muted-foreground">{index + 1}</span>
           <Badge variant="outline" className={SEV[card.severity]}>{card.severity}</Badge>
           <Badge variant="outline">{card.owner === "site" ? "SITE" : "ADS"}</Badge>
           <Badge variant="outline">{ACTION[card.action]}</Badge>
+          {decided && (
+            <Badge variant="outline" className={STATUS_STYLE[card.status]}>
+              {card.status === "applied" ? "APPLIED" : "DISMISSED"}
+              {card.decided_at ? ` · ${card.decided_at.slice(0, 10)}` : ""}
+            </Badge>
+          )}
           <span className="text-[10px] tabular-nums text-muted-foreground">{money(card.stake)} at stake</span>
           <span className="text-[10px] text-muted-foreground">{card.metric}</span>
         </div>
@@ -131,6 +214,29 @@ function IntelCardView({ card, index }: { card: IntelCard; index: number }) {
           <p><span className="font-medium text-foreground">If it works. </span>{card.ifItWorks}</p>
         </div>
         <p className="text-[11px] text-muted-foreground">Evidence — {card.evidence}</p>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Button variant="outline" size="sm" onClick={copyPrompt}>
+            <ClipboardCopy className="mr-1.5 h-3.5 w-3.5" />
+            {copied ? "Copied" : "Copy prompt"}
+          </Button>
+          {decided ? (
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => onDecide(card, "open")}>
+              <Undo2 className="mr-1.5 h-3.5 w-3.5" />
+              Reopen
+            </Button>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => onDecide(card, "applied")}>
+                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                I did this
+              </Button>
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => onDecide(card, "dismissed")}>
+                <X className="mr-1.5 h-3.5 w-3.5" />
+                Not doing it
+              </Button>
+            </>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
@@ -153,6 +259,147 @@ function pctDelta(curr: number, prev: number): string {
 
 const EMPTY_BRIEF = { headline: "", ads: "", site: "" };
 
+interface UploadReceipt {
+  sent?: number;
+  accepted?: Array<{ name: string; kind: string; rows: number; min_date: string | null; max_date: string | null }>;
+  skipped?: string[];
+  warnings?: string[];
+  upserted?: { campaigns?: number; queries?: number; ga?: number };
+  newest?: { paid: string | null; gsc: string | null; ga4: string | null };
+}
+
+const KIND_LABEL: Record<string, string> = {
+  google: "Google Ads",
+  meta: "Meta Ads",
+  gsc_queries: "GSC Queries",
+  gsc_pages: "GSC Pages",
+  gsc_chart: "GSC Chart",
+  ga4: "GA4 Explore",
+};
+
+function UploadReceiptCard({ receipt, onDismiss }: { receipt: UploadReceipt; onDismiss: () => void }) {
+  const accepted = receipt.accepted ?? [];
+  const skipped = receipt.skipped ?? [];
+  const u = receipt.upserted ?? {};
+  return (
+    <Card className="border-emerald-200 dark:border-emerald-900">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            Upload accepted — {accepted.length} of {receipt.sent ?? accepted.length + skipped.length} file
+            {(receipt.sent ?? 0) === 1 ? "" : "s"} recognised
+          </p>
+          <Button variant="ghost" size="sm" onClick={onDismiss}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        <div className="divide-y">
+          {accepted.map((a) => (
+            <div key={a.name} className="flex flex-wrap items-baseline justify-between gap-2 py-1.5">
+              <span className="text-[12px] font-medium">{a.name}</span>
+              <span className="text-[11px] text-muted-foreground">
+                {KIND_LABEL[a.kind] ?? a.kind} · {fmt(a.rows)} rows
+                {a.min_date ? ` · ${a.min_date} → ${a.max_date}` : " · snapshot (no date)"}
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Written: {fmt(u.campaigns ?? 0)} campaign days, {fmt(u.queries ?? 0)} Search rows, {fmt(u.ga ?? 0)} GA4 rows.
+          Matching days were overwritten; older days were kept.
+        </p>
+        {skipped.length > 0 && (
+          <p className="text-[11px] text-amber-700 dark:text-amber-400">
+            Not recognised: {skipped.join(", ")}. {receipt.warnings?.[0] ?? ""}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FreshnessBanner({ freshness }: { freshness: IntelBundle["freshness"] }) {
+  if (!freshness) return null;
+  const behind = freshness.days_behind;
+  if (behind == null) return null;
+  const stale = freshness.stale;
+  const laggards = (freshness.sources ?? []).filter((s) => s.stale && s.max_date);
+  if (!stale && behind < 3) return null;
+  return (
+    <Card className={stale
+      ? "border-amber-300 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/30"
+      : "border-slate-200 dark:border-slate-800"}
+    >
+      <CardContent className="flex flex-wrap items-center gap-2 p-3">
+        <AlertTriangle className={`h-4 w-4 ${stale ? "text-amber-600" : "text-muted-foreground"}`} />
+        <p className="text-[13px]">
+          {stale
+            ? `Data is ${behind} days behind — upload a fresh export. Everything below still describes the week ending ${freshness.sources?.[0]?.max_date ?? ""}.`
+            : `Newest paid row is ${behind} day${behind === 1 ? "" : "s"} old.`}
+        </p>
+        <span className="text-[11px] text-muted-foreground">
+          {(freshness.sources ?? []).map((s) => `${s.label} ${s.max_date ?? "none"}`).join(" · ")}
+          {laggards.length ? ` · stale after ${freshness.stale_after_days}d` : ""}
+        </span>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DeskHeader({
+  title, hint, prompt, filename, onError,
+}: {
+  title: string;
+  hint: string;
+  prompt: string;
+  filename: string;
+  onError: (msg: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyDesk() {
+    if (!prompt.trim()) {
+      onError("Nothing to export for this desk yet.");
+      return;
+    }
+    try {
+      await copyText(prompt);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2500);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Clipboard blocked — use the .md download.");
+    }
+  }
+
+  function downloadDesk() {
+    const blob = new Blob([prompt], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div>
+        <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+        <p className="text-[11px] text-muted-foreground">{hint}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={copyDesk}>
+          <ClipboardCopy className="mr-1.5 h-3.5 w-3.5" />
+          {copied ? "Copied" : "Copy this desk"}
+        </Button>
+        <Button variant="outline" size="sm" onClick={downloadDesk}>
+          <Download className="mr-1.5 h-3.5 w-3.5" />
+          .md
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function PaidAdsIntel({
   data,
   range,
@@ -173,24 +420,54 @@ export function PaidAdsIntel({
   const [msg, setMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [drag, setDrag] = useState(false);
+  const [deciding, setDeciding] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<UploadReceipt | null>(null);
 
   const empty = !data.as_of;
+  const adsCards = data.cards.filter((c) => (c.owner ?? "ads") === "ads");
+  const siteCards = data.cards.filter((c) => c.owner === "site");
+
+  async function decide(card: IntelCard, status: "applied" | "dismissed" | "open") {
+    if (!data.as_of) return;
+    setDeciding(card.id);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/paid-ads/decision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          card_id: card.id,
+          as_of: data.as_of,
+          status,
+          owner: card.owner,
+          title: card.title,
+          stake: card.stake,
+          metric: card.metric,
+        }),
+      });
+      const json = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+      onUploaded();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeciding(null);
+    }
+  }
 
   async function onFiles(files: FileList | null) {
     if (!files?.length) return;
+    const sent = Array.from(files);
     setBusy(true);
     setMsg(null);
+    setReceipt(null);
     try {
       const fd = new FormData();
-      for (const f of Array.from(files)) fd.append("files", f, f.name);
+      for (const f of sent) fd.append("files", f, f.name);
       const res = await fetch("/api/paid-ads/csv", { method: "POST", body: fd });
-      const json = await res.json() as {
-        ok?: boolean; error?: string; upserted?: Record<string, number>;
-        sources?: string[]; warnings?: string[];
-      };
+      const json = await res.json() as UploadReceipt & { ok?: boolean; error?: string };
       if (!res.ok || !json.ok) throw new Error(json.error || `HTTP ${res.status}`);
-      const u = json.upserted ?? {};
-      setMsg(`Upserted ${u.campaigns ?? 0} campaign days, ${u.queries ?? 0} GSC rows, ${u.ga ?? 0} GA4 rows${json.sources?.length ? ` · ${json.sources.join(", ")}` : ""}.`);
+      setReceipt({ ...json, sent: sent.length });
       onUploaded();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
@@ -341,8 +618,12 @@ export function PaidAdsIntel({
       </div>
 
       {msg && (
-        <p className="text-xs text-muted-foreground">{msg}</p>
+        <p className="text-xs text-amber-700 dark:text-amber-400">{msg}</p>
       )}
+
+      {receipt && <UploadReceiptCard receipt={receipt} onDismiss={() => setReceipt(null)} />}
+
+      <FreshnessBanner freshness={data.freshness} />
 
       {empty ? (
         <Card>
@@ -352,7 +633,8 @@ export function PaidAdsIntel({
               Drop Google Ads Daily, Meta campaign export, GSC (Queries + Chart + Pages), and a GA4 Explore CSV.
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              A missing source omits that channel — it does not crash. Matching days overwrite; older days stay.
+              Select all of them at once — the parser identifies each file by its header.
+              A missing source omits that channel; it does not crash. Matching days overwrite; older days stay.
             </p>
           </CardContent>
         </Card>
@@ -432,28 +714,48 @@ export function PaidAdsIntel({
           </section>
 
           <section id="ads-desk" className="space-y-3 scroll-mt-12">
-            <h2 className="text-sm font-semibold tracking-tight">Paid media · for the ads lead</h2>
-            <p className="text-[11px] text-muted-foreground">
-              7-day keep/kill tests, ranked by $ at stake. Never move Meta or PMax onto Brand Search. Success metric is on every card.
-            </p>
-            {data.cards.filter((c) => (c.owner ?? "ads") === "ads").length === 0 ? (
+            <DeskHeader
+              title="Paid media · for the ads lead"
+              hint="7-day keep/kill tests, ranked by $ at stake. Never move Meta or PMax onto Brand Search."
+              prompt={data.grok?.adsDesk ?? ""}
+              filename={`tallowbourn-ads-desk-${data.as_of ?? "empty"}.md`}
+              onError={setMsg}
+            />
+            {adsCards.length === 0 ? (
               <p className="text-sm text-muted-foreground">No paid-media cards for this filter.</p>
-            ) : data.cards.filter((c) => (c.owner ?? "ads") === "ads").map((c, i) => (
-              <IntelCardView key={c.id} card={c} index={i} />
+            ) : adsCards.map((c, i) => (
+              <IntelCardView key={c.id} card={c} index={i} onDecide={decide} busy={deciding === c.id} />
             ))}
           </section>
 
           <section id="site-desk" className="space-y-3 scroll-mt-12">
-            <h2 className="text-sm font-semibold tracking-tight">Site &amp; conversion · for the web team</h2>
-            <p className="text-[11px] text-muted-foreground">
-              Tracking, bounce, titles, and PDP leaks. Send this block as-is. Do not invent a position change from Queries.csv.
-            </p>
-            {data.cards.filter((c) => c.owner === "site").length === 0 ? (
+            <DeskHeader
+              title="Site &amp; conversion · for the web team"
+              hint="Tracking, bounce, titles, and PDP leaks. Never invent a position change from Queries.csv."
+              prompt={data.grok?.siteDesk ?? ""}
+              filename={`tallowbourn-site-desk-${data.as_of ?? "empty"}.md`}
+              onError={setMsg}
+            />
+            {siteCards.length === 0 ? (
               <p className="text-sm text-muted-foreground">No site cards for this filter.</p>
-            ) : data.cards.filter((c) => c.owner === "site").map((c, i) => (
-              <IntelCardView key={c.id} card={c} index={i} />
+            ) : siteCards.map((c, i) => (
+              <IntelCardView key={c.id} card={c} index={i} onDecide={decide} busy={deciding === c.id} />
             ))}
           </section>
+
+          {(data.log ?? []).length > 0 && (
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold tracking-tight">
+                Already handled · week of {data.as_of}
+              </h2>
+              <p className="text-[11px] text-muted-foreground">
+                These no longer count against the 12 open recommendations. Reopen one if the test needs another week.
+              </p>
+              {(data.log ?? []).map((c, i) => (
+                <IntelCardView key={c.id} card={c} index={i} onDecide={decide} busy={deciding === c.id} />
+              ))}
+            </section>
+          )}
 
           <section id="campaigns" className="space-y-3 scroll-mt-12">
             <h2 className="text-sm font-semibold tracking-tight">Campaigns</h2>
@@ -645,38 +947,56 @@ function SimpleList({
   );
 }
 
+function normalizeBundle(raw: IntelBundle): IntelBundle {
+  return {
+    ...raw,
+    brief: raw.brief ?? EMPTY_BRIEF,
+    wow: raw.wow ?? { last: raw.kpis?.blended, prior: raw.kpis?.blended },
+    cards: (raw.cards ?? []).map((c) => ({ ...c, owner: c.owner === "site" ? "site" : "ads" })),
+    log: (raw.log ?? []).map((c) => ({ ...c, owner: c.owner === "site" ? "site" : "ads" })),
+  };
+}
+
 export function usePaidIntel(range: IntelRangeDays, filter: IntelFilter) {
-  const [data, setData] = useState<IntelBundle | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [state, setState] = useState<{
+    key: string;
+    data: IntelBundle | null;
+    error: string | null;
+  }>({ key: "", data: null, error: null });
+  const [nonce, setNonce] = useState(0);
 
-  const load = useCallback(() => {
+  const key = `${range}|${filter}|${nonce}`;
+
+  useEffect(() => {
     const ac = new AbortController();
-    setLoading(true);
-    fetch(`/api/paid-ads/intel?range=${range}&filter=${filter}`, { signal: ac.signal })
-      .then(async (r) => {
-        const json = await r.json();
+    // Every setState happens after an await, so the effect body itself is sync-free.
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/paid-ads/intel?range=${range}&filter=${filter}`,
+          { signal: ac.signal },
+        );
+        const json = await res.json();
         if (json.fatalError) throw new Error(json.fatalError);
-        const raw = json as IntelBundle;
-        setData({
-          ...raw,
-          brief: raw.brief ?? EMPTY_BRIEF,
-          wow: raw.wow ?? { last: raw.kpis?.blended, prior: raw.kpis?.blended },
-          cards: (raw.cards ?? []).map((c) => ({ ...c, owner: c.owner === "site" ? "site" : "ads" })),
+        setState({
+          key: `${range}|${filter}|${nonce}`,
+          data: normalizeBundle(json as IntelBundle),
+          error: json.loadErrors?.length ? json.loadErrors.join(" · ") : null,
         });
-        setError(json.loadErrors?.length ? json.loadErrors.join(" · ") : null);
-      })
-      .catch((e) => {
-        if (e instanceof DOMException && e.name === "AbortError") return;
-        setError(e instanceof Error ? e.message : String(e));
-        setData(null);
-      })
-      .finally(() => {
-        if (!ac.signal.aborted) setLoading(false);
-      });
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        setState({
+          key: `${range}|${filter}|${nonce}`,
+          data: null,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    })();
     return () => ac.abort();
-  }, [range, filter]);
+  }, [range, filter, nonce]);
 
-  useEffect(() => load(), [load]);
-  return { data, loading, error, reload: () => { load(); } };
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  // Derived, not stored: no loading flag to set inside the effect.
+  const loading = state.key !== key;
+  return { data: state.data, loading, error: state.error, reload };
 }

@@ -1,9 +1,61 @@
-import { shiftDays } from "../as-of";
+import { agentToday, shiftDays } from "../as-of";
 import { deriveCpc, deriveRoas, round2 } from "./csv";
 import type {
-  CampaignAgg, CampaignDaily, GaDaily, IntelFilter, IntelRangeDays,
-  PlatformKpis, ProductAgg, ProductLine, SearchQueryDaily,
+  CampaignAgg, CampaignDaily, GaDaily, IntelFilter, IntelFreshness, IntelRangeDays,
+  PlatformKpis, ProductAgg, ProductLine, SearchQueryDaily, SourceFreshness,
 } from "./types";
+
+/** Upload a fresh export once the newest paid row is this many days behind today. */
+export const STALE_AFTER_DAYS = 7;
+
+export function daysBetween(from: string, to: string): number {
+  const a = Date.parse(`${from}T12:00:00Z`);
+  const b = Date.parse(`${to}T12:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return 0;
+  return Math.round((b - a) / 86_400_000);
+}
+
+/**
+ * Freshness is measured against the real calendar, not the file as-of.
+ * `as_of` drives the range windows; this drives the "upload fresh data" nudge.
+ */
+export function buildFreshness(opts: {
+  campaigns: Array<{ date: string }>;
+  queries: Array<{ date: string }>;
+  ga: Array<{ date: string }>;
+  today?: string;
+}): IntelFreshness {
+  const today = opts.today ?? agentToday();
+  const paidMax = maxPaidDate(opts.campaigns);
+  const gscMax = maxPaidDate(opts.queries.filter((q) => q.date));
+  const gaMax = maxPaidDate(opts.ga);
+  const source = (
+    key: SourceFreshness["source"],
+    label: string,
+    max: string | null,
+  ): SourceFreshness => {
+    const behind = max ? daysBetween(max, today) : null;
+    return {
+      source: key,
+      label,
+      max_date: max,
+      days_behind: behind,
+      stale: behind == null || behind >= STALE_AFTER_DAYS,
+    };
+  };
+  const paidBehind = paidMax ? daysBetween(paidMax, today) : null;
+  return {
+    today,
+    days_behind: paidBehind,
+    stale: paidBehind == null ? false : paidBehind >= STALE_AFTER_DAYS,
+    stale_after_days: STALE_AFTER_DAYS,
+    sources: [
+      source("paid", "Google + Meta", paidMax),
+      source("gsc", "Search Console", gscMax),
+      source("ga4", "GA4 Explore", gaMax),
+    ],
+  };
+}
 
 export function maxPaidDate(rows: Array<{ date: string }>): string | null {
   let max = "";

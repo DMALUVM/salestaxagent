@@ -1,8 +1,8 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 import {
-  INTEL_FILTERS, INTEL_RANGES, buildIntel,
-  type CampaignDaily, type GaDaily, type IntelFilter, type IntelRangeDays,
-  type SearchQueryDaily,
+  DECISION_STATUSES, INTEL_FILTERS, INTEL_RANGES, buildIntel,
+  type CampaignDaily, type DecisionStatus, type GaDaily, type IntelDecision,
+  type IntelFilter, type IntelRangeDays, type SearchQueryDaily,
 } from "@/lib/paid-intel";
 
 export const runtime = "nodejs";
@@ -83,6 +83,21 @@ function queryRow(r: Record<string, unknown>): SearchQueryDaily | null {
   };
 }
 
+function decisionRow(r: Record<string, unknown>): IntelDecision | null {
+  const card_id = String(r.card_id ?? "").trim();
+  const as_of = String(r.as_of ?? "").trim();
+  const status = String(r.status ?? "");
+  if (!card_id || !as_of || !(DECISION_STATUSES as readonly string[]).includes(status)) return null;
+  return {
+    card_id,
+    as_of,
+    status: status as DecisionStatus,
+    note: typeof r.note === "string" ? r.note : null,
+    applied_at: typeof r.applied_at === "string" ? r.applied_at : null,
+    dismissed_at: typeof r.dismissed_at === "string" ? r.dismissed_at : null,
+  };
+}
+
 function gaRow(r: Record<string, unknown>): GaDaily | null {
   const date = typeof r.date === "string" ? r.date : "";
   if (!date) return null;
@@ -113,18 +128,21 @@ export async function GET(request: Request) {
     const rawFilter = (url.searchParams.get("filter") ?? "all") as IntelFilter;
     const filter = (INTEL_FILTERS as readonly string[]).includes(rawFilter) ? rawFilter : "all";
 
-    const [cRes, qRes, gRes] = await Promise.all([
+    const [cRes, qRes, gRes, dRes] = await Promise.all([
       selectAll("paid_campaign_daily"),
       selectAll("paid_search_query_daily"),
       selectAll("paid_ga_daily"),
+      selectAll("paid_intel_decisions"),
     ]);
     const missing = cRes.missing && qRes.missing && gRes.missing;
-    const loadErrors = [cRes.error, qRes.error, gRes.error].filter((e): e is string => Boolean(e));
+    const loadErrors = [cRes.error, qRes.error, gRes.error, dRes.error]
+      .filter((e): e is string => Boolean(e));
 
     const bundle = buildIntel({
       campaigns: cRes.rows.map(campRow).filter((r): r is CampaignDaily => Boolean(r)),
       queries: qRes.rows.map(queryRow).filter((r): r is SearchQueryDaily => Boolean(r)),
       ga: gRes.rows.map(gaRow).filter((r): r is GaDaily => Boolean(r)),
+      decisions: dRes.rows.map(decisionRow).filter((r): r is IntelDecision => Boolean(r)),
       range,
       filter,
     });

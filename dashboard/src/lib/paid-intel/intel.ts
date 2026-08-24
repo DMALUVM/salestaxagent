@@ -1,12 +1,13 @@
 import { deriveRoas, round2 } from "./csv";
 import {
-  aggregateCampaigns, aggregateProducts, dailySeries, filterCampaigns,
+  aggregateCampaigns, aggregateProducts, buildFreshness, dailySeries, filterCampaigns,
   gaInRange, kpisOf, maxPaidDate, priorWindow, snapshotQueries,
 } from "./window";
-import { buildGrok } from "./grok";
+import { buildCardPrompt, buildGrok } from "./grok";
 import type {
-  CampaignAgg, CampaignDaily, GaDaily, IntelBrief, IntelBundle, IntelCard,
-  IntelFilter, IntelOwner, IntelRangeDays, SearchQueryDaily, WinLoseRow,
+  CampaignAgg, CampaignDaily, DecisionStatus, GaDaily, IntelBrief, IntelBundle,
+  IntelCard, IntelDecision, IntelFilter, IntelOwner, IntelRangeDays,
+  SearchQueryDaily, WinLoseRow,
 } from "./types";
 
 const PAID_GA = /^(paid search|paid social|cross-network|display|paid other)$/i;
@@ -19,13 +20,20 @@ function roas(n: number): string {
   return `${n.toFixed(2)}x`;
 }
 
-function card(partial: Omit<IntelCard, "severity" | "owner"> & {
+function card(partial: Omit<IntelCard, "severity" | "owner" | "prompt" | "status" | "decided_at"> & {
   severity?: IntelCard["severity"];
   owner?: IntelOwner;
 }): IntelCard {
   const stake = partial.stake;
   const severity = partial.severity ?? (stake >= 200 ? "critical" : stake >= 50 ? "warn" : "info");
-  return { owner: "ads", ...partial, severity };
+  return {
+    owner: "ads",
+    ...partial,
+    severity,
+    prompt: "",
+    status: "open",
+    decided_at: null,
+  };
 }
 
 function nonBrandGoogle(camps: CampaignAgg[]): CampaignAgg[] {
@@ -769,7 +777,12 @@ export function buildIntel(opts: {
   ga: GaDaily[];
   range: IntelRangeDays;
   filter: IntelFilter;
+  decisions?: IntelDecision[];
+  today?: string;
 }): IntelBundle {
+  const freshness = buildFreshness({
+    campaigns: opts.campaigns, queries: opts.queries, ga: opts.ga, today: opts.today,
+  });
   const paidMax = maxPaidDate(opts.campaigns);
   const gscMax = maxPaidDate(opts.queries.filter((q) => q.date));
   const gaMax = maxPaidDate(opts.ga);
@@ -783,14 +796,15 @@ export function buildIntel(opts: {
       as_of: null, range_days: range, filter,
       kpis: { google: emptyK, meta: kpisOf([], "meta"), blended: emptyB },
       wow: { last: emptyB, prior: emptyB },
-      campaigns: [], products: [], cards: [], wins: [], losses: [], daily: [],
+      campaigns: [], products: [], cards: [], log: [], wins: [], losses: [], daily: [],
       gsc: { hidden: filter === "meta", queries: [], pages: [], chart: [] },
       ga4: {
         channels: [], devices: [], landings: [], unassigned_share: 0,
         paid_social_sessions: 0, paid_search_sessions: 0, cross_network_sessions: 0, paid_revenue: 0,
       },
-      grok: { markdown: "No paid rows uploaded yet.", snapshot: emptySnapshot() },
+      grok: { markdown: "No paid rows uploaded yet.", snapshot: emptySnapshot(), adsDesk: "", siteDesk: "" },
       brief: { headline: "", ads: "", site: "" },
+      freshness,
       sources: { campaigns: 0, queries: opts.queries.length, ga: opts.ga.length },
     };
   }
@@ -841,13 +855,30 @@ export function buildIntel(opts: {
     detectUnassigned(ga7),
     detectLastClick(last7, ga7),
   ].filter((c): c is IntelCard => Boolean(c));
-  const adsCards = rawCards.filter((c) => c.owner === "ads")
-    .sort((a, b) => b.stake - a.stake || a.title.localeCompare(b.title))
-    .slice(0, 6);
-  const siteCards = rawCards.filter((c) => c.owner === "site")
-    .sort((a, b) => b.stake - a.stake || a.title.localeCompare(b.title))
-    .slice(0, 6);
+  const decided = new Map<string, IntelDecision>();
+  for (const d of opts.decisions ?? []) {
+    if (d.as_of === asOf) decided.set(d.card_id, d);
+  }
+  const promptCtx = { asOf, google, meta, blended };
+  const withState = rawCards.map((c) => {
+    const d = decided.get(c.id);
+    const status: DecisionStatus = d?.status ?? "open";
+    return {
+      ...c,
+      status,
+      decided_at: d?.applied_at ?? d?.dismissed_at ?? null,
+      prompt: buildCardPrompt(c, promptCtx),
+    };
+  });
+  // Recommendations are OPEN cards only (max 6 per desk = 12 total).
+  // Applied/dismissed cards move to `log` so they never eat the recommendation budget.
+  const order = (a: IntelCard, b: IntelCard) =>
+    b.stake - a.stake || a.title.localeCompare(b.title);
+  const open = withState.filter((c) => c.status === "open");
+  const adsCards = open.filter((c) => c.owner === "ads").sort(order).slice(0, 6);
+  const siteCards = open.filter((c) => c.owner === "site").sort(order).slice(0, 6);
   const cards = [...adsCards, ...siteCards];
+  const log = withState.filter((c) => c.status !== "open").sort(order);
   const brief = buildBrief({ asOf, google, meta, blended, wow, cards: adsCards, siteCards });
 
   const grok = buildGrok({
@@ -863,6 +894,8 @@ export function buildIntel(opts: {
     kpis: { google, meta, blended },
     wow,
     brief,
+    freshness,
+    log,
     campaigns: camps,
     products,
     cards,
@@ -898,10 +931,10 @@ function buildBrief(opts: {
     : `As-of ${opts.asOf}: blended ${money(opts.blended.spend)} at ${roas(opts.blended.roas)}. Google ${roas(google.roas)} vs Meta ${roas(meta.roas)}.`;
   const ads = cards.length
     ? `Ads lead this week: ${cards.slice(0, 3).map((c) => c.title).join(" · ")}.`
-    : "No paid-media keep/kill cards for this filter.";
+    : "No open paid-media cards — everything in this window is applied or dismissed.";
   const site = siteCards.length
     ? `Web team this week: ${siteCards.slice(0, 3).map((c) => c.title).join(" · ")}.`
-    : "No site/conversion cards for this filter.";
+    : "No open site/conversion cards — everything in this window is applied or dismissed.";
   return { headline, ads, site };
 }
 

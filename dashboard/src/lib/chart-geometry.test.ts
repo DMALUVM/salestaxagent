@@ -47,6 +47,31 @@ test("the branded-mix chart clips its own bars", () => {
     "the fill must be anchored to the bottom of its own column");
 });
 
+/**
+ * Live regression: the Paid Ads spend-vs-value chart rendered completely blank.
+ * The day column was `flex items-end` with NO height, so each bar's
+ * `height: <pct>%` resolved against an auto-height parent and collapsed to 0.
+ * A percentage height needs a definite parent height — h-full inside a fixed box.
+ */
+test("the paid-ads chart gives its bars a definite parent height", () => {
+  const src = read("paid-ads-intel.tsx");
+  const bar = src.slice(src.indexOf("function Bar("), src.indexOf("function DualChart("));
+  assert.ok(bar.includes("h-full"),
+    "each bar column must have a definite height or its percentage fill collapses");
+  assert.ok(bar.includes("absolute inset-x-0 bottom-0"),
+    "the fill must be bottom-anchored inside its own column");
+  assert.ok(bar.includes("overflow-hidden"),
+    "the bar column must clip its fill");
+
+  const chart = src.slice(src.indexOf("function DualChart("), src.indexOf("function IntelCardView("));
+  assert.ok(/style=\{\{ height: CHART_HEIGHT \}\}/.test(chart),
+    "the chart box needs an explicit pixel height for the percentage fills to resolve");
+  assert.ok(/className="flex h-full min-w-\[8px\] flex-1 items-end/.test(chart),
+    "each day column must be h-full so its bars have a definite parent height");
+  assert.ok(/Math\.max\(\s*0,\s*Math\.min\(\s*100/.test(src),
+    "the fill percentage must be clamped to 0..100");
+});
+
 test("the bar fill percentage is clamped to 0..100", () => {
   const src = read("brand-share.tsx");
   assert.ok(/Math\.max\(\s*0,\s*Math\.min\(\s*100/.test(src),

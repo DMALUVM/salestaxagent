@@ -6,7 +6,7 @@ import {
   parseMoney, parsePct, round2, unzipCsvs,
 } from "./csv";
 import type {
-  CampaignDaily, CampaignType, GaDaily, ParsedFiles, SearchQueryDaily,
+  AcceptedFile, CampaignDaily, CampaignType, GaDaily, ParsedFiles, SearchQueryDaily,
 } from "./types";
 
 export type FileKind =
@@ -321,8 +321,21 @@ export function parseGa4Csv(text: string): GaDaily[] {
   return out;
 }
 
+function receipt(name: string, kind: string, rows: Array<{ date: string }>): AcceptedFile {
+  const dated = rows.map((r) => r.date).filter(Boolean).sort();
+  return {
+    name,
+    kind,
+    rows: rows.length,
+    min_date: dated[0] ?? null,
+    max_date: dated[dated.length - 1] ?? null,
+  };
+}
+
 export function parseNamedFile(name: string, text: string): ParsedFiles {
-  const empty: ParsedFiles = { campaigns: [], queries: [], ga: [], sources: [], skipped: [], warnings: [] };
+  const empty: ParsedFiles = {
+    campaigns: [], queries: [], ga: [], sources: [], skipped: [], warnings: [], accepted: [],
+  };
   const kind = detectKind(name, text);
   if (kind === "unknown") {
     empty.skipped.push(name);
@@ -335,29 +348,38 @@ export function parseNamedFile(name: string, text: string): ParsedFiles {
     return empty;
   }
   try {
-    if (kind === "google") {
-      const campaigns = parseGoogleCsv(text);
-      return { ...empty, campaigns, sources: campaigns.length ? ["google"] : [] };
+    if (kind === "google" || kind === "meta") {
+      const campaigns = kind === "google" ? parseGoogleCsv(text) : parseMetaCsv(text);
+      if (!campaigns.length) {
+        empty.skipped.push(name);
+        empty.warnings.push(`${name}: detected ${kind} but no usable rows`);
+        return empty;
+      }
+      return {
+        ...empty, campaigns, sources: [kind], accepted: [receipt(name, kind, campaigns)],
+      };
     }
-    if (kind === "meta") {
-      const campaigns = parseMetaCsv(text);
-      return { ...empty, campaigns, sources: campaigns.length ? ["meta"] : [] };
-    }
-    if (kind === "gsc_queries") {
-      const queries = parseGscQueries(text);
-      return { ...empty, queries, sources: queries.length ? ["gsc_queries"] : [] };
-    }
-    if (kind === "gsc_pages") {
-      const queries = parseGscPages(text);
-      return { ...empty, queries, sources: queries.length ? ["gsc_pages"] : [] };
-    }
-    if (kind === "gsc_chart") {
-      const queries = parseGscChart(text);
-      return { ...empty, queries, sources: queries.length ? ["gsc_chart"] : [] };
+    if (kind === "gsc_queries" || kind === "gsc_pages" || kind === "gsc_chart") {
+      const queries = kind === "gsc_queries" ? parseGscQueries(text)
+        : kind === "gsc_pages" ? parseGscPages(text)
+        : parseGscChart(text);
+      if (!queries.length) {
+        empty.skipped.push(name);
+        empty.warnings.push(`${name}: detected ${kind} but no usable rows`);
+        return empty;
+      }
+      return {
+        ...empty, queries, sources: [kind], accepted: [receipt(name, kind, queries)],
+      };
     }
     if (kind === "ga4") {
       const ga = parseGa4Csv(text);
-      return { ...empty, ga, sources: ga.length ? ["ga4"] : [] };
+      if (!ga.length) {
+        empty.skipped.push(name);
+        empty.warnings.push(`${name}: detected ga4 but no usable rows`);
+        return empty;
+      }
+      return { ...empty, ga, sources: ["ga4"], accepted: [receipt(name, "ga4", ga)] };
     }
   } catch (e) {
     empty.skipped.push(name);
@@ -370,7 +392,7 @@ export function parseZipBuffer(name: string, buf: Buffer): ParsedFiles {
   const files = unzipCsvs(buf);
   if (!files.length) {
     return {
-      campaigns: [], queries: [], ga: [], sources: [],
+      campaigns: [], queries: [], ga: [], sources: [], accepted: [],
       skipped: [name],
       warnings: [`${name}: no CSV members (send Queries.csv + Chart.csv + Pages.csv)`],
     };
@@ -379,7 +401,9 @@ export function parseZipBuffer(name: string, buf: Buffer): ParsedFiles {
 }
 
 export function mergeParsed(parts: ParsedFiles[]): ParsedFiles {
-  const out: ParsedFiles = { campaigns: [], queries: [], ga: [], sources: [], skipped: [], warnings: [] };
+  const out: ParsedFiles = {
+    campaigns: [], queries: [], ga: [], sources: [], skipped: [], warnings: [], accepted: [],
+  };
   for (const p of parts) {
     out.campaigns.push(...p.campaigns);
     out.queries.push(...p.queries);
@@ -387,6 +411,7 @@ export function mergeParsed(parts: ParsedFiles[]): ParsedFiles {
     out.sources.push(...p.sources);
     out.skipped.push(...p.skipped);
     out.warnings.push(...p.warnings);
+    out.accepted.push(...p.accepted);
   }
   out.sources = [...new Set(out.sources)];
   return out;

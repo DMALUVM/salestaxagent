@@ -55,6 +55,14 @@ export interface GaDaily {
   bounce_rate: number | null;
 }
 
+export interface AcceptedFile {
+  name: string;
+  kind: string;
+  rows: number;
+  min_date: string | null;
+  max_date: string | null;
+}
+
 export interface ParsedFiles {
   campaigns: CampaignDaily[];
   queries: SearchQueryDaily[];
@@ -62,6 +70,25 @@ export interface ParsedFiles {
   sources: string[];
   skipped: string[];
   warnings: string[];
+  /** One entry per file the parser actually understood — the upload receipt. */
+  accepted: AcceptedFile[];
+}
+
+export interface SourceFreshness {
+  source: "paid" | "gsc" | "ga4";
+  label: string;
+  max_date: string | null;
+  days_behind: number | null;
+  stale: boolean;
+}
+
+export interface IntelFreshness {
+  today: string;
+  /** Days between today and the newest paid row. Null when nothing is loaded. */
+  days_behind: number | null;
+  stale: boolean;
+  stale_after_days: number;
+  sources: SourceFreshness[];
 }
 
 export interface CampaignAgg {
@@ -106,6 +133,18 @@ export interface ProductAgg {
 
 export type IntelOwner = "ads" | "site";
 
+export const DECISION_STATUSES = ["applied", "dismissed", "open"] as const;
+export type DecisionStatus = (typeof DECISION_STATUSES)[number];
+
+export interface IntelDecision {
+  card_id: string;
+  as_of: string;
+  status: DecisionStatus;
+  note: string | null;
+  applied_at: string | null;
+  dismissed_at: string | null;
+}
+
 export interface IntelCard {
   id: string;
   owner: IntelOwner;
@@ -118,6 +157,11 @@ export interface IntelCard {
   stake: number;
   metric: string;
   action: "kill" | "keep" | "shift" | "fix";
+  /** Self-contained prompt for one card — paste straight into an agent. */
+  prompt: string;
+  /** Implementation status for this as-of week. */
+  status: DecisionStatus;
+  decided_at: string | null;
 }
 
 export interface IntelBrief {
@@ -177,9 +221,13 @@ export interface IntelBundle {
   kpis: { google: PlatformKpis; meta: PlatformKpis; blended: PlatformKpis };
   wow: { last: PlatformKpis; prior: PlatformKpis };
   brief: IntelBrief;
+  freshness: IntelFreshness;
   campaigns: CampaignAgg[];
   products: ProductAgg[];
+  /** Open recommendations only — max 6 per desk. */
   cards: IntelCard[];
+  /** Applied / dismissed cards for this as-of week. Never counted as recommendations. */
+  log: IntelCard[];
   wins: WinLoseRow[];
   losses: WinLoseRow[];
   daily: DailyPoint[];
@@ -199,6 +247,6 @@ export interface IntelBundle {
     cross_network_sessions: number;
     paid_revenue: number;
   };
-  grok: { markdown: string; snapshot: GrokSnapshot };
+  grok: { markdown: string; snapshot: GrokSnapshot; adsDesk: string; siteDesk: string };
   sources: { campaigns: number; queries: number; ga: number };
 }

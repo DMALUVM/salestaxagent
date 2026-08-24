@@ -171,16 +171,30 @@ export async function POST(request: NextRequest) {
     );
     if (gaErr) return Response.json({ ok: false, error: gaErr }, { status: 500 });
 
+    const maxOf = (rows: Array<{ date: string }>) => {
+      const dated = rows.map((r) => r.date).filter(Boolean).sort();
+      return dated[dated.length - 1] ?? null;
+    };
+
     return Response.json({
       ok: true,
       sources: parsed.sources,
       skipped: parsed.skipped,
       warnings: parsed.warnings,
+      /** Per-file receipt: what was recognised, how many rows, and the date span. */
+      accepted: parsed.accepted,
+      files_received: parsed.accepted.length + parsed.skipped.length,
       upserted: {
         campaigns: campaigns.length,
         queries: queries.length,
         ga: ga.length,
       },
+      newest: {
+        paid: maxOf(campaigns),
+        gsc: maxOf(queries.filter((q) => q.date)),
+        ga4: maxOf(ga),
+      },
+      ingested_at: ingestedAt,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

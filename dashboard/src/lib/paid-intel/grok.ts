@@ -8,6 +8,105 @@ function money(n: number): string {
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
+const HARD_RULES = [
+  "- Never move Meta or PMax budget onto Brand Search.",
+  "- Never invent a Δ position from Queries.csv (it is a snapshot with no date).",
+  "- Never treat GA4 revenue as Google/Meta ads conversion value.",
+  "- Ignore $0 / 0-impression Meta rows.",
+];
+
+function cardContext(ctx: PromptContext): string[] {
+  return [
+    `Account as-of (max date in the files): ${ctx.asOf}.`,
+    `Last 7 days: Google ${money(ctx.google.spend)} at ${ctx.google.roas.toFixed(2)}x · Meta ${money(ctx.meta.spend)} at ${ctx.meta.roas.toFixed(2)}x · blended ${ctx.blended.roas.toFixed(2)}x.`,
+  ];
+}
+
+export interface PromptContext {
+  asOf: string;
+  google: PlatformKpis;
+  meta: PlatformKpis;
+  blended: PlatformKpis;
+}
+
+/** Self-contained prompt for ONE card. Paste into an agent, no other context needed. */
+export function buildCardPrompt(card: IntelCard, ctx: PromptContext): string {
+  const role = card.owner === "ads"
+    ? "You are the Shopify paid-media agent for Tallowbourn (Google Ads + Meta)."
+    : "You are the Shopify site/conversion agent for Tallowbourn (Shopify theme + GA4 + Search Console).";
+  return [
+    `# ${card.title}`,
+    "",
+    role,
+    ...cardContext(ctx),
+    "",
+    "Hard rules:",
+    ...HARD_RULES,
+    "",
+    `Action: ${card.action.toUpperCase()} · $ at stake: ${money(card.stake)} · Kill/keep metric: ${card.metric}`,
+    "",
+    "## Situation",
+    card.body,
+    "",
+    "## Do this (7-day test)",
+    card.doThis,
+    "",
+    "## Success criteria",
+    card.ifItWorks,
+    "",
+    "## Evidence",
+    card.evidence,
+    "",
+    "## What to return",
+    "1. The exact changes you made (campaign / ad set / URL / template, and the before → after value).",
+    "2. Anything you refused to change and why.",
+    "3. The one number you will re-check in 7 days.",
+    "",
+  ].join("\n");
+}
+
+/** One desk's whole stack as a single prompt. */
+export function buildDeskPrompt(
+  label: string,
+  cards: IntelCard[],
+  ctx: PromptContext,
+  brief?: string,
+): string {
+  const role = label === "ads"
+    ? "You are the Shopify paid-media agent for Tallowbourn (Google Ads + Meta)."
+    : "You are the Shopify site/conversion agent for Tallowbourn (Shopify theme + GA4 + Search Console).";
+  const lines = [
+    label === "ads" ? "# Tallowbourn paid media — this week" : "# Tallowbourn site & conversion — this week",
+    "",
+    role,
+    ...cardContext(ctx),
+    "",
+    "Hard rules:",
+    ...HARD_RULES,
+  ];
+  if (brief) lines.push("", brief);
+  lines.push("", "## Stack (ranked by $ at stake)");
+  if (!cards.length) {
+    lines.push("Nothing for this desk in the current window.");
+  }
+  cards.forEach((c, i) => {
+    lines.push("");
+    lines.push(`### ${i + 1}. [${c.action.toUpperCase()} · ${money(c.stake)}] ${c.title}`);
+    lines.push(`Metric: ${c.metric}`);
+    lines.push(c.body);
+    lines.push(`Do this (7 days): ${c.doThis}`);
+    lines.push(`If it works: ${c.ifItWorks}`);
+    lines.push(`Evidence: ${c.evidence}`);
+  });
+  lines.push(
+    "",
+    "## What to return",
+    "For each item: what you changed (before → after), what you refused and why, and the number you will re-check in 7 days.",
+    "",
+  );
+  return lines.join("\n");
+}
+
 export function buildGrok(opts: {
   asOf: string;
   range: IntelRangeDays;
@@ -26,7 +125,7 @@ export function buildGrok(opts: {
     landings: Array<{ page: string; sessions: number; revenue: number; bounce: number | null; key_events: number }>;
     paid_revenue: number;
   };
-}): { markdown: string; snapshot: GrokSnapshot } {
+}): { markdown: string; snapshot: GrokSnapshot; adsDesk: string; siteDesk: string } {
   const spend = opts.google.spend + opts.meta.spend;
   const snapshot: GrokSnapshot = {
     kpis: {
@@ -97,5 +196,13 @@ export function buildGrok(opts: {
   dump("Site & conversion — web team (ranked by $ at stake)", site, next);
   if (!opts.cards.length) lines.push("", "1. No keep/kill cards — upload a Google or Meta CSV.");
   lines.push("", "## JSON snapshot", "```json", JSON.stringify(snapshot, null, 2), "```", "");
-  return { markdown: lines.join("\n"), snapshot };
+  const ctx: PromptContext = {
+    asOf: opts.asOf, google: opts.google, meta: opts.meta, blended: opts.blended,
+  };
+  return {
+    markdown: lines.join("\n"),
+    snapshot,
+    adsDesk: buildDeskPrompt("ads", ads, ctx, opts.brief?.headline),
+    siteDesk: buildDeskPrompt("site", site, ctx, opts.brief?.headline),
+  };
 }

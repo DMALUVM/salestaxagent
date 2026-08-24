@@ -51,6 +51,26 @@ CREATE TABLE IF NOT EXISTS paid_ga_daily (
   PRIMARY KEY (date, channel_group, landing_page, device)
 );
 
+-- Implementation log: which intel card was applied / dismissed, per as-of week.
+-- One row per (card_id, as_of) so the same detector can be tracked week over week.
+CREATE TABLE IF NOT EXISTS paid_intel_decisions (
+  card_id text NOT NULL,
+  as_of text NOT NULL,
+  status text NOT NULL CHECK (status IN ('applied', 'dismissed', 'open')),
+  owner text,
+  title text,
+  stake numeric,
+  metric text,
+  note text,
+  applied_at timestamptz,
+  dismissed_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (card_id, as_of)
+);
+
+CREATE INDEX IF NOT EXISTS paid_intel_decisions_as_of_idx
+  ON paid_intel_decisions (as_of DESC, status);
+
 CREATE INDEX IF NOT EXISTS paid_campaign_daily_date_idx
   ON paid_campaign_daily (date DESC, platform);
 CREATE INDEX IF NOT EXISTS paid_search_query_daily_kind_idx
