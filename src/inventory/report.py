@@ -19,13 +19,20 @@ def build_report() -> dict:
     awd_snapshots = {r["sku"]: r for r in _safe_fetch("inventory_awd")}
     settings = _load_settings()
 
-    target_days = settings["target_cover_days"]
+    from src.inventory.holiday_surge import (
+        AMAZON_MIN_COVER_DAYS,
+        amazon_cover_target,
+        amazon_demand_daily,
+    )
+
+    target_days = amazon_cover_target(
+        int(settings.get("target_cover_days", AMAZON_MIN_COVER_DAYS) or AMAZON_MIN_COVER_DAYS),
+        holiday_mode=bool(settings.get("holiday_mode", False)),
+    )
     lead_days = settings["lead_time_days"]
     include_inbound = settings["include_inbound"]
     include_3pl = settings.get("include_3pl", True)
     holiday_mode = bool(settings.get("holiday_mode", False))
-    if holiday_mode:
-        target_days = max(target_days, 90)
 
     all_skus = sorted(
         set(snapshots) | set(velocities) | set(restock) | set(tpl_snapshots)
@@ -55,9 +62,10 @@ def build_report() -> dict:
 
         awd_oh = int(awd_snapshots.get(sku, {}).get("awd_on_hand", 0) or 0)
 
-        # Velocity — holiday_mode uses planning_u_30 (prior Nov–Dec × YoY)
+        # Velocity — Amazon cover always uses trough-resistant planning rate
+        # (never Aug/Sep V30 alone; surge SKUs anchor to prior Nov–Dec × YoY)
         total_vel_30 = float(vel.get("total_u_30", 0) or 0)
-        planning_vel = float(vel.get("planning_u_30", 0) or 0)
+        planning_vel = amazon_demand_daily(vel)
         surge_mult = float(vel.get("holiday_surge_mult", 1) or 1)
         amazon_vel_30 = float(vel.get("amazon_u_30", 0) or 0)
         shopify_vel_30 = float(vel.get("shopify_u_30", 0) or 0)
@@ -124,13 +132,8 @@ def build_report() -> dict:
                 flag = "OK"
 
         else:
-            # ── Amazon-active: FBA rules with 60d floor ──
-            # Holiday mode: use surge-anchored planning velocity so lip balm
-            # DOS/reorder reflect Nov–Dec (not flat summer V30).
-            if holiday_mode and planning_vel > total_vel_30:
-                demand_rate = planning_vel
-            else:
-                demand_rate = total_vel_30
+            # ── Amazon-active: ≥60d FBA at holiday-aware planning velocity ──
+            demand_rate = planning_vel if planning_vel > eps else total_vel_30
 
             fba_dos = fba_on_hand / max(demand_rate, eps) if demand_rate > eps else (
                 9999 if fba_on_hand > 0 else 0
@@ -243,7 +246,7 @@ def build_report() -> dict:
     rows.sort(key=lambda r: (flag_order.get(r["flag"], 3), r["dos"]))
 
     # Summary
-    at_risk = [r for r in rows if r["dos"] < 60 and r["fba_on_hand"] > 0]
+    at_risk = [r for r in rows if r["dos"] < AMAZON_MIN_COVER_DAYS and r["fba_on_hand"] > 0]
     total_reorder = sum(r["our_reorder_qty"] for r in rows)
     total_amz_rec = sum(r["amz_rec_qty"] for r in rows)
     active_skus = [r for r in rows if r["fba_on_hand"] > 0 or r["total_u_30"] > 0]

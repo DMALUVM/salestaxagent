@@ -1,27 +1,21 @@
 """Per-SKU holiday surge from prior-year Nov–Dec sales.
 
-Lip balm (and similar) can run 2–4.5× summer velocity in Nov–Dec.
-Account-level seasonality understates that for surge SKUs and flat V30
-DOS/reorder on the inventory page ignores it entirely when holiday_mode
-is on.
+Lip balm can run 2–4.5× summer velocity in Nov–Dec. Aug/Sep is the
+annual trough — never use depressed V30 alone as the planning baseline.
 
-This module:
-  1. Reads sales_by_sku for prior-year Jun–Aug vs Nov–Dec
-  2. Computes surge, YoY growth vs current V30, and planning_u_30
-  3. Upserts onto sku_velocity
-  4. Writes per-SKU peak-week floors into seasonality_weekly
-
-Planning rate (when holiday_mode or peak window):
-  planning_u_30 = max(V30, holiday_prior_daily * yoy_growth_mult)
-  where yoy = clamp(V30 / summer_prior_daily, 0.75, 1.40)
-  and surge SKUs only (surge > 1); otherwise planning_u_30 = V30.
+Policy:
+  - Amazon FBA must stay ≥ AMAZON_MIN_COVER_DAYS (60) at holiday-aware
+    planning velocity at all times.
+  - planning_u_30 anchors to prior Nov–Dec × YoY (surge SKUs) or a
+    trough-resistant baseline (everyone else).
+  - YoY / baseline use max(V90, summer_prior), not Aug/Sep V30.
 """
 from __future__ import annotations
 
 import logging
 import math
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 
 from src.db import fetch_all, upsert_rows
 
@@ -30,6 +24,10 @@ log = logging.getLogger(__name__)
 # ISO weeks treated as holiday peak (Nov–Jan)
 PEAK_WEEKS = frozenset(range(44, 53)) | frozenset(range(1, 6))
 
+# Aug + Sep = annual trough — do not trust V30 alone
+SLOW_MONTHS = frozenset({8, 9})
+
+AMAZON_MIN_COVER_DAYS = 60
 YOY_FLOOR = 0.75
 YOY_CAP = 1.40
 SURGE_FLOOR = 0.40
@@ -51,41 +49,124 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
+def is_slow_season(today: date | None = None) -> bool:
+    """True in Aug/Sep — slowest sales months; V30 is a trough."""
+    d = today or date.today()
+    return d.month in SLOW_MONTHS
+
+
+def approaching_peak(
+    today: date | None = None,
+    peak_start: date | None = None,
+    lead_days: int = 45,
+) -> bool:
+    """True when within lead_days of peak window (or already in peak)."""
+    d = today or date.today()
+    if peak_start is None:
+        # Default: Oct 1 of current year (or next if past Jan peak end)
+        peak_start = date(d.year, 10, 1)
+        if d.month <= 1:
+            peak_start = date(d.year - 1, 10, 1)
+    return d >= peak_start - timedelta(days=lead_days)
+
+
+def normalized_baseline(
+    v30: float,
+    v90: float = 0.0,
+    summer_prior_daily: float = 0.0,
+    today: date | None = None,
+) -> float:
+    """Trough-resistant daily baseline.
+
+    Always take the strongest of V30 / V90 / prior summer. In Aug/Sep the
+    trough V30 loses automatically; a strong current V30 still wins.
+    Never let depressed Aug/Sep V30 alone set the rate.
+    """
+    v30 = float(v30 or 0)
+    v90 = float(v90 or 0)
+    summer = float(summer_prior_daily or 0)
+    return round(max(v30, v90, summer), 2)
+
+
 def planning_daily(
     v30: float,
     holiday_prior_daily: float,
     summer_prior_daily: float,
     surge_mult: float,
     *,
+    v90: float = 0.0,
     holiday_mode: bool = False,
+    today: date | None = None,
+    force_holiday_plan: bool = False,
 ) -> float:
-    """Holiday-aware units/day for DOS, reorder, and capacity.
+    """Holiday-aware units/day for Amazon DOS / reorder / capacity.
 
-    Non-surge SKUs (deodorant, balms) keep flat V30 — do not deflate cover.
-    Surge SKUs use max(V30, prior holiday daily × YoY) when holiday_mode.
+    Always trough-resistant. For surge SKUs, anchors to prior Nov–Dec × YoY
+    (YoY vs summer using normalized baseline, not Aug/Sep V30).
+
+    Non-surge SKUs: normalized baseline (do not deflate with surge < 1).
     """
-    v30 = float(v30 or 0)
-    if not holiday_mode or surge_mult <= 1.0 or holiday_prior_daily <= 0:
-        return round(v30, 2)
+    baseline = normalized_baseline(v30, v90, summer_prior_daily, today=today)
+    surge_mult = float(surge_mult or 1.0)
+    holiday_prior_daily = float(holiday_prior_daily or 0)
+    summer_prior_daily = float(summer_prior_daily or 0)
 
-    if summer_prior_daily > 0.01:
-        yoy = _clamp(v30 / summer_prior_daily, YOY_FLOOR, YOY_CAP)
+    use_holiday = force_holiday_plan or holiday_mode or is_slow_season(today)
+    if not use_holiday:
+        # Still store a sensible rate; callers decide when to apply
+        use_holiday = True  # planning_u_30 is always the cover demand rate
+
+    if surge_mult <= 1.0 or holiday_prior_daily <= 0:
+        return round(max(baseline, float(v30 or 0)), 2)
+
+    if summer_prior_daily > 0.01 and baseline > 0:
+        yoy = _clamp(baseline / summer_prior_daily, YOY_FLOOR, YOY_CAP)
     else:
         yoy = 1.0
+
     anchored = holiday_prior_daily * yoy
-    return round(max(v30, anchored), 2)
+    from_surge = baseline * surge_mult
+    return round(max(baseline, anchored, from_surge), 2)
+
+
+def amazon_cover_target(
+    target_cover_days: int = 60,
+    holiday_mode: bool = False,
+) -> int:
+    """Amazon FBA cover target — never below 60 days."""
+    t = int(target_cover_days or AMAZON_MIN_COVER_DAYS)
+    if holiday_mode:
+        t = max(t, 90)
+    return max(AMAZON_MIN_COVER_DAYS, t)
+
+
+def amazon_demand_daily(vel: dict, *, today: date | None = None) -> float:
+    """Units/day for Amazon cover math from a sku_velocity row."""
+    plan = float(vel.get("planning_u_30") or 0)
+    v30 = float(vel.get("total_u_30") or 0)
+    v90 = float(vel.get("total_u_90") or 0)
+    summer = float(vel.get("summer_prior_daily") or 0)
+    surge = float(vel.get("holiday_surge_mult") or 1)
+    holiday = float(vel.get("holiday_prior_daily") or 0)
+
+    if plan > 0:
+        # Recompute if stored plan looks like it was V30-only in a trough
+        recomputed = planning_daily(
+            v30, holiday, summer, surge, v90=v90, today=today, force_holiday_plan=True,
+        )
+        return max(plan, recomputed)
+
+    return planning_daily(
+        v30, holiday, summer, surge, v90=v90, today=today, force_holiday_plan=True,
+    )
 
 
 def compute_surge_from_sales(
     prior_year: int | None = None,
     holiday_mode: bool | None = None,
 ) -> dict:
-    """Compute per-SKU holiday surge from sales_by_sku and patch sku_velocity.
-
-    Returns summary stats + per-SKU rows (also upserted).
-    """
+    """Compute per-SKU holiday surge from sales_by_sku and patch sku_velocity."""
     today = date.today()
-    # Holiday season we are planning for: prior calendar year's Nov–Dec
     py = prior_year or (today.year - 1)
     summer_start = date(py, 6, 1)
     summer_end = date(py, 8, 31)
@@ -97,10 +178,7 @@ def compute_surge_from_sales(
     if holiday_mode is None:
         holiday_mode = _load_holiday_mode()
 
-    # Aggregate monthly sales by normalized SKU
-    # Prefer amazon_spapi / Amazon channel rows; include all if needed.
     monthly: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    # also keep a display sku (prefer velocity casing later)
     display_sku: dict[str, str] = {}
 
     try:
@@ -115,10 +193,6 @@ def compute_surge_from_sales(
             continue
         if isinstance(ps, str):
             ps = date.fromisoformat(ps[:10])
-        if ps.year != py and not (ps.year == py + 1 and ps.month == 1):
-            # only prior-year summer + Nov–Dec (Jan unused for surge ratio)
-            if not (summer_start <= ps <= holiday_end):
-                continue
         if not (summer_start <= ps <= holiday_end):
             continue
 
@@ -136,7 +210,6 @@ def compute_surge_from_sales(
         elif holiday_start <= ps <= holiday_end:
             monthly[key]["holiday"] += units
 
-    # Map velocity rows (canonical SKU casing for upsert)
     vel_rows = []
     try:
         vel_rows = fetch_all("sku_velocity")
@@ -147,14 +220,12 @@ def compute_surge_from_sales(
     for v in vel_rows:
         vel_by_norm[normalize_sku(v.get("sku"))] = v
 
-    # Account peak mult (for scaling per-SKU peak floors)
     account_peak_avg = _account_peak_avg()
 
     updates: list[dict] = []
     seasonality_rows: list[dict] = []
     surge_skus = 0
 
-    # Union: velocity SKUs + sales SKUs with holiday volume
     all_keys = set(vel_by_norm) | {
         k for k, u in monthly.items()
         if u.get("holiday", 0) >= MIN_HOLIDAY_UNITS
@@ -171,22 +242,21 @@ def compute_surge_from_sales(
 
         if summer_u >= MIN_SUMMER_UNITS and holiday_u >= MIN_HOLIDAY_UNITS:
             surge = _clamp(holiday_daily / summer_daily, SURGE_FLOOR, SURGE_CAP)
-        elif holiday_u >= MIN_HOLIDAY_UNITS and summer_u < MIN_SUMMER_UNITS:
-            # New SKU with holiday history but thin summer — treat as mild surge
-            surge = 1.0
         else:
             surge = 1.0
 
         v30 = float(vel.get("total_u_30") or 0)
-        if summer_daily > 0.01 and v30 > 0:
-            yoy = _clamp(v30 / summer_daily, YOY_FLOOR, YOY_CAP)
+        v90 = float(vel.get("total_u_90") or 0)
+        baseline = normalized_baseline(v30, v90, summer_daily, today=today)
+
+        if summer_daily > 0.01 and baseline > 0:
+            yoy = _clamp(baseline / summer_daily, YOY_FLOOR, YOY_CAP)
         else:
             yoy = 1.0
 
-        # Always store holiday-anchored planning rate; UI / holiday_mode chooses
-        # whether to use it vs flat V30 for DOS/reorder.
         holiday_plan = planning_daily(
-            v30, holiday_daily, summer_daily, surge, holiday_mode=True,
+            v30, holiday_daily, summer_daily, surge,
+            v90=v90, today=today, force_holiday_plan=True,
         )
 
         if surge > 1.05:
@@ -211,7 +281,7 @@ def compute_surge_from_sales(
             "total_u_90": vel.get("total_u_90", 0),
             "seasonality_mult": vel.get("seasonality_mult", 1.0),
             "seasonal_total_u_30": (
-                round(holiday_plan, 2) if surge > 1.0 and holiday_plan > 0
+                round(holiday_plan, 2) if holiday_plan > 0
                 else vel.get("seasonal_total_u_30", 0)
             ),
             "holiday_surge_mult": round(surge, 3),
@@ -224,11 +294,8 @@ def compute_surge_from_sales(
         }
         updates.append(row)
 
-        # Per-SKU peak-week floors in seasonality_weekly (year=0)
         if surge > 1.05 and account_peak_avg > 0:
             for wk in PEAK_WEEKS:
-                # Scale account shape so peak-week average ≈ surge
-                # Fallback flat surge if no account curve
                 seasonality_rows.append({
                     "year": 0,
                     "week": wk,
@@ -240,8 +307,6 @@ def compute_surge_from_sales(
 
     inserted = 0
     if updates:
-        # Upsert only surge columns + planning — but PostgREST upsert needs full PK.
-        # We send full rows reconstructed from velocity to avoid nulling other fields.
         try:
             inserted = upsert_rows("sku_velocity", updates, on_conflict="sku")
         except Exception as e:
@@ -265,6 +330,8 @@ def compute_surge_from_sales(
     return {
         "prior_year": py,
         "holiday_mode": holiday_mode,
+        "slow_season": is_slow_season(today),
+        "amazon_min_cover_days": AMAZON_MIN_COVER_DAYS,
         "skus_updated": inserted or len(updates),
         "surge_skus": surge_skus,
         "seasonality_rows": seas_n or len(seasonality_rows),
@@ -278,8 +345,10 @@ def compute_surge_from_sales(
                 "summer_daily": t["summer_prior_daily"],
                 "planning_u_30": t["planning_u_30"],
                 "v30": t["total_u_30"],
+                "v90": t["total_u_90"],
                 "yoy": t["yoy_growth_mult"],
                 "nov_dec_units": t["holiday_nov_dec_units"],
+                "cover_60d_units": int(math.ceil(t["planning_u_30"] * AMAZON_MIN_COVER_DAYS)),
             }
             for t in top
         ],
