@@ -8,7 +8,7 @@ export type PlanningTab = "demand" | "inbound";
 
 export const PLANNING_TABS: Array<{ key: PlanningTab; label: string }> = [
   { key: "demand", label: "Demand" },
-  { key: "inbound", label: "Inbound" },
+  { key: "inbound", label: "Supply" },
 ];
 
 /**

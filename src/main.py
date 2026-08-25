@@ -3866,6 +3866,28 @@ def inventory_velocity_cmd(days, dry_run):
                 )
 
 
+@cli.command("inventory-supply-plan")
+@click.option("--until", "until_date", default="2027-01-15")
+@click.option("--sku", multiple=True, help="SKU filter (default: all active)")
+def inventory_supply_plan_cmd(until_date, sku):
+    """Four-number supply plan: manufacture, warehouse ship, FBA DOS, network OOS."""
+    from src.inventory.supply_plan import build_four_numbers_plan, format_four_numbers_text
+    skus = list(sku) if sku else None
+    plan = build_four_numbers_plan(skus=skus, until_date=until_date)
+    click.echo(format_four_numbers_text(plan))
+
+
+@cli.command("inventory-inbound-plan")
+@click.option("--until", "until_date", default="2027-01-15")
+@click.option("--sku", multiple=True, help="SKU filter (default: lip balm SKUs)")
+def inventory_inbound_plan_cmd(until_date, sku):
+    """Warehouse → FBA inbound waves with receiving lead time."""
+    from src.inventory.inbound_waves import build_inbound_wave_plan, format_inbound_plan_text
+    skus = list(sku) if sku else None
+    plan = build_inbound_wave_plan(skus=skus, until_date=until_date)
+    click.echo(format_inbound_plan_text(plan))
+
+
 @cli.command("inventory-holiday-surge")
 @click.option("--year", default=None, type=int, help="Prior holiday year (default: last calendar year)")
 def inventory_holiday_surge_cmd(year):
