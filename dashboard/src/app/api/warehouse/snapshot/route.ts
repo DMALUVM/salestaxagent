@@ -24,7 +24,7 @@ export async function GET() {
     const stamp = snapshot.exported_at.slice(0, 10);
     const filename = `warehouse_snapshot_${stamp}.json.gz`;
 
-    return new Response(gz, {
+    return new Response(new Uint8Array(gz), {
       headers: {
         "Content-Type": "application/gzip",
         "Content-Disposition": `attachment; filename="${filename}"`,

@@ -7,7 +7,7 @@ import {
   parseSnapshotBytes,
   validateSnapshot,
   type WarehouseSnapshot,
-} from "./warehouse-snapshot.ts";
+} from "./warehouse-snapshot";
 
 describe("warehouse-snapshot", () => {
   const sample: WarehouseSnapshot = {
