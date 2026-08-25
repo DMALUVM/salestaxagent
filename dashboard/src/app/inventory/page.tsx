@@ -370,8 +370,7 @@ export default function InventoryPage() {
       if (surge_mult > 1.05 && holiday_prior > 0) {
         const yoy = Math.min(1.4, Math.max(0.75, troughBaseline / Math.max(summer_prior, 0.01)));
         const anchored = holiday_prior * yoy;
-        const fromSurge = troughBaseline * surge_mult;
-        planning_vel = Math.max(planning_vel_raw, troughBaseline, anchored, fromSurge);
+        planning_vel = Math.max(planning_vel_raw, troughBaseline, anchored);
       } else {
         planning_vel = Math.max(planning_vel_raw, troughBaseline);
       }

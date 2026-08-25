@@ -27,38 +27,34 @@ def test_slow_season_aug_sep():
 
 
 def test_normalized_baseline_ignores_aug_trough_v30():
-    # Aug: V30 depressed vs V90 — max picks V90/summer, not trough V30
+    # Aug: V30 depressed vs V90 — max picks V90, not trough V30
     base = normalized_baseline(25.0, v90=50.0, summer_prior_daily=38.0, today=date(2026, 8, 20))
     assert base == 50.0
 
 
 def test_normalized_baseline_keeps_strong_v30():
-    # Unscented-like: current V30 above V90 — keep it
     base = normalized_baseline(106.0, v90=77.0, summer_prior_daily=43.0, today=date(2026, 8, 20))
     assert base == 106.0
 
 
 def test_planning_daily_non_surge_keeps_baseline():
-    # Deodorant-like: holiday slower than summer — do not deflate
     plan = planning_daily(18, 11, 12, 0.9, v90=17, today=date(2026, 8, 25))
     assert plan >= 17.0
 
 
 def test_planning_daily_assorted_not_understated_by_aug_v30():
-    # Assorted: if Aug V30 is artificially low (25) but V90=52, summer=38, holiday=160
-    # Must not anchor YoY to depressed 25.
     plan = planning_daily(
         25.0, 155.5, 34.3, 4.53, v90=51.59, today=date(2026, 8, 25),
     )
-    # baseline ≈ 51.59; yoy ≈ 1.40 cap vs summer 34.3; anchored ≈ 217
+    # baseline=51.59; yoy=min(1.4, 51.59/34.3)≈1.40; anchored≈217.7
     assert plan > 200
-    assert plan > 25 * 4.53  # better than trough×surge alone would be if yoy floored
+    assert plan < 230
 
 
 def test_planning_daily_yoy_cap():
+    # Strong baseline vs thin summer → YoY capped at 1.40 (no uncapped ×surge)
     plan = planning_daily(80, 100, 20, 5.0, v90=80, today=date(2026, 4, 1))
-    # baseline ≥ 80; yoy capped 1.40 → anchored 140; from_surge 400 → 400
-    assert plan == 400.0
+    assert plan == 140.0
 
 
 def test_amazon_cover_target_floor_60():

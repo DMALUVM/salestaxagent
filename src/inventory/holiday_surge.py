@@ -124,9 +124,9 @@ def planning_daily(
     else:
         yoy = 1.0
 
+    # holiday × capped YoY — do NOT also multiply baseline×surge (bypasses YoY cap)
     anchored = holiday_prior_daily * yoy
-    from_surge = baseline * surge_mult
-    return round(max(baseline, anchored, from_surge), 2)
+    return round(max(baseline, anchored), 2)
 
 
 def amazon_cover_target(
