@@ -5,14 +5,14 @@
 import {
   buildInboundWavePlan,
   holidayDemandUnits,
-  type ForecastWeekRow,
-  type SeasonalityWeek,
   type SkuVelocityRow,
   type InventorySnapshot,
 } from "./inventory-inbound-waves";
 import {
   phasedAvgDaily,
   phasedStockoutDate,
+  type ForecastWeekRow,
+  type SeasonalityWeek,
 } from "./inventory-phased-demand";
 
 export const PRODUCTION_LEAD_DAYS = {
