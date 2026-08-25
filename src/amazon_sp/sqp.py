@@ -37,6 +37,11 @@ SOURCE = "sqp_spapi"
 # SP-API caps the `asin` reportOption string at 200 characters. ASINs are 10
 # chars, space-separated, so 18 fit; batching is computed rather than assumed.
 ASIN_OPTION_MAX_CHARS = 200
+# Soft cap on ASINs per request. The 200-char option limit allows ~18 ASINs,
+# but Brand Analytics has returned FATAL for a single 17-ASIN request on this
+# account (week 2026-08-16→22). Smaller batches succeed where the jumbo
+# request fails.
+ASIN_BATCH_MAX = 8
 
 VALID_PERIODS = ("WEEK", "MONTH", "QUARTER")
 
@@ -86,13 +91,17 @@ def period_bounds(period: str, ref: date | None = None) -> tuple[date, date]:
 
 
 def batch_asins(asins: list[str],
-                max_chars: int = ASIN_OPTION_MAX_CHARS) -> list[list[str]]:
-    """Split ASINs into batches whose space-joined form fits the option limit."""
+                max_chars: int = ASIN_OPTION_MAX_CHARS,
+                max_asins: int = ASIN_BATCH_MAX) -> list[list[str]]:
+    """Split ASINs so each batch fits the option char limit and ASIN count."""
     batches: list[list[str]] = []
     current: list[str] = []
+    limit = max(1, int(max_asins or ASIN_BATCH_MAX))
     for a in [str(x).strip() for x in asins if str(x).strip()]:
         candidate = current + [a]
-        if len(" ".join(candidate)) > max_chars and current:
+        over_chars = len(" ".join(candidate)) > max_chars and bool(current)
+        over_count = len(candidate) > limit and bool(current)
+        if over_chars or over_count:
             batches.append(current)
             current = [a]
         else:

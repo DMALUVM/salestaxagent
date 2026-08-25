@@ -82,6 +82,13 @@ class TestAsinBatching:
     def test_a_single_batch_when_they_fit(self):
         assert len(batch_asins(["B0CLHTF8YN", "B0DQFKMJFY", "B0HBSZ71XQ"])) == 1
 
+    def test_soft_asin_cap_splits_large_lists(self):
+        asins = [f"B0{i:08d}" for i in range(17)]
+        batches = batch_asins(asins)
+        assert all(len(b) <= 8 for b in batches)
+        assert sum(len(b) for b in batches) == 17
+        assert len(batches) >= 3
+
     def test_empty_input(self):
         assert batch_asins([]) == []
 

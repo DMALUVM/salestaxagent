@@ -139,7 +139,16 @@ def wait_for_report(
             return doc_id
 
         if status in ("CANCELLED", "FATAL"):
-            raise SPAPIError(f"Report {report_id} ended with status: {status}")
+            detail_bits = []
+            for key in ("processingStatus", "reportType", "reportOptions",
+                        "dataStartTime", "dataEndTime", "marketplaceIds"):
+                if report.get(key) is not None:
+                    detail_bits.append(f"{key}={report.get(key)}")
+            extras = "; ".join(detail_bits[:6])
+            raise SPAPIError(
+                f"Report {report_id} ended with status: {status}"
+                + (f" ({extras})" if extras else "")
+            )
 
         if time.time() > deadline:
             raise ReportTimeoutError(
