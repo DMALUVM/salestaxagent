@@ -292,6 +292,7 @@ describe("page / API invariants", () => {
     assert.match(intelUi, /Tallowbourn ads Intel/);
     assert.match(intelUi, /newest date/);
     assert.match(intelUi, /Upload CSVs/);
+    assert.match(intelUi, /PaidAdsExportGuide/);
     assert.match(intelUi, /Copy for Grok/);
     assert.match(intelUi, /EMPTY_BRIEF|brief \?\?/);
     assert.equal(PAID_ADS_ATTRIBUTION.includes("not a live"), true);

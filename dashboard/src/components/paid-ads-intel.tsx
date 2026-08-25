@@ -8,6 +8,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { SectionNav } from "@/components/section-nav";
+import { PaidAdsExportGuide } from "@/components/paid-ads-export-guide";
 import type {
   IntelBundle, IntelCard, IntelFilter, IntelRangeDays, PlatformKpis,
 } from "@/lib/paid-intel/types";
@@ -956,6 +957,8 @@ export function PaidAdsIntel({
           ))}
         </div>
       </div>
+
+      <PaidAdsExportGuide />
 
       {msg && (
         <p className="text-xs text-amber-700 dark:text-amber-400">{msg}</p>
