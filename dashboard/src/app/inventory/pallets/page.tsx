@@ -13,6 +13,7 @@ import {
 import { isConfigured } from "@/lib/supabase";
 import { FourNumbersSummary } from "@/components/inventory/FourNumbersSummary";
 import { useFourNumbersPlan } from "@/lib/use-four-numbers-plan";
+import { formatManufactureAction, formatShipBy } from "@/lib/inventory-supply-display";
 import { Shield, Package, AlertTriangle, Download, FileText, Lock, Unlock } from "lucide-react";
 import Link from "next/link";
 
@@ -600,7 +601,11 @@ export default function PalletPlanPage() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums font-semibold text-primary">{fmt(mfgQty)}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {supply?.orderBy?.slice(5) ?? "—"}
+                      {formatManufactureAction(
+                        supply?.manufactureQty ?? 0,
+                        supply?.orderBy ?? null,
+                        supply?.orderUrgent ?? false,
+                      )}
                     </TableCell>
                   </TableRow>
                   );

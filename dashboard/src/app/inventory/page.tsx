@@ -40,6 +40,10 @@ import {
 } from "@/lib/inventory-supply-shared";
 import { FourNumbersSummary } from "@/components/inventory/FourNumbersSummary";
 import {
+  formatManufactureAction,
+  formatShipBy,
+} from "@/lib/inventory-supply-display";
+import {
   Shield,
   AlertTriangle,
   Download,
@@ -120,6 +124,9 @@ interface ComputedRow {
   ship_to_fba: number;
   phased_fba_dos: number | null;
   order_by: string | null;
+  order_urgent: boolean;
+  next_ship_by: string | null;
+  ship_urgent: boolean;
   flag: string;
 }
 
@@ -511,6 +518,9 @@ export default function InventoryPage() {
         ship_to_fba: supply?.shipToFba ?? 0,
         phased_fba_dos: supply?.fbaDosPhased ?? null,
         order_by: supply?.orderBy ?? null,
+        order_urgent: supply?.orderUrgent ?? false,
+        next_ship_by: supply?.nextShipBy ?? null,
+        ship_urgent: supply?.shipUrgent ?? false,
         flag,
       });
     }
@@ -661,8 +671,7 @@ export default function InventoryPage() {
             )}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            DOS uses current V30. Stockout &amp; reorder walk V30 × weekly seasonality (ramps Nov–Jan).
-            Peak column is Dec-reference only — not applied in August.
+            PhDOS = phased FBA cover. Mfg due / Ship by from shared supply plan (Order now / Ship now when overdue).
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -901,26 +910,19 @@ export default function InventoryPage() {
             <TableHeader className="sticky top-0 z-10 bg-card">
               <TableRow>
                 {[
-                  { key: "sku", label: "SKU", tip: "Seller SKU / MSKU" },
-                  { key: "fba_on_hand", label: "FBA", tip: "Sellable units checked in at Amazon FBA" },
-                  { key: "awd_on_hand", label: "AWD", tip: "AWD on-hand (not FBA sellable until replenished)" },
-                  { key: "tpl_available", label: "3PL", tip: "Third-party / own warehouse units" },
-                  { key: "inbound", label: "Inbnd", tip: "Amazon inbound — not yet sellable" },
-                  { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
-                  { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days" },
-                  { key: "planning_u_30", label: "Peak", tip: "Peak holiday reference (prior Nov–Dec × YoY) — for manufacture / Plan SKU, not current DOS" },
-                  { key: "holiday_surge_mult", label: "Surge", tip: "2025 Nov–Dec daily ÷ Jun–Aug daily" },
-                  { key: "dos", label: "DOS", tip: "FBA days of supply at current V30 (today's run-rate)" },
-                  { key: "phased_fba_dos", label: "PhDOS", tip: "FBA days at phased seasonal rate — no new warehouse sends (shared supply plan)" },
-                  { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
-                  { key: "manufacture_qty", label: "Mfg", tip: "Manufacture order qty (holiday YoY need minus owned stock)" },
-                  { key: "ship_to_fba", label: "Ship", tip: "Warehouse → FBA units from phased wave plan" },
-                  { key: "order_by", label: "MfgBy", tip: "Order from manufacturer by (product-line lead)" },
-                  { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
-                  { key: "our_reorder_qty", label: "Reorder", tip: "Gap to phased demand (V30 × seasonality over cover + lead) minus network stock" },
-                  { key: "stockout_date", label: "Out", tip: "FBA reaches 0 (Amazon) or warehouse reaches 0 (Shop) — uses forecast + seasonality" },
-                  { key: "network_oos_date", label: "OOS", tip: "All network stock (FBA+AWD+3PL+Inbound) reaches 0 — uses forecast + seasonality" },
-                  { key: "flag", label: "Status", tip: "OK ≥ target cover; CRITICAL/LOW below; RESTOCK approaching" },
+                  { key: "sku", label: "SKU", tip: "Seller SKU" },
+                  { key: "fba_on_hand", label: "FBA", tip: "Amazon FBA on-hand (sellable)" },
+                  { key: "tpl_available", label: "3PL", tip: "Warehouse units" },
+                  { key: "inbound", label: "Inbnd", tip: "Inbound to Amazon (not sellable yet)" },
+                  { key: "total_u_30", label: "V30", tip: "Current 30d velocity (u/day)" },
+                  { key: "phased_fba_dos", label: "PhDOS", tip: "FBA days at phased seasonal rate (no new sends)" },
+                  { key: "manufacture_qty", label: "Mfg", tip: "Units to order from manufacturer (holiday YoY need − owned)" },
+                  { key: "order_by", label: "Mfg due", tip: "Place manufacture order by — Order now if overdue" },
+                  { key: "ship_to_fba", label: "Ship", tip: "Units to send 3PL → FBA (wave plan)" },
+                  { key: "next_ship_by", label: "Ship by", tip: "Ship from warehouse by (full date)" },
+                  { key: "stockout_date", label: "FBA out", tip: "FBA stockout at phased demand (inbound counts)" },
+                  { key: "network_oos_date", label: "Net OOS", tip: "All stock out (FBA+inb+AWD+3PL) at phased demand" },
+                  { key: "flag", label: "Status", tip: "CRITICAL / RESTOCK / OK" },
                 ].map(({ key, label, tip }) => (
                   <TableHead
                     key={key}
@@ -944,7 +946,7 @@ export default function InventoryPage() {
               {filtered.length === 0 ? (
                 <TableRow>
                     <TableCell
-                      colSpan={15}
+                      colSpan={13}
                       className="text-center text-muted-foreground py-8"
                     >
                       No inventory data. Run:{" "}
@@ -984,69 +986,23 @@ export default function InventoryPage() {
                       {r.channel === "shopify_only" ? "—" : fmt(r.fba_on_hand)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {r.awd_on_hand > 0 ? fmt(r.awd_on_hand) : "—"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
                       {r.tpl_available > 0 ? fmt(r.tpl_available) : "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {fmt(r.inbound)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {r.total_u_7.toFixed(1)}
+                      {r.inbound > 0 ? fmt(r.inbound) : "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {r.total_u_30.toFixed(1)}
                     </TableCell>
                     <TableCell
                       className={`text-right tabular-nums ${
-                        r.planning_u_30 > r.total_u_30 * 1.5
-                          ? "text-amber-700 dark:text-amber-400"
-                          : "text-muted-foreground"
-                      }`}
-                      title={`Peak holiday reference ${r.planning_u_30.toFixed(1)}/d vs current V30 ${r.total_u_30.toFixed(1)}/d`}
-                    >
-                      {r.planning_u_30.toFixed(1)}
-                    </TableCell>
-                    <TableCell
-                      className={`text-right tabular-nums ${
-                        r.holiday_surge_mult >= 2
-                          ? "text-amber-700 dark:text-amber-400 font-medium"
-                          : r.holiday_surge_mult > 1.05
-                            ? "text-amber-600"
-                            : "text-muted-foreground"
-                      }`}
-                    >
-                      {r.holiday_surge_mult >= 1.05
-                        ? `${r.holiday_surge_mult.toFixed(2)}×`
-                        : "—"}
-                    </TableCell>
-                    <TableCell
-                      className={`text-right tabular-nums font-medium ${
-                        r.dos < 30
-                          ? "text-red-500"
-                          : r.dos < 60
-                            ? "text-amber-500"
-                            : ""
-                      }`}
-                      title={r.channel === "shopify_only" ? "Warehouse days of cover" : "FBA days of cover"}
-                    >
-                      {r.dos > 999 ? "999+" : fmt(r.dos)}
-                    </TableCell>
-                    <TableCell
-                      className={`text-right tabular-nums ${
                         r.phased_fba_dos != null && r.phased_fba_dos < 60
-                          ? "text-amber-600"
-                          : "text-muted-foreground"
+                          ? "text-amber-600 font-medium"
+                          : ""
                       }`}
                       title="Phased seasonal rate · no new FBA sends"
                     >
                       {r.phased_fba_dos != null ? `${r.phased_fba_dos}d` : "—"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {r.pipeline_dos > 999
-                        ? "999+"
-                        : fmt(r.pipeline_dos)}
                     </TableCell>
                     <TableCell
                       className={`text-right tabular-nums font-medium ${
@@ -1055,29 +1011,38 @@ export default function InventoryPage() {
                     >
                       {r.manufacture_qty > 0 ? fmt(r.manufacture_qty) : "—"}
                     </TableCell>
+                    <TableCell
+                      className={`text-right text-xs ${
+                        r.order_urgent ? "text-red-600 font-semibold" : ""
+                      }`}
+                    >
+                      {formatManufactureAction(
+                        r.manufacture_qty,
+                        r.order_by,
+                        r.order_urgent,
+                      )}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {r.ship_to_fba > 0 ? fmt(r.ship_to_fba) : "—"}
                     </TableCell>
-                    <TableCell className="text-right text-xs">
-                      {r.order_by?.slice(5) ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {fmt(r.amz_rec_qty)}
-                    </TableCell>
                     <TableCell
-                      className={`text-right tabular-nums font-medium ${
-                        r.our_reorder_qty > 0 ? "text-amber-600" : ""
+                      className={`text-right text-xs ${
+                        r.ship_urgent ? "text-red-600 font-semibold" : ""
                       }`}
                     >
-                      {fmt(r.our_reorder_qty)}
+                      {formatShipBy(
+                        r.ship_to_fba,
+                        r.next_ship_by,
+                        r.ship_urgent,
+                      )}
                     </TableCell>
                     <TableCell className="text-right text-xs"
-                      title={r.channel === "shopify_only" ? "Warehouse reaches 0" : "FBA reaches 0"}>
-                      {r.stockout_date?.slice(5) ?? "—"}
+                      title={r.channel === "shopify_only" ? "Warehouse reaches 0" : "FBA reaches 0 at phased rate"}>
+                      {r.stockout_date ?? "—"}
                     </TableCell>
-                    <TableCell className="text-right text-xs text-muted-foreground"
-                      title="All owned network stock reaches 0">
-                      {r.network_oos_date?.slice(5) ?? "—"}
+                    <TableCell className="text-right text-xs"
+                      title="FBA + inbound + AWD + 3PL at phased rate">
+                      {r.network_oos_date ?? "—"}
                     </TableCell>
                     <TableCell>
                       <Badge

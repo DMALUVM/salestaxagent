@@ -14,6 +14,7 @@ import {
   type ForecastWeekRow,
   type SeasonalityWeek,
 } from "./inventory-phased-demand";
+import { computeManufactureTiming } from "./inventory-supply-display";
 
 export const PRODUCTION_LEAD_DAYS = {
   lip: 42,
@@ -66,6 +67,8 @@ export type SkuFourNumbers = {
   manufactureQty: number;
   orderBy: string | null;
   orderUrgent: boolean;
+  nextShipBy: string | null;
+  shipUrgent: boolean;
   shipToFba: number;
   shipToAwd: number;
   warehouseShipments: WarehouseShipment[];
@@ -182,26 +185,16 @@ export function buildFourNumbersPlan(opts: {
 
     const manufactureQty = inboundPlan?.produceShort ?? 0;
 
-    let orderBy: string | null = null;
-    let orderUrgent = false;
-    if (manufactureQty > 0) {
-      const tplDates = tplWaves.map((w) => w.ship_by).sort();
-      if (tplDates.length > 0) {
-        const firstShip = new Date(tplDates[0] + "T00:00:00");
-        const needAtWh = new Date(firstShip);
-        needAtWh.setDate(needAtWh.getDate() - recvDays);
-        const ob = new Date(needAtWh);
-        ob.setDate(ob.getDate() - prodLead);
-        orderBy = localDate(ob);
-        orderUrgent = ob < today;
-      } else {
-        const peakStart = new Date(today.getFullYear(), 9, 1);
-        const ob = new Date(peakStart);
-        ob.setDate(ob.getDate() - prodLead - recvDays);
-        orderBy = localDate(ob);
-        orderUrgent = ob < today;
-      }
-    }
+    const timing = computeManufactureTiming({
+      manufactureQty,
+      tplShipWaves: tplWaves.map((w) => ({
+        ship_by: w.ship_by,
+        urgent: w.urgent,
+      })),
+      productionLeadDays: prodLead,
+      receivingDays: recvDays,
+      today,
+    });
 
     let fbaDosPhased: number | null = null;
     let fbaStockoutDate: string | null = null;
@@ -277,8 +270,10 @@ export function buildFourNumbersPlan(opts: {
       productLine: line,
       productionLeadDays: prodLead,
       manufactureQty,
-      orderBy,
-      orderUrgent,
+      orderBy: timing.orderBy,
+      orderUrgent: timing.orderUrgent,
+      nextShipBy: timing.nextShipBy,
+      shipUrgent: timing.shipUrgent,
       shipToFba: shipFba,
       shipToAwd: shipTplToAwd,
       warehouseShipments,

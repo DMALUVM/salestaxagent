@@ -13,6 +13,7 @@ import { isConfigured } from "@/lib/supabase";
 import type { FourNumbersPlan } from "@/lib/inventory-four-numbers";
 import { DEFAULT_RECEIVING_DAYS, DEFAULT_UNTIL_DATE } from "@/lib/inventory-supply-shared";
 import { useFourNumbersPlan } from "@/lib/use-four-numbers-plan";
+import { formatManufactureAction } from "@/lib/inventory-supply-display";
 import { Calculator, AlertTriangle, Download } from "lucide-react";
 import { displayTitle } from "@/lib/display-title";
 
@@ -188,12 +189,11 @@ export function InboundPlannerView({ plan: planProp }: { plan?: FourNumbersPlan 
                           {r.manufactureQty > 0 ? fmt(r.manufactureQty) : "—"}
                         </TableCell>
                         <TableCell className="text-xs">
-                          {r.orderBy ? (
-                            <span className={r.orderUrgent ? "text-red-600 font-medium" : ""}>
-                              {r.orderBy}
-                              {r.orderUrgent && " !"}
-                            </span>
-                          ) : "—"}
+                          {formatManufactureAction(
+                            r.manufactureQty,
+                            r.orderBy,
+                            r.orderUrgent,
+                          )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {r.shipToFba > 0 ? fmt(r.shipToFba) : "—"}
