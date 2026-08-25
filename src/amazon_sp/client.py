@@ -57,17 +57,30 @@ def create_report(
     start: date,
     end: date,
     report_options: dict | None = None,
+    *,
+    date_only: bool = False,
 ) -> str:
     """Create a report request.  Returns the reportId.
 
     `report_options` maps to SP-API's `reportOptions`. Brand Analytics reports
     need it (reportPeriod, asin); the order and inventory reports do not pass
     it and are unaffected.
+
+    Brand Analytics schemas declare dataStartTime/dataEndTime as `format: date`
+    (YYYY-MM-DD). Passing a full datetime has worked historically, but Amazon
+    has also returned FATAL for mis-typed boundaries — `date_only=True` sends
+    the documented shape.
     """
+    if date_only:
+        start_s, end_s = start.isoformat(), end.isoformat()
+    else:
+        start_s = (datetime.combine(start, datetime.min.time()).isoformat() + "Z")
+        end_s = (datetime.combine(end, datetime.max.time().replace(microsecond=0))
+                 .isoformat() + "Z")
     body = {
         "reportType": report_type,
-        "dataStartTime": datetime.combine(start, datetime.min.time()).isoformat() + "Z",
-        "dataEndTime": datetime.combine(end, datetime.max.time().replace(microsecond=0)).isoformat() + "Z",
+        "dataStartTime": start_s,
+        "dataEndTime": end_s,
         "marketplaceIds": [_marketplace_id()],
     }
     if report_options:

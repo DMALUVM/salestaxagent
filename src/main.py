@@ -1773,17 +1773,31 @@ def brand_share_cmd(weeks, opportunities):
 @cli.command("sqp-sync")
 @click.option("--period", type=click.Choice(["WEEK", "MONTH", "QUARTER"]), default=None)
 @click.option("--asin", "asins", multiple=True, help="Override configured ASINs")
+@click.option("--ref", "ref_date", default=None,
+              help="Reference date YYYY-MM-DD — pulls the complete week before this day")
 @click.option("--dry-run/--apply", default=True, help="Dry run by default")
-def sqp_sync_cmd(period, asins, dry_run):
+@click.option("--no-previous-retry", is_flag=True,
+              help="Do not fall back to the prior week on empty/FATAL")
+def sqp_sync_cmd(period, asins, ref_date, dry_run, no_previous_retry):
     """Pull Brand Analytics SQP via SP-API into keyword_organic_rank.
 
     Debugging entry point — the scheduled weekly job is the primary path.
     Requires Brand Registry + the Brand Analytics role on the SP-API app.
     """
+    from datetime import date as _date
+
     from src.amazon_sp.sqp import BrandAnalyticsRoleError, sync_sqp
 
+    ref = None
+    if ref_date:
+        try:
+            ref = _date.fromisoformat(ref_date)
+        except ValueError as e:
+            raise click.UsageError(f"--ref must be YYYY-MM-DD: {e}") from e
+
     try:
-        r = sync_sqp(asins=list(asins) or None, period=period, dry_run=dry_run)
+        r = sync_sqp(asins=list(asins) or None, period=period, ref=ref,
+                     dry_run=dry_run, retry_previous=not no_previous_retry)
     except BrandAnalyticsRoleError as e:
         raise click.ClickException(str(e))
 
@@ -1793,7 +1807,9 @@ def sqp_sync_cmd(period, asins, dry_run):
     if r.get("retried_previous_period"):
         fa = r.get("first_attempt") or {}
         click.echo(f"  retried     : latest period {fa.get('start')}→{fa.get('end')} "
-                   f"was empty (Amazon publishes ~24-48h after close)")
+                   f"was empty/FATAL (Amazon publishes ~24-48h after close)")
+        for e in (fa.get("errors") or [])[:3]:
+            click.echo(f"               first attempt: {e[:120]}")
     res = r.get("asin_resolution") or {}
     click.echo(f"  asins       : {len(r.get('asins') or [])} in {r['batches']} "
                f"batch(es) [{res.get('basis', '?')}]")
@@ -1810,6 +1826,8 @@ def sqp_sync_cmd(period, asins, dry_run):
     click.echo(f"  unique keys : {len(r['rows'])}")
     if not dry_run:
         click.echo(f"  written     : {r.get('written', 0)}")
+        if r.get("weekly_written") is not None:
+            click.echo(f"  weekly rows : {r.get('weekly_written', 0)}")
     for w in r.get("warnings", []):
         click.echo(f"  ⚠ {w}")
     for e in r.get("errors", []):

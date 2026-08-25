@@ -374,6 +374,72 @@ class TestPreviousPeriodRetry:
         sqp.sync_sqp(dry_run=True)
         assert len(calls) == 1
 
+    def test_fatal_latest_week_retries_previous(self, monkeypatch):
+        """Amazon often FATALs unpublished weeks instead of returning empty."""
+        import src.amazon_sp.sqp as sqp
+        calls = []
+
+        def fake_fetch(asins, period="WEEK", ref=None, timeout=1800):
+            calls.append(ref)
+            if len(calls) == 1:
+                return {"rows": [], "errors": ["batch 1: FATAL"], "warnings": [],
+                        "period": period, "start": "2026-08-16", "end": "2026-08-22",
+                        "batches": 1}
+            return {"rows": [{"keyword_normalized": "kw"}], "errors": [],
+                    "warnings": [], "period": period, "start": "2026-08-09",
+                    "end": "2026-08-15", "batches": 1}
+
+        monkeypatch.setattr(sqp, "fetch_sqp", fake_fetch)
+        monkeypatch.setattr(sqp, "resolve_asins",
+                            lambda *a, **k: {"asins": ["B0X"], "basis": "config",
+                                             "unknown": [], "note": ""})
+        monkeypatch.setattr("src.amazon_ads.organic_rank.load_config",
+                            lambda: {"sqp_auto": {"report_period": "WEEK"}})
+        monkeypatch.setattr("src.amazon_ads.organic_rank.upsert_ranks",
+                            lambda rows: len(rows))
+        r = sqp.sync_sqp(dry_run=True)
+        assert len(calls) == 2
+        assert r["retried_previous_period"] is True
+        assert r["end"] == "2026-08-15"
+        assert any("FATAL" in w for w in r["warnings"])
+
+
+class TestFatalBisect:
+    def test_fatal_multi_asin_batch_is_split_and_retried(self, monkeypatch):
+        import src.amazon_sp.sqp as sqp
+        from datetime import date
+
+        calls = []
+
+        def fake_create(report_type, start, end, report_options=None, date_only=False):
+            asin = (report_options or {}).get("asin", "")
+            n = len(asin.split())
+            calls.append(n)
+            if n > 1:
+                raise RuntimeError("Report x ended with status: FATAL")
+            return f"ok-{asin}"
+
+        def fake_wait(report_id, timeout=1800):
+            return "doc-1"
+
+        def fake_download(doc_id):
+            return json.dumps({"dataByAsin": [{
+                "asin": "B0AAAAAAA1",
+                "searchQueryData": {"searchQuery": "tallow"},
+                "clickData": {"clickShare": 0.5},
+            }]})
+
+        monkeypatch.setattr("src.amazon_sp.client.create_report", fake_create)
+        monkeypatch.setattr("src.amazon_sp.client.wait_for_report", fake_wait)
+        monkeypatch.setattr("src.amazon_sp.client.download_report", fake_download)
+
+        r = sqp.fetch_sqp(
+            ["B0AAAAAAA1", "B0AAAAAAA2"], period="WEEK", ref=date(2026, 8, 25))
+        assert calls[0] == 2
+        assert 1 in calls  # bisected to singles
+        assert r["parsed"] >= 1
+        assert any("splitting" in w for w in r["warnings"])
+
 
 class TestUpsertShape:
     def test_rows_carry_everything_the_gate_and_table_need(self):

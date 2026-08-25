@@ -398,9 +398,9 @@ def fetch_sqp(asins: list[str], period: str = "WEEK",
               ref: date | None = None, timeout: int = 1800) -> dict:
     """Pull SQP for the most recent complete period. Returns parsed rows.
 
-    Batches ASINs to respect the 200-character reportOptions limit. A batch
-    that fails is recorded and the others still run — partial data beats none,
-    and the failure is reported rather than swallowed.
+    Batches ASINs to respect the 200-character option limit and a soft per-
+    request ASIN cap. A FATAL on a multi-ASIN batch is bisected and retried —
+    one bad ASIN (or Amazon rejecting a jumbo request) must not wipe the week.
     """
     from src.amazon_sp.client import create_report, download_report, wait_for_report
 
@@ -409,8 +409,8 @@ def fetch_sqp(asins: list[str], period: str = "WEEK",
         raise ValueError(f"reportPeriod must be one of {VALID_PERIODS}, got {period!r}")
 
     start, end = period_bounds(p, ref)
-    batches = batch_asins(asins)
-    if not batches:
+    initial = batch_asins(asins)
+    if not initial:
         return {"rows": [], "period": p, "start": start.isoformat(),
                 "end": end.isoformat(), "batches": 0, "errors": [],
                 "warnings": ["no ASINs configured — set organic_rank_gating."
@@ -422,16 +422,22 @@ def fetch_sqp(asins: list[str], period: str = "WEEK",
     diagnostics: list[dict] = []
     all_weekly: list[dict] = []
     parsed = skipped = 0
+    batch_count = 0
 
-    for i, batch in enumerate(batches, 1):
+    # Work queue so a FATAL mid-batch can split and re-try without nesting.
+    pending: list[list[str]] = list(initial)
+    while pending:
+        batch = pending.pop(0)
+        batch_count += 1
         opts = {"reportPeriod": p, "asin": " ".join(batch)}
-        log.info("SQP batch %d/%d: %s..%s asins=%s",
-                 i, len(batches), start, end, len(batch))
+        log.info("SQP batch %d (queue %d left): %s..%s asins=%s",
+                 batch_count, len(pending), start, end, len(batch))
         try:
-            report_id = create_report(REPORT_TYPE, start, end, report_options=opts)
+            report_id = create_report(
+                REPORT_TYPE, start, end, report_options=opts, date_only=True)
             doc_id = wait_for_report(report_id, timeout=timeout)
             content = download_report(doc_id)
-            diagnostics.append({"batch": i, "report_id": report_id,
+            diagnostics.append({"batch": batch_count, "report_id": report_id,
                                 "asins": list(batch), "doc_bytes": len(content or "")})
         except Exception as e:
             msg = str(e)
@@ -439,8 +445,21 @@ def fetch_sqp(asins: list[str], period: str = "WEEK",
             if any(t in low for t in ("unauthorized", "access to requested resource",
                                       "403", "forbidden", "invalid report type")):
                 raise _role_error(msg) from e
-            errors.append(f"batch {i} ({len(batch)} asins): {msg[:160]}")
-            log.warning("SQP batch %d failed: %s", i, msg[:200])
+            is_fatal = "fatal" in low
+            if is_fatal and len(batch) > 1:
+                mid = len(batch) // 2
+                left, right = batch[:mid], batch[mid:]
+                pending.insert(0, right)
+                pending.insert(0, left)
+                warnings.append(
+                    f"batch of {len(batch)} ASINs FATAL — splitting into "
+                    f"{len(left)}+{len(right)} and retrying")
+                log.warning("SQP FATAL on %d ASINs — bisecting", len(batch))
+                continue
+            errors.append(
+                f"batch {batch_count} ({len(batch)} asin(s)"
+                f"{': ' + batch[0] if len(batch) == 1 else ''}): {msg[:160]}")
+            log.warning("SQP batch %d failed: %s", batch_count, msg[:200])
             continue
 
         res = parse_sqp_json(content, as_of=end, week_start=start, period=p,
@@ -452,7 +471,7 @@ def fetch_sqp(asins: list[str], period: str = "WEEK",
                                     "records_parsed": res.parsed,
                                     "api_error_codes": res.api_error_codes})
         if res.api_error_codes:
-            errors.append(f"batch {i}: SP-API error "
+            errors.append(f"batch {batch_count}: SP-API error "
                           f"{', '.join(res.api_error_codes)}")
         all_rows.extend(res.rows)
         parsed += res.parsed
@@ -471,10 +490,10 @@ def fetch_sqp(asins: list[str], period: str = "WEEK",
 
     return {"rows": list(best.values()), "period": p,
             "start": start.isoformat(), "end": end.isoformat(),
-            "batches": len(batches), "parsed": parsed, "skipped": skipped,
+            "batches": batch_count, "parsed": parsed, "skipped": skipped,
             "errors": errors, "warnings": warnings, "diagnostics": diagnostics,
             "weekly": all_weekly,
-            "asins_requested": [a for b in batches for a in b]}
+            "asins_requested": [a for b in initial for a in b]}
 
 
 def sync_sqp(asins: list[str] | None = None, period: str | None = None,
@@ -508,7 +527,10 @@ def sync_sqp(asins: list[str] | None = None, period: str | None = None,
     result["dry_run"] = dry_run
     result["period_used"] = result["end"]
 
-    # Publish lag: an empty latest week is expected within ~48h of it closing.
+    # Publish lag: an empty latest week is expected within ~48h of close.
+    # Amazon also returns FATAL (not an empty DONE document) when the week
+    # is not published yet — treat all-FATAL-with-no-rows the same as empty
+    # so we still fall back to the previous complete week.
     quota_hit = any("QuotaExceeded" in str(e) for e in (result.get("errors") or []))
     if quota_hit:
         result["quota_exceeded"] = True
@@ -518,21 +540,32 @@ def sync_sqp(asins: list[str] | None = None, period: str | None = None,
             "interval; wait before retrying. The weekly schedule stays well "
             "inside the quota; ad-hoc re-runs are what exhaust it."]
 
-    if retry_previous and not quota_hit and not result["rows"] and not result["errors"]:
+    err_text = " ".join(str(e) for e in (result.get("errors") or []))
+    only_fatal = bool(result.get("errors")) and "FATAL" in err_text.upper() \
+        and "QuotaExceeded" not in err_text
+    empty_or_fatal = (not result["rows"]) and (
+        not result.get("errors") or only_fatal)
+
+    if retry_previous and not quota_hit and empty_or_fatal:
         start = date.fromisoformat(result["start"])
         earlier_ref = start - timedelta(days=1)
-        log.info("SQP: latest period empty, retrying the previous %s", use_period)
+        log.info("SQP: latest period empty/FATAL, retrying the previous %s",
+                 use_period)
         prev = fetch_sqp(use_asins, period=use_period, ref=earlier_ref)
         prev["asins"] = list(use_asins)
         prev["asin_resolution"] = resolution
         prev["dry_run"] = dry_run
         prev["retried_previous_period"] = True
-        prev["first_attempt"] = {"start": result["start"], "end": result["end"],
-                                 "rows": 0}
+        prev["first_attempt"] = {
+            "start": result["start"], "end": result["end"], "rows": 0,
+            "errors": list(result.get("errors") or []),
+        }
+        reason = ("FATAL from Amazon" if only_fatal else "no rows")
         prev["warnings"] = list(prev.get("warnings") or []) + [
-            f"latest {use_period} ({result['start']}→{result['end']}) returned no "
-            f"rows; used the previous {use_period} instead. Amazon publishes SQP "
-            f"roughly 24-48h after a period closes."]
+            f"latest {use_period} ({result['start']}→{result['end']}) "
+            f"returned {reason}; used the previous {use_period} instead. "
+            f"Amazon publishes SQP roughly 24-48h after a period closes "
+            f"(sometimes longer, and unpublished weeks often FATAL)."]
         result = prev
         result["period_used"] = result["end"]
 
