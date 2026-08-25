@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { DemandPlannerView } from "./DemandPlannerView";
 import { InboundPlannerView } from "./InboundPlannerView";
+import { FourNumbersSummary } from "./FourNumbersSummary";
+import { useFourNumbersPlan } from "@/lib/use-four-numbers-plan";
 
 export type PlanningTab = "demand" | "inbound";
 
@@ -11,26 +13,12 @@ export const PLANNING_TABS: Array<{ key: PlanningTab; label: string }> = [
   { key: "inbound", label: "Supply" },
 ];
 
-/**
- * Planning hub: one nav destination, two existing views.
- *
- * Both views are rendered from the components they were moved into — no logic,
- * formula or endpoint is duplicated here. The hub owns only the heading, the
- * segmented control, and keeping ?tab= in sync so links stay shareable and the
- * /forecast and /planner redirects land on the right tab.
- *
- * Only the active view is mounted, matching the old one-page-at-a-time
- * behaviour: switching tabs remounts and each view re-runs its own loaders
- * exactly as it did when it was its own route.
- */
 export function PlanningHub({ initialTab }: { initialTab: PlanningTab }) {
   const [tab, setTab] = useState<PlanningTab>(initialTab);
+  const { plan, loading } = useFourNumbersPlan();
 
   function selectTab(next: PlanningTab) {
     setTab(next);
-    // Reflect the tab in the URL without a navigation, so a refresh or a
-    // copied link reopens the same tab. history API, not router.replace, to
-    // avoid re-running the server component for a purely client-side switch.
     const url = new URL(window.location.href);
     url.searchParams.set("tab", next);
     window.history.replaceState(null, "", url);
@@ -63,7 +51,9 @@ export function PlanningHub({ initialTab }: { initialTab: PlanningTab }) {
         </div>
       </div>
 
-      {tab === "demand" ? <DemandPlannerView /> : <InboundPlannerView />}
+      {!loading && plan && <FourNumbersSummary plan={plan} planningHref="/planning?tab=inbound" />}
+
+      {tab === "demand" ? <DemandPlannerView /> : <InboundPlannerView plan={plan} />}
     </div>
   );
 }

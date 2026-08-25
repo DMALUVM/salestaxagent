@@ -35,6 +35,11 @@ import {
   phasedStockoutDate,
 } from "@/lib/inventory-phased-demand";
 import {
+  buildFourNumbersPlanFromRaw,
+  skuFourNumbersMap,
+} from "@/lib/inventory-supply-shared";
+import { FourNumbersSummary } from "@/components/inventory/FourNumbersSummary";
+import {
   Shield,
   AlertTriangle,
   Download,
@@ -110,6 +115,11 @@ interface ComputedRow {
   amz_rec_ship: string | null;
   stockout_date: string | null;
   network_oos_date: string | null;
+  /** Shared four-number plan fields */
+  manufacture_qty: number;
+  ship_to_fba: number;
+  phased_fba_dos: number | null;
+  order_by: string | null;
   flag: string;
 }
 
@@ -175,6 +185,20 @@ export default function InventoryPage() {
   const awdSnapshots = (raw?.awd ?? []) as { sku: string; awd_on_hand: number; awd_inbound: number }[];
   const modelStateRows = (raw?.modelState ?? []) as Array<{ sku: string; weights: unknown; seasonal_factors: unknown; model_version: string }>;
   const capacityLimits = (raw?.capacity ?? []) as { month: string; limit_ft3: number; used_ft3: number; source: string }[];
+
+  const supplyPlan = useMemo(
+    () =>
+      buildFourNumbersPlanFromRaw({
+        snapshots,
+        velocity: velocities,
+        tpl: tplSnapshots,
+        awd: awdSnapshots,
+        seasonality,
+        forecast: forecasts,
+      }),
+    [snapshots, velocities, tplSnapshots, awdSnapshots, seasonality, forecasts],
+  );
+  const supplyBySku = useMemo(() => skuFourNumbersMap(supplyPlan), [supplyPlan]);
 
   const [localSettings, setLocalSettings] = useState<InventorySettings | null>(
     null,
@@ -452,6 +476,8 @@ export default function InventoryPage() {
 
       const shopify_share = total_vel_30 > 0 ? Math.round((shopify_vel_30 / total_vel_30) * 100) : 0;
 
+      const supply = supplyBySku.get(sku);
+
       result.push({
         sku,
         asin: vel?.asin ?? rec?.asin ?? snap?.asin ?? "",
@@ -481,12 +507,16 @@ export default function InventoryPage() {
         amz_rec_ship: rec?.recommended_ship_date ?? null,
         stockout_date,
         network_oos_date,
+        manufacture_qty: supply?.manufactureQty ?? 0,
+        ship_to_fba: supply?.shipToFba ?? 0,
+        phased_fba_dos: supply?.fbaDosPhased ?? null,
+        order_by: supply?.orderBy ?? null,
         flag,
       });
     }
 
     return result;
-  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, s]);
+  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, s, supplyBySku]);
 
   // Filter + sort
   const filtered = useMemo(() => {
@@ -616,6 +646,8 @@ export default function InventoryPage() {
           {error}
         </div>
       )}
+
+      {supplyPlan && <FourNumbersSummary plan={supplyPlan} />}
 
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -879,7 +911,11 @@ export default function InventoryPage() {
                   { key: "planning_u_30", label: "Peak", tip: "Peak holiday reference (prior Nov–Dec × YoY) — for manufacture / Plan SKU, not current DOS" },
                   { key: "holiday_surge_mult", label: "Surge", tip: "2025 Nov–Dec daily ÷ Jun–Aug daily" },
                   { key: "dos", label: "DOS", tip: "FBA days of supply at current V30 (today's run-rate)" },
+                  { key: "phased_fba_dos", label: "PhDOS", tip: "FBA days at phased seasonal rate — no new warehouse sends (shared supply plan)" },
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
+                  { key: "manufacture_qty", label: "Mfg", tip: "Manufacture order qty (holiday YoY need minus owned stock)" },
+                  { key: "ship_to_fba", label: "Ship", tip: "Warehouse → FBA units from phased wave plan" },
+                  { key: "order_by", label: "MfgBy", tip: "Order from manufacturer by (product-line lead)" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
                   { key: "our_reorder_qty", label: "Reorder", tip: "Gap to phased demand (V30 × seasonality over cover + lead) minus network stock" },
                   { key: "stockout_date", label: "Out", tip: "FBA reaches 0 (Amazon) or warehouse reaches 0 (Shop) — uses forecast + seasonality" },
@@ -997,10 +1033,33 @@ export default function InventoryPage() {
                     >
                       {r.dos > 999 ? "999+" : fmt(r.dos)}
                     </TableCell>
+                    <TableCell
+                      className={`text-right tabular-nums ${
+                        r.phased_fba_dos != null && r.phased_fba_dos < 60
+                          ? "text-amber-600"
+                          : "text-muted-foreground"
+                      }`}
+                      title="Phased seasonal rate · no new FBA sends"
+                    >
+                      {r.phased_fba_dos != null ? `${r.phased_fba_dos}d` : "—"}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
                       {r.pipeline_dos > 999
                         ? "999+"
                         : fmt(r.pipeline_dos)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right tabular-nums font-medium ${
+                        r.manufacture_qty > 0 ? "text-primary" : ""
+                      }`}
+                    >
+                      {r.manufacture_qty > 0 ? fmt(r.manufacture_qty) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {r.ship_to_fba > 0 ? fmt(r.ship_to_fba) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right text-xs">
+                      {r.order_by?.slice(5) ?? "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {fmt(r.amz_rec_qty)}

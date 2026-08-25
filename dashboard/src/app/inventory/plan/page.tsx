@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { isConfigured } from "@/lib/supabase";
+import { buildFourNumbersPlanFromRaw } from "@/lib/inventory-supply-shared";
 import { Shield, AlertTriangle, Play } from "lucide-react";
 import Link from "next/link";
 
@@ -93,6 +94,22 @@ export default function PlanSkuPage() {
     ]);
     return Array.from(set).sort();
   }, [snapshots, velocities]);
+
+  const sharedSupply = useMemo(() => {
+    if (!selectedSku || !raw) return null;
+    const p = buildFourNumbersPlanFromRaw(
+      {
+        snapshots,
+        velocity: velocities,
+        tpl: tplList,
+        awd: awdList,
+        seasonality,
+        forecast: forecastRows,
+      },
+      { skus: [selectedSku], untilDate: untilDate },
+    );
+    return p?.skuRows[0] ?? null;
+  }, [selectedSku, raw, snapshots, velocities, tplList, awdList, seasonality, forecastRows, untilDate]);
 
   const plan = useMemo((): PlanResult | null => {
     if (!ran || !selectedSku) return null;
@@ -562,6 +579,40 @@ export default function PlanSkuPage() {
               )}
             </CardContent>
           </Card>
+
+          {sharedSupply && (
+            <Card className="border-primary/20">
+              <CardContent className="p-4 space-y-2 text-sm">
+                <p className="font-medium">Shared supply plan (same as Inventory / Pallets / Planning)</p>
+                <div className="grid gap-2 sm:grid-cols-4 text-xs">
+                  <div>
+                    <span className="text-muted-foreground">Mfg </span>
+                    <span className="font-semibold tabular-nums">{fmt(sharedSupply.manufactureQty)}</span>
+                    {sharedSupply.orderBy && (
+                      <span className="text-muted-foreground"> by {sharedSupply.orderBy.slice(5)}</span>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Ship →FBA </span>
+                    <span className="font-semibold tabular-nums">{fmt(sharedSupply.shipToFba)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Phased FBA DOS </span>
+                    <span className="font-semibold tabular-nums">
+                      {sharedSupply.fbaDosPhased != null ? `${sharedSupply.fbaDosPhased}d` : "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Network OOS </span>
+                    <span className="font-semibold">{sharedSupply.networkOosDate ?? "—"}</span>
+                  </div>
+                </div>
+                <Link href="/planning?tab=inbound" className="text-xs text-primary hover:underline">
+                  Full ship schedule →
+                </Link>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Weekly demand chart */}
           <Card>

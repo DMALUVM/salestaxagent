@@ -11,6 +11,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { isConfigured } from "@/lib/supabase";
+import { FourNumbersSummary } from "@/components/inventory/FourNumbersSummary";
+import { useFourNumbersPlan } from "@/lib/use-four-numbers-plan";
 import { Shield, Package, AlertTriangle, Download, FileText, Lock, Unlock } from "lucide-react";
 import Link from "next/link";
 
@@ -238,6 +240,16 @@ export default function PalletPlanPage() {
   const awdList = (raw?.awd ?? []) as { sku: string; awd_on_hand: number }[];
   const tplList = (raw?.tpl ?? []) as { sku: string; available: number }[];
   const velocityList = (raw?.velocity ?? []) as SkuVelocity[];
+
+  const { plan: supplyPlan } = useFourNumbersPlan({
+    skus: SKUS,
+    raw: raw ?? undefined,
+  });
+  const supplyBySku = useMemo(() => {
+    const m = new Map<string, NonNullable<typeof supplyPlan>["skuRows"][number]>();
+    if (supplyPlan) for (const r of supplyPlan.skuRows) m.set(r.sku, r);
+    return m;
+  }, [supplyPlan]);
 
   // ── Pallet plan ──
   const { skuPlans, pallets, totalGap, totalDemand, totalSupply } = useMemo(() => {
@@ -484,7 +496,9 @@ export default function PalletPlanPage() {
         </label>
       </div>
 
-      {/* Summary cards */}
+      {supplyPlan && <FourNumbersSummary plan={supplyPlan} />}
+
+      {/* Summary cards — pallet Nov+Dec view + FBA cover alerts */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
         <Card>
           <CardContent className="p-4">
@@ -540,7 +554,8 @@ export default function PalletPlanPage() {
           </div>
           <div className="flex items-center gap-4 mt-1">
             <p className="text-xs text-muted-foreground">
-              Nov+Dec+Jan demand · correction_factor primary · actual_2025 sensitivity
+              Manufacture column uses shared supply plan (YoY holiday · lip 6w / balm 10w lead).
+              Monthly schedule below is correction_factor sensitivity.
             </p>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <input type="checkbox" checked={tplOffsetsProduction}
@@ -563,31 +578,62 @@ export default function PalletPlanPage() {
                   <TableHead className="text-right">3PL</TableHead>
                   <TableHead className="text-right">Transfer</TableHead>
                   <TableHead className="text-right font-semibold">Manufacture</TableHead>
+                  <TableHead>Order by</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {mfgSkuSummary.map((s) => (
+                {mfgSkuSummary.map((s) => {
+                  const supply = supplyBySku.get(s.sku);
+                  const mfgQty = supply?.manufactureQty ?? s.manufacture;
+                  return (
                   <TableRow key={s.sku}>
                     <TableCell className="font-medium text-xs">{SKU_SHORT[s.sku]}</TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">{fmt(s.holidayDemand)}</TableCell>
+                    <TableCell className="text-right tabular-nums font-medium">
+                      {fmt(supply?.holidayDemand ?? s.holidayDemand)}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(s.fba)}</TableCell>
                     <TableCell className="text-right tabular-nums">{s.inbound > 0 ? fmt(s.inbound) : "—"}</TableCell>
                     <TableCell className="text-right tabular-nums">{s.awd > 0 ? fmt(s.awd) : "—"}</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">{s.tpl > 0 ? fmt(s.tpl) : "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums text-blue-500">{s.transfer > 0 ? fmt(s.transfer) : "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums font-semibold text-primary">{fmt(s.manufacture)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-blue-500">
+                      {fmt(supply?.shipToFba ?? s.transfer)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums font-semibold text-primary">{fmt(mfgQty)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {supply?.orderBy?.slice(5) ?? "—"}
+                    </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
                 <TableRow className="bg-muted/30 font-semibold">
                   <TableCell>TOTAL</TableCell>
                   <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.holidayDemand, 0))}</TableCell>
                   <TableCell colSpan={4} />
-                  <TableCell className="text-right tabular-nums text-blue-500">{fmt(mfgSkuSummary.reduce((a, s) => a + s.transfer, 0))}</TableCell>
-                  <TableCell className="text-right tabular-nums text-primary">{fmt(mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0))}</TableCell>
+                  <TableCell className="text-right tabular-nums text-blue-500">
+                    {fmt(supplyPlan?.totalWarehouseShipFba ?? mfgSkuSummary.reduce((a, s) => a + s.transfer, 0))}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-primary">
+                    {fmt(supplyPlan?.totalManufacture ?? mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0))}
+                  </TableCell>
+                  <TableCell />
                 </TableRow>
               </TableBody>
             </Table>
           </div>
+
+          {supplyPlan && supplyPlan.wavesConsolidated.length > 0 && (
+            <div className="rounded-lg border p-3 space-y-2">
+              <p className="text-xs font-medium">Warehouse ship schedule (shared plan · 3PL → FBA)</p>
+              {supplyPlan.wavesConsolidated.map((w) => (
+                <div key={w.ship_by} className="flex justify-between text-xs">
+                  <span className={w.urgent ? "text-red-600 font-medium" : ""}>
+                    Ship by {w.ship_by}{w.urgent ? " URGENT" : ""}
+                  </span>
+                  <span className="tabular-nums font-medium">{fmt(w.total_units)} units</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Month cards */}
           <div className="grid gap-4 sm:grid-cols-3">
