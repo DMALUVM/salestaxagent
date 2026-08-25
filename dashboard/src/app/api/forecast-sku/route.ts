@@ -58,9 +58,10 @@ export async function GET(request: NextRequest) {
     const sb = getServerSupabase();
 
     // ── Load data sources ──
-    const [velRes, seasRes, fcRes, snsRes, retRes] = await Promise.all([
+    const [velRes, seasRes, skuSeasRes, fcRes, snsRes, retRes] = await Promise.all([
       sb.from("sku_velocity").select("*").eq("sku", sku).limit(1),
       sb.from("seasonality_weekly").select("week,multiplier").eq("sku", "_account_").eq("year", 0),
+      sb.from("seasonality_weekly").select("week,multiplier").eq("sku", sku).eq("year", 0),
       sb.from("forecast_weekly").select("week_start,units").eq("sku", sku).eq("scenario", "correction_factor"),
       sb.from("sns_offer_metrics").select("*").eq("sku", sku).order("week_start", { ascending: false }).limit(1),
       sb.from("fba_returns").select("quantity").eq("sku", sku),
@@ -68,10 +69,14 @@ export async function GET(request: NextRequest) {
 
     const vel = velRes.data?.[0] ?? null;
 
-    // Seasonality: {week: multiplier}
+    // Seasonality: account + per-SKU peak floors (holiday surge)
     const seasonality: Record<number, number> = {};
     for (const r of seasRes.data ?? []) {
       seasonality[r.week] = Number(r.multiplier);
+    }
+    for (const r of skuSeasRes.data ?? []) {
+      const m = Number(r.multiplier);
+      if (m > (seasonality[r.week] ?? 0)) seasonality[r.week] = m;
     }
 
     // Holiday forecast: {isoDate: units}
