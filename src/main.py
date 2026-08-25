@@ -3846,6 +3846,54 @@ def inventory_velocity_cmd(days, dry_run):
     click.echo(f"Total: {r['skus']}, seasonality weeks: {r['seasonality_weeks']}")
     click.echo(f"Forward multiplier: {r['avg_forward_mult']:.3f}")
     click.echo(f"Rows inserted: {r['rows_inserted']}")
+    if not dry_run:
+        from src.inventory.holiday_surge import compute_surge_from_sales
+        click.echo("\nApplying prior-year holiday surge from sales_by_sku...")
+        surge = compute_surge_from_sales()
+        if surge.get("error"):
+            click.echo(f"  Holiday surge ERROR: {surge['error']}")
+        else:
+            click.echo(
+                f"  Prior year {surge['prior_year']}: {surge['surge_skus']} surge SKUs, "
+                f"{surge['skus_updated']} velocity rows patched"
+            )
+            for t in surge.get("top_surge", [])[:5]:
+                click.echo(
+                    f"    {t['sku']}: {t['surge']:.2f}×  "
+                    f"holiday {t['holiday_daily']:.0f}/d  "
+                    f"plan {t['planning_u_30']:.0f}/d  "
+                    f"(V30 {float(t['v30'] or 0):.0f})"
+                )
+
+
+@cli.command("inventory-holiday-surge")
+@click.option("--year", default=None, type=int, help="Prior holiday year (default: last calendar year)")
+def inventory_holiday_surge_cmd(year):
+    """Recompute per-SKU holiday surge from prior-year Nov–Dec sales_by_sku.
+
+    Anchors planning velocity to last holiday season × YoY growth so lip-balm
+    surge (often 2–4.5× summer) drives DOS / reorder / manufacture plans.
+    """
+    from src.inventory.holiday_surge import compute_surge_from_sales
+    click.echo("Computing per-SKU holiday surge from sales_by_sku...\n")
+    r = compute_surge_from_sales(prior_year=year)
+    if r.get("error"):
+        click.echo(f"ERROR: {r['error']}")
+        return
+    click.echo(f"Prior year:        {r['prior_year']}")
+    click.echo(f"Holiday mode:      {r['holiday_mode']}")
+    click.echo(f"SKUs updated:      {r['skus_updated']}")
+    click.echo(f"Surge SKUs (>1.05): {r['surge_skus']}")
+    click.echo(f"Peak seasonality rows: {r['seasonality_rows']}")
+    click.echo("\nTop surge SKUs:")
+    for t in r.get("top_surge", []):
+        click.echo(
+            f"  {t['sku']}: {t['surge']:.2f}×  "
+            f"Nov–Dec {t['nov_dec_units']:,} u ({t['holiday_daily']:.1f}/d)  "
+            f"summer {t['summer_daily']:.1f}/d  "
+            f"YoY {t['yoy']:.2f}  "
+            f"plan {t['planning_u_30']:.1f}/d vs V30 {float(t['v30'] or 0):.1f}"
+        )
 
 
 @cli.command("inventory-report")

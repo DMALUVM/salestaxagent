@@ -93,6 +93,8 @@ interface ComputedRow {
   shopify_u_30: number;
   total_u_7: number;
   total_u_30: number;
+  planning_u_30: number;
+  holiday_surge_mult: number;
   shopify_share_pct: number;
   channel: string;
   dos: number;
@@ -189,10 +191,17 @@ export default function InventoryPage() {
       ...awdSnapshots.map((a) => a.sku),
     ]);
 
-    // Seasonality lookup: {isoWeek: multiplier}
+    // Seasonality: account curve + per-SKU peak floors from holiday surge
     const seasMap = new Map<number, number>();
+    const skuSeasMap = new Map<string, Map<number, number>>();
     for (const sw of seasonality) {
-      seasMap.set(sw.week, sw.multiplier);
+      const skuKey = sw.sku ?? "_account_";
+      if (skuKey === "_account_") {
+        seasMap.set(sw.week, sw.multiplier);
+      } else {
+        if (!skuSeasMap.has(skuKey)) skuSeasMap.set(skuKey, new Map());
+        skuSeasMap.get(skuKey)!.set(sw.week, sw.multiplier);
+      }
     }
 
     // Forecast lookup: {sku: {YYYY-MM: monthly_units}}
@@ -280,7 +289,11 @@ export default function InventoryPage() {
         )));
         const isPeak = PEAK_WEEKS.has(isoWeek);
         const wt = isPeak ? peak : offpeak;
-        const mult = seasMap.get(isoWeek) ?? 1.0;
+        const acctMult = seasMap.get(isoWeek) ?? 1.0;
+        const skuMult = skuSeasMap.get(sku)?.get(isoWeek);
+        // Per-SKU holiday surge floor on peak weeks (lip balm >> account avg)
+        const mult =
+          skuMult != null && skuMult > acctMult ? skuMult : acctMult;
 
         // Method A: naive (flat velocity × 7)
         const naive = baseDailyRate * 7;
@@ -346,6 +359,13 @@ export default function InventoryPage() {
       if (s.include_awd !== false) on_hand += awd_on_hand;
 
       const total_vel_30 = Number(vel?.total_u_30 ?? 0);
+      const planning_vel_raw = Number(vel?.planning_u_30 ?? 0);
+      const surge_mult = Number(vel?.holiday_surge_mult ?? 1);
+      // Holiday mode: DOS/reorder use surge-anchored planning velocity
+      const planning_vel =
+        s.holiday_mode && planning_vel_raw > total_vel_30
+          ? planning_vel_raw
+          : total_vel_30;
       const amazon_vel_30 = Number(vel?.amazon_u_30 ?? 0);
       const shopify_vel_30 = Number(vel?.shopify_u_30 ?? 0);
 
@@ -375,19 +395,20 @@ export default function InventoryPage() {
         network_oos_date = stockout_date; // same pool for shop-only
         flag = dos < 30 && demand > eps ? "LOW" : our_reorder > 0 ? "RESTOCK" : "OK";
       } else {
-        // Amazon: FBA rules with 60d floor
-        dos = total_vel_30 > eps ? fba_on_hand / total_vel_30 : (fba_on_hand > 0 ? 9999 : 0);
+        // Amazon: FBA rules — holiday_mode uses planning_vel (2025 surge × YoY)
+        const demand = planning_vel > eps ? planning_vel : total_vel_30;
+        dos = demand > eps ? fba_on_hand / demand : (fba_on_hand > 0 ? 9999 : 0);
         const amz_supply = fba_on_hand + inbound + awd_on_hand;
-        dos_amz_supply = total_vel_30 > eps ? amz_supply / total_vel_30 : (amz_supply > 0 ? 9999 : 0);
+        dos_amz_supply = demand > eps ? amz_supply / demand : (amz_supply > 0 ? 9999 : 0);
         const pipeline_supply = fba_on_hand + inbound + awd_on_hand;
-        pipeline_dos = total_vel_30 > eps ? Math.round(pipeline_supply / total_vel_30) : (pipeline_supply > 0 ? 9999 : 0);
-        our_reorder = Math.max(Math.ceil((target + s.lead_time_days) * total_vel_30) - on_hand, 0);
+        pipeline_dos = demand > eps ? Math.round(pipeline_supply / demand) : (pipeline_supply > 0 ? 9999 : 0);
+        our_reorder = Math.max(Math.ceil((target + s.lead_time_days) * demand) - on_hand, 0);
         // FBA-only stockout (forecast + seasonal walk-forward)
-        stockout_date = seasonalStockoutDate(fba_on_hand, total_vel_30, sku);
+        stockout_date = seasonalStockoutDate(fba_on_hand, demand, sku);
         // Network OOS: all owned stock (forecast + seasonal walk-forward)
         const network = fba_on_hand + inbound + awd_on_hand + tpl_available;
-        network_oos_date = seasonalStockoutDate(network, total_vel_30, sku);
-        flag = dos < 60 && total_vel_30 > eps ? "CRITICAL" : our_reorder > 0 ? "RESTOCK" : "OK";
+        network_oos_date = seasonalStockoutDate(network, demand, sku);
+        flag = dos < 60 && demand > eps ? "CRITICAL" : our_reorder > 0 ? "RESTOCK" : "OK";
       }
 
       const shopify_share = total_vel_30 > 0 ? Math.round((shopify_vel_30 / total_vel_30) * 100) : 0;
@@ -409,6 +430,8 @@ export default function InventoryPage() {
         shopify_u_30: shopify_vel_30,
         total_u_7: Number(vel?.total_u_7 ?? 0),
         total_u_30: total_vel_30,
+        planning_u_30: planning_vel,
+        holiday_surge_mult: surge_mult,
         shopify_share_pct: shopify_share,
         channel,
         dos: Math.min(Math.round(dos), 9999),
@@ -515,11 +538,11 @@ export default function InventoryPage() {
 
   function exportCSV() {
     const header =
-      "SKU,ASIN,Product,FBA_OnHand,AWD,3PL,Inbound,TotalV30,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
+      "SKU,ASIN,Product,FBA_OnHand,AWD,3PL,Inbound,TotalV30,PlanningU30,Surge,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
     const body = filtered
       .map(
         (r) =>
-          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_on_hand},${r.awd_on_hand},${r.tpl_available},${r.inbound},${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
+          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_on_hand},${r.awd_on_hand},${r.tpl_available},${r.inbound},${r.total_u_30},${r.planning_u_30},${r.holiday_surge_mult},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
       )
       .join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
@@ -536,9 +559,9 @@ export default function InventoryPage() {
 
   const target = s.holiday_mode ? 90 : s.target_cover_days;
 
-  // Seasonality chart data (weeks 1-52)
+  // Seasonality chart data (weeks 1-52) — account-level only
   const seasonChart = seasonality
-    .filter((s) => Number(s.week) >= 1 && Number(s.week) <= 52)
+    .filter((s) => (s.sku ?? "_account_") === "_account_" && Number(s.week) >= 1 && Number(s.week) <= 52)
     .map((s) => ({ ...s, week: Number(s.week), multiplier: Number(s.multiplier) }))
     .sort((a, b) => a.week - b.week);
   const maxMult = Math.max(...seasonChart.map((s) => s.multiplier), 1.5);
@@ -561,6 +584,11 @@ export default function InventoryPage() {
               <Badge variant="outline" className="ml-2 text-amber-600 border-amber-300">Holiday Mode</Badge>
             )}
           </p>
+          {s.holiday_mode && (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              DOS &amp; reorder use 2025 Nov–Dec velocity × YoY for surge SKUs (lip balm), not flat summer V30.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -805,7 +833,9 @@ export default function InventoryPage() {
                   { key: "inbound", label: "Inbnd", tip: "Amazon inbound — not yet sellable" },
                   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
                   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days" },
-                  { key: "dos", label: "DOS", tip: "Days of supply — FBA cover (Amazon) or warehouse cover (Shop)" },
+                  { key: "planning_u_30", label: "Plan", tip: "Holiday planning velocity — prior Nov–Dec × YoY when surge > 1× (used for DOS/reorder in Holiday Mode)" },
+                  { key: "holiday_surge_mult", label: "Surge", tip: "2025 Nov–Dec daily ÷ Jun–Aug daily. Lip balm often 2–4.5×; deodorant ~0.7–1×" },
+                  { key: "dos", label: "DOS", tip: "Days of supply at planning velocity (Holiday Mode) or V30" },
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
                   { key: "our_reorder_qty", label: "Reorder", tip: "Units to transfer/produce to reach target cover" },
@@ -834,19 +864,23 @@ export default function InventoryPage() {
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell
-                    colSpan={13}
-                    className="text-center text-muted-foreground py-8"
-                  >
-                    No inventory data. Run:{" "}
-                    <code className="text-xs bg-muted px-1 rounded">
-                      inventory-sync
-                    </code>{" "}
-                    then{" "}
-                    <code className="text-xs bg-muted px-1 rounded">
-                      inventory-velocity
-                    </code>
-                  </TableCell>
+                    <TableCell
+                      colSpan={15}
+                      className="text-center text-muted-foreground py-8"
+                    >
+                      No inventory data. Run:{" "}
+                      <code className="text-xs bg-muted px-1 rounded">
+                        inventory-sync
+                      </code>{" "}
+                      then{" "}
+                      <code className="text-xs bg-muted px-1 rounded">
+                        inventory-velocity
+                      </code>{" "}
+                      /{" "}
+                      <code className="text-xs bg-muted px-1 rounded">
+                        inventory-holiday-surge
+                      </code>
+                    </TableCell>
                 </TableRow>
               ) : (
                 filtered.map((r, i) => (
@@ -884,6 +918,33 @@ export default function InventoryPage() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {r.total_u_30.toFixed(1)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right tabular-nums ${
+                        r.planning_u_30 > r.total_u_30 * 1.1
+                          ? "text-amber-700 dark:text-amber-400 font-medium"
+                          : ""
+                      }`}
+                      title={
+                        r.holiday_surge_mult > 1.05
+                          ? `Holiday plan ${r.planning_u_30.toFixed(1)}/d (${r.holiday_surge_mult.toFixed(2)}× surge)`
+                          : "Same as V30 (no holiday surge)"
+                      }
+                    >
+                      {r.planning_u_30.toFixed(1)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right tabular-nums ${
+                        r.holiday_surge_mult >= 2
+                          ? "text-amber-700 dark:text-amber-400 font-medium"
+                          : r.holiday_surge_mult > 1.05
+                            ? "text-amber-600"
+                            : "text-muted-foreground"
+                      }`}
+                    >
+                      {r.holiday_surge_mult >= 1.05
+                        ? `${r.holiday_surge_mult.toFixed(2)}×`
+                        : "—"}
                     </TableCell>
                     <TableCell
                       className={`text-right tabular-nums font-medium ${
@@ -1085,7 +1146,13 @@ export default function InventoryPage() {
 
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>
-                  Velocity: {selected.total_u_30.toFixed(1)} u/day
+                  V30: {selected.total_u_30.toFixed(1)} u/day
+                  {selected.planning_u_30 > selected.total_u_30 * 1.05 && (
+                    <> · Holiday plan: {selected.planning_u_30.toFixed(1)} u/day</>
+                  )}
+                  {selected.holiday_surge_mult >= 1.05 && (
+                    <> · 2025 surge {selected.holiday_surge_mult.toFixed(2)}×</>
+                  )}
                 </p>
                 {selected.stockout_date && (
                   <p>

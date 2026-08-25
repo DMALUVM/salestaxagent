@@ -23,6 +23,9 @@ def build_report() -> dict:
     lead_days = settings["lead_time_days"]
     include_inbound = settings["include_inbound"]
     include_3pl = settings.get("include_3pl", True)
+    holiday_mode = bool(settings.get("holiday_mode", False))
+    if holiday_mode:
+        target_days = max(target_days, 90)
 
     all_skus = sorted(
         set(snapshots) | set(velocities) | set(restock) | set(tpl_snapshots)
@@ -52,8 +55,10 @@ def build_report() -> dict:
 
         awd_oh = int(awd_snapshots.get(sku, {}).get("awd_on_hand", 0) or 0)
 
-        # Velocity
+        # Velocity — holiday_mode uses planning_u_30 (prior Nov–Dec × YoY)
         total_vel_30 = float(vel.get("total_u_30", 0) or 0)
+        planning_vel = float(vel.get("planning_u_30", 0) or 0)
+        surge_mult = float(vel.get("holiday_surge_mult", 1) or 1)
         amazon_vel_30 = float(vel.get("amazon_u_30", 0) or 0)
         shopify_vel_30 = float(vel.get("shopify_u_30", 0) or 0)
         eps = 0.001
@@ -120,7 +125,12 @@ def build_report() -> dict:
 
         else:
             # ── Amazon-active: FBA rules with 60d floor ──
-            demand_rate = total_vel_30
+            # Holiday mode: use surge-anchored planning velocity so lip balm
+            # DOS/reorder reflect Nov–Dec (not flat summer V30).
+            if holiday_mode and planning_vel > total_vel_30:
+                demand_rate = planning_vel
+            else:
+                demand_rate = total_vel_30
 
             fba_dos = fba_on_hand / max(demand_rate, eps) if demand_rate > eps else (
                 9999 if fba_on_hand > 0 else 0
@@ -211,6 +221,8 @@ def build_report() -> dict:
             "shopify_u_30": shopify_vel_30,
             "total_u_7": float(vel.get("total_u_7", 0) or 0),
             "total_u_30": total_vel_30,
+            "planning_u_30": planning_vel if planning_vel > 0 else total_vel_30,
+            "holiday_surge_mult": surge_mult,
             "shopify_share_pct": shopify_share,
             "channel": channel,
             "dos": round(dos_value, 1),

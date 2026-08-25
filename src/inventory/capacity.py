@@ -31,6 +31,7 @@ def build_capacity_plan() -> dict:
     tpl = {r["sku"]: r for r in _safe_fetch("inventory_3pl_snapshots")}
     velocities = {r["sku"]: r for r in _safe_fetch("sku_velocity")}
     seasonality = _load_seasonality()
+    sku_seasonality = _load_sku_seasonality()
 
     today = date.today()
     peak_start = _parse_date(settings.get("peak_start_date", "2026-10-01"))
@@ -43,7 +44,8 @@ def build_capacity_plan() -> dict:
     )
     awd_to_fba = settings["awd_to_fba_days"]
     production_lead = settings["production_lead_days"]
-    target_days = 90 if settings.get("holiday_mode") else settings["target_cover_days"]
+    holiday_mode = bool(settings.get("holiday_mode"))
+    target_days = 90 if holiday_mode else settings["target_cover_days"]
 
     # Active SKUs: have stock or velocity
     active_skus = sorted(set(snapshots) | set(v for v, d in velocities.items()
@@ -76,19 +78,39 @@ def build_capacity_plan() -> dict:
 
         total_supply = fba_on_hand + inbound + awd_on_hand + tpl_available
 
-        # Velocity and seasonality
+        # Velocity: prefer holiday planning rate when holiday_mode
         total_u_30 = float(vel.get("total_u_30", 0) or 0)
-        if total_u_30 <= 0:
+        planning_u = float(vel.get("planning_u_30", 0) or 0)
+        surge = float(vel.get("holiday_surge_mult", 1) or 1)
+        if holiday_mode and planning_u > total_u_30:
+            demand_daily = planning_u
+        else:
+            demand_daily = total_u_30
+        if demand_daily <= 0:
             sku_plans.append(_empty_plan(sku, vel, fba_on_hand, inbound, awd_on_hand, tpl_available, ft3))
             continue
 
         # Forecast weekly demand for next 20 weeks using seasonality
+        # Prefer per-SKU peak floor (holiday surge) over account curve.
+        sku_seas = sku_seasonality.get(sku, {})
         current_week = today.isocalendar()[1]
         weekly_demand = []
         for w_offset in range(20):
             wk = ((current_week - 1 + w_offset) % 52) + 1
-            mult = seasonality.get(wk, 1.0)
-            weekly_units = total_u_30 * 7 * mult
+            acct_mult = seasonality.get(wk, 1.0)
+            sku_mult = sku_seas.get(wk)
+            if sku_mult is not None and sku_mult > acct_mult:
+                mult = sku_mult
+            else:
+                mult = acct_mult
+            # When using planning_u (already holiday-anchored), don't double-apply
+            # full surge on peak weeks — use relative account shape vs current week.
+            if holiday_mode and planning_u > total_u_30 and surge > 1.05:
+                cur_mult = max(seasonality.get(current_week, 1.0), 0.5)
+                rel = mult / cur_mult
+                weekly_units = demand_daily * 7 * rel
+            else:
+                weekly_units = total_u_30 * 7 * mult
             weekly_demand.append({
                 "week_offset": w_offset,
                 "iso_week": wk,
@@ -104,6 +126,9 @@ def build_capacity_plan() -> dict:
 
         # How many days current total supply covers at seasonal velocity
         avg_seasonal_daily = sum(w["demand_units"] for w in weekly_demand[:8]) / 56
+        # Floor: never plan below holiday planning daily when holiday_mode
+        if holiday_mode and planning_u > avg_seasonal_daily:
+            avg_seasonal_daily = planning_u
         eps = 0.001
         dos_fba_only = fba_on_hand / max(avg_seasonal_daily, eps)
         dos_fba_inbound = (fba_on_hand + inbound) / max(avg_seasonal_daily, eps)
@@ -149,6 +174,8 @@ def build_capacity_plan() -> dict:
             "tpl_available": tpl_available,
             "total_supply": total_supply,
             "total_u_30": total_u_30,
+            "planning_u_30": demand_daily,
+            "holiday_surge_mult": surge,
             "peak_week_demand": round(peak_week_demand, 0),
             "dos_fba_only": round(dos_fba_only, 0),
             "dos_fba_inbound": round(dos_fba_inbound, 0),
@@ -270,11 +297,28 @@ def _load_sku_volumes() -> dict[str, float]:
 
 
 def _load_seasonality() -> dict[int, float]:
+    """Account-level weekly multipliers (sku=_account_, year=0)."""
     result: dict[int, float] = {}
     try:
         for r in fetch_all("seasonality_weekly"):
             if r.get("sku") == "_account_" and r.get("year") == 0:
                 result[r["week"]] = float(r.get("multiplier", 1.0) or 1.0)
+    except Exception:
+        pass
+    return result
+
+
+def _load_sku_seasonality() -> dict[str, dict[int, float]]:
+    """Per-SKU peak-week floors from holiday surge (excludes _account_)."""
+    result: dict[str, dict[int, float]] = {}
+    try:
+        for r in fetch_all("seasonality_weekly"):
+            sku = r.get("sku")
+            if not sku or sku == "_account_" or r.get("year") != 0:
+                continue
+            result.setdefault(sku, {})[int(r["week"])] = float(
+                r.get("multiplier", 1.0) or 1.0
+            )
     except Exception:
         pass
     return result

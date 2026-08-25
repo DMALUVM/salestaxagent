@@ -24,7 +24,6 @@ export async function GET() {
         sb
           .from("seasonality_weekly")
           .select("*")
-          .eq("sku", "_account_")
           .eq("year", 0)
           .then((r) => r.data ?? []),
         sb.from("inventory_3pl_snapshots").select("*").then((r) => r.data ?? []),

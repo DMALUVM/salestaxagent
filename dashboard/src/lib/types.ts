@@ -250,6 +250,15 @@ export interface SkuVelocity {
   total_u_90: number;
   seasonality_mult: number;
   seasonal_total_u_30: number;
+  /** Prior-year Nov–Dec daily / Jun–Aug daily (>1 = holiday surge). */
+  holiday_surge_mult?: number;
+  holiday_prior_daily?: number;
+  summer_prior_daily?: number;
+  yoy_growth_mult?: number;
+  /** Holiday-anchored planning velocity (u/day). */
+  planning_u_30?: number;
+  holiday_nov_dec_units?: number;
+  holiday_prior_year?: number | null;
 }
 
 export interface InventoryRestock {
@@ -285,6 +294,7 @@ export interface SeasonalityWeekly {
   multiplier: number;
   units_actual: number;
   baseline_units: number;
+  sku?: string;
 }
 
 export interface Inventory3plSnapshot {

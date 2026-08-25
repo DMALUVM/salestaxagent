@@ -441,9 +441,36 @@ def _holiday_demand_by_sku(
     target_skus: list[str],
     scenario: str,
     include_jan: bool = True,
+    velocities: dict[str, dict] | None = None,
 ) -> dict[str, int]:
-    """Sum Nov + Dec (+ optional Jan) forecast per SKU."""
+    """Sum Nov + Dec (+ optional Jan) forecast per SKU.
+
+    scenario ``yoy_anchored`` uses prior-year Nov–Dec daily × YoY from
+    sku_velocity (ignores forecast_weekly). This is the conservative
+    manufacture plan when correction_factor implies aggressive growth.
+    """
     totals: dict[str, float] = {s: 0 for s in target_skus}
+
+    if scenario == "yoy_anchored":
+        from src.inventory.holiday_surge import holiday_demand_units
+        nov_dec_days = 61
+        jan_days = 31 if include_jan else 0
+        for sku in target_skus:
+            vel = (velocities or {}).get(sku, {})
+            daily = float(vel.get("holiday_prior_daily", 0) or 0)
+            yoy = float(vel.get("yoy_growth_mult", 1) or 1)
+            # Prefer planning_u_30 × days when surge fields exist
+            plan = float(vel.get("planning_u_30", 0) or 0)
+            if plan > 0 and float(vel.get("holiday_surge_mult", 1) or 1) > 1.0:
+                totals[sku] = plan * (nov_dec_days + jan_days)
+            elif daily > 0:
+                totals[sku] = holiday_demand_units(daily, yoy, nov_dec_days + jan_days)
+            else:
+                # Fallback: V30 × days (no surge history)
+                v30 = float(vel.get("total_u_30", 0) or 0)
+                totals[sku] = v30 * (nov_dec_days + jan_days)
+        return {s: round(v) for s, v in totals.items()}
+
     holiday_months = {"2026-11", "2026-12"}
     if include_jan:
         holiday_months |= {"2026-01", "2027-01"}
@@ -478,7 +505,8 @@ def build_manufacturer_headsup(
     Production distributed across months using *month_weights* (default
     25 / 35 / 40 %), with pallet cap of 19 000 per pallet.
 
-    Returns primary (correction_factor) and sensitivity (actual_2025).
+    Returns primary (yoy_anchored from 2025 holiday × YoY) and sensitivity
+    (correction_factor xlsx — often more aggressive, especially Assorted).
     """
     target_skus = skus or LIP_BALM_SKUS
     today = date.today()
@@ -495,6 +523,7 @@ def build_manufacturer_headsup(
     except Exception:
         pass
     fc_rows = fetch_all("forecast_weekly")
+    velocities = {r["sku"]: r for r in fetch_all("sku_velocity")}
 
     # Per-SKU inventory (scenario-independent)
     inv: dict[str, dict[str, int]] = {}
@@ -508,13 +537,15 @@ def build_manufacturer_headsup(
         tpl_v = int(tpls_data.get(sku, {}).get("available", 0) or 0)
         inv[sku] = {"fba": fba, "inbound": inbound, "awd": awd_v, "tpl": tpl_v}
 
-    # Build both scenarios
+    # Primary = YoY-anchored 2025 holiday; sensitivity = correction_factor
+    # (Assorted CF was ~1.83× prior Nov–Dec — too aggressive for manufacture base)
     scenarios_out: dict[str, dict] = {}
     all_sku_summaries: dict[str, list[dict]] = {}
 
-    for scenario in ["correction_factor", "actual_2025"]:
+    for scenario in ["yoy_anchored", "correction_factor", "actual_2025"]:
         demand_by_sku = _holiday_demand_by_sku(
             fc_rows, target_skus, scenario, include_jan,
+            velocities=velocities,
         )
 
         sku_summaries: list[dict] = []
@@ -616,12 +647,15 @@ def build_manufacturer_headsup(
         "tpl_offsets_production": tpl_offsets_production,
         "months": production_months,
         "month_weights": list(month_weights),
-        "primary": scenarios_out["correction_factor"],
-        "sensitivity": scenarios_out["actual_2025"],
-        "primary_scenario": "correction_factor",
-        "sensitivity_scenario": "actual_2025",
-        "sku_summary": all_sku_summaries["correction_factor"],
-        "sku_summary_sensitivity": all_sku_summaries["actual_2025"],
+        # Primary manufacture plan: 2025 Nov–Dec × YoY (not aggressive CF xlsx)
+        "primary": scenarios_out["yoy_anchored"],
+        "sensitivity": scenarios_out["correction_factor"],
+        "actual_2025": scenarios_out.get("actual_2025"),
+        "primary_scenario": "yoy_anchored",
+        "sensitivity_scenario": "correction_factor",
+        "sku_summary": all_sku_summaries["yoy_anchored"],
+        "sku_summary_sensitivity": all_sku_summaries["correction_factor"],
+        "sku_summary_actual_2025": all_sku_summaries.get("actual_2025", []),
         "transfers": transfers,
         "skus": target_skus,
     }
@@ -634,8 +668,8 @@ def format_manufacturer_csv(headsup: dict) -> str:
     # SKU summary section
     lines.append("Section,SKU,SKU_Label,Holiday_Demand,FBA,Inbound,AWD,TPL,"
                  "Transfer,Manufacture,Scenario")
-    for scenario, key in [("correction_factor", "sku_summary"),
-                          ("actual_2025", "sku_summary_sensitivity")]:
+    for scenario, key in [("yoy_anchored", "sku_summary"),
+                          ("correction_factor", "sku_summary_sensitivity")]:
         for s in headsup[key]:
             lines.append(
                 f"SKU_Summary,{s['sku']},{s['label']},{s['holiday_demand']},"
@@ -647,8 +681,8 @@ def format_manufacturer_csv(headsup: dict) -> str:
     lines.append("")
     lines.append("Section,Month,Month_Label,Status,SKU,SKU_Label,Units,"
                  "Pallets,Ship_By,Scenario")
-    for sc_key, sc_label in [("primary", "correction_factor"),
-                             ("sensitivity", "actual_2025")]:
+    for sc_key, sc_label in [("primary", "yoy_anchored"),
+                             ("sensitivity", "correction_factor")]:
         for entry in headsup[sc_key]["entries"]:
             if not entry["mix"]:
                 lines.append(
@@ -692,7 +726,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
 
     a("")
     demand_period = "Nov + Dec + Jan" if headsup.get("include_jan") else "Nov + Dec"
-    a(f"Demand period: {demand_period} (forecast_weekly)")
+    a(f"Demand period: {demand_period} (yoy_anchored = 2025 holiday × YoY)")
     a(f"Pallet capacity: {headsup['pallet_max']:,} units")
     a(f"FBA cover target: {headsup['cover_target_days']} days forward stock")
     a(f"All units in Amazon FBA by: {headsup['amazon_in_by']}")
@@ -703,7 +737,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     # ── Per-SKU summary ──
     a("")
     a("-" * 65)
-    a("PER-SKU SUMMARY (correction_factor)")
+    a("PER-SKU SUMMARY (yoy_anchored — primary manufacture plan)")
     a("-" * 65)
     a(f"  {'SKU':<14} {'Demand':>8} {'FBA':>7} {'Inb':>6} {'AWD':>6}"
       f" {'3PL':>7} {'Xfer':>7} {'Mfg':>8}")
@@ -724,7 +758,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("")
     a("-" * 65)
     pct = "/".join(f"{int(w*100)}%" for w in headsup["month_weights"])
-    a(f"PRODUCTION SCHEDULE — correction_factor ({pct} split)")
+    a(f"PRODUCTION SCHEDULE — yoy_anchored ({pct} split)")
     a("-" * 65)
 
     for entry in headsup["primary"]["entries"]:
@@ -759,7 +793,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     # ── Sensitivity ──
     a("")
     a("-" * 65)
-    a(f"SENSITIVITY: actual_2025")
+    a("SENSITIVITY: correction_factor (xlsx stretch — often aggressive)")
     a("-" * 65)
     a(f"  {'SKU':<14} {'Demand':>8} {'Mfg':>8}")
     a(f"  {'-'*32}")
@@ -788,6 +822,8 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("")
     a("-" * 65)
     a("NOTES:")
+    a("  - Primary plan anchors to 2025 Nov–Dec units × YoY growth.")
+    a("  - correction_factor is stretch only (Assorted CF was ~1.8× YoY).")
     a("  - FIRM months represent committed production volumes.")
     a("    INDICATIVE months are forecasts and may change.")
     a("  - Manufacture volumes assume 3PL stock is transferred")

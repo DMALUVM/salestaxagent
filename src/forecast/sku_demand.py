@@ -73,8 +73,21 @@ def forecast_sku(
     vel = next((v for v in vel_rows if v.get("sku") == sku), None)
 
     seas_rows = fetch_all("seasonality_weekly")
-    seasonality = {r["week"]: float(r["multiplier"])
-                   for r in seas_rows if r.get("sku") == "_account_" and r.get("year") == 0}
+    # Prefer per-SKU peak floors; fall back to account curve
+    seasonality: dict[int, float] = {}
+    sku_seas: dict[int, float] = {}
+    for r in seas_rows:
+        if r.get("year") != 0:
+            continue
+        wk = int(r.get("week") or 0)
+        mult = float(r.get("multiplier") or 1.0)
+        if r.get("sku") == sku:
+            sku_seas[wk] = mult
+        elif r.get("sku") == "_account_":
+            seasonality[wk] = mult
+    for wk, mult in sku_seas.items():
+        if mult > seasonality.get(wk, 0):
+            seasonality[wk] = mult
 
     fc_rows = fetch_all("forecast_weekly")
     holiday_fc: dict[str, float] = {}
