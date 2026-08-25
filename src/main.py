@@ -5919,6 +5919,8 @@ def _run_job_worker():
             elif job_type in ("ads_sync", "ppc_sync"):
                 days = int(payload.get("days", 14))
                 _run_ads_sync_job("ads_sync", days=days, label="dashboard-enqueue")
+            elif job_type == "sqp_sync":
+                _run_sqp_sync()
             else:
                 raise ValueError(f"Unknown job type: {job_type}")
 

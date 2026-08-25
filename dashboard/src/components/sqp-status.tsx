@@ -47,14 +47,38 @@ export function SqpStatus() {
 
   async function syncNow() {
     setBusy(true);
-    setMsg("Requesting the report from Amazon — this can take a few minutes…");
+    setMsg("Enqueueing SQP sync on the Mac Mini agent…");
+    const priorNewest = s?.newestAsOf ?? null;
     try {
       const r = await fetch("/api/sqp-sync", { method: "POST" }).then((x) => x.json());
-      setMsg(r.ok ? (r.output ?? "Done.") : (r.hint ?? r.error ?? "Failed."));
-      load();
+      if (!r.ok) {
+        setMsg(r.hint ?? r.error ?? "Failed to enqueue.");
+        return;
+      }
+      setMsg(r.message ?? "Enqueued.");
+      // Poll status — SQP report generation can take several minutes on Amazon's side.
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts += 1;
+        try {
+          const st = await fetch("/api/sqp-status").then((x) => x.json());
+          setS(st);
+          if (st.newestAsOf && st.newestAsOf !== priorNewest) {
+            clearInterval(poll);
+            setMsg(`Done — newest week now ${st.newestAsOf}.`);
+            setBusy(false);
+          }
+        } catch { /* ignore */ }
+        if (attempts >= 36) {
+          clearInterval(poll);
+          setMsg(
+            `${r.message ?? "Enqueued."}\nStill running or waiting on Amazon — refresh this card in a few minutes.`,
+          );
+          setBusy(false);
+        }
+      }, 10000);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Request failed.");
-    } finally {
       setBusy(false);
     }
   }
