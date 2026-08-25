@@ -1,13 +1,36 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 
 /**
- * POST /api/sqp-sync — enqueue Brand Analytics SQP pull for the Mac Mini worker.
- *
- * Previously this route shelled out to `python -m src.main sqp-sync` on the
- * Vercel host (no venv, no SP-API credentials, timeouts). The Mini agent's
- * job worker (`_run_job_worker`) runs `_run_sqp_sync()` when it claims a
- * pending `sqp_sync` row.
+ * GET /api/sqp-sync?job_id=… — poll agent_jobs row for dashboard enqueue status.
+ * POST — enqueue Brand Analytics SQP pull for the Mac Mini worker.
  */
+export async function GET(request: Request) {
+  const jobId = new URL(request.url).searchParams.get("job_id");
+  if (!jobId) {
+    return Response.json({ ok: false, error: "job_id required" }, { status: 400 });
+  }
+  try {
+    const sb = getServerSupabase();
+    const { data, error } = await sb
+      .from("agent_jobs")
+      .select("id,job_type,status,started_at,finished_at,error_text")
+      .eq("id", jobId)
+      .maybeSingle();
+    if (error) {
+      return Response.json({ ok: false, error: error.message }, { status: 500 });
+    }
+    if (!data) {
+      return Response.json({ ok: false, error: "job not found" }, { status: 404 });
+    }
+    return Response.json({ ok: true, job: data });
+  } catch (e) {
+    return Response.json({
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+    }, { status: 500 });
+  }
+}
+
 export async function POST() {
   try {
     const sb = getServerSupabase();

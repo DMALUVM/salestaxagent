@@ -56,11 +56,41 @@ export function SqpStatus() {
         return;
       }
       setMsg(r.message ?? "Enqueued.");
-      // Poll status — SQP report generation can take several minutes on Amazon's side.
+      const jobId = r.job_id as string | undefined;
+      // Poll job status and SQP freshness — Amazon report generation can take minutes.
       let attempts = 0;
       const poll = setInterval(async () => {
         attempts += 1;
         try {
+          if (jobId) {
+            const jr = await fetch(`/api/sqp-sync?job_id=${encodeURIComponent(jobId)}`)
+              .then((x) => x.json());
+            const st = jr.job?.status as string | undefined;
+            if (st === "error") {
+              clearInterval(poll);
+              const err = jr.job?.error_text ?? "Job failed on the Mini agent.";
+              setMsg(
+                `Enqueue failed on Mini: ${err}\n`
+                + "Pull latest agent code and restart `python -m src.main run`, "
+                + "or run `python -m src.main sqp-sync --apply` on the Mini.",
+              );
+              setBusy(false);
+              return;
+            }
+            if (st === "done") {
+              const status = await fetch("/api/sqp-status").then((x) => x.json());
+              setS(status);
+              clearInterval(poll);
+              setMsg(
+                status.newestAsOf && status.newestAsOf !== priorNewest
+                  ? `Done — newest week now ${status.newestAsOf}.`
+                  : "Mini finished the job — refresh if the week did not advance "
+                    + "(Amazon may have returned 0 rows for the latest complete week).",
+              );
+              setBusy(false);
+              return;
+            }
+          }
           const st = await fetch("/api/sqp-status").then((x) => x.json());
           setS(st);
           if (st.newestAsOf && st.newestAsOf !== priorNewest) {

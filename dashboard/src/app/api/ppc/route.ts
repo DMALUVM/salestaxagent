@@ -5,6 +5,7 @@ import {
 } from "@/lib/ads-roles";
 import { loadMergedStrategy, roleTargetOf, shareStatusOf } from "@/lib/ads-strategy-settings";
 import { decisionPatch, isMarkableStatus } from "@/lib/ppc-mark";
+import { buildDailyReconcile } from "@/lib/ads-reconcile";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -688,6 +689,14 @@ export async function GET() {
       }
     } catch { /* */ }
 
+    // Per-day reconcile for the 7D window — surfaces partial SP-only days vs console.
+    const dailyReconcile = buildDailyReconcile(
+      allCampaignRows as Parameters<typeof buildDailyReconcile>[0],
+      asOf,
+      7,
+      7,
+    );
+
     return Response.json({
       kpi7: kpi7.kpis, kpi7Days: kpi7.days,
       kpi14: kpi14.kpis, kpi14Days: kpi14.days,
@@ -705,7 +714,7 @@ export async function GET() {
         updatedAt: strategy.updatedAt,
       },
       loadErrors,
-      rolesByRange, adTypesByRange, spendScopeByRange,
+      rolesByRange, adTypesByRange, spendScopeByRange, dailyReconcile,
       placementsByRange, placementsAvailable,
       searchTerms, searchTermsByRange, recommendations,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
@@ -720,6 +729,7 @@ export async function GET() {
       kpi7: null, kpi14: null, kpi30: null, kpi90: null,
       dailySeries: [], cutoffs: null, campaigns: [],
       rolesByRange: null, adTypesByRange: null, spendScopeByRange: null,
+      dailyReconcile: null,
       placementsByRange: null, placementsAvailable: false,
       strategy: null,
       searchTerms: [], searchTermsByRange: null, recommendations: [],

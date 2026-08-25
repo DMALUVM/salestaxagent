@@ -15,6 +15,8 @@ import { SqpStatus } from "@/components/sqp-status";
 import { BrandShare } from "@/components/brand-share";
 import { PpcPlaybook } from "@/components/ppc-playbook";
 import { PpcSkuAds } from "@/components/ppc-sku-ads";
+import { PpcReconcile } from "@/components/ppc-reconcile";
+import type { DailyReconcileSummary } from "@/lib/ads-reconcile";
 import { isConfigured } from "@/lib/supabase";
 import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy, Settings2 } from "lucide-react";
 import {
@@ -143,6 +145,7 @@ interface PPCData {
     total: number; placementSpend: number; unallocated: number;
     productsPresent: string[]; productsMissing: string[];
   }> | null;
+  dailyReconcile: DailyReconcileSummary | null;
   placementsByRange: Record<Range, PlacementAgg[]> | null;
   placementsAvailable: boolean;
   searchTerms: SearchTerm[];
@@ -1020,6 +1023,8 @@ export default function PPCPage() {
           <BrandShare />
 
           <SqpStatus />
+
+          <PpcReconcile summary={data?.dailyReconcile ?? null} asOfLabel={asOf} />
 
           {spendScope && spendScope.productsMissing.length > 0 && (
             <p className="text-[10px] text-amber-700 dark:text-amber-400">
