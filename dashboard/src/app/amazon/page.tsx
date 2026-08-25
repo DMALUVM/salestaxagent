@@ -385,7 +385,7 @@ export default function AmazonOpsPage() {
                       </TableHeader>
                       <TableBody>
                         {snsOffers.slice(0, 10).map((o) => (
-                          <TableRow key={o.asin}>
+                          <TableRow key={`${o.asin}:${o.week_start}`}>
                             <TableCell>
                               <span className="text-sm font-medium">{o.sku || o.asin}</span>
                               <span className="ml-1.5 text-[10px] text-muted-foreground">{o.asin}</span>
