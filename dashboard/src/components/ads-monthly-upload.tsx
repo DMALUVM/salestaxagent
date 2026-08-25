@@ -99,6 +99,7 @@ export function AdsMonthlyUpload({ onComplete }: { onComplete?: () => void }) {
         <p className="text-xs text-muted-foreground">
           Seller Central → Reports → <strong>SKU Economics</strong>. Use{" "}
           <strong>Monthly</strong> aggregation (or one calendar month per file).
+          Reports start <strong>September 2024</strong> — earlier ad months need Ads Console.
           Sponsored Products charge column required. Fills the Ads column on Month/Year
           when the Ads API has no history (~95 days).
         </p>

@@ -222,8 +222,8 @@ export function PnlTable({
               Showing {lookbackHint}. Average is contribution ÷ calendar days in the visible months.
               Fees are estimated (15% referral + $3.50 FBA / unit). COGS is units × <code>sku_costs</code>.
               {adsDateMin
-                ? ` Ad spend from the Ads API starts ${adsDateMin} (~95-day ceiling). Upload monthly SKU Economics CSVs below (or Data page) for earlier months.`
-                : " Ad spend is unknown — upload monthly SKU Economics CSVs below."}
+                ? ` Ad spend from the Ads API starts ${adsDateMin} (~95-day ceiling). Upload monthly SKU Economics CSVs (Sept 2024 onward) or Ads Console for earlier months.`
+                : " Ad spend is unknown — upload SKU Economics (from Sept 2024) or Ads Console CSVs."}
               {skuMissingJan2024 && (
                 <> Jan–Jul 2024 are not in the warehouse — SP-API keeps ~2 years. Drop a Seller Central All Orders report for those months into <code>incoming/amazon/</code>.</>
               )}
@@ -262,7 +262,7 @@ export function PnlTable({
                 <TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">
                   {usingMonthly
                     ? "No Amazon SKU months in this lookback."
-                    : "No stored P&L days in this lookback. Nightly sync keeps 90 days; Month/Year use SKU economics from Aug 2024."}
+                    : "No stored P&L days in this lookback. Nightly sync keeps 90 days; Month/Year use sales_by_sku from Aug 2024 (SP-API)."}
                 </TableCell>
               </TableRow>
             )}

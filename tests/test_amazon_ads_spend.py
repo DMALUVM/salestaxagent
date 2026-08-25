@@ -45,6 +45,16 @@ def test_sku_economics_sums_ad_fees_by_month():
     assert parsed["warnings"] == []
 
 
+def test_sku_economics_skips_months_before_sept_2024():
+    rows = [
+        ["2024-08-01", "2024-08-31", "AA", "B1", "100", "50.00", "0"],
+        ["2024-09-01", "2024-09-30", "AA", "B1", "90", "30.00", "0"],
+    ]
+    parsed = parse_sku_economics_monthly(SKU_ECON, rows)
+    assert [m["period_start"] for m in parsed["months"]] == ["2024-09-01"]
+    assert any("September 2024" in w for w in parsed["warnings"])
+
+
 def test_sku_economics_refuses_multi_month_lump():
     rows = [["2024-08-01", "2025-07-31", "AA", "B1", "999", "5000", "0"]]
     parsed = parse_sku_economics_monthly(SKU_ECON, rows)

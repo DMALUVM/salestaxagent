@@ -16,6 +16,9 @@ import { monthEnd, type PnlRow } from "./pnl-periods";
 export const PNL_REFERRAL_PCT = 0.15;
 export const PNL_FBA_PER_UNIT = 3.5;
 
+/** Seller Central SKU Economics CSV floor — mirrors config/business_rules.json ads.sku_economics_min_date */
+export const ADS_SKU_ECONOMICS_MIN_DATE = "2024-09-01";
+
 export interface SkuSalesRow {
   channel: string;
   sku: string;

@@ -595,7 +595,8 @@ export default function SkusPage() {
         <p>
           <strong>Amazon contribution</strong> = gross − estimated referral (15%) − FBA ($3.50/unit) − COGS
           from <code>sku_costs</code>. Ads are campaign-level and are not subtracted here.
-          Amazon months in the warehouse start August 2024; Jan–Jul 2024 need an All Orders CSV.
+          Amazon months in the warehouse start August 2024 (SP-API orders). SKU Economics ad
+          reports only go back to September 2024; Jan–Jul 2024 sales need an All Orders CSV.
           <strong> Refunds:</strong> Shopify refunds from order refund line items.
           Amazon refunds only if the SP-API orders report includes return data;
           otherwise shown as &ldquo;—&rdquo;.

@@ -43,6 +43,9 @@ class TestBusinessRulesConfig:
     def test_amazon_pulse_source(self):
         assert self.cfg["amazon"]["pulse_source"] == "amazon_spapi"
 
+    def test_sku_economics_min_date(self):
+        assert self.cfg["ads"]["sku_economics_min_date"] == "2024-09-01"
+
     def test_ads_mandatory_chunking(self):
         assert self.cfg["ads"]["mandatory_chunking"] is True
 

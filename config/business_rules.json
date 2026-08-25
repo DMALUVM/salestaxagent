@@ -37,6 +37,8 @@
     "campaign_report_timeout_sb_seconds": 900,
     "campaign_report_timeout_sd_seconds": 900,
     "mandatory_chunking": true,
+    "sku_economics_min_date": "2024-09-01",
+    "//sku_economics_min_date": "Seller Central SKU Economics exports only retain from this month. Earlier ad months need Ads Console campaign CSV or another source — not SKU Economics.",
     "//campaign_chunk_days": "Daily campaign pull uses 7-day chunks, not one 30-day report. A 30-day SB/SD request on this account sits PENDING past the 900s cap (2026-08-22 nightly: SB+SD FAILED, SP kept). The same 30-day window in 7-day chunks completed. Still clamped to max_chunk_days.",
     "//campaign_sb_sd_daily_days": "Nightly SB/SD window. Five 7-day SB/SD chunks each PENDING 900s is what turned 2026-08-24 into a 3.9h campaigns job; placements/search terms then waited 180 minutes on the process lock and Telegram'd. SP keeps the full 30d nightly range.",
     "//campaign_sb_sd_backfill_days": "Sunday 90d backfill still covers SP for long trends. SB/SD stay on a short window so 03:00 cannot still hold the lock at 05:00."

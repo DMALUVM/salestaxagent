@@ -3,6 +3,8 @@
  * Mirrors src/parsers/amazon_ads_spend.py. Excel files go through the Mini.
  */
 
+import { ADS_SKU_ECONOMICS_MIN_DATE } from "../sku-monthly-pnl";
+
 export type AdsSpendKind = "sku_economics" | "ads_console";
 
 export interface AdsMonthSpendRow {
@@ -194,8 +196,18 @@ export function parseAmazonAdsSpendCsv(content: string): AdsSpendParseResult {
       spend: Math.round(s * 100) / 100,
       source: "sku_economics" as const,
     }));
+    const floor = ADS_SKU_ECONOMICS_MIN_DATE.slice(0, 7) + "-01";
+    const beforeFloor = months.filter((m) => m.period_start < floor);
+    const kept = months.filter((m) => m.period_start >= floor);
+    if (beforeFloor.length) {
+      const d = new Date(`${ADS_SKU_ECONOMICS_MIN_DATE}T12:00:00`);
+      const label = d.toLocaleString(undefined, { month: "long", year: "numeric" });
+      warnings.push(
+        `SKU Economics exports only go back to ${label}. Skipped ${beforeFloor.length} earlier month(s) — use Ads Console for older ad spend.`,
+      );
+    }
     return {
-      kind, months, daily: [], rows_total: body.length,
+      kind, months: kept, daily: [], rows_total: body.length,
       rows_parsed: body.length - skipped - wide, rows_skipped: skipped + wide, warnings,
     };
   }

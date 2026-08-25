@@ -33,6 +33,16 @@ describe("Amazon ads spend CSV", () => {
     assert.equal(mar?.spend, 1200.1);
   });
 
+  test("skips SKU Economics months before September 2024", () => {
+    const csv = `Start Date,End Date,MSKU,Sponsored Products Ad Fee
+2024-08-01,2024-08-31,AA,50
+2024-09-01,2024-09-30,AA,30
+`;
+    const parsed = parseAmazonAdsSpendCsv(csv);
+    assert.deepEqual(parsed.months.map((m) => m.period_start), ["2024-09-01"]);
+    assert.match(parsed.warnings.join(" "), /September 2024/i);
+  });
+
   test("refuses a multi-month lump", () => {
     const parsed = parseAmazonAdsSpendCsv(LUMP);
     assert.equal(parsed.months.length, 0);

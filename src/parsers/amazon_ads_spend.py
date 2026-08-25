@@ -21,6 +21,7 @@ from pathlib import Path
 
 from src.config import PROJECT_ROOT
 from src.db import log_audit, log_ingestion, upsert_rows
+from src.rules import ADS_SKU_ECONOMICS_MIN_DATE
 
 SOURCE_SKU_ECON = "sku_economics"
 SOURCE_ADS_CONSOLE = "ads_console"
@@ -218,6 +219,25 @@ def _header_row_index(rows: list[list[object]]) -> int | None:
     return None
 
 
+def _apply_sku_economics_floor(months: list[dict], warnings: list[str]) -> list[dict]:
+    """SKU Economics CSVs only exist from ADS_SKU_ECONOMICS_MIN_DATE onward."""
+    floor = ADS_SKU_ECONOMICS_MIN_DATE.replace(day=1)
+    kept: list[dict] = []
+    dropped = 0
+    for month in months:
+        ps = date.fromisoformat(month["period_start"])
+        if ps < floor:
+            dropped += 1
+            continue
+        kept.append(month)
+    if dropped:
+        warnings.append(
+            f"SKU Economics exports only go back to {floor.strftime('%B %Y')}. "
+            f"Skipped {dropped} earlier month(s) — use Ads Console for older ad spend."
+        )
+    return kept
+
+
 def parse_sku_economics_monthly(headers: list[str], rows: list[list[object]]) -> dict:
     names = [_norm(h) for h in headers]
     lookup = _lookup(names)
@@ -268,6 +288,7 @@ def parse_sku_economics_monthly(headers: list[str], rows: list[list[object]]) ->
             "spend": round(spend, 2),
             "source": SOURCE_SKU_ECON,
         })
+    months = _apply_sku_economics_floor(months, warnings)
     return {
         "kind": SOURCE_SKU_ECON,
         "months": months,

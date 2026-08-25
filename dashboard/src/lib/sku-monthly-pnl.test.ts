@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "path";
 
-import { buildAmazonMonthlyPnl, monthOverlapsWindow, PNL_FBA_PER_UNIT, PNL_REFERRAL_PCT } from "./sku-monthly-pnl";
+import { buildAmazonMonthlyPnl, monthOverlapsWindow, ADS_SKU_ECONOMICS_MIN_DATE, PNL_FBA_PER_UNIT, PNL_REFERRAL_PCT } from "./sku-monthly-pnl";
 
 describe("SKU monthly contribution", () => {
   test("constants match business_rules.json", () => {
@@ -12,6 +12,7 @@ describe("SKU monthly contribution", () => {
     );
     assert.equal(PNL_REFERRAL_PCT, cfg.pnl.default_referral_pct);
     assert.equal(PNL_FBA_PER_UNIT, cfg.pnl.default_fba_fee_per_unit);
+    assert.equal(ADS_SKU_ECONOMICS_MIN_DATE, cfg.ads.sku_economics_min_date);
   });
 
   test("Amazon-only, Shopify dropped, formula matches Python fixture", () => {

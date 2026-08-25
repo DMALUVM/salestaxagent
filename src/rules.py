@@ -75,6 +75,8 @@ ADS_CAMPAIGN_TIMEOUT_SB_SECONDS: int = int(
     _RULES["ads"].get("campaign_report_timeout_sb_seconds", 900))
 ADS_CAMPAIGN_TIMEOUT_SD_SECONDS: int = int(
     _RULES["ads"].get("campaign_report_timeout_sd_seconds", 900))
+ADS_SKU_ECONOMICS_MIN_DATE: date = date.fromisoformat(
+    str(_RULES["ads"].get("sku_economics_min_date", "2024-09-01")))
 
 # ── Agent scheduler ───────────────────────────────────────
 # Every cron job in `python -m src.main run` fires on this zone, regardless of
