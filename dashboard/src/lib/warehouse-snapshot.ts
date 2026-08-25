@@ -1,7 +1,7 @@
-import fs from "fs";
-import path from "path";
 import zlib from "zlib";
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+import tableConfig from "../../config/warehouse_snapshot_tables.json";
 
 export const SNAPSHOT_FORMAT = "sales_tax_agent_warehouse_snapshot";
 export const SUPPORTED_VERSIONS = new Set([1]);
@@ -43,32 +43,11 @@ export interface RestoreSummary {
   tables: RestoreTableResult[];
 }
 
-function configFilePath(): string {
-  const candidates = [
-    path.join(process.cwd(), "../config/warehouse_snapshot_tables.json"),
-    path.join(process.cwd(), "config/warehouse_snapshot_tables.json"),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return p;
-  }
-  throw new Error("warehouse_snapshot_tables.json not found");
-}
-
 export function loadTableSpecs(): TableSpec[] {
-  const raw = fs.readFileSync(configFilePath(), "utf-8");
-  const cfg = JSON.parse(raw) as { tables: TableSpec[] };
+  const cfg = tableConfig as { tables: TableSpec[] };
   return [...cfg.tables].sort(
     (a, b) => a.restore_order - b.restore_order || a.name.localeCompare(b.name),
   );
-}
-
-export function validateSnapshot(snapshot: WarehouseSnapshot): void {
-  if (snapshot.format !== SNAPSHOT_FORMAT) {
-    throw new Error(`Unknown snapshot format: ${snapshot.format}`);
-  }
-  if (!SUPPORTED_VERSIONS.has(snapshot.version)) {
-    throw new Error(`Unsupported snapshot version: ${snapshot.version}`);
-  }
 }
 
 export async function fetchAllRows(
@@ -95,6 +74,7 @@ export async function exportWarehouseSnapshot(sb: SupabaseClient): Promise<Wareh
   const tables: Record<string, Record<string, unknown>[]> = {};
   const table_meta: SnapshotMeta["table_meta"] = {};
   const errors: SnapshotMeta["errors"] = [];
+  const cfg = tableConfig as { version?: number };
 
   for (const spec of specs) {
     try {
@@ -108,8 +88,6 @@ export async function exportWarehouseSnapshot(sb: SupabaseClient): Promise<Wareh
       errors.push({ table: spec.name, error: msg.slice(0, 500) });
     }
   }
-
-  const cfg = JSON.parse(fs.readFileSync(configFilePath(), "utf-8")) as { version: number };
 
   return {
     format: SNAPSHOT_FORMAT,
@@ -203,4 +181,13 @@ export async function restoreWarehouseSnapshot(
     errors,
     tables: results,
   };
+}
+
+export function validateSnapshot(snapshot: WarehouseSnapshot): void {
+  if (snapshot.format !== SNAPSHOT_FORMAT) {
+    throw new Error(`Unknown snapshot format: ${snapshot.format}`);
+  }
+  if (!SUPPORTED_VERSIONS.has(snapshot.version)) {
+    throw new Error(`Unsupported snapshot version: ${snapshot.version}`);
+  }
 }

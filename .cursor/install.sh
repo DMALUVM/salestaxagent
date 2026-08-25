@@ -46,4 +46,7 @@ if ! npm ci; then
   npm install
 fi
 
+echo "==> Dashboard: production build (typecheck)"
+npm run build
+
 echo "==> Install complete"
