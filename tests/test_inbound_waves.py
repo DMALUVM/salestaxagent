@@ -36,3 +36,28 @@ def test_build_inbound_plan_structure_without_db():
 
 def test_default_receiving_days_in_2_3_week_range():
     assert 14 <= DEFAULT_RECEIVING_DAYS <= 21
+
+
+def test_inbound_pipeline_reduces_urgent_ship():
+    from src.inventory.inbound_waves import (
+        _forward_phased_avg_daily,
+        _pipeline_receipts_ahead,
+        _week_list,
+    )
+    from collections import defaultdict
+
+    today = date.today()
+    end = date(2027, 1, 15)
+    weeks = _week_list(today, end)
+    season = {35: 1.0}
+    scheduled: dict[int, int] = defaultdict(int)
+    scheduled[1] = 270
+    pipeline = _pipeline_receipts_ahead(scheduled, 0, weeks, 18)
+    assert pipeline == 270
+
+    avg = _forward_phased_avg_daily(
+        weeks[0], end, 18.2, 60, season, [],
+    )
+    effective = 730 + pipeline
+    cover = effective / avg
+    assert cover > 50  # inbound + FBA gives ~55d+ cover at trough rate

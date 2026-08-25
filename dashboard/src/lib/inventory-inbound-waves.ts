@@ -149,6 +149,55 @@ function weeklyDemand(
   return Math.round(baseDaily * days * mult);
 }
 
+/** Phased average daily demand over the next `horizonDays` from `start` (matches PhDOS). */
+function forwardPhasedAvgDaily(
+  start: Date,
+  end: Date,
+  baseDaily: number,
+  horizonDays: number,
+  seasonMap: Map<number, number>,
+  forecastWeeks: { start: number; units: number }[],
+): number {
+  let totalUnits = 0;
+  let countedDays = 0;
+  const cursor = new Date(start);
+  while (countedDays < horizonDays && cursor <= end) {
+    const weekEnd = new Date(cursor);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    if (weekEnd > end) weekEnd.setTime(end.getTime());
+    const spanDays =
+      Math.floor((weekEnd.getTime() - cursor.getTime()) / 86400000) + 1;
+    const useDays = Math.min(spanDays, horizonDays - countedDays);
+    const weekUnits = weeklyDemand(
+      baseDaily,
+      cursor,
+      weekEnd,
+      seasonMap,
+      forecastWeeks,
+    );
+    totalUnits += weekUnits * (useDays / spanDays);
+    countedDays += useDays;
+    cursor.setDate(cursor.getDate() + spanDays);
+  }
+  return countedDays > 0 ? totalUnits / countedDays : baseDaily;
+}
+
+/** Inbound / AWD receipts already scheduled to arrive within receiving lead time. */
+function pipelineReceiptsAhead(
+  scheduled: Map<number, number>,
+  wi: number,
+  weeks: Date[],
+  leadDays: number,
+): number {
+  let total = 0;
+  const deadlineMs = weeks[wi].getTime() + leadDays * 86400000;
+  for (let fj = wi + 1; fj < weeks.length; fj++) {
+    if (weeks[fj].getTime() > deadlineMs) break;
+    total += scheduled.get(fj) ?? 0;
+  }
+  return total;
+}
+
 function weekList(start: Date, end: Date): Date[] {
   const monday = new Date(start);
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
@@ -204,7 +253,10 @@ export function buildInboundWavePlan(opts: {
   const recvDays = opts.receivingDays ?? DEFAULT_RECEIVING_DAYS;
   const awdDays = opts.awdToFbaDays ?? 14;
   const includeAwd = opts.includeAwdInSupply ?? true;
-  const inboundWeek = opts.inboundArriveWeek ?? 1;
+  // In-transit inbound typically lands within one receiving cycle
+  const inboundWeek =
+    opts.inboundArriveWeek ??
+    Math.max(0, Math.min(Math.ceil(recvDays / 7) - 1, 1));
   const awdWeek = Math.max(1, Math.ceil(awdDays / 7));
 
   const seasonMap = new Map<number, number>();
@@ -305,47 +357,68 @@ export function buildInboundWavePlan(opts: {
       const receipt = scheduled.get(wi) ?? 0;
       fbaSim += receipt;
 
-      // Forward avg daily over next ~9 weeks
-      let forwardUnits = 0;
-      let forwardDays = 0;
-      for (let fi = wi; fi < weeks.length && forwardDays < 63; fi++) {
-        forwardUnits += demandByWeek.get(localDate(weeks[fi])) ?? 0;
-        forwardDays += 7;
-      }
-      const avgDaily = forwardDays > 0 ? forwardUnits / forwardDays : 0;
-      const coverDays = avgDaily > 0 ? fbaSim / avgDaily : 999;
-      const flagged = coverDays < coverTarget && coverDays < 999;
+      // Phased demand over cover horizon (not 9-week blend that pulls Nov peak into August)
+      const avgDaily = forwardPhasedAvgDaily(
+        w,
+        end,
+        baseDaily,
+        coverTarget,
+        seasonMap,
+        forecastWeeks,
+      );
+      const pipeline = pipelineReceiptsAhead(scheduled, wi, weeks, recvDays);
+      const effectiveFba = fbaSim + pipeline;
+      const coverDays = avgDaily > 0 ? effectiveFba / avgDaily : 999;
+      const replenishThreshold = coverTarget - 7;
+      const inboundGrace =
+        inbound > 0
+          ? Math.max(replenishThreshold - 8, recvDays + 7)
+          : replenishThreshold;
+      const flagged = coverDays < inboundGrace && coverDays < 999;
 
       if (flagged && avgDaily > 0) {
         const targetFba = coverTarget * avgDaily;
-        let deficit = Math.ceil(Math.max(targetFba - fbaSim, 0));
+        let deficit = Math.ceil(Math.max(targetFba - effectiveFba, 0));
+        const criticalUrgent = coverDays < recvDays;
 
-        const fromAwd = Math.min(deficit, awdPool);
+        // Incremental waves in trough — only dump warehouse when lead time forces it
+        const waveCap = criticalUrgent
+          ? warehousePool
+          : Math.min(
+              warehousePool,
+              Math.max(Math.ceil(avgDaily * recvDays), Math.ceil(avgDaily * 7)),
+            );
+
+        const fromAwd = Math.min(deficit, awdPool, waveCap);
         if (fromAwd > 0) {
           awdPool -= fromAwd;
           scheduled.set(wi, (scheduled.get(wi) ?? 0) + fromAwd);
           fbaSim += fromAwd;
           const shipBy = new Date(w);
           shipBy.setDate(shipBy.getDate() - awdDays);
+          const urgent = criticalUrgent;
           waves.push({
             sku,
             source: "AWD",
             units: fromAwd,
             arrive_date: wIso,
             ship_by: localDate(shipBy),
-            urgent: shipBy < today,
+            urgent,
           });
           deficit -= fromAwd;
         }
 
-        const fromTpl = Math.min(deficit, warehousePool);
+        const tplCap = criticalUrgent
+          ? warehousePool
+          : Math.min(warehousePool, waveCap - fromAwd);
+        const fromTpl = Math.min(deficit, tplCap);
         if (fromTpl > 0) {
           warehousePool -= fromTpl;
           scheduled.set(wi, (scheduled.get(wi) ?? 0) + fromTpl);
           fbaSim += fromTpl;
           const shipBy = new Date(w);
           shipBy.setDate(shipBy.getDate() - recvDays);
-          const urgent = shipBy < today;
+          const urgent = criticalUrgent;
           waves.push({
             sku,
             source: "3PL",
@@ -359,7 +432,7 @@ export function buildInboundWavePlan(opts: {
               sku,
               week: wIso,
               cover_days: Math.round(coverDays),
-              message: "Ship immediately — lead time elapsed",
+              message: "Ship immediately — cover below receiving lead time",
             });
           }
         }
@@ -411,7 +484,9 @@ export function buildInboundWavePlan(opts: {
       ship_by,
       mix,
       total_units: Object.values(mix).reduce((s, n) => s + n, 0),
-      urgent: ship_by < localDate(today),
+      urgent: allWaves.some(
+        (w) => w.source === "3PL" && w.ship_by === ship_by && w.urgent,
+      ),
     }));
 
   return {

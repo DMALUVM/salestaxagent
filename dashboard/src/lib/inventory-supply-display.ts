@@ -92,3 +92,26 @@ export function computeManufactureTiming(opts: {
 function localDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+/** Units to ship in the next actionable wave (not cumulative through peak). */
+export function nextWarehouseShip(
+  tplWaves: Array<{ units: number; ship_by: string; urgent?: boolean }>,
+  today?: Date,
+): { units: number; shipBy: string | null; urgent: boolean } {
+  const t = today ?? new Date();
+  t.setHours(0, 0, 0, 0);
+  const todayStr = localDate(t);
+  const upcoming = tplWaves
+    .filter((w) => w.ship_by >= todayStr)
+    .sort((a, b) => a.ship_by.localeCompare(b.ship_by));
+  if (upcoming.length === 0) {
+    return { units: 0, shipBy: null, urgent: false };
+  }
+  const firstDate = upcoming[0].ship_by;
+  const batch = upcoming.filter((w) => w.ship_by === firstDate);
+  return {
+    units: batch.reduce((s, w) => s + w.units, 0),
+    shipBy: firstDate,
+    urgent: batch.some((w) => w.urgent),
+  };
+}

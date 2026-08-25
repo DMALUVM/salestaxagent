@@ -14,7 +14,7 @@ import {
   type ForecastWeekRow,
   type SeasonalityWeek,
 } from "./inventory-phased-demand";
-import { computeManufactureTiming } from "./inventory-supply-display";
+import { computeManufactureTiming, nextWarehouseShip } from "./inventory-supply-display";
 
 export const PRODUCTION_LEAD_DAYS = {
   lip: 42,
@@ -70,6 +70,7 @@ export type SkuFourNumbers = {
   nextShipBy: string | null;
   shipUrgent: boolean;
   shipToFba: number;
+  shipToFbaTotal: number;
   shipToAwd: number;
   warehouseShipments: WarehouseShipment[];
   fbaDosPhased: number | null;
@@ -196,6 +197,8 @@ export function buildFourNumbersPlan(opts: {
       today,
     });
 
+    const nextShip = nextWarehouseShip(tplWaves, today);
+
     let fbaDosPhased: number | null = null;
     let fbaStockoutDate: string | null = null;
     let networkOosDate: string | null = null;
@@ -272,9 +275,10 @@ export function buildFourNumbersPlan(opts: {
       manufactureQty,
       orderBy: timing.orderBy,
       orderUrgent: timing.orderUrgent,
-      nextShipBy: timing.nextShipBy,
-      shipUrgent: timing.shipUrgent,
-      shipToFba: shipFba,
+      nextShipBy: nextShip.shipBy ?? timing.nextShipBy,
+      shipUrgent: nextShip.urgent || timing.shipUrgent,
+      shipToFba: nextShip.units,
+      shipToFbaTotal: shipFba,
       shipToAwd: shipTplToAwd,
       warehouseShipments,
       fbaDosPhased,
@@ -290,7 +294,7 @@ export function buildFourNumbersPlan(opts: {
     });
 
     totalManufacture += manufactureQty;
-    totalFba += shipFba;
+    totalFba += nextShip.units;
     totalAwd += shipTplToAwd;
   }
 

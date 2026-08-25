@@ -125,28 +125,44 @@ def _weekly_demand(
     return round(base_daily_v30 * days * mult)
 
 
-def _forward_avg_daily(
-    weeks: list[date],
-    wi: int,
-    demand_by_week: dict[str, float],
-    sku: str,
-    lookahead_days: int = 60,
+def _forward_phased_avg_daily(
+    start: date,
+    end: date,
+    base_daily_v30: float,
+    horizon_days: int,
+    season_map: dict[int, float],
+    forecast_weeks: list[tuple[date, float]],
 ) -> float:
-    units = 0.0
-    days = 0
-    for fi in range(wi, len(weeks)):
-        w_iso = weeks[fi].isoformat()
-        wk_units = demand_by_week.get(w_iso, 0)
-        week_days = 7
-        if fi == len(weeks) - 1:
-            week_days = 7
-        units += wk_units
-        days += week_days
-        if days >= lookahead_days:
+    """Phased average daily over horizon_days from start (matches dashboard PhDOS)."""
+    total_units = 0.0
+    counted_days = 0
+    cursor = start
+    while counted_days < horizon_days and cursor <= end:
+        week_end = min(cursor + timedelta(days=6), end)
+        span_days = (week_end - cursor).days + 1
+        use_days = min(span_days, horizon_days - counted_days)
+        week_units = _weekly_demand(
+            base_daily_v30, cursor, week_end, season_map, forecast_weeks,
+        )
+        total_units += week_units * (use_days / span_days)
+        counted_days += use_days
+        cursor = week_end + timedelta(days=1)
+    return total_units / counted_days if counted_days > 0 else base_daily_v30
+
+
+def _pipeline_receipts_ahead(
+    scheduled: dict[int, int],
+    wi: int,
+    weeks: list[date],
+    lead_days: int,
+) -> int:
+    total = 0
+    deadline = weeks[wi].toordinal() + lead_days
+    for fj in range(wi + 1, len(weeks)):
+        if weeks[fj].toordinal() > deadline:
             break
-    if days <= 0:
-        return 0.0
-    return units / days
+        total += scheduled.get(fj, 0)
+    return total
 
 
 def _week_list(start: date, end: date) -> list[date]:
@@ -167,7 +183,7 @@ def build_inbound_wave_plan(
     receiving_days: int | None = None,
     scenario: str = "correction_factor",
     include_awd_in_supply: bool = True,
-    inbound_arrive_week: int = 1,
+    inbound_arrive_week: int | None = None,
     awd_arrive_week: int | None = None,
 ) -> dict:
     """Plan warehouse → FBA inbound waves with receiving lead time.
@@ -191,6 +207,10 @@ def build_inbound_wave_plan(
     recv_days = receiving_days or int(settings.get("receiving_days_normal", DEFAULT_RECEIVING_DAYS))
     awd_days = int(settings.get("awd_to_fba_days", DEFAULT_AWD_TO_FBA_DAYS))
     awd_week = awd_arrive_week if awd_arrive_week is not None else max(1, math.ceil(awd_days / 7))
+
+    inbound_week = inbound_arrive_week
+    if inbound_week is None:
+        inbound_week = max(0, min(math.ceil(recv_days / 7) - 1, 1))
 
     # Load inventory
     snaps = {r["sku"]: r for r in fetch_all("inventory_snapshots")}
@@ -266,7 +286,7 @@ def build_inbound_wave_plan(
         # Pre-schedule existing inbound + AWD transfers
         scheduled: dict[int, int] = defaultdict(int)
         if inbound > 0:
-            scheduled[min(inbound_arrive_week, len(weeks) - 1)] += inbound
+            scheduled[min(inbound_week, len(weeks) - 1)] += inbound
         awd_pool = awd_oh if not include_awd_in_supply else 0
         if include_awd_in_supply and awd_oh > 0:
             scheduled[min(awd_week, len(weeks) - 1)] += awd_oh
@@ -283,21 +303,37 @@ def build_inbound_wave_plan(
             receipt = scheduled.get(wi, 0)
             fba_sim += receipt
 
-            avg_daily = _forward_avg_daily(weeks, wi, demand_by_week, sku)
+            avg_daily = _forward_phased_avg_daily(
+                w, end, base_daily, target_days, season_map, forecast_weeks,
+            )
+            pipeline = _pipeline_receipts_ahead(scheduled, wi, weeks, recv_days)
+            effective_fba = fba_sim + pipeline
             if avg_daily > 0:
-                cover_days = fba_sim / avg_daily
+                cover_days = effective_fba / avg_daily
             else:
                 cover_days = 999.0
 
-            flagged = cover_days < target_days and cover_days < 999
+            inbound_grace = max(target_days - 15, recv_days + 7) if inbound > 0 else target_days - 7
+            flagged = cover_days < inbound_grace and cover_days < 999
 
-            # Schedule warehouse shipment if below cover target
             if flagged and avg_daily > 0:
                 target_fba = target_days * avg_daily
-                deficit = math.ceil(max(target_fba - fba_sim, 0))
+                deficit = math.ceil(max(target_fba - effective_fba, 0))
+                critical_urgent = cover_days < recv_days
+                wave_cap = (
+                    warehouse_pool
+                    if critical_urgent
+                    else min(
+                        warehouse_pool,
+                        max(
+                            math.ceil(avg_daily * recv_days),
+                            math.ceil(avg_daily * 7),
+                        ),
+                    )
+                )
+
                 if deficit > 0:
-                    # Prefer AWD internal transfer first
-                    from_awd = min(deficit, awd_pool)
+                    from_awd = min(deficit, awd_pool, wave_cap)
                     if from_awd > 0:
                         awd_pool -= from_awd
                         scheduled[wi] += from_awd
@@ -308,39 +344,44 @@ def build_inbound_wave_plan(
                             "units": from_awd,
                             "arrive_date": w_iso,
                             "ship_by": (w - timedelta(days=awd_days)).isoformat(),
-                            "urgent": (w - timedelta(days=awd_days)) < today,
+                            "urgent": critical_urgent,
                         })
                         deficit -= from_awd
 
-                    from_tpl = min(deficit, warehouse_pool)
+                    tpl_cap = (
+                        warehouse_pool
+                        if critical_urgent
+                        else min(warehouse_pool, wave_cap - from_awd)
+                    )
+                    from_tpl = min(deficit, tpl_cap)
                     if from_tpl > 0:
                         warehouse_pool -= from_tpl
                         scheduled[wi] += from_tpl
                         fba_sim += from_tpl
                         ship_by = w - timedelta(days=recv_days)
-                        urgent = ship_by < today
                         waves.append({
                             "sku": sku,
                             "source": "3PL",
                             "units": from_tpl,
                             "arrive_date": w_iso,
                             "ship_by": ship_by.isoformat(),
-                            "urgent": urgent,
+                            "urgent": critical_urgent,
                         })
-                        if urgent:
+                        if critical_urgent:
                             alerts.append({
                                 "sku": sku,
                                 "week": w_iso,
                                 "cover_days": round(cover_days),
                                 "units_needed": from_tpl,
-                                "message": "Ship immediately — lead time already elapsed",
+                                "message": "Ship immediately — cover below receiving lead time",
                             })
 
             wk_demand = demand_by_week.get(w_iso, 0)
             fba_sim = max(fba_sim - wk_demand, 0)
 
-            # Recompute cover after demand for display
-            avg_daily_post = _forward_avg_daily(weeks, wi, demand_by_week, sku)
+            avg_daily_post = _forward_phased_avg_daily(
+                w, end, base_daily, target_days, season_map, forecast_weeks,
+            )
             cover_post = (
                 fba_sim / avg_daily_post if avg_daily_post > 0 else None
             )
@@ -398,7 +439,12 @@ def build_inbound_wave_plan(
             "ship_by": ship_by,
             "mix": mix,
             "total_units": sum(mix.values()),
-            "urgent": ship_by < today.isoformat(),
+            "urgent": any(
+                w["source"] == "3PL"
+                and w["ship_by"] == ship_by
+                and w.get("urgent")
+                for w in all_waves
+            ),
         })
 
     return {

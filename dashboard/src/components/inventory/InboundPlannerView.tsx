@@ -158,7 +158,7 @@ export function InboundPlannerView({ plan: planProp }: { plan?: FourNumbersPlan 
                     <TableHead>Product</TableHead>
                     <TableHead className="text-right">Mfg</TableHead>
                     <TableHead>Order by</TableHead>
-                    <TableHead className="text-right">→FBA</TableHead>
+                    <TableHead className="text-right">→FBA next</TableHead>
                     <TableHead className="text-right">FBA DOS</TableHead>
                     <TableHead>FBA out</TableHead>
                     <TableHead>Net OOS</TableHead>
