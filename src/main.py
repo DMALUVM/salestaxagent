@@ -243,6 +243,52 @@ def ads_monthly_export_seed(seed_path):
     click.echo(f"Wrote {result.get('rows', 0)} month(s) to {result.get('path')}")
 
 
+@cli.command("warehouse-export")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Output .json.gz path (default: warehouse_snapshot_<date>.json.gz)")
+@click.option("--table", "tables", multiple=True,
+              help="Export only these tables (default: all configured)")
+def warehouse_export_cmd(output, tables):
+    """Export a gzip JSON bundle of all operational Supabase tables."""
+    from datetime import date as d
+    from src.maintenance.warehouse_snapshot import export_snapshot_gzip
+
+    if output is None:
+        output = f"warehouse_snapshot_{d.today().isoformat()}.json.gz"
+    table_list = list(tables) if tables else None
+    result = export_snapshot_gzip(output, tables_filter=table_list)
+    click.echo(f"Wrote {result.get('bytes', 0):,} bytes to {result.get('path')}")
+    click.echo(f"Tables OK: {result.get('tables_ok')}  Errors: {result.get('tables_error')}")
+    click.echo(f"Total rows: {result.get('total_rows', 0):,}")
+
+
+@cli.command("warehouse-restore")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--dry-run", is_flag=True, help="Validate and count rows without writing")
+@click.option("--table", "tables", multiple=True,
+              help="Restore only these tables from the bundle")
+def warehouse_restore_cmd(path, dry_run, tables):
+    """Restore operational tables from a warehouse snapshot .json.gz bundle."""
+    from src.maintenance.warehouse_snapshot import restore_snapshot_file
+
+    table_list = list(tables) if tables else None
+    result = restore_snapshot_file(path, dry_run=dry_run, tables_filter=table_list)
+    click.echo(f"Snapshot from: {result.get('exported_at')}")
+    click.echo(f"Tables processed: {result.get('tables_processed')}")
+    click.echo(f"Rows upserted: {result.get('total_upserted', 0):,}")
+    if result.get("unknown_tables"):
+        click.echo(f"Unknown tables in file (skipped): {', '.join(result['unknown_tables'])}")
+    for err in result.get("errors") or []:
+        click.echo(f"ERROR {err.get('table')}: {err.get('error')}", err=True)
+    for row in result.get("tables") or []:
+        if row.get("status") == "error":
+            continue
+        click.echo(
+            f"  {row['table']}: {row.get('rows_in_backup', 0):,} in backup, "
+            f"{row.get('upserted', 0):,} upserted"
+        )
+
+
 @cli.command("export-csv")
 @click.option("--table", type=click.Choice([
     "sales_by_state", "sales_by_sku", "ads_monthly_spend",

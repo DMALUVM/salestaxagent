@@ -6,6 +6,7 @@ import type { IngestionLog, ResearchTask } from "@/lib/types";
 import { LoadingState } from "@/components/loading";
 import { Disclaimer } from "@/components/disclaimer";
 import { AdsMonthlyUpload } from "@/components/ads-monthly-upload";
+import { WarehouseBackupCard } from "@/components/warehouse-backup";
 import { fileTypeLabel } from "@/lib/channels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -778,6 +779,8 @@ export default function DataPage() {
       <FileUploadCard onComplete={refetchLogs} />
 
       <AdsMonthlyUpload onComplete={refetchLogs} />
+
+      <WarehouseBackupCard onComplete={refetchLogs} />
 
       <SPAPIRefreshCard onComplete={refetchLogs} />
 
