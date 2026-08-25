@@ -8,11 +8,11 @@ import {
   type SkuFourNumbers,
 } from "./inventory-four-numbers";
 import type { ForecastWeekRow } from "./inventory-phased-demand";
-import type { SeasonalityWeekly } from "./types";
+import type { InventorySnapshot, SeasonalityWeekly, SkuVelocity } from "./types";
 
 export type InventoryRawLike = {
-  snapshots?: Array<Record<string, unknown>>;
-  velocity?: Array<Record<string, unknown>>;
+  snapshots?: InventorySnapshot[];
+  velocity?: SkuVelocity[];
   tpl?: Array<{ sku: string; available: number }>;
   awd?: Array<{ sku: string; awd_on_hand: number }>;
   seasonality?: SeasonalityWeekly[];
