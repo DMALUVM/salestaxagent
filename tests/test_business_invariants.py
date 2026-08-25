@@ -62,17 +62,17 @@ class TestBusinessRulesConfig:
         assert ads["campaign_chunk_days"] == 7
         assert ads["campaign_chunk_days"] <= ads["max_chunk_days"]
 
-    def test_ads_sb_sd_scheduled_windows_are_one_chunk(self):
-        """Scheduled SB/SD must stay inside a single 7-day chunk.
+    def test_ads_sb_sd_use_one_day_chunks(self):
+        """SB/SD must chunk per day so one timeout cannot wipe a week.
 
-        2026-08-24: five SB/SD chunks × 900s PENDING pinned campaigns for
-        3.9h; placements/search terms then waited 180 minutes and paged.
+        2026-08-25: a single 7-day SB/SD chunk timed out → SB+SD $0, SP kept,
+        Aug 23–24 SP-only vs Seller Central.
         """
         ads = self.cfg["ads"]
+        assert ads["campaign_sb_sd_chunk_days"] == 1
         assert ads["campaign_sb_sd_daily_days"] == 7
         assert ads["campaign_sb_sd_backfill_days"] == 7
-        assert ads["campaign_sb_sd_daily_days"] <= ads["campaign_chunk_days"]
-        assert ads["campaign_sb_sd_backfill_days"] <= ads["campaign_chunk_days"]
+        assert ads["campaign_sb_sd_chunk_days"] <= ads["campaign_chunk_days"]
 
     def test_spapi_chunk_limit(self):
         assert self.cfg["spapi"]["max_chunk_days"] <= 31
@@ -157,14 +157,14 @@ class TestRulesModule:
 
     def test_ads_sb_sd_windows_from_config(self):
         from src.rules import (
-            ADS_CAMPAIGN_CHUNK_DAYS,
             ADS_SB_SD_BACKFILL_DAYS,
+            ADS_SB_SD_CHUNK_DAYS,
             ADS_SB_SD_DAILY_DAYS,
         )
         assert ADS_SB_SD_DAILY_DAYS == 7
         assert ADS_SB_SD_BACKFILL_DAYS == 7
-        assert ADS_SB_SD_DAILY_DAYS <= ADS_CAMPAIGN_CHUNK_DAYS
-        assert ADS_SB_SD_BACKFILL_DAYS <= ADS_CAMPAIGN_CHUNK_DAYS
+        assert ADS_SB_SD_CHUNK_DAYS == 1
+        assert ADS_SB_SD_CHUNK_DAYS <= ADS_SB_SD_DAILY_DAYS
 
     def test_spapi_chunk_size_within_limit(self):
         from src.rules import SPAPI_MAX_CHUNK_DAYS
@@ -702,10 +702,11 @@ class TestAdProductCoverage:
         sb = [(cs, ce) for product, cs, ce in calls if product == "SB"]
         sd = [(cs, ce) for product, cs, ce in calls if product == "SD"]
         assert len(sp) == 5
-        assert len(sb) == 1 and len(sd) == 1
-        assert sb[0][1] == date(2026, 8, 30)
-        assert (sb[0][1] - sb[0][0]).days + 1 <= 7
-        assert (sd[0][1] - sd[0][0]).days + 1 <= 7
+        # 7 closed days in 1-day chunks.
+        assert len(sb) == 7 and len(sd) == 7
+        assert max(ce for _, ce in sb) == date(2026, 8, 30)
+        assert min(cs for cs, _ in sb) == date(2026, 8, 24)
+        assert all((ce - cs).days == 0 for cs, ce in sb)
         assert r["by_type"]["SB"]["ok"] is True
 
     def test_sb_rows_count_as_present_even_with_chunk_errors(self, monkeypatch):
@@ -816,6 +817,21 @@ class TestAdsPollResilience:
         assert "_run_ads_placements_sync" in src
         assert "_run_ads_search_terms_sync" in src
         assert 'status == "skipped"' in src
+
+    def test_partial_sb_sd_failure_schedules_heal(self):
+        import inspect
+        from src.main import _run_ads_sync_job
+        src = inspect.getsource(_run_ads_sync_job)
+        assert "_run_ads_sb_sd_heal" in src
+        assert "lost_products" in src
+
+    def test_midday_heal_job_exists(self):
+        import inspect
+        from src import main as main_mod
+        assert callable(main_mod._run_ads_sb_sd_heal)
+        src = inspect.getsource(main_mod)
+        assert 'id="ads_sb_sd_heal"' in src
+        assert "_run_ads_sb_sd_heal" in src
 
     def test_sunday_backfill_caps_sb_sd(self):
         import inspect

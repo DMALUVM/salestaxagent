@@ -18,6 +18,7 @@ from src.rules import (
     ADS_CAMPAIGN_TIMEOUT_SB_SECONDS,
     ADS_CAMPAIGN_TIMEOUT_SD_SECONDS,
     ADS_MAX_CHUNK_DAYS,
+    ADS_SB_SD_CHUNK_DAYS,
     ADS_SEARCH_TERM_CHUNK_DAYS,
     amazon_as_of,
 )
@@ -430,9 +431,14 @@ def fetch_campaigns_daily(start: date, end: date,
         product_inserted = 0
 
         product_chunks = chunks
-        if product in ("SB", "SD") and sb_sd_days:
-            product_start = max(start, end - timedelta(days=sb_sd_days - 1))
-            product_chunks = _date_chunks(product_start, end, size)
+        if product in ("SB", "SD"):
+            product_start = start
+            if sb_sd_days:
+                product_start = max(start, end - timedelta(days=sb_sd_days - 1))
+            # SB/SD always use the tighter chunk size. One 7-day Brands
+            # report that times out used to leave the whole window SP-only.
+            sb_sd_size = min(size, ADS_SB_SD_CHUNK_DAYS)
+            product_chunks = _date_chunks(product_start, end, sb_sd_size)
         # Newest first: if a later chunk times out we still have yesterday.
         product_chunks = list(reversed(product_chunks))
 
