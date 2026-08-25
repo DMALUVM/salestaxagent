@@ -30,6 +30,11 @@ import {
 } from "@/components/ui/table";
 import { isConfigured } from "@/lib/supabase";
 import {
+  phasedAvgDaily,
+  phasedDemandUnits,
+  phasedStockoutDate,
+} from "@/lib/inventory-phased-demand";
+import {
   Shield,
   AlertTriangle,
   Download,
@@ -359,23 +364,12 @@ export default function InventoryPage() {
       if (s.include_awd !== false) on_hand += awd_on_hand;
 
       const total_vel_30 = Number(vel?.total_u_30 ?? 0);
-      const v90 = Number(vel?.total_u_90 ?? 0);
-      const planning_vel_raw = Number(vel?.planning_u_30 ?? 0);
+      const peak_plan_u_30 = Number(vel?.planning_u_30 ?? 0);
       const surge_mult = Number(vel?.holiday_surge_mult ?? 1);
-      const summer_prior = Number(vel?.summer_prior_daily ?? 0);
-      const holiday_prior = Number(vel?.holiday_prior_daily ?? 0);
-      // Trough-resistant baseline: max(V30, V90, summer) — Aug/Sep V30 loses if depressed
-      const troughBaseline = Math.max(total_vel_30, v90, summer_prior);
-      let planning_vel = planning_vel_raw;
-      if (surge_mult > 1.05 && holiday_prior > 0) {
-        const yoy = Math.min(1.4, Math.max(0.75, troughBaseline / Math.max(summer_prior, 0.01)));
-        const anchored = holiday_prior * yoy;
-        planning_vel = Math.max(planning_vel_raw, troughBaseline, anchored);
-      } else {
-        planning_vel = Math.max(planning_vel_raw, troughBaseline);
-      }
       const amazon_vel_30 = Number(vel?.amazon_u_30 ?? 0);
       const shopify_vel_30 = Number(vel?.shopify_u_30 ?? 0);
+      // Current sell-through (Aug/Sep trough) — same base as Plan SKU page
+      const currentDemand = total_vel_30;
 
       // Channel detection
       const minVel = 0.1;
@@ -385,11 +379,14 @@ export default function InventoryPage() {
       if (!amazonActive && !shopifyOnly && total_vel_30 <= minVel) continue;
       const channel = shopifyOnly ? "shopify_only" : "amazon";
 
-      // Amazon FBA: always ≥60d at holiday-aware planning velocity
+      // Amazon FBA: ≥60d cover using phased demand (V30 × seasonality), not peak holiday rate
       const AMAZON_MIN_COVER = 60;
       const target = Math.max(
         AMAZON_MIN_COVER,
         s.holiday_mode ? Math.max(90, s.target_cover_days) : s.target_cover_days,
+      );
+      const accountSeasonality = seasonality.filter(
+        (sw) => !sw.sku || sw.sku === "_account_",
       );
       let dos: number, dos_amz_supply: number, pipeline_dos: number;
       let our_reorder: number, stockout_date: string | null = null, flag: string;
@@ -404,28 +401,53 @@ export default function InventoryPage() {
         dos_amz_supply = dos;
         pipeline_dos = Math.round(dos);
         our_reorder = Math.max(Math.ceil((target + s.lead_time_days) * demand) - supply, 0);
-        stockout_date = seasonalStockoutDate(supply, demand, sku);
-        network_oos_date = stockout_date; // same pool for shop-only
+        stockout_date = phasedStockoutDate(
+          supply, demand, sku, accountSeasonality, forecasts,
+        );
+        network_oos_date = stockout_date;
         flag = dos < 30 && demand > eps ? "LOW" : our_reorder > 0 ? "RESTOCK" : "OK";
       } else {
-        // Amazon: never use Aug/Sep trough V30 — planning_vel is holiday-aware
-        const demand = planning_vel > eps ? planning_vel : total_vel_30;
+        // DOS at current V30 — you won't stock out on today's run-rate
+        const demand = currentDemand > eps ? currentDemand : total_vel_30;
         dos = demand > eps ? fba_on_hand / demand : (fba_on_hand > 0 ? 9999 : 0);
         const amz_supply = fba_on_hand + inbound + awd_on_hand;
         dos_amz_supply = demand > eps ? amz_supply / demand : (amz_supply > 0 ? 9999 : 0);
         const pipeline_supply = fba_on_hand + inbound + awd_on_hand;
         pipeline_dos = demand > eps ? Math.round(pipeline_supply / demand) : (pipeline_supply > 0 ? 9999 : 0);
-        // Reorder to hit ≥60d (or holiday target) at planning velocity + lead time
-        our_reorder = Math.max(Math.ceil((target + s.lead_time_days) * demand) - on_hand, 0);
-        stockout_date = seasonalStockoutDate(fba_on_hand, demand, sku);
+
+        // Reorder: phased demand over cover + lead (ramps Nov–Jan), not peak × days today
+        const horizonDays = target + s.lead_time_days;
+        const phasedNeed = phasedDemandUnits(
+          demand,
+          sku,
+          horizonDays,
+          accountSeasonality,
+          forecasts,
+        );
+        our_reorder = Math.max(phasedNeed - on_hand, 0);
+
+        stockout_date = phasedStockoutDate(
+          fba_on_hand, demand, sku, accountSeasonality, forecasts,
+        );
         const network = fba_on_hand + inbound + awd_on_hand + tpl_available;
-        network_oos_date = seasonalStockoutDate(network, demand, sku);
+        network_oos_date = phasedStockoutDate(
+          network, demand, sku, accountSeasonality, forecasts,
+        );
+
+        // CRITICAL only if below 60d at current velocity OR phased stockout inside lead window
+        const forward60 = phasedAvgDaily(
+          demand, sku, 60, accountSeasonality, forecasts,
+        );
+        const dosForward =
+          forward60 > eps ? fba_on_hand / forward60 : dos;
         flag =
           dos < AMAZON_MIN_COVER && demand > eps
             ? "CRITICAL"
-            : our_reorder > 0
-              ? "RESTOCK"
-              : "OK";
+            : dosForward < AMAZON_MIN_COVER && forward60 > eps
+              ? "LOW"
+              : our_reorder > 0
+                ? "RESTOCK"
+                : "OK";
       }
 
       const shopify_share = total_vel_30 > 0 ? Math.round((shopify_vel_30 / total_vel_30) * 100) : 0;
@@ -447,7 +469,7 @@ export default function InventoryPage() {
         shopify_u_30: shopify_vel_30,
         total_u_7: Number(vel?.total_u_7 ?? 0),
         total_u_30: total_vel_30,
-        planning_u_30: planning_vel,
+        planning_u_30: peak_plan_u_30 > 0 ? peak_plan_u_30 : total_vel_30,
         holiday_surge_mult: surge_mult,
         shopify_share_pct: shopify_share,
         channel,
@@ -607,7 +629,8 @@ export default function InventoryPage() {
             )}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Aug/Sep trough V30 is not used as baseline. Surge SKUs plan off 2025 Nov–Dec × YoY; Amazon floor is 60 days.
+            DOS uses current V30. Stockout &amp; reorder walk V30 × weekly seasonality (ramps Nov–Jan).
+            Peak column is Dec-reference only — not applied in August.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -853,12 +876,12 @@ export default function InventoryPage() {
                   { key: "inbound", label: "Inbnd", tip: "Amazon inbound — not yet sellable" },
                   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
                   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days" },
-                  { key: "planning_u_30", label: "Plan", tip: "Holiday planning velocity — trough-resistant baseline × surge / prior Nov–Dec × YoY. Used for Amazon DOS & reorder (not Aug/Sep V30)." },
-                  { key: "holiday_surge_mult", label: "Surge", tip: "2025 Nov–Dec daily ÷ Jun–Aug daily. Lip balm often 2–4.5×; deodorant ~0.7–1×" },
-                  { key: "dos", label: "DOS", tip: "FBA days of supply at planning velocity — must stay ≥60d" },
+                  { key: "planning_u_30", label: "Peak", tip: "Peak holiday reference (prior Nov–Dec × YoY) — for manufacture / Plan SKU, not current DOS" },
+                  { key: "holiday_surge_mult", label: "Surge", tip: "2025 Nov–Dec daily ÷ Jun–Aug daily" },
+                  { key: "dos", label: "DOS", tip: "FBA days of supply at current V30 (today's run-rate)" },
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
-                  { key: "our_reorder_qty", label: "Reorder", tip: "Units to transfer/produce to reach target cover" },
+                  { key: "our_reorder_qty", label: "Reorder", tip: "Gap to phased demand (V30 × seasonality over cover + lead) minus network stock" },
                   { key: "stockout_date", label: "Out", tip: "FBA reaches 0 (Amazon) or warehouse reaches 0 (Shop) — uses forecast + seasonality" },
                   { key: "network_oos_date", label: "OOS", tip: "All network stock (FBA+AWD+3PL+Inbound) reaches 0 — uses forecast + seasonality" },
                   { key: "flag", label: "Status", tip: "OK ≥ target cover; CRITICAL/LOW below; RESTOCK approaching" },
@@ -941,15 +964,11 @@ export default function InventoryPage() {
                     </TableCell>
                     <TableCell
                       className={`text-right tabular-nums ${
-                        r.planning_u_30 > r.total_u_30 * 1.1
-                          ? "text-amber-700 dark:text-amber-400 font-medium"
-                          : ""
+                        r.planning_u_30 > r.total_u_30 * 1.5
+                          ? "text-amber-700 dark:text-amber-400"
+                          : "text-muted-foreground"
                       }`}
-                      title={
-                        r.holiday_surge_mult > 1.05
-                          ? `Holiday plan ${r.planning_u_30.toFixed(1)}/d (${r.holiday_surge_mult.toFixed(2)}× surge)`
-                          : "Same as V30 (no holiday surge)"
-                      }
+                      title={`Peak holiday reference ${r.planning_u_30.toFixed(1)}/d vs current V30 ${r.total_u_30.toFixed(1)}/d`}
                     >
                       {r.planning_u_30.toFixed(1)}
                     </TableCell>
@@ -1167,8 +1186,8 @@ export default function InventoryPage() {
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>
                   V30: {selected.total_u_30.toFixed(1)} u/day
-                  {selected.planning_u_30 > selected.total_u_30 * 1.05 && (
-                    <> · Holiday plan: {selected.planning_u_30.toFixed(1)} u/day</>
+                  {selected.planning_u_30 > selected.total_u_30 * 1.2 && (
+                    <> · Peak ref: {selected.planning_u_30.toFixed(1)} u/day (Nov–Dec)</>
                   )}
                   {selected.holiday_surge_mult >= 1.05 && (
                     <> · 2025 surge {selected.holiday_surge_mult.toFixed(2)}×</>

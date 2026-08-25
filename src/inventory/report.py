@@ -19,11 +19,7 @@ def build_report() -> dict:
     awd_snapshots = {r["sku"]: r for r in _safe_fetch("inventory_awd")}
     settings = _load_settings()
 
-    from src.inventory.holiday_surge import (
-        AMAZON_MIN_COVER_DAYS,
-        amazon_cover_target,
-        amazon_demand_daily,
-    )
+    from src.inventory.holiday_surge import AMAZON_MIN_COVER_DAYS, amazon_cover_target
 
     target_days = amazon_cover_target(
         int(settings.get("target_cover_days", AMAZON_MIN_COVER_DAYS) or AMAZON_MIN_COVER_DAYS),
@@ -32,7 +28,6 @@ def build_report() -> dict:
     lead_days = settings["lead_time_days"]
     include_inbound = settings["include_inbound"]
     include_3pl = settings.get("include_3pl", True)
-    holiday_mode = bool(settings.get("holiday_mode", False))
 
     all_skus = sorted(
         set(snapshots) | set(velocities) | set(restock) | set(tpl_snapshots)
@@ -62,10 +57,9 @@ def build_report() -> dict:
 
         awd_oh = int(awd_snapshots.get(sku, {}).get("awd_on_hand", 0) or 0)
 
-        # Velocity — Amazon cover always uses trough-resistant planning rate
-        # (never Aug/Sep V30 alone; surge SKUs anchor to prior Nov–Dec × YoY)
+        # Velocity — DOS at current V30; peak planning_u_30 is reference only
         total_vel_30 = float(vel.get("total_u_30", 0) or 0)
-        planning_vel = amazon_demand_daily(vel)
+        planning_vel = float(vel.get("planning_u_30", 0) or 0)
         surge_mult = float(vel.get("holiday_surge_mult", 1) or 1)
         amazon_vel_30 = float(vel.get("amazon_u_30", 0) or 0)
         shopify_vel_30 = float(vel.get("shopify_u_30", 0) or 0)
@@ -132,8 +126,8 @@ def build_report() -> dict:
                 flag = "OK"
 
         else:
-            # ── Amazon-active: ≥60d FBA at holiday-aware planning velocity ──
-            demand_rate = planning_vel if planning_vel > eps else total_vel_30
+            # ── Amazon-active: DOS at current sell-through (not peak holiday rate) ──
+            demand_rate = total_vel_30
 
             fba_dos = fba_on_hand / max(demand_rate, eps) if demand_rate > eps else (
                 9999 if fba_on_hand > 0 else 0

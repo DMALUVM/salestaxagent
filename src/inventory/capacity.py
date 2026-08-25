@@ -44,11 +44,7 @@ def build_capacity_plan() -> dict:
     )
     awd_to_fba = settings["awd_to_fba_days"]
     production_lead = settings["production_lead_days"]
-    from src.inventory.holiday_surge import (
-        AMAZON_MIN_COVER_DAYS,
-        amazon_cover_target,
-        amazon_demand_daily,
-    )
+    from src.inventory.holiday_surge import AMAZON_MIN_COVER_DAYS, amazon_cover_target
 
     holiday_mode = bool(settings.get("holiday_mode"))
     target_days = amazon_cover_target(
@@ -87,11 +83,11 @@ def build_capacity_plan() -> dict:
 
         total_supply = fba_on_hand + inbound + awd_on_hand + tpl_available
 
-        # Always use trough-resistant / holiday-anchored planning rate
+        # Current V30 for immediate metrics; weekly walk uses seasonality (ramps later)
         total_u_30 = float(vel.get("total_u_30", 0) or 0)
-        demand_daily = amazon_demand_daily(vel, today=today)
+        demand_daily = total_u_30
         surge = float(vel.get("holiday_surge_mult", 1) or 1)
-        planning_u = demand_daily
+        planning_u = float(vel.get("planning_u_30", 0) or 0)
         if demand_daily <= 0:
             sku_plans.append(_empty_plan(sku, vel, fba_on_hand, inbound, awd_on_hand, tpl_available, ft3))
             continue
@@ -109,13 +105,7 @@ def build_capacity_plan() -> dict:
                 mult = sku_mult
             else:
                 mult = acct_mult
-            # Planning rate already holiday-anchored — scale relatively vs current week
-            if surge > 1.05:
-                cur_mult = max(seasonality.get(current_week, 1.0), 0.5)
-                rel = mult / cur_mult
-                weekly_units = demand_daily * 7 * rel
-            else:
-                weekly_units = demand_daily * 7 * mult
+            weekly_units = total_u_30 * 7 * mult
             weekly_demand.append({
                 "week_offset": w_offset,
                 "iso_week": wk,
@@ -131,9 +121,6 @@ def build_capacity_plan() -> dict:
 
         # How many days current total supply covers at seasonal velocity
         avg_seasonal_daily = sum(w["demand_units"] for w in weekly_demand[:8]) / 56
-        # Floor: never plan below holiday planning daily
-        if planning_u > avg_seasonal_daily:
-            avg_seasonal_daily = planning_u
         eps = 0.001
         dos_fba_only = fba_on_hand / max(avg_seasonal_daily, eps)
         dos_fba_inbound = (fba_on_hand + inbound) / max(avg_seasonal_daily, eps)
@@ -179,7 +166,7 @@ def build_capacity_plan() -> dict:
             "tpl_available": tpl_available,
             "total_supply": total_supply,
             "total_u_30": total_u_30,
-            "planning_u_30": demand_daily,
+            "planning_u_30": planning_u if planning_u > 0 else total_u_30,
             "holiday_surge_mult": surge,
             "peak_week_demand": round(peak_week_demand, 0),
             "dos_fba_only": round(dos_fba_only, 0),
