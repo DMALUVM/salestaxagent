@@ -116,6 +116,18 @@ export function obligationStatus(
       detail: `period_type=${periodType}, state files ${freq}`,
     };
   }
+  if (freq === "casual" && PERIODIC_TYPES.has(periodType ?? "")) {
+    return {
+      reason: "superseded_frequency",
+      detail: `period_type=${periodType}, state files casual`,
+    };
+  }
+  if (periodType === "casual" && PERIODIC_TYPES.has(freq)) {
+    return {
+      reason: "superseded_frequency",
+      detail: `period_type=casual, state files ${freq}`,
+    };
+  }
 
   return null;
 }

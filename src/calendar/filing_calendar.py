@@ -107,6 +107,17 @@ def generate_filing_entries(state_code: str, frequency: str, year: int,
             "status": "pending",
         })
 
+    elif frequency == "casual":
+        entries.append({
+            "state_code": state_code,
+            "period_type": "casual",
+            "period_label": str(year),
+            "period_start": date(year, 1, 1),
+            "period_end": date(year, 12, 31),
+            "due_date": _safe_date(year + 1, 1, due_day),
+            "status": "pending",
+        })
+
     return entries
 
 

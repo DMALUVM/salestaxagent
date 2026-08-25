@@ -64,7 +64,7 @@ function computeNextDue(
     periodEndDate = new Date(y, qEnd + 1, 0);
   } else if (freq === "semi_annual" || freq === "semi-annual") {
     periodEndDate = m < 6 ? new Date(y, 6, 0) : new Date(y, 12, 0);
-  } else if (freq === "annual") {
+  } else if (freq === "annual" || freq === "casual") {
     periodEndDate = new Date(y, 12, 0);
   } else {
     periodEndDate = new Date(y, m + 1, 0);
@@ -95,7 +95,7 @@ function computeNextDue(
     periodLabel = `Q${q} ${peYear}`;
   } else if (freq === "semi_annual" || freq === "semi-annual") {
     periodLabel = peMonth < 6 ? `H1 ${peYear}` : `H2 ${peYear}`;
-  } else if (freq === "annual") {
+  } else if (freq === "annual" || freq === "casual") {
     periodLabel = `${peYear}`;
   } else {
     periodLabel = periodEnd;

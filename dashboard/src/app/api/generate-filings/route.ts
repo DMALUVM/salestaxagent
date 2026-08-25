@@ -188,10 +188,10 @@ function generateEntries(
           status: "pending",
         });
       }
-    } else if (frequency === "annual") {
+    } else if (frequency === "annual" || frequency === "casual") {
       allEntries.push({
         state_code: stateCode,
-        period_type: "annual",
+        period_type: frequency,
         period_label: String(year),
         period_start: isoDate(year, 1, 1),
         period_end: isoDate(year, 12, 31),

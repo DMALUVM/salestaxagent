@@ -92,7 +92,7 @@ def compute_next_due(
             pe = date(y, q_end + 1, 1) - timedelta(days=1)
     elif freq in ("semi_annual", "semi-annual"):
         pe = date(y, 6, 30) if m <= 6 else date(y, 12, 31)
-    elif freq == "annual":
+    elif freq in ("annual", "casual"):
         pe = date(y, 12, 31)
     else:
         if m == 12:

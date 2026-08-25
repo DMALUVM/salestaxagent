@@ -135,7 +135,7 @@ function computeNextDue(
   } else if (freq === "semi_annual" || freq === "semi-annual") {
     // H1 = Jan-Jun, H2 = Jul-Dec
     periodEndDate = m < 6 ? new Date(y, 6, 0) : new Date(y, 12, 0);
-  } else if (freq === "annual") {
+  } else if (freq === "annual" || freq === "casual") {
     periodEndDate = new Date(y, 12, 0); // Dec 31
   } else {
     // Unknown frequency — fall back to monthly
@@ -204,7 +204,7 @@ function MarkFiledDialog({
       if (row.frequency === "monthly") d.setMonth(d.getMonth() + 1);
       else if (row.frequency === "quarterly") d.setMonth(d.getMonth() + 3);
       else if (row.frequency?.includes("semi")) d.setMonth(d.getMonth() + 6);
-      else if (row.frequency === "annual") d.setFullYear(d.getFullYear() + 1);
+      else if (row.frequency === "annual" || row.frequency === "casual") d.setFullYear(d.getFullYear() + 1);
       // period_end = last day of the derived month
       const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
       setPeriodEnd(formatLocalYmd(last));

@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/badge";
+import { formatFilingFrequency } from "@/lib/filing-frequencies";
 
 const nexusStyles: Record<string, string> = {
   active: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800",
@@ -57,6 +57,7 @@ export function SeverityBadge({ severity }: { severity: string | null | undefine
 const frequencyStyles: Record<string, string> = {
   monthly: "bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950 dark:text-violet-300 dark:border-violet-800",
   quarterly: "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-300 dark:border-sky-800",
+  casual: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-800",
   annual: "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700",
 };
 
@@ -68,11 +69,10 @@ export function FrequencyBadge({ frequency }: { frequency: string | null | undef
       </Badge>
     );
   }
-  const f = frequency.toLowerCase().replace("_", "-");
-  const label =
-    f === "semi-annual" ? "Semi-Annual" : f.charAt(0).toUpperCase() + f.slice(1);
+  const key = frequency.toLowerCase().replace("-", "_");
+  const label = formatFilingFrequency(key);
   return (
-    <Badge variant="outline" className={`text-xs font-medium ${frequencyStyles[frequency.toLowerCase()] ?? frequencyStyles.monthly}`}>
+    <Badge variant="outline" className={`text-xs font-medium ${frequencyStyles[key] ?? frequencyStyles.monthly}`}>
       {label}
     </Badge>
   );
