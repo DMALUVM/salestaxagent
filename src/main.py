@@ -972,6 +972,71 @@ def ads_reconcile_cmd(target_date, expect_spend, expect_clicks, tolerance_pct):
         click.echo("  Within tolerance — Amazon remains the source of truth for spend/clicks.")
 
 
+@cli.command("ads-heal")
+@click.option("--days", default=None, type=int,
+              help="Lookback closed days (default: ads.campaign_sb_sd_daily_days)")
+@click.option("--dry-run", is_flag=True,
+              help="Only list gaps — do not call the Ads API")
+def ads_heal_cmd(days, dry_run):
+    """Backfill missing Sponsored Brands / Display days automatically.
+
+    Finds closed LA days that have Sponsored Products rows but no SB/SD, then
+    re-pulls only those products in 1-day chunks. The midday scheduler and the
+    post-partial retry after a nightly SB/SD failure both use this path so
+    console gaps do not wait for a human.
+    """
+    from src.amazon_ads.heal import missing_product_days, sync_missing_sb_sd
+    from src.db import get_client
+    from src.rules import ADS_SB_SD_DAILY_DAYS, amazon_as_of, window_start
+
+    lookback = days or ADS_SB_SD_DAILY_DAYS
+    as_of = amazon_as_of()
+    start = window_start(as_of, lookback)
+
+    if dry_run:
+        client = get_client()
+        rows, offset = [], 0
+        while True:
+            page = (client.table("ads_campaigns_daily")
+                    .select("date,campaign_type")
+                    .gte("date", start.isoformat())
+                    .lte("date", as_of.isoformat())
+                    .range(offset, offset + 999).execute().data) or []
+            rows.extend(page)
+            if len(page) < 1000:
+                break
+            offset += 1000
+        missing = missing_product_days(rows, as_of=as_of, lookback_days=lookback)
+        if not missing:
+            click.echo(f"No SB/SD gaps in {start} → {as_of}")
+            return
+        click.echo(f"Gaps in {start} → {as_of} (dry-run, no API call):")
+        for product, ds in missing.items():
+            click.echo(f"  {product}: {', '.join(d.isoformat() for d in ds)}")
+        return
+
+    from src.db import job_finish, job_start
+    run_id = job_start("ads_sb_sd_heal")
+    try:
+        out = sync_missing_sb_sd(lookback_days=lookback, on_progress=click.echo)
+    except Exception as e:
+        job_finish(run_id, "fail", str(e)[:500])
+        raise
+    if not out.get("healed"):
+        job_finish(run_id, "success", out.get("reason") or "no gaps")
+        click.echo(f"Ads heal: {out.get('reason') or 'no gaps'}")
+        return
+    camp = (out.get("result") or {}).get("campaigns") or {}
+    bad = camp.get("products_failed") or []
+    status = "partial" if bad else "success"
+    msg = (f"healed {','.join(out.get('products') or [])} "
+           f"{out['window']['start']}→{out['as_of']}")
+    if bad:
+        msg += f" — {'+'.join(bad)} still missing"
+    job_finish(run_id, status, msg, stats=camp if isinstance(camp, dict) else None)
+    click.echo(f"Ads heal {status}: {msg}")
+
+
 @cli.command("ads-outcomes")
 @click.option("--dry-run", is_flag=True, help="Show what would be written, write nothing")
 @click.option("--as-of", default=None, help="Override the LA as-of date (YYYY-MM-DD)")
@@ -4489,7 +4554,7 @@ def run():
                 coalesce=True,
                 max_instances=1,
             )
-            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (SP 30d, SB/SD 7d, then placements + search terms)")
+            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (SP 30d, SB/SD 7d×1d chunks, then placements + search terms)")
 
             scheduler.add_job(
                 _run_ads_search_terms_sync,
@@ -4502,6 +4567,20 @@ def run():
                 max_instances=1,   # a 90-min run must never overlap itself
             )
             click.echo("[Scheduler] Ads search terms sync daily at 05:30 (7d, 7d chunks)")
+
+            # Midday SB/SD heal — catches overnight partials that the
+            # post-failure retry also missed (lock busy, Amazon still slow).
+            scheduler.add_job(
+                _run_ads_sb_sd_heal,
+                "cron",
+                hour=13,
+                minute=0,
+                id="ads_sb_sd_heal",
+                misfire_grace_time=3600,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo("[Scheduler] Ads SB/SD heal daily at 13:00 (fills SP-only days)")
 
             scheduler.add_job(
                 _run_ads_actions,
@@ -5336,6 +5415,10 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
         elif lost_products:
             _ads_alert(f"Ads {label} sync partial — {'+'.join(lost_products)} missing",
                        message)
+            # Do not wait for tomorrow. A 20-minute SB/SD-only heal with
+            # 1-day chunks usually lands what the jumbo nightly chunk lost.
+            if any(p in ("SB", "SD") for p in lost_products):
+                _schedule_ads_retry(_run_ads_sb_sd_heal, 0, "ads_sb_sd_heal")
         return status
     except AdsSyncBusy as e:
         print(f"[Ads {label}] Skipped: {e}")
@@ -5428,11 +5511,9 @@ def _run_sqp_sync():
 def _run_ads_campaigns_sync(retry: int = 0):
     """05:00 — campaign dailies for the KPI cards and trend chart.
 
-    SB/SD use a 7-day window so five 900s timeouts cannot pin the lock
-    through the 05:15/05:30 jobs. After campaigns release the lock this
-    job runs placements and search terms itself, so those crons are a
-    backup — they skip in seconds if the lock is still held, they do not
-    wait three hours and page Telegram.
+    SB/SD use a 7-day window in 1-day chunks so one timed-out report cannot
+    wipe the whole week. After campaigns release the lock this job runs
+    placements and search terms itself; those crons are a backup.
     """
     from src.rules import ADS_SB_SD_DAILY_DAYS
     status = _run_ads_sync_job(
@@ -5445,6 +5526,50 @@ def _run_ads_campaigns_sync(retry: int = 0):
         return
     _run_ads_placements_sync()
     _run_ads_search_terms_sync()
+
+
+def _run_ads_sb_sd_heal():
+    """13:00 (and post-partial retry) — fill SP-only days with SB/SD.
+
+    Does nothing when the lookback already has Brands/Display on every day
+    that has Sponsored Products. Safe to run while other ads jobs are idle;
+    if the lock is held it skips via AdsSyncBusy like every other ads job.
+    """
+    from src.amazon_ads.heal import sync_missing_sb_sd
+    from src.amazon_ads.reports import AdsSyncBusy
+    from src.db import job_finish, job_start
+
+    run_id = job_start("ads_sb_sd_heal")
+    try:
+        out = sync_missing_sb_sd(on_progress=lambda m: print(f"[Ads heal] {m}"))
+    except AdsSyncBusy as e:
+        print(f"[Ads heal] Skipped: {e}")
+        job_finish(run_id, "skipped", str(e)[:500])
+        _schedule_ads_retry(_run_ads_sb_sd_heal, 0, "ads_sb_sd_heal")
+        return
+    except Exception as e:
+        print(f"[Ads heal] Failed: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        _ads_alert("Ads SB/SD heal failed", str(e))
+        return
+
+    if not out.get("healed"):
+        msg = out.get("reason") or "no gaps"
+        print(f"[Ads heal] {msg}")
+        job_finish(run_id, "success", msg)
+        return
+
+    camp = (out.get("result") or {}).get("campaigns") or {}
+    bad = [p for p in (camp.get("products_failed") or [])
+           if not ((camp.get("by_type") or {}).get(p) or {}).get("rows")]
+    status = "partial" if bad else "success"
+    msg = (f"healed {','.join(out.get('products') or [])} "
+           f"{out['window']['start']}→{out['as_of']}")
+    if bad:
+        msg += f" — {'+'.join(bad)} still missing"
+        _ads_alert(f"Ads SB/SD heal partial — {'+'.join(bad)} still missing", msg)
+    print(f"[Ads heal] {status}: {msg}")
+    job_finish(run_id, status, msg, stats=camp if isinstance(camp, dict) else None)
 
 
 def _run_ads_search_terms_sync():
