@@ -31,7 +31,15 @@ interface Reimbursement {
 
 export default function AmazonOpsPage() {
   interface SnsSeller { week_start: string; week_end: string; active_subscriptions: number; shipped_units: number; total_revenue: number; revenue_penetration: number; not_delivered_oos: number; lost_revenue_oos: number; }
-  interface SnsOffer { asin: string; sku: string | null; active_subscriptions: number; shipped_units: number; total_revenue: number; }
+  interface SnsOffer {
+    asin: string;
+    sku: string | null;
+    week_start: string;
+    week_end: string;
+    active_subscriptions: number;
+    shipped_units: number;
+    total_revenue: number;
+  }
   const [data, setData] = useState<{ traffic: TrafficDay[]; asinTraffic: AsinTraffic[]; reimbursements: Reimbursement[]; snsSeller: SnsSeller[]; snsOffers: SnsOffer[] } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -385,7 +393,7 @@ export default function AmazonOpsPage() {
                       </TableHeader>
                       <TableBody>
                         {snsOffers.slice(0, 10).map((o) => (
-                          <TableRow key={o.asin}>
+                          <TableRow key={`${o.asin}:${o.week_start}`}>
                             <TableCell>
                               <span className="text-sm font-medium">{o.sku || o.asin}</span>
                               <span className="ml-1.5 text-[10px] text-muted-foreground">{o.asin}</span>

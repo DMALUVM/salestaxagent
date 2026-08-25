@@ -19,8 +19,10 @@
   },
   "spapi": {
     "max_chunk_days": 30,
+    "orders_report_max_age_years": 2,
     "inventory_ledger_days": 14,
     "inventory_ledger_backfill_days": 90,
+    "//orders_report_max_age_years": "GET_FLAT_FILE_ALL_ORDERS_* purchase-date floor. Chunks older than this come back DONE with 0 rows. Jan–Jul 2024 is past this wall as of 2026-08; do not poll them.",
     "//inventory_ledger_days": "Daily inventory-ledger window. Physical nexus depends on this feed, so the window is wider than strictly needed: Amazon can restate ledger rows for several days, and a wider window re-upserts them rather than missing them. Upsert-only — a narrow or wide window never deletes older events.",
     "//inventory_ledger_backfill_days": "Weekly deeper re-pull, for ledger rows Amazon settled after the daily window had moved on. Also upsert-only."
   },
@@ -36,6 +38,8 @@
     "campaign_report_timeout_sb_seconds": 900,
     "campaign_report_timeout_sd_seconds": 900,
     "mandatory_chunking": true,
+    "sku_economics_min_date": "2024-09-01",
+    "//sku_economics_min_date": "Seller Central SKU Economics exports only retain from this month. Earlier ad months need Ads Console campaign CSV or another source — not SKU Economics.",
     "//campaign_chunk_days": "SP campaign pull uses 7-day chunks, not one 30-day report. Still clamped to max_chunk_days.",
     "//campaign_sb_sd_chunk_days": "SB/SD use 1-day chunks. A single 7-day SB/SD report that times out at 900s used to wipe the whole window (2026-08-25: SB+SD $0, SP kept → Aug 23–24 SP-only vs console). One-day chunks keep prior days when one report stalls.",
     "//campaign_sb_sd_daily_days": "Nightly SB/SD window. SP keeps the full 30d nightly range. After a partial, ads-heal retries SB/SD only.",

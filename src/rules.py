@@ -38,6 +38,11 @@ SHOPIFY_TZ: ZoneInfo = ZoneInfo(SHOPIFY_TZ_NAME)
 
 # ── SP-API ────────────────────────────────────────────────
 SPAPI_MAX_CHUNK_DAYS: int = _RULES["spapi"]["max_chunk_days"]
+# GET_FLAT_FILE_ALL_ORDERS_* only retains purchase dates inside this
+# calendar window. Older chunks come back DONE with 0 rows — not a
+# parser bug, and not worth polling.
+SPAPI_ORDERS_MAX_AGE_YEARS: int = int(
+    _RULES["spapi"].get("orders_report_max_age_years", 2))
 # Inventory ledger windows. This feed drives physical nexus, so it is pulled on
 # a wider window than the orders report and re-pulled weekly — both upsert-only.
 SPAPI_INVENTORY_LEDGER_DAYS: int = _RULES["spapi"].get("inventory_ledger_days", 14)
@@ -72,6 +77,8 @@ ADS_CAMPAIGN_TIMEOUT_SB_SECONDS: int = int(
     _RULES["ads"].get("campaign_report_timeout_sb_seconds", 900))
 ADS_CAMPAIGN_TIMEOUT_SD_SECONDS: int = int(
     _RULES["ads"].get("campaign_report_timeout_sd_seconds", 900))
+ADS_SKU_ECONOMICS_MIN_DATE: date = date.fromisoformat(
+    str(_RULES["ads"].get("sku_economics_min_date", "2024-09-01")))
 
 # ── Agent scheduler ───────────────────────────────────────
 # Every cron job in `python -m src.main run` fires on this zone, regardless of
@@ -113,6 +120,47 @@ def amazon_today(now: datetime | None = None) -> date:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=AMAZON_TZ)
     return moment.astimezone(AMAZON_TZ).date()
+
+
+def orders_report_floor(as_of: date | None = None) -> date:
+    """Oldest purchase date SP-API All Orders will still return.
+
+    Amazon drops GET_FLAT_FILE_ALL_ORDERS rows older than
+    SPAPI_ORDERS_MAX_AGE_YEARS. From 2026-08-24 that floor is 2024-08-24.
+    Jan–Jul 2024 is gone from the API; only an old Seller Central CSV
+    can fill those months.
+    """
+    day = as_of if as_of is not None else amazon_today()
+    try:
+        return day.replace(year=day.year - SPAPI_ORDERS_MAX_AGE_YEARS)
+    except ValueError:
+        return day.replace(year=day.year - SPAPI_ORDERS_MAX_AGE_YEARS, day=28)
+
+
+def clamp_orders_report_range(
+    start: date,
+    end: date,
+    as_of: date | None = None,
+) -> tuple[date | None, date, str | None]:
+    """Drop or clamp a range that All Orders can no longer serve.
+
+    Returns (start, end, warning). start is None when the whole window
+    is older than the floor — callers must not request Amazon.
+    """
+    floor = orders_report_floor(as_of)
+    if end < floor:
+        return None, end, (
+            f"SP-API All Orders only keeps ~{SPAPI_ORDERS_MAX_AGE_YEARS} years. "
+            f"{start} to {end} is before {floor.isoformat()}. Amazon returns "
+            "empty files. Drop an old All Orders CSV in incoming/amazon/ "
+            "if you still have one."
+        )
+    if start < floor:
+        return floor, end, (
+            f"Clamped start {start} → {floor} "
+            f"(SP-API All Orders {SPAPI_ORDERS_MAX_AGE_YEARS}-year floor)."
+        )
+    return start, end, None
 
 
 def amazon_as_of(now: datetime | None = None) -> date:

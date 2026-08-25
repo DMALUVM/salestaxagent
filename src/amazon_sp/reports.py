@@ -15,7 +15,12 @@ from src.channels import AMAZON
 from src.db import delete_rows, log_audit, log_ingestion, upsert_rows
 from src.mappers.fc_to_state import fc_to_state
 from src.models.schema import InventoryEvent, SalesByState
-from src.rules import AMAZON_TZ, SPAPI_MAX_CHUNK_DAYS, is_excluded_status
+from src.rules import (
+    AMAZON_TZ,
+    SPAPI_MAX_CHUNK_DAYS,
+    clamp_orders_report_range,
+    is_excluded_status,
+)
 from src.sku_normalize import normalize_sku
 
 from src.amazon_sp.client import request_and_download
@@ -504,6 +509,25 @@ def fetch_amazon_skus(
     on_poll: callable | None = None,
 ) -> dict:
     """Fetch SP-API orders report, parse SKU-level, upsert to sales_by_sku."""
+    start, end, floor_warning = clamp_orders_report_range(start, end)
+    if start is None:
+        if on_poll:
+            on_poll(floor_warning or "orders report range is past the 2-year floor", 0)
+        return {
+            "report_type": "amazon_skus",
+            "source": SOURCE_LABEL,
+            "period": f"{end} (skipped)",
+            "chunks": 0,
+            "rows_total": 0,
+            "rows_parsed": 0,
+            "rows_skipped": 0,
+            "sku_rows": 0,
+            "unique_skus": 0,
+            "warnings": [floor_warning] if floor_warning else [],
+            "dry_run": dry_run,
+            "rows_inserted": 0,
+        }
+
     chunks = _date_chunks(start, end)
 
     all_rows: list[dict] = []
@@ -511,6 +535,8 @@ def fetch_amazon_skus(
     total_skipped = 0
     total_raw = 0
     warnings: list[str] = []
+    if floor_warning:
+        warnings.append(floor_warning)
 
     for i, (c_start, c_end) in enumerate(chunks, 1):
         label = c_start.strftime("%Y-%m")
@@ -555,33 +581,7 @@ def fetch_amazon_skus(
     if dry_run or not all_rows:
         return summary
 
-    # Deduplicate on upsert key before writing
-    seen: dict[tuple, dict] = {}
-    for row in all_rows:
-        key = (row["channel"], row["sku"], row["state_code"],
-               row["period_start"], row["source"])
-        existing = seen.get(key)
-        if existing:
-            existing["units"] += row["units"]
-            existing["gross_sales"] = round(existing["gross_sales"] + row["gross_sales"], 2)
-            existing["net_sales"] = round((existing["net_sales"] or 0) + (row["net_sales"] or 0), 2)
-            existing["order_count"] = (existing["order_count"] or 0) + (row["order_count"] or 0)
-            # Keep longest title
-            if row.get("product_title") and (
-                not existing.get("product_title")
-                or len(row["product_title"]) > len(existing["product_title"])
-            ):
-                existing["product_title"] = row["product_title"]
-        else:
-            seen[key] = dict(row)
-
-    deduped = list(seen.values())
-    _stamp_ingested_at(deduped)
-
-    inserted = upsert_rows(
-        "sales_by_sku", deduped,
-        on_conflict="channel,sku,state_code,period_start,source",
-    )
+    inserted, deduped = upsert_amazon_sku_rows(all_rows)
     summary["rows_inserted"] = inserted
 
     log_ingestion(
@@ -604,6 +604,37 @@ def fetch_amazon_skus(
     )
 
     return summary
+
+
+def upsert_amazon_sku_rows(rows: list[dict]) -> tuple[int, list[dict]]:
+    """Dedupe and upsert sales_by_sku rows (SP-API or All Orders CSV)."""
+    if not rows:
+        return 0, []
+    seen: dict[tuple, dict] = {}
+    for row in rows:
+        key = (row["channel"], row["sku"], row["state_code"],
+               row["period_start"], row["source"])
+        existing = seen.get(key)
+        if existing:
+            existing["units"] += row["units"]
+            existing["gross_sales"] = round(existing["gross_sales"] + row["gross_sales"], 2)
+            existing["net_sales"] = round((existing["net_sales"] or 0) + (row["net_sales"] or 0), 2)
+            existing["order_count"] = (existing["order_count"] or 0) + (row["order_count"] or 0)
+            if row.get("product_title") and (
+                not existing.get("product_title")
+                or len(row["product_title"]) > len(existing["product_title"])
+            ):
+                existing["product_title"] = row["product_title"]
+        else:
+            seen[key] = dict(row)
+
+    deduped = list(seen.values())
+    _stamp_ingested_at(deduped)
+    inserted = upsert_rows(
+        "sales_by_sku", deduped,
+        on_conflict="channel,sku,state_code,period_start,source",
+    )
+    return inserted, deduped
 
 
 # ── Inventory Ledger parser ──────────────────────────────────

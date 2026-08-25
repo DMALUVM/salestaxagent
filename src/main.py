@@ -166,6 +166,19 @@ def backfill_amazon_skus(start_str, end_str, dry_run):
     if dry_run:
         click.echo("DRY RUN — no data will be written.\n")
 
+    from src.rules import clamp_orders_report_range, orders_report_floor
+    floor = orders_report_floor()
+    clamped_start, clamped_end, floor_warning = clamp_orders_report_range(start, end)
+    if floor_warning:
+        click.echo(floor_warning)
+    if clamped_start is None:
+        click.echo(
+            f"Skipped Amazon. All Orders floor is {floor.isoformat()}. "
+            "No SKU rows will be written."
+        )
+        return
+    start, end = clamped_start, clamped_end
+
     click.echo(f"Fetching Amazon SKU data: {start} to {end}")
 
     def _on_poll(status, elapsed):
@@ -185,9 +198,101 @@ def backfill_amazon_skus(start_str, end_str, dry_run):
         click.echo(f"  Warning: {w}")
 
 
+@cli.command("ads-import")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--dry-run", is_flag=True)
+def ads_import_cmd(path, dry_run):
+    """Load monthly Amazon ad spend from SKU Economics or an Ads Console CSV.
+
+    Ads API only keeps ~95 days. Drop the file in incoming/amazon/ or pass
+    the path here. SKU Economics must be Monthly aggregation (or one month
+    per file) — a multi-month custom range is one lump and is refused.
+    """
+    from src.parsers.amazon_ads_spend import ingest_amazon_ads_spend
+    result = ingest_amazon_ads_spend(path, dry_run=dry_run)
+    click.echo(f"Kind:    {result.get('kind')}")
+    click.echo(f"Months:  {result.get('months', 0)}  {result.get('month_starts')}")
+    click.echo(f"Spend:   ${result.get('total_spend', 0):,.2f}")
+    click.echo(f"Inserted:{result.get('rows_inserted', 0)}")
+    for w in result.get("warnings") or []:
+        click.echo(f"Warning: {w}")
+
+
+@cli.command("ads-monthly-restore")
+@click.option("--seed", "seed_path", type=click.Path(exists=True), default=None,
+              help="Seed CSV (default: config/ads_monthly_spend_seed.csv)")
+@click.option("--dry-run", is_flag=True)
+def ads_monthly_restore(seed_path, dry_run):
+    """Restore ads_monthly_spend from the committed seed file."""
+    from src.parsers.amazon_ads_spend import restore_ads_monthly_from_seed
+    result = restore_ads_monthly_from_seed(seed_path, dry_run=dry_run)
+    if result.get("error"):
+        click.echo(result["error"], err=True)
+        return
+    click.echo(f"Seed: {result.get('seed')}")
+    click.echo(f"Rows: {result.get('rows', 0)}  Inserted: {result.get('inserted', 0)}")
+
+
+@cli.command("ads-monthly-export-seed")
+@click.option("--output", "seed_path", type=click.Path(), default=None,
+              help="Output path (default: config/ads_monthly_spend_seed.csv)")
+def ads_monthly_export_seed(seed_path):
+    """Export ads_monthly_spend to the git-tracked seed CSV."""
+    from src.parsers.amazon_ads_spend import export_ads_monthly_seed
+    result = export_ads_monthly_seed(seed_path)
+    click.echo(f"Wrote {result.get('rows', 0)} month(s) to {result.get('path')}")
+
+
+@cli.command("warehouse-export")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Output .json.gz path (default: warehouse_snapshot_<date>.json.gz)")
+@click.option("--table", "tables", multiple=True,
+              help="Export only these tables (default: all configured)")
+def warehouse_export_cmd(output, tables):
+    """Export a gzip JSON bundle of all operational Supabase tables."""
+    from datetime import date as d
+    from src.maintenance.warehouse_snapshot import export_snapshot_gzip
+
+    if output is None:
+        output = f"warehouse_snapshot_{d.today().isoformat()}.json.gz"
+    table_list = list(tables) if tables else None
+    result = export_snapshot_gzip(output, tables_filter=table_list)
+    click.echo(f"Wrote {result.get('bytes', 0):,} bytes to {result.get('path')}")
+    click.echo(f"Tables OK: {result.get('tables_ok')}  Errors: {result.get('tables_error')}")
+    click.echo(f"Total rows: {result.get('total_rows', 0):,}")
+
+
+@cli.command("warehouse-restore")
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--dry-run", is_flag=True, help="Validate and count rows without writing")
+@click.option("--table", "tables", multiple=True,
+              help="Restore only these tables from the bundle")
+def warehouse_restore_cmd(path, dry_run, tables):
+    """Restore operational tables from a warehouse snapshot .json.gz bundle."""
+    from src.maintenance.warehouse_snapshot import restore_snapshot_file
+
+    table_list = list(tables) if tables else None
+    result = restore_snapshot_file(path, dry_run=dry_run, tables_filter=table_list)
+    click.echo(f"Snapshot from: {result.get('exported_at')}")
+    click.echo(f"Tables processed: {result.get('tables_processed')}")
+    click.echo(f"Rows upserted: {result.get('total_upserted', 0):,}")
+    if result.get("unknown_tables"):
+        click.echo(f"Unknown tables in file (skipped): {', '.join(result['unknown_tables'])}")
+    for err in result.get("errors") or []:
+        click.echo(f"ERROR {err.get('table')}: {err.get('error')}", err=True)
+    for row in result.get("tables") or []:
+        if row.get("status") == "error":
+            continue
+        click.echo(
+            f"  {row['table']}: {row.get('rows_in_backup', 0):,} in backup, "
+            f"{row.get('upserted', 0):,} upserted"
+        )
+
+
 @cli.command("export-csv")
-@click.option("--table", type=click.Choice(["sales_by_state", "sales_by_sku"]),
-              default="sales_by_state", help="Table to export")
+@click.option("--table", type=click.Choice([
+    "sales_by_state", "sales_by_sku", "ads_monthly_spend",
+]), default="sales_by_state", help="Table to export")
 @click.option("--start", "start_str", default=None, help="Start date (YYYY-MM-DD)")
 @click.option("--end", "end_str", default=None, help="End date (YYYY-MM-DD)")
 @click.option("--output", default=None, help="Output file path")
@@ -198,10 +303,11 @@ def export_csv_cmd(table, start_str, end_str, output):
     from src.db import fetch_all
 
     rows = fetch_all(table)
+    date_key = "period_start"
     if start_str:
-        rows = [r for r in rows if (r.get("period_start") or "") >= start_str]
+        rows = [r for r in rows if (r.get(date_key) or "") >= start_str]
     if end_str:
-        rows = [r for r in rows if (r.get("period_start") or "") <= end_str]
+        rows = [r for r in rows if (r.get(date_key) or "") <= end_str]
 
     if not rows:
         click.echo("No rows match the filter.")
@@ -2862,6 +2968,44 @@ def pnl_sync_cmd(days, no_skus):
                        f"contribution ${f['contribution']:,.2f}  — {'; '.join(f['issues'])}")
     else:
         click.echo("  Sanity check: all days within expected fee % and revenue/unit bands")
+    skipped = result.get("skipped_days") or []
+    if skipped:
+        click.echo(click.style(
+            f"  ⚠ skipped {len(skipped)} day(s) with units but $0 sales "
+            f"(not stored): {', '.join(skipped[:12])}",
+            fg="yellow",
+        ))
+
+
+@cli.command("pnl-monthly-sync")
+def pnl_monthly_sync_cmd():
+    """Store monthly Amazon contribution from sales_by_sku × sku_costs.
+
+    No SP-API call. Covers every Amazon month already in sales_by_sku
+    (today: 2024-08 through the current month). Months before ads
+    coverage are labelled ads-unknown, not $0 spend.
+    """
+    from src.pnl_monthly import compute_monthly_pnl
+
+    click.echo("Computing monthly Amazon SKU economics from sales_by_sku...")
+    result = compute_monthly_pnl(persist=True)
+    if not result.get("month_count"):
+        click.echo("No Amazon sales_by_sku rows.")
+        return
+    click.echo(f"Months: {result['coverage_min']} → {result['coverage_max']} "
+               f"({result['month_count']} months, {result.get('sku_row_count', 0)} SKU rows)")
+    click.echo(f"  Sales        ${result['total_sales']:>12,.2f}")
+    click.echo(f"  - Fees       ${result['total_fees']:>12,.2f}")
+    click.echo(f"  - Ad spend   ${result['total_ads']:>12,.2f}  "
+               f"({result['ads_known_months']} month(s) with ads, "
+               f"{result['ads_unknown_months']} ads-unknown)")
+    click.echo(f"  - COGS       ${result['total_cogs']:>12,.2f}")
+    click.echo(f"  = Contribution ${result['total_contribution']:>10,.2f}")
+    click.echo(f"Inserted: {result.get('inserted', 0)} month + "
+               f"{result.get('sku_inserted', 0)} SKU rows")
+    if result.get("missing_cost_skus"):
+        click.echo(f"  ⚠ no sku_costs for {len(result['missing_cost_skus'])} SKU(s): "
+                   f"{', '.join(result['missing_cost_skus'][:8])}")
 
 
 @cli.command("paid-ads-freshness")
@@ -5692,26 +5836,43 @@ def _run_pnl_sync():
 
     run_id = job_start("pnl_sync")
     try:
-        r = compute_pnl(days=35)
+        # 90 days covers the ads_campaigns_daily span this account actually
+        # has. The profit table now reads every stored day (week / month /
+        # year rollups), so the writer has to keep more than a month or the
+        # lookback controls are empty. Do not jump to 365: days before ads
+        # coverage would store $0 spend and overstate contribution.
+        r = compute_pnl(days=90)
+        from src.pnl_monthly import compute_monthly_pnl
+        monthly = compute_monthly_pnl(persist=True)
     except Exception as e:
         print(f"[P&L] Failed: {e}")
         job_finish(run_id, "fail", str(e)[:500])
         _ads_alert("Contribution P&L sync failed", str(e))
         return
 
-    if not r.get("rows"):
+    if not r.get("rows") and not monthly.get("month_count"):
         job_finish(run_id, "success", "no data in window")
         return
 
-    msg = (f"{r['days']}d: sales ${r['total_sales']:,.0f} - fees ${r['total_fees']:,.0f} "
-           f"- ads ${r['total_ads']:,.0f} - COGS ${r['total_cogs']:,.0f} "
-           f"= ${r['total_contribution']:,.0f}")
-    print(f"[P&L] {msg} ({r['settled_days']} settled, {r['estimated_days']} estimated)")
+    if r.get("rows"):
+        msg = (f"{r['days']}d: sales ${r['total_sales']:,.0f} - fees ${r['total_fees']:,.0f} "
+               f"- ads ${r['total_ads']:,.0f} - COGS ${r['total_cogs']:,.0f} "
+               f"= ${r['total_contribution']:,.0f}")
+    else:
+        msg = "no daily rows"
+    if monthly.get("month_count"):
+        msg += (f"; monthly {monthly['coverage_min']}→{monthly['coverage_max']} "
+                f"${monthly['total_contribution']:,.0f}")
+    settled = r.get("settled_days", 0)
+    estimated = r.get("estimated_days", 0)
+    print(f"[P&L] {msg} ({settled} settled, {estimated} estimated)")
     job_finish(run_id, "success", msg, stats={
-        "days": r["days"], "sales": r["total_sales"], "fees": r["total_fees"],
-        "ads": r["total_ads"], "cogs": r["total_cogs"],
-        "contribution": r["total_contribution"],
-        "settled_days": r["settled_days"],
+        "days": r.get("days", 0), "sales": r.get("total_sales", 0),
+        "fees": r.get("total_fees", 0), "ads": r.get("total_ads", 0),
+        "cogs": r.get("total_cogs", 0),
+        "contribution": r.get("total_contribution", 0),
+        "settled_days": settled,
+        "monthly_months": monthly.get("month_count", 0),
     })
 
 
@@ -5883,6 +6044,8 @@ def _run_job_worker():
             elif job_type in ("ads_sync", "ppc_sync"):
                 days = int(payload.get("days", 14))
                 _run_ads_sync_job("ads_sync", days=days, label="dashboard-enqueue")
+            elif job_type == "sqp_sync":
+                _run_sqp_sync()
             else:
                 raise ValueError(f"Unknown job type: {job_type}")
 

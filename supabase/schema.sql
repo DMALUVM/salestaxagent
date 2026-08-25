@@ -175,13 +175,27 @@ create table if not exists audit_log (
 create index if not exists idx_audit_action on audit_log(action);
 create index if not exists idx_audit_created on audit_log(created_at);
 
+-- Monthly Amazon ad spend (SKU Economics / Ads Console import).
+-- Imported months override ads_campaigns_daily for /profit Month/Year.
+create table if not exists ads_monthly_spend (
+    period_start    text primary key,
+    period_end      text not null,
+    spend           numeric not null default 0,
+    source          text not null,
+    filename        text,
+    ingested_at     timestamptz not null default now()
+);
+
 -- ============================================================
 -- INGESTION LOG (track every file processed)
 -- ============================================================
 create table if not exists ingestion_log (
     id                  uuid primary key default uuid_generate_v4(),
     filename            text not null,
-    file_type           text not null check (file_type in ('amazon_inventory', 'amazon_sales', 'shopify_orders', 'shopify_api', 'registrations', 'other')),
+    file_type           text not null check (file_type in (
+        'amazon_inventory', 'amazon_sales', 'amazon_spapi', 'amazon_ads',
+        'shopify_orders', 'shopify_api', 'registrations', 'other'
+    )),
     file_hash           text,
     rows_total          integer not null default 0,
     rows_inserted       integer not null default 0,

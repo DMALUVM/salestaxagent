@@ -77,8 +77,30 @@ export async function GET() {
     } catch { /* table may not exist */ }
 
     try {
-      const r = await sb.from("sns_offer_metrics").select("*").order("active_subscriptions", { ascending: false }).limit(20);
-      snsOffers = r.data ?? [];
+      // One row per ASIN per week is stored. Without a week filter, top-N by subs
+      // mixes weeks and the same SKU/ASIN appears twice (last week + prior week).
+      const r = await sb.from("sns_offer_metrics").select("*").order("week_start", { ascending: false }).limit(500);
+      const offerRows = (r.data ?? []) as Array<{
+        asin: string;
+        sku?: string | null;
+        week_start: string;
+        week_end: string;
+        active_subscriptions?: number;
+      }>;
+      const completeOffers = offerRows.filter((o) => {
+        const s = new Date(`${o.week_start}T00:00:00`);
+        const e = new Date(`${o.week_end}T00:00:00`);
+        return (e.getTime() - s.getTime()) >= 6 * 86400000;
+      });
+      const latestOfferWeek = completeOffers.reduce(
+        (max, o) => (o.week_start > max ? o.week_start : max),
+        "",
+      );
+      snsOffers = latestOfferWeek
+        ? completeOffers
+            .filter((o) => o.week_start === latestOfferWeek)
+            .sort((a, b) => (b.active_subscriptions ?? 0) - (a.active_subscriptions ?? 0))
+        : [];
     } catch { /* table may not exist */ }
 
     return Response.json({ traffic, asinTraffic, reimbursements, snsSeller, snsOffers });

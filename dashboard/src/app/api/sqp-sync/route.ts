@@ -1,49 +1,82 @@
-import { execFile } from "node:child_process";
-import path from "node:path";
-import { promisify } from "node:util";
-
-const run = promisify(execFile);
+import { getServerSupabase } from "@/lib/supabase-server";
 
 /**
- * POST /api/sqp-sync — run the Brand Analytics SQP pull now.
- *
- * Same shell-out pattern as the registration plan: the SP-API auth, report
- * polling and rank-band logic all live in Python, and a second implementation
- * of the share->band mapping would eventually disagree with the scheduled job.
- *
- * SQP reports can take minutes to generate, so the timeout is generous and the
- * caller is told plainly when it ran out rather than being shown a fake success.
+ * GET /api/sqp-sync?job_id=… — poll agent_jobs row for dashboard enqueue status.
+ * POST — enqueue Brand Analytics SQP pull for the Mac Mini worker.
  */
-export async function POST() {
-  const roots = [path.join(process.cwd(), ".."), process.cwd()];
-  let lastErr = "";
-
-  for (const root of roots) {
-    try {
-      const { stdout } = await run(
-        path.join(root, ".venv", "bin", "python"),
-        ["-m", "src.main", "sqp-sync", "--apply"],
-        { cwd: root, timeout: 900_000, maxBuffer: 8 * 1024 * 1024 },
-      );
-      const text = stdout.trim();
-      // The CLI prints the role-permission guidance verbatim when it applies.
-      const roleProblem = /Brand Analytics/i.test(text) && /role/i.test(text);
-      return Response.json({
-        ok: !roleProblem,
-        output: text.split("\n").slice(0, 20).join("\n"),
-        roleProblem,
-      });
-    } catch (e) {
-      lastErr = e instanceof Error ? e.message : String(e);
-    }
+export async function GET(request: Request) {
+  const jobId = new URL(request.url).searchParams.get("job_id");
+  if (!jobId) {
+    return Response.json({ ok: false, error: "job_id required" }, { status: 400 });
   }
+  try {
+    const sb = getServerSupabase();
+    const { data, error } = await sb
+      .from("agent_jobs")
+      .select("id,job_type,status,started_at,finished_at,error_text")
+      .eq("id", jobId)
+      .maybeSingle();
+    if (error) {
+      return Response.json({ ok: false, error: error.message }, { status: 500 });
+    }
+    if (!data) {
+      return Response.json({ ok: false, error: "job not found" }, { status: 404 });
+    }
+    return Response.json({ ok: true, job: data });
+  } catch (e) {
+    return Response.json({
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+    }, { status: 500 });
+  }
+}
 
-  const timedOut = /ETIMEDOUT|timed out/i.test(lastErr);
-  return Response.json({
-    ok: false,
-    error: lastErr.slice(0, 600),
-    hint: timedOut
-      ? "The SQP report was still generating when the request timed out. It may still complete — check the status card again in a few minutes."
-      : "Could not run `python -m src.main sqp-sync --apply`. Check the Brand Analytics role and SP-API credentials.",
-  }, { status: 200 });
+export async function POST() {
+  try {
+    const sb = getServerSupabase();
+    const { data: job, error } = await sb
+      .from("agent_jobs")
+      .insert({
+        job_type: "sqp_sync",
+        status: "pending",
+        payload: { source: "dashboard" },
+      })
+      .select("id")
+      .single();
+
+    if (error) {
+      return Response.json({
+        ok: false,
+        error: error.message,
+        hint:
+          "Could not enqueue sqp_sync. Confirm agent_jobs exists and SUPABASE_SERVICE_KEY is set. "
+          + "Or on the Mini: python -m src.main sqp-sync --apply",
+      }, { status: 500 });
+    }
+
+    try {
+      await sb.from("audit_log").insert({
+        action: "request_sqp_sync",
+        category: "ingestion",
+        details: { source: "dashboard", job_id: job?.id },
+      });
+    } catch {
+      /* audit is best-effort */
+    }
+
+    return Response.json({
+      ok: true,
+      enqueued: true,
+      job_id: job?.id,
+      message:
+        "SQP sync enqueued. The Mac Mini agent (python -m src.main run) picks this up within ~45s. "
+        + "Amazon may take several minutes to finish generating the report.",
+    });
+  } catch (e) {
+    return Response.json({
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      hint: "Request failed before enqueue. Check dashboard Supabase env vars.",
+    }, { status: 500 });
+  }
 }

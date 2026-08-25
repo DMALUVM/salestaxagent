@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { ingestAdsMonthlyCsv } from "@/lib/ads-monthly-ingest";
+import { isAmazonAdsSpendCsv } from "@/lib/parsers/amazon-ads-spend";
 import { parseAmazonInventoryCSV } from "@/lib/parsers/amazon";
 import {
   isCustomCombinedTax,
@@ -36,12 +38,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
+      return Response.json({
+        error: "Excel SKU Economics files go on the Mini: drop them in incoming/amazon/. Save as CSV to upload here.",
+      }, { status: 400 });
+    }
+
     const content = await file.text();
 
     // Auto-detect: read first line of CSV to determine report type
     const firstLine = content.split(/\r?\n/)[0] ?? "";
     const isTaxReport = isCustomCombinedTax(firstLine);
 
+    if (isAmazonAdsSpendCsv(content)) {
+      return handleAdsSpend(content, file.name);
+    }
     if (isTaxReport) {
       return handleTaxReport(content, file.name);
     }
@@ -54,6 +66,34 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+async function handleAdsSpend(content: string, filename: string) {
+  const sb = getServerSupabase();
+  const result = await ingestAdsMonthlyCsv(sb, filename, content);
+  if (!result.ok) {
+    return Response.json({
+      success: false,
+      report_type: "amazon_ads_spend",
+      filename,
+      error: result.error,
+      warnings: result.warnings,
+      rows_inserted: 0,
+    });
+  }
+  return Response.json({
+    success: true,
+    report_type: "amazon_ads_spend",
+    filename,
+    kind: result.kind,
+    months: result.months,
+    month_starts: result.month_starts,
+    total_spend: result.total_spend,
+    rows_inserted: result.rows_inserted,
+    rows_parsed: result.rows_parsed,
+    rows_skipped: result.rows_skipped,
+    warnings: result.warnings,
+  });
 }
 
 // ---------------------------------------------------------------------------

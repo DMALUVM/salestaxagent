@@ -5,6 +5,8 @@ import { useSupabaseQuery } from "@/lib/hooks";
 import type { IngestionLog, ResearchTask } from "@/lib/types";
 import { LoadingState } from "@/components/loading";
 import { Disclaimer } from "@/components/disclaimer";
+import { AdsMonthlyUpload } from "@/components/ads-monthly-upload";
+import { WarehouseBackupCard } from "@/components/warehouse-backup";
 import { fileTypeLabel } from "@/lib/channels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -776,6 +778,10 @@ export default function DataPage() {
 
       <FileUploadCard onComplete={refetchLogs} />
 
+      <AdsMonthlyUpload onComplete={refetchLogs} />
+
+      <WarehouseBackupCard onComplete={refetchLogs} />
+
       <SPAPIRefreshCard onComplete={refetchLogs} />
 
       <CPAExportsCard />
@@ -876,9 +882,9 @@ export default function DataPage() {
             <div className="rounded-lg border bg-muted/30 p-3">
               <p className="text-sm font-medium">Amazon Reports</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Drop CSV/TXT into{" "}
-                <code className="rounded bg-muted px-1">incoming/amazon/</code>{" "}
-                for automatic processing by the folder watcher.
+                Drop CSV/TXT/XLSX into{" "}
+                <code className="rounded bg-muted px-1">incoming/amazon/</code>
+                {" "}(SKU Economics monthly, Ads Console, All Orders, or Inventory).
               </p>
             </div>
             <div className="rounded-lg border bg-muted/30 p-3">
