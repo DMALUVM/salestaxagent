@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge";
 import { formatFilingFrequency } from "@/lib/filing-frequencies";
 
 const nexusStyles: Record<string, string> = {
