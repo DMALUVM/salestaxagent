@@ -79,7 +79,7 @@ export async function GET() {
         .map((r) => r.replenish_days),
     );
 
-    const signals = (signalsRaw as Array<Record<string, unknown>>).map((s) => {
+    const signals: Array<Record<string, unknown>> = (signalsRaw as Array<Record<string, unknown>>).map((s) => {
       const recv = Number(s.measured_receive_days);
       const replen = Number(s.measured_replenish_days);
       return {
