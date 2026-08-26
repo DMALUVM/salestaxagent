@@ -7,6 +7,7 @@ from statistics import median
 
 from src.db import fetch_all, upsert_rows
 from src.inventory.awd_client import awd_get
+from src.amazon_sp.client import SPAPIError
 
 log = logging.getLogger(__name__)
 
@@ -40,12 +41,30 @@ def _list_orders_page(
 def _get_order(order_id: str) -> dict | None:
     try:
         body = awd_get(f"/replenishmentOrders/{order_id}")
-    except Exception as e:
+    except SPAPIError as e:
         if "404" in str(e):
+            return None
+        if "429" in str(e):
+            log.warning("AWD getReplenishmentOrder %s: quota exceeded, using list summary", order_id)
             return None
         log.warning("AWD getReplenishmentOrder %s: %s", order_id, e)
         return None
+    except Exception as e:
+        log.warning("AWD getReplenishmentOrder %s: %s", order_id, e)
+        return None
     return body.get("order") or body
+
+
+def _needs_order_detail(summary: dict) -> bool:
+    """Fetch detail only when list payload lacks fields needed for lead time."""
+    status = (summary.get("status") or "").upper()
+    if status != "SUCCESS":
+        return False
+    if summary.get("outboundShipments"):
+        return False
+    if summary.get("shippedProducts") or summary.get("products"):
+        return False
+    return True
 
 
 def _fba_shipments_by_id() -> dict[str, dict]:
@@ -138,12 +157,19 @@ def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict
 
     order_rows: list[dict] = []
     item_rows: list[dict] = []
+    detail_fetched = 0
+    detail_skipped = 0
 
     for summary in orders:
         oid = summary.get("orderId") or summary.get("order_id")
         if not oid:
             continue
-        detail = _get_order(oid) or summary
+        if _needs_order_detail(summary):
+            detail = _get_order(oid) or summary
+            detail_fetched += 1
+        else:
+            detail = summary
+            detail_skipped += 1
         status = (detail.get("status") or "").upper()
         confirmed = _parse_ts(detail.get("confirmedOn"))
         created = _parse_ts(detail.get("createdAt"))
@@ -213,6 +239,8 @@ def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict
         "orders_found": len(order_rows),
         "items_found": len(item_rows),
         "rows_upserted": 0,
+        "detail_fetched": detail_fetched,
+        "detail_skipped": detail_skipped,
         "dry_run": dry_run,
     }
     if dry_run or not order_rows:

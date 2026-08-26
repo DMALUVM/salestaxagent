@@ -12,15 +12,47 @@ def test_awd_get_403_includes_role_hint(monkeypatch):
     class FakeResp:
         status_code = 403
         text = "Access denied"
+        headers = {}
 
     monkeypatch.setattr("src.inventory.awd_client.httpx.get", lambda *a, **k: FakeResp())
     monkeypatch.setattr("src.inventory.awd_client._headers", lambda: {})
+    monkeypatch.setattr("src.inventory.awd_client._throttle", lambda: None)
 
     from src.inventory.awd_client import awd_get
 
     with pytest.raises(SPAPIError) as exc:
         awd_get("/inventory")
     assert "Amazon Warehousing and Distribution" in str(exc.value)
+
+
+def test_awd_get_retries_429(monkeypatch):
+    calls = {"n": 0}
+
+    class FakeResp:
+        def __init__(self, status_code, text=""):
+            self.status_code = status_code
+            self.text = text
+            self.headers = {}
+
+        def json(self):
+            return {"inventory": []}
+
+    def fake_get(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return FakeResp(429, "quota")
+        return FakeResp(200)
+
+    monkeypatch.setattr("src.inventory.awd_client.httpx.get", fake_get)
+    monkeypatch.setattr("src.inventory.awd_client._headers", lambda: {})
+    monkeypatch.setattr("src.inventory.awd_client._throttle", lambda: None)
+    monkeypatch.setattr("src.inventory.awd_client.time.sleep", lambda _s: None)
+
+    from src.inventory.awd_client import awd_get
+
+    body = awd_get("/inventory")
+    assert body == {"inventory": []}
+    assert calls["n"] == 2
 
 
 def test_awd_probe_all_ok(monkeypatch):
@@ -34,6 +66,7 @@ def test_awd_probe_all_ok(monkeypatch):
         return {}
 
     monkeypatch.setattr("src.inventory.awd_client.awd_get", fake_get)
+    monkeypatch.setattr("src.inventory.awd_client._throttle", lambda: None)
     result = awd_probe()
     assert result["all_ok"] is True
     assert result["inventory"]["ok"] is True
@@ -47,6 +80,7 @@ def test_awd_probe_partial_failure(monkeypatch):
         return {"orders": []} if path == "/replenishmentOrders" else {"shipments": []}
 
     monkeypatch.setattr("src.inventory.awd_client.awd_get", fake_get)
+    monkeypatch.setattr("src.inventory.awd_client._throttle", lambda: None)
     result = awd_probe()
     assert result["all_ok"] is False
     assert result["inventory"]["ok"] is False

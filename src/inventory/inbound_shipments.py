@@ -24,21 +24,56 @@ log = logging.getLogger(__name__)
 INBOUND_PATH = "/fba/inbound/v0"
 TRANSPORT_FETCH_LIMIT = 25
 
+SHIPMENT_STATUSES = (
+    "WORKING",
+    "SHIPPED",
+    "RECEIVING",
+    "CLOSED",
+    "IN_TRANSIT",
+    "DELIVERED",
+    "CHECKED_IN",
+    "CANCELLED",
+    "ERROR",
+)
+
+
+def _shipments_query_params(
+    last_updated_after: datetime,
+    last_updated_before: datetime | None,
+    next_token: str | None,
+) -> list[tuple[str, str]]:
+    """Build getShipments query params.
+
+    Amazon requires ShipmentStatusList even for DATE_RANGE queries (API quirk).
+    Pagination uses QueryType=NEXT_TOKEN.
+    """
+    if next_token:
+        return [
+            ("QueryType", "NEXT_TOKEN"),
+            ("MarketplaceId", _marketplace_id()),
+            ("NextToken", next_token),
+        ]
+
+    params: list[tuple[str, str]] = [
+        ("QueryType", "DATE_RANGE"),
+        ("MarketplaceId", _marketplace_id()),
+        ("LastUpdatedAfter", last_updated_after.strftime("%Y-%m-%dT%H:%M:%SZ")),
+    ]
+    if last_updated_before:
+        params.append(
+            ("LastUpdatedBefore", last_updated_before.strftime("%Y-%m-%dT%H:%M:%SZ")),
+        )
+    for status in SHIPMENT_STATUSES:
+        params.append(("ShipmentStatusList", status))
+    return params
+
 
 def _get_shipments_page(
     last_updated_after: datetime,
     last_updated_before: datetime | None,
     next_token: str | None,
 ) -> dict:
-    params: dict = {
-        "QueryType": "DATE_RANGE",
-        "MarketplaceId": _marketplace_id(),
-        "LastUpdatedAfter": last_updated_after.strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    if last_updated_before:
-        params["LastUpdatedBefore"] = last_updated_before.strftime("%Y-%m-%dT%H:%M:%SZ")
-    if next_token:
-        params["NextToken"] = next_token
+    params = _shipments_query_params(last_updated_after, last_updated_before, next_token)
 
     resp = httpx.get(
         f"{BASE_URL}{INBOUND_PATH}/shipments",
