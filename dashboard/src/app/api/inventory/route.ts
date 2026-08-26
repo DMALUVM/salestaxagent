@@ -24,6 +24,64 @@ function percentileInclusive(vals: number[], p: number): number | null {
   return nums[idx];
 }
 
+const LIP_BALM_SALES_SKUS = [
+  "ddpe0001shop",
+  "ddpe0002shop",
+  "ddpe0003shop",
+  "ddpe0004shop",
+];
+
+async function amazonLipMonthlySales(
+  sb: ReturnType<typeof getServerSupabase>,
+): Promise<Array<{ sku: string; period_start: string; units: number; channel: string; source: string }>> {
+  const wanted = new Set(LIP_BALM_SALES_SKUS);
+  const aggregated = new Map<string, {
+    sku: string; period_start: string; units: number; channel: string; source: string;
+  }>();
+  const PAGE = 1000;
+  let from = 0;
+  try {
+    while (true) {
+      const { data } = await sb
+        .from("sales_by_sku")
+        .select("sku,period_start,units,channel,source")
+        .eq("channel", "amazon")
+        .eq("source", "amazon_spapi")
+        .or("sku.ilike.ddpe0001shop,sku.ilike.ddpe0002shop,sku.ilike.ddpe0003shop,sku.ilike.ddpe0004shop")
+        .gte("period_start", "2025-01-01")
+        .range(from, from + PAGE - 1);
+      const rows = data ?? [];
+      for (const r of rows as Array<{
+        sku?: string; period_start?: string; units?: number; channel?: string; source?: string;
+      }>) {
+        const sku = String(r.sku ?? "");
+        if (!wanted.has(sku.trim().toLowerCase())) continue;
+        const period = String(r.period_start ?? "").slice(0, 10);
+        if (!period) continue;
+        const month = `${period.slice(0, 7)}-01`;
+        const key = `${sku.trim().toLowerCase()}|${month}`;
+        const prev = aggregated.get(key);
+        const units = Number(r.units ?? 0);
+        if (prev) prev.units += units;
+        else {
+          aggregated.set(key, {
+            sku,
+            period_start: month,
+            units,
+            channel: "amazon",
+            source: "amazon_spapi",
+          });
+        }
+      }
+      if (rows.length < PAGE) break;
+      from += PAGE;
+    }
+  } catch {
+    return [];
+  }
+  return [...aggregated.values()];
+}
+
 /**
  * GET /api/inventory
  *
@@ -129,6 +187,9 @@ export async function GET() {
       modelState = ms.data ?? [];
     } catch { /* table may not exist */ }
 
+    // Compact Amazon pulse monthly units for lip-balm pallet demand (sum across states)
+    const amazonLipSales = await amazonLipMonthlySales(sb);
+
     return Response.json(
       {
         snapshots,
@@ -141,6 +202,7 @@ export async function GET() {
         awd,
         capacity,
         forecast,
+        amazonLipSales,
         modelState,
         signals,
         leadtime,
