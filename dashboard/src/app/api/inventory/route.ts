@@ -3,13 +3,24 @@ import { getServerSupabase } from "@/lib/supabase-server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-function medianPositive(vals: Array<number | null | undefined>): number | null {
+const LEAD_MIN_DAYS = 4;
+const LEAD_MAX_DAYS = 45;
+
+function daySpan(start?: string | null, end?: string | null): number | null {
+  if (!start || !end) return null;
+  const a = Date.parse(String(start));
+  const b = Date.parse(String(end));
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
+  return Math.round((b - a) / 86_400_000);
+}
+
+function percentileInclusive(vals: number[], p: number): number | null {
   const nums = vals
-    .map((v) => (v == null ? NaN : Number(v)))
-    .filter((n) => Number.isFinite(n) && n >= 1)
+    .filter((n) => n >= LEAD_MIN_DAYS && n <= LEAD_MAX_DAYS)
     .sort((a, b) => a - b);
   if (!nums.length) return null;
-  return nums[Math.floor((nums.length - 1) / 2)];
+  const idx = Math.min(nums.length - 1, Math.floor((nums.length - 1) * p));
+  return nums[idx];
 }
 
 /**
@@ -59,33 +70,41 @@ export async function GET() {
         })(),
         sb
           .from("inventory_awd_replenishments")
-          .select("replenish_days,order_status,replenish_days_basis")
+          .select("created_at,completed_at,order_status")
           .then((r) => r.data ?? []),
         sb
           .from("inventory_awd_inbound_shipments")
-          .select("receive_days,shipment_status,receive_days_basis")
+          .select("created_at,closed_at,shipment_status")
           .then((r) => r.data ?? []),
       ]);
 
-    const accountRecv = medianPositive(
-      (awdInRows as Array<{ receive_days?: number; shipment_status?: string }>).
-        filter((r) => (r.shipment_status || "").toUpperCase() === "CLOSED")
-        .map((r) => r.receive_days),
+    // Amazon list payloads often collapse ship/receive onto the same updatedAt.
+    // Use created → closed/SUCCESS, drop 1-3 day status noise and stale 230d rows.
+    // p75 matches real LTL/AWD time better than a median pulled down by 4-day parcels.
+    const awdInboundDays = percentileInclusive(
+      (awdInRows as Array<{ created_at?: string; closed_at?: string; shipment_status?: string }>)
+        .filter((r) => (r.shipment_status || "").toUpperCase() === "CLOSED")
+        .map((r) => daySpan(r.created_at, r.closed_at))
+        .filter((n): n is number => n != null),
+      0.75,
     );
-    const accountReplen = medianPositive(
-      (replenRows as Array<{ replenish_days?: number; order_status?: string; replenish_days_basis?: string }>).
-        filter((r) => (r.order_status || "").toUpperCase() === "SUCCESS")
-        .filter((r) => (r.replenish_days_basis || "") !== "confirm_to_success_fallback")
-        .map((r) => r.replenish_days),
+    const accountReplen = percentileInclusive(
+      (replenRows as Array<{ created_at?: string; completed_at?: string; order_status?: string }>)
+        .filter((r) => (r.order_status || "").toUpperCase() === "SUCCESS")
+        .map((r) => daySpan(r.created_at, r.completed_at))
+        .filter((n): n is number => n != null),
+      0.75,
     );
+    const accountRecv =
+      awdInboundDays != null && accountReplen != null
+        ? awdInboundDays + accountReplen
+        : awdInboundDays ?? accountReplen;
 
     const signals: Array<Record<string, unknown>> = (signalsRaw as Array<Record<string, unknown>>).map((s) => {
-      const recv = Number(s.measured_receive_days);
-      const replen = Number(s.measured_replenish_days);
       return {
         ...s,
-        measured_receive_days: recv > 0 ? recv : accountRecv,
-        measured_replenish_days: replen > 0 ? replen : accountReplen,
+        measured_receive_days: accountRecv,
+        measured_replenish_days: accountReplen,
       };
     });
 
