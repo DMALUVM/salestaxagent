@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 from src.inventory.reorder import (
+    LAST_INBOUND_BY,
     PALLET_MAX_UNITS,
     allocate_monthly_units,
     amazon_inventory_reorder,
     forecast_by_holiday_month,
     holiday_demand_with_planning,
     holiday_inbound_months,
+    holiday_leftover_months,
     holiday_month_plan,
+    holiday_production_months,
     manufacture_need,
     month_pallet_fill_pct,
     pack_pallets,
@@ -67,35 +70,33 @@ def test_displayed_4249_is_same_formula_at_stored_v30():
 
 
 MONTHS = ["2026-08", "2026-09", "2026-10"]
+MONTHS4 = ["2026-08", "2026-09", "2026-10", "2026-11"]
 
 
-def test_august_keeps_reorder_and_takes_a_balanced_holiday_share():
+def test_august_is_reorder_only_leftover_goes_later():
     holiday_mfg = {"DDPE0001Shop": 6696}
     reorder = {"DDPE0001Shop": 4252}
     mixes = allocate_monthly_units(
         ["DDPE0001Shop"], reorder, holiday_mfg, MONTHS,
     )
-    assert mixes[0].get("DDPE0001Shop") >= 4252
-    assert mixes[0].get("DDPE0001Shop") != round(6696 * 0.25)
     leftover = 6696 - 4252
-    share = leftover // 3
-    assert mixes[0]["DDPE0001Shop"] == 4252 + 815  # round(2444/3)
+    assert mixes[0].get("DDPE0001Shop") == 4252
     later = mixes[1].get("DDPE0001Shop", 0) + mixes[2].get("DDPE0001Shop", 0)
-    assert later == leftover - 815
+    assert later == leftover
     assert sum(m.get("DDPE0001Shop", 0) for m in mixes) == 6696
-    assert share  # leftover is split, not dumped on Sep/Oct only
 
 
-def test_ok_sku_has_no_august_and_all_holiday_in_sep_oct():
+def test_ok_sku_has_no_august_and_all_holiday_in_later_months():
     mixes = allocate_monthly_units(
         ["DDPE0002Shop"],
         {"DDPE0002Shop": 0},
         {"DDPE0002Shop": 3832},
         MONTHS,
     )
-    months_qty = [mixes[i].get("DDPE0002Shop", 0) for i in range(3)]
-    assert sum(months_qty) == 3832
-    assert max(months_qty) - min(months_qty) <= 2
+    assert mixes[0].get("DDPE0002Shop", 0) == 0
+    later = [mixes[i].get("DDPE0002Shop", 0) for i in range(1, 3)]
+    assert sum(later) == 3832
+    assert max(later) - min(later) <= 2
 
 
 def test_manufacture_is_max_of_reorder_and_holiday():
@@ -147,17 +148,27 @@ def test_october_ship_by_clears_oct_31_with_19d_recv():
     assert ship_by_for_amazon_deadline("2026-09", "2026-10-31", 19) == "2026-09-20"
 
 
-def test_long_lead_keeps_holiday_out_of_october():
+def test_long_lead_keeps_holiday_out_of_october_when_deadline_is_halloween():
     assert holiday_inbound_months(MONTHS, "2026-10-31", 35) == ["2026-08", "2026-09"]
     mixes = allocate_monthly_units(
         ["DDPE0001Shop"],
         {"DDPE0001Shop": 0},
         {"DDPE0001Shop": 4000},
         MONTHS,
+        last_inbound_by="2026-10-31",
         lead_days=35,
     )
     assert mixes[2].get("DDPE0001Shop", 0) == 0
     assert mixes[0].get("DDPE0001Shop", 0) + mixes[1].get("DDPE0001Shop", 0) == 4000
+
+
+def test_november_is_a_leftover_month_at_19d_recv():
+    assert holiday_leftover_months(MONTHS4, LAST_INBOUND_BY, 19) == [
+        "2026-09", "2026-10", "2026-11",
+    ]
+    assert holiday_inbound_months(MONTHS4, "2026-10-31", 19) == [
+        "2026-08", "2026-09", "2026-10",
+    ]
 
 
 def test_holiday_demand_splits_nov_dec_jan():
@@ -229,25 +240,27 @@ def test_covering_projections_and_unscented_do_not_undershoot_reorder():
     assert sum(m.get("DDPE0001Shop", 0) for m in mixes) == holiday_gap
 
 
-def test_holiday_leftover_balances_across_aug_sep_oct():
-    """Screenshot shape: August should not sit at 22% while Sep/Oct each hold 27k."""
+def test_november_pallet_keeps_august_at_one_pallet():
+    """Live shape: do not open a second August pallet for early storage."""
     skus = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"]
     reorder = {"DDPE0001Shop": 4249, "DDPE0002Shop": 0, "DDPE0003Shop": 0, "DDPE0004Shop": 0}
     holiday = {
-        "DDPE0001Shop": 4249 + 3890 + 3890,
-        "DDPE0002Shop": 3569 + 3568,
-        "DDPE0003Shop": 7978 + 7978,
-        "DDPE0004Shop": 11592 + 11591,
+        "DDPE0001Shop": 12029,
+        "DDPE0002Shop": 7137,
+        "DDPE0003Shop": 15956,
+        "DDPE0004Shop": 23183,
     }
-    mixes = allocate_monthly_units(skus, reorder, holiday, MONTHS)
+    mixes = allocate_monthly_units(skus, reorder, holiday, MONTHS4)
     totals = [sum(m.values()) for m in mixes]
-    assert mixes[0]["DDPE0001Shop"] >= 4249
-    assert totals[0] != PALLET_MAX_UNITS
-    # Reorder stays on August, leftover split three ways → ~22k / 18k / 18k
-    assert totals[0] < totals[1] + 5000
+    assert mixes[0]["DDPE0001Shop"] == 4249
+    assert totals[0] <= PALLET_MAX_UNITS
+    assert totals[0] == 4249
+    assert max(totals[1:]) <= PALLET_MAX_UNITS
     assert abs(totals[1] - totals[2]) <= 5
-    assert 15_000 < totals[0] < 25_000
+    assert abs(totals[2] - totals[3]) <= 5
     assert sum(totals) == sum(holiday.values())
+    from datetime import date
+    assert holiday_production_months(date(2026, 8, 26)) == MONTHS4
 
 
 def test_month_under_19k_is_one_pallet():

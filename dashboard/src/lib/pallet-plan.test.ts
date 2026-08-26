@@ -7,7 +7,10 @@ import {
   holidayDemandCoveringProjections,
   holidayDemandWithPlanning,
   holidayInboundMonths,
+  holidayLeftoverMonths,
   holidayMonthPlan,
+  holidayProductionMonths,
+  LAST_INBOUND_BY,
   manufactureNeed,
   monthPalletFillPct,
   monthShortfall,
@@ -19,18 +22,21 @@ import {
 import { holidayDemandUnits } from "./inventory-inbound-waves";
 
 const MONTHS = ["2026-08", "2026-09", "2026-10"];
+const MONTHS4 = ["2026-08", "2026-09", "2026-10", "2026-11"];
 
 describe("pallet monthly allocation", () => {
-  test("August keeps reorder and takes a balanced holiday share", () => {
+  test("August is reorder only; leftover goes later", () => {
     const mixes = allocateMonthlyUnits(
       ["DDPE0001Shop"],
       { DDPE0001Shop: 4252 },
       { DDPE0001Shop: 6696 },
       MONTHS,
     );
-    assert.ok((mixes[0].DDPE0001Shop ?? 0) >= 4252);
-    assert.notEqual(Math.round(6696 * 0.25), mixes[0].DDPE0001Shop);
-    assert.equal(mixes[0].DDPE0001Shop, 4252 + 815);
+    assert.equal(mixes[0].DDPE0001Shop, 4252);
+    assert.equal(
+      (mixes[1].DDPE0001Shop ?? 0) + (mixes[2].DDPE0001Shop ?? 0),
+      6696 - 4252,
+    );
     assert.equal(
       mixes.reduce((s, m) => s + (m.DDPE0001Shop ?? 0), 0),
       6696,
@@ -38,16 +44,17 @@ describe("pallet monthly allocation", () => {
     assert.deepEqual(monthShortfall(mixes[0], { DDPE0001Shop: 4252 }, ["DDPE0001Shop"]), {});
   });
 
-  test("OK SKU leftover is split across Aug/Sep/Oct", () => {
+  test("OK SKU leftover skips August", () => {
     const mixes = allocateMonthlyUnits(
       ["DDPE0002Shop"],
       { DDPE0002Shop: 0 },
       { DDPE0002Shop: 3832 },
       MONTHS,
     );
-    const qty = [0, 1, 2].map((i) => mixes[i].DDPE0002Shop ?? 0);
-    assert.equal(qty.reduce((s, n) => s + n, 0), 3832);
-    assert.ok(Math.max(...qty) - Math.min(...qty) <= 2);
+    assert.equal(mixes[0].DDPE0002Shop ?? 0, 0);
+    const later = [1, 2].map((i) => mixes[i].DDPE0002Shop ?? 0);
+    assert.equal(later.reduce((s, n) => s + n, 0), 3832);
+    assert.ok(Math.max(...later) - Math.min(...later) <= 2);
   });
 
   test("old 25% split would show a shortfall vs inventory", () => {
@@ -69,7 +76,7 @@ describe("pallet monthly allocation", () => {
     assert.equal(shipByForAmazonDeadline("2026-09", "2026-10-31", 19), "2026-09-20");
   });
 
-  test("35d lead drops October from the holiday window", () => {
+  test("35d lead drops October when the deadline is Halloween", () => {
     assert.deepEqual(
       holidayInboundMonths(MONTHS, "2026-10-31", 35),
       ["2026-08", "2026-09"],
@@ -79,10 +86,17 @@ describe("pallet monthly allocation", () => {
       { DDPE0001Shop: 0 },
       { DDPE0001Shop: 4000 },
       MONTHS,
-      { leadDays: 35 },
+      { lastInboundBy: "2026-10-31", leadDays: 35 },
     );
     assert.equal(mixes[2].DDPE0001Shop, undefined);
     assert.equal((mixes[0].DDPE0001Shop ?? 0) + (mixes[1].DDPE0001Shop ?? 0), 4000);
+  });
+
+  test("November is a leftover month at 19d Recv", () => {
+    assert.deepEqual(
+      holidayLeftoverMonths(MONTHS4, LAST_INBOUND_BY, 19),
+      ["2026-09", "2026-10", "2026-11"],
+    );
   });
 
   test("months over 19k pack into multiple pallets with CRITICAL first", () => {
@@ -165,23 +179,25 @@ describe("pallet monthly allocation", () => {
     assert.equal(total, 12029);
   });
 
-  test("holiday leftover balances across Aug/Sep/Oct without forcing 19k", () => {
+  test("November pallet keeps August at one pallet", () => {
     const mixes = allocateMonthlyUnits(
       ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"],
       { DDPE0001Shop: 4249, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 },
       {
-        DDPE0001Shop: 4249 + 3890 + 3890,
-        DDPE0002Shop: 3569 + 3568,
-        DDPE0003Shop: 7978 + 7978,
-        DDPE0004Shop: 11592 + 11591,
+        DDPE0001Shop: 12029,
+        DDPE0002Shop: 7137,
+        DDPE0003Shop: 15956,
+        DDPE0004Shop: 23183,
       },
-      MONTHS,
+      MONTHS4,
     );
     const totals = mixes.map((m) => Object.values(m).reduce((s, q) => s + q, 0));
-    assert.ok((mixes[0].DDPE0001Shop ?? 0) >= 4249);
-    assert.notEqual(totals[0], PALLET_MAX_UNITS);
-    assert.ok(totals[0] > 15000 && totals[0] < 25000);
+    assert.equal(mixes[0].DDPE0001Shop, 4249);
+    assert.ok(totals[0] <= PALLET_MAX_UNITS);
+    assert.equal(totals[0], 4249);
+    assert.ok(Math.max(...totals.slice(1)) <= PALLET_MAX_UNITS);
     assert.ok(Math.abs(totals[1] - totals[2]) <= 5);
+    assert.deepEqual(holidayProductionMonths(new Date(2026, 7, 26)), MONTHS4);
   });
 
   test("inbound holidayDemandUnits matches covering projections", () => {

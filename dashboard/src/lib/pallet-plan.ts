@@ -1,8 +1,10 @@
 /**
  * Monthly pallet allocation that stays consistent with inventory reorder.
  *
- * Month 0 ships each SKU's inventory-page reorder in full, then leftover
- * holiday surplus is split with the remaining month weights.
+ * Month 0 ships each SKU's inventory-page reorder only. Holiday leftover
+ * goes to later months that can still land by LAST_INBOUND_BY (including
+ * a November pallet) so August does not open a second pallet for storage
+ * while velocity is still slow. Majority still aims for AMAZON_IN_BY.
  *
  * A pallet holds PALLET_MAX_UNITS lip-balm cartons. Mixes that exceed
  * that are packed CRITICAL / highest-reorder first.
@@ -14,8 +16,11 @@ export const HOLIDAY_DAYS_NOV_JAN = 92;
 export const CRITICAL_DOS_DAYS = 60;
 export const RATE_DIVERGENCE_WARN_PCT = 25;
 export const AMAZON_IN_BY = "2026-10-31";
-/** Holiday build ships in these months so it is Prime-eligible by AMAZON_IN_BY. */
-export const HOLIDAY_SHIP_MONTHS = ["2026-09", "2026-10"];
+/** Last pallet can land mid-to-late November so August stays at one pallet. */
+export const LAST_INBOUND_BY = "2026-11-25";
+export const HOLIDAY_PRODUCTION_THROUGH = "2026-11";
+/** Holiday leftover ships in these months. November is a late inbound. */
+export const HOLIDAY_SHIP_MONTHS = ["2026-09", "2026-10", "2026-11"];
 
 export function manufactureNeed(
   inventoryReorder: number,
@@ -83,6 +88,78 @@ export function holidayInboundMonths(
   return capable.length ? capable : months.slice(0, 1);
 }
 
+export function holidayLeftoverMonths(
+  months: string[],
+  lastInboundBy = LAST_INBOUND_BY,
+  leadDays = 19,
+): string[] {
+  const capable = holidayInboundMonths(months, lastInboundBy, leadDays);
+  if (capable.length > 1 && months[0] && capable[0] === months[0]) {
+    return capable.slice(1);
+  }
+  return capable;
+}
+
+export function holidayProductionMonths(
+  today = new Date(),
+  through = HOLIDAY_PRODUCTION_THROUGH,
+): string[] {
+  const start = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  if (start > through) return [start];
+  const months: string[] = [];
+  let y = today.getFullYear();
+  let m = today.getMonth() + 1;
+  const [endY, endM] = through.split("-").map(Number);
+  while (y < endY || (y === endY && m <= endM)) {
+    months.push(`${y}-${String(m).padStart(2, "0")}`);
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return months;
+}
+
+export function inboundDeadlineForMonth(
+  month: string,
+  leadDays = 19,
+  majorityBy = AMAZON_IN_BY,
+  lastInboundBy = LAST_INBOUND_BY,
+): string {
+  return monthCanArriveBy(month, majorityBy, leadDays) ? majorityBy : lastInboundBy;
+}
+
+export function spillOverPalletCap(
+  mixes: Record<string, number>[],
+  protectedQty: Record<string, number>,
+  monthIndex = 0,
+  palletMax = PALLET_MAX_UNITS,
+  maxPallets = 1,
+): Record<string, number>[] {
+  if (monthIndex >= mixes.length) return mixes;
+  const cap = palletMax * maxPallets;
+  let excess = Object.values(mixes[monthIndex]).reduce((s, q) => s + q, 0) - cap;
+  const later = mixes.map((_, i) => i).filter((i) => i > monthIndex);
+  if (excess <= 0 || !later.length) return mixes;
+  const skus = Object.keys(mixes[monthIndex]).sort((a, b) => {
+    const ma = Math.max(0, (mixes[monthIndex][a] ?? 0) - (protectedQty[a] ?? 0));
+    const mb = Math.max(0, (mixes[monthIndex][b] ?? 0) - (protectedQty[b] ?? 0));
+    return mb - ma;
+  });
+  let destI = 0;
+  for (const sku of skus) {
+    if (excess <= 0) break;
+    const have = mixes[monthIndex][sku] ?? 0;
+    const take = Math.min(Math.max(0, have - (protectedQty[sku] ?? 0)), excess);
+    if (take <= 0) continue;
+    mixes[monthIndex][sku] = have - take;
+    if (mixes[monthIndex][sku] <= 0) delete mixes[monthIndex][sku];
+    const dest = later[destI % later.length];
+    mixes[dest][sku] = (mixes[dest][sku] ?? 0) + take;
+    destI += 1;
+    excess -= take;
+  }
+  return mixes;
+}
+
 export function fillMonthTowardPallet(
   mixes: Record<string, number>[],
   priority: string[],
@@ -121,16 +198,18 @@ export function allocateMonthlyUnits(
   months: string[],
   opts?: {
     amazonInBy?: string;
+    lastInboundBy?: string;
     leadDays?: number;
     priority?: string[];
     fillFirstPallet?: boolean;
+    maxFirstPallets?: number;
   },
 ): Record<string, number>[] {
   if (!months.length) return [];
 
-  const amazonInBy = opts?.amazonInBy ?? AMAZON_IN_BY;
+  const lastInboundBy = opts?.lastInboundBy ?? LAST_INBOUND_BY;
   const leadDays = opts?.leadDays ?? 19;
-  const holidayMonths = holidayInboundMonths(months, amazonInBy, leadDays);
+  const leftoverMonths = holidayLeftoverMonths(months, lastInboundBy, leadDays);
   const mixes: Record<string, number>[] = Array.from({ length: months.length }, () => ({}));
 
   for (const sku of skus) {
@@ -142,13 +221,13 @@ export function allocateMonthlyUnits(
     let leftover = mfg - floor;
     if (leftover <= 0) continue;
 
-    for (let hi = 0; hi < holidayMonths.length; hi++) {
-      const mi = months.indexOf(holidayMonths[hi]);
+    for (let hi = 0; hi < leftoverMonths.length; hi++) {
+      const mi = months.indexOf(leftoverMonths[hi]);
       if (mi < 0) continue;
-      const last = hi === holidayMonths.length - 1;
+      const last = hi === leftoverMonths.length - 1;
       const alloc = last
         ? leftover
-        : Math.min(Math.round(leftover / (holidayMonths.length - hi)), leftover);
+        : Math.min(Math.round(leftover / (leftoverMonths.length - hi)), leftover);
       if (alloc > 0) {
         mixes[mi][sku] = (mixes[mi][sku] ?? 0) + alloc;
         leftover -= alloc;
@@ -157,6 +236,11 @@ export function allocateMonthlyUnits(
     if (leftover > 0) {
       mixes[0][sku] = (mixes[0][sku] ?? 0) + leftover;
     }
+  }
+
+  const maxFirst = opts?.maxFirstPallets ?? 1;
+  if (maxFirst > 0) {
+    spillOverPalletCap(mixes, inventoryReorder, 0, PALLET_MAX_UNITS, maxFirst);
   }
 
   if (opts?.fillFirstPallet) {

@@ -145,7 +145,11 @@ def manufacture_need(inventory_reorder: int, holiday_manufacture: int) -> int:
 
 
 AMAZON_IN_BY = "2026-10-31"
-HOLIDAY_SHIP_MONTHS = ("2026-09", "2026-10")
+# Last pallet can land mid-to-late November so August does not need a
+# second pallet (storage while velocity is still slow).
+LAST_INBOUND_BY = "2026-11-25"
+HOLIDAY_PRODUCTION_THROUGH = "2026-11"
+HOLIDAY_SHIP_MONTHS = ("2026-09", "2026-10", "2026-11")
 PALLET_MAX_UNITS = 19_000
 
 
@@ -192,18 +196,111 @@ def holiday_inbound_months(
     amazon_in_by: str = AMAZON_IN_BY,
     lead_days: int = 19,
 ) -> list[str]:
-    """Months that can still arrive by amazon_in_by — including the current one.
-
-    Holiday leftover is split across these so August is not a 22% pallet
-    while Sep/Oct each carry two. Full pallets are preferred when a
-    month lands near 19k; we do not force-fill August.
-    """
+    """Months that can still arrive by ``amazon_in_by``."""
     capable = [
         m for m in months if month_can_arrive_by(m, amazon_in_by, lead_days)
     ]
     if capable:
         return capable
     return months[:1]
+
+
+def holiday_leftover_months(
+    months: list[str],
+    last_inbound_by: str = LAST_INBOUND_BY,
+    lead_days: int = 19,
+) -> list[str]:
+    """Months that take holiday leftover after the current-month reorder.
+
+    Skips month 0 when a later month can still land by ``last_inbound_by``
+    so August does not open a second pallet for storage during slow
+    velocity. November is eligible at 19–20d Recv (arrive ~mid-Nov).
+    """
+    capable = holiday_inbound_months(months, last_inbound_by, lead_days)
+    if len(capable) > 1 and months and capable[0] == months[0]:
+        return capable[1:]
+    return capable
+
+
+def holiday_production_months(
+    today: date | None = None,
+    through: str = HOLIDAY_PRODUCTION_THROUGH,
+) -> list[str]:
+    """Current month through the last inbound month (Nov 2026)."""
+    start = today or date.today()
+    cursor = start.replace(day=1)
+    end_y, end_m = (int(p) for p in through.split("-"))
+    end = date(end_y, end_m, 1)
+    if cursor > end:
+        return [start.strftime("%Y-%m")]
+    months: list[str] = []
+    while cursor <= end:
+        months.append(cursor.strftime("%Y-%m"))
+        if cursor.month == 12:
+            cursor = cursor.replace(year=cursor.year + 1, month=1)
+        else:
+            cursor = cursor.replace(month=cursor.month + 1)
+    return months
+
+
+def inbound_deadline_for_month(
+    month: str,
+    lead_days: int = 19,
+    majority_by: str = AMAZON_IN_BY,
+    last_inbound_by: str = LAST_INBOUND_BY,
+) -> str:
+    """Oct 31 if this month can still hit it; otherwise the late-inbound date."""
+    if month_can_arrive_by(month, majority_by, lead_days):
+        return majority_by
+    return last_inbound_by
+
+
+def spill_over_pallet_cap(
+    mixes: list[dict[str, int]],
+    protected: dict[str, int],
+    month_index: int = 0,
+    pallet_max: int = PALLET_MAX_UNITS,
+    max_pallets: int = 1,
+) -> list[dict[str, int]]:
+    """Move unprotected units off a month so it stays at ``max_pallets``.
+
+    Inventory reorder on month 0 is never reduced. Excess holiday share
+    goes to later months (round-robin).
+    """
+    if month_index >= len(mixes):
+        return mixes
+    cap = pallet_max * max_pallets
+    total = sum(int(q or 0) for q in mixes[month_index].values())
+    excess = total - cap
+    later = list(range(month_index + 1, len(mixes)))
+    if excess <= 0 or not later:
+        return mixes
+    skus = sorted(
+        mixes[month_index].keys(),
+        key=lambda s: max(
+            0,
+            int(mixes[month_index].get(s, 0) or 0)
+            - int(protected.get(s, 0) or 0),
+        ),
+        reverse=True,
+    )
+    dest_i = 0
+    for sku in skus:
+        if excess <= 0:
+            break
+        have = int(mixes[month_index].get(sku, 0) or 0)
+        keep = int(protected.get(sku, 0) or 0)
+        take = min(max(0, have - keep), excess)
+        if take <= 0:
+            continue
+        mixes[month_index][sku] = have - take
+        if mixes[month_index][sku] <= 0:
+            mixes[month_index].pop(sku, None)
+        dest = later[dest_i % len(later)]
+        mixes[dest][sku] = mixes[dest].get(sku, 0) + take
+        dest_i += 1
+        excess -= take
+    return mixes
 
 
 def fill_month_toward_pallet(
@@ -254,20 +351,24 @@ def allocate_monthly_units(
     months: list[str],
     *,
     amazon_in_by: str = AMAZON_IN_BY,
+    last_inbound_by: str = LAST_INBOUND_BY,
     lead_days: int = 19,
     priority: list[str] | None = None,
     fill_first_pallet: bool = False,
+    max_first_pallets: int = 1,
 ) -> list[dict[str, int]]:
-    """Current month ≥ inventory reorder. Holiday leftover split across
-    every month that can still arrive by ``amazon_in_by`` (Aug/Sep/Oct
-    at 19d lead) so loads stay balanced. Optional freight-fill is off
-    by default — full pallets are preferred, not required.
+    """Current month = inventory reorder only when later months can land.
+
+    Holiday leftover goes to Sep/Oct/Nov (anything that can still arrive
+    by ``last_inbound_by``) so August stays at one pallet and does not
+    sit in FBA storage while velocity is still slow. ``amazon_in_by`` is
+    the majority deadline (Halloween). Optional freight-fill is off.
     """
-    _ = priority
+    _ = amazon_in_by
     if not months:
         return []
 
-    holiday_months = holiday_inbound_months(months, amazon_in_by, lead_days)
+    leftover_months = holiday_leftover_months(months, last_inbound_by, lead_days)
     mixes: list[dict[str, int]] = [dict() for _ in months]
 
     for sku in skus:
@@ -279,20 +380,27 @@ def allocate_monthly_units(
         leftover = mfg - floor
         if leftover <= 0:
             continue
-        for hi, month in enumerate(holiday_months):
+        for hi, month in enumerate(leftover_months):
             try:
                 mi = months.index(month)
             except ValueError:
                 continue
-            last = hi == len(holiday_months) - 1
+            last = hi == len(leftover_months) - 1
             alloc = leftover if last else min(
-                round(leftover / (len(holiday_months) - hi)), leftover,
+                round(leftover / (len(leftover_months) - hi)), leftover,
             )
             if alloc > 0:
                 mixes[mi][sku] = mixes[mi].get(sku, 0) + alloc
                 leftover -= alloc
         if leftover > 0:
             mixes[0][sku] = mixes[0].get(sku, 0) + leftover
+
+    if max_first_pallets > 0:
+        spill_over_pallet_cap(
+            mixes, inventory_reorder, 0,
+            pallet_max=PALLET_MAX_UNITS,
+            max_pallets=max_first_pallets,
+        )
 
     if fill_first_pallet:
         order = list(priority) if priority else sku_pack_priority(

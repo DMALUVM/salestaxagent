@@ -23,8 +23,11 @@ from collections import defaultdict
 from src.db import fetch_all
 from src.inventory.reorder import (
     AMAZON_IN_BY,
+    LAST_INBOUND_BY,
     PALLET_MAX_UNITS,
     allocate_monthly_units,
+    holiday_production_months,
+    inbound_deadline_for_month,
     amazon_inventory_reorder,
     days_of_supply,
     forecast_by_holiday_month,
@@ -441,18 +444,6 @@ def _month_label(m: str) -> str:
     return f"{calendar.month_name[int(mo)]} {y}"
 
 
-def _month_list(start: date, n: int) -> list[str]:
-    months: list[str] = []
-    cursor = start.replace(day=1)
-    for _ in range(n):
-        months.append(cursor.strftime("%Y-%m"))
-        if cursor.month == 12:
-            cursor = cursor.replace(year=cursor.year + 1, month=1)
-        else:
-            cursor = cursor.replace(month=cursor.month + 1)
-    return months
-
-
 def _holiday_demand_by_sku(
     fc_rows: list[dict],
     target_skus: list[str],
@@ -498,17 +489,17 @@ def build_manufacturer_headsup(
       4. Transfer to FBA — 3PL + AWD already on hand
 
     This plan covers Amazon FBA through January 31 (Nov+Dec+Jan
-    sell-through). Month 1 ships the inventory reorder so Amazon does
-    not stock out now. Leftover holiday manufacture is split across
-    every month that can still arrive by ``amazon_in_by`` (end of
-    October). Nov/Dec/Jan are demand months, not inbound months — stock
-    has to land before Halloween. Ship-by is pulled forward by receiving
-    lead time. Pallet = 19 000 cartons; a month may ship more than one.
+    sell-through). Month 1 ships the inventory reorder only so Amazon
+    does not stock out now — no second August pallet for storage while
+    velocity is still slow. Holiday leftover goes to Sep/Oct plus a
+    late November inbound so the majority is in FBA by end of October
+    / mid-November. December and January are demand-only. Ship-by is
+    pulled forward by receiving lead time. Pallet = 19 000 cartons.
     """
     target_skus = skus or LIP_BALM_SKUS
     today = date.today()
     committed = set(committed_months or [])
-    production_months = _month_list(today, 3)
+    production_months = holiday_production_months(today)
     amazon_in_by = DEFAULTS.get("amazon_in_by") or AMAZON_IN_BY
 
     # Load data once
@@ -704,7 +695,8 @@ def build_manufacturer_headsup(
             packed = pack_pallets(mix, priority, cap)
             total = sum(mix.values())
             n_pallets = len(packed)
-            ship_by = ship_by_for_amazon_deadline(month, amazon_in_by, lead_days)
+            deadline = inbound_deadline_for_month(month, lead_days, amazon_in_by, LAST_INBOUND_BY)
+            ship_by = ship_by_for_amazon_deadline(month, deadline, lead_days)
             arrive_by = (
                 date.fromisoformat(ship_by) + timedelta(days=lead_days)
             ).isoformat()
@@ -852,7 +844,8 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("Coverage: Amazon FBA through 2027-01-31 (Nov + Dec + Jan sell-through).")
     a("Month 1 = inventory reorder + a balanced share of holiday leftover.")
     a("Nov/Dec/Jan below are DEMAND months — units customers buy.")
-    a("Those units produce now and ship Aug–Oct so they are in FBA by Halloween.")
+    a("Those units produce now. Aug = reorder only. Leftover ships Sep/Oct")
+    a("plus a late November pallet so majority is in FBA by end Oct / mid-Nov.")
     a(f"All units in Amazon FBA by: {headsup['amazon_in_by']}")
     tpl_note = "3PL OFFSETS production" if headsup.get("tpl_offsets_production") \
         else "3PL shown as transfer only (does NOT reduce manufacture)"
@@ -885,7 +878,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     # ── Production schedule ──
     a("")
     a("-" * 65)
-    a("PRODUCTION SCHEDULE — Aug–Oct inbound so Amazon is covered through January")
+    a("PRODUCTION SCHEDULE — Aug reorder; Sep/Oct majority; Nov late inbound")
     a("-" * 65)
 
     for entry in headsup["primary"]["entries"]:
@@ -965,7 +958,8 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("  - This plan covers Amazon FBA through 2027-01-31.")
     a("  - Current month = inventory-page reorder (keep Amazon covered now).")
     a("  - Nov/Dec/Jan are demand months (what customers buy), already on")
-    a("    the Aug–Oct pallets so stock is in Amazon by end of October.")
+    a("    the Aug–Nov pallets. Majority in FBA by end of October; last")
+    a("    pallet can land mid-November so August stays at one pallet.")
     a("  - After January, start a new replenishment / warehouse-reserve plan.")
     a("  - One pallet holds 19,000 lip-balm cartons. A month can ship")
     a("    multiple pallets; CRITICAL / highest reorder packs first.")
