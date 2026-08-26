@@ -3825,7 +3825,11 @@ def inventory_sync_cmd(dry_run):
     if dry_run:
         click.echo("DRY RUN\n")
     results = sync_all(dry_run=dry_run)
-    for name in ["fba_summaries", "awd", "restock", "planning", "inbound_shipments", "awd_replenishments"]:
+    sync_names = [
+        "fba_summaries", "awd", "restock", "planning",
+        "inbound_shipments", "awd_replenishments", "awd_inbound",
+    ]
+    for name in sync_names:
         r = results.get(name, {})
         if "error" in r:
             click.echo(f"{name}: ERROR — {r['error'][:200]}")
@@ -3835,6 +3839,28 @@ def inventory_sync_cmd(dry_run):
                 extra = f", daily={r['daily'].get('rows', 0)}"
             click.echo(f"{name}: {r.get('rows_total', r.get('shipments_found', r.get('orders_found', 0)))} rows "
                        f"({r.get('rows_inserted', r.get('rows_upserted', 0))} upserted){extra}")
+
+
+@cli.command("inventory-awd-test")
+def inventory_awd_test_cmd():
+    """Probe AWD API access (inventory, replenishment orders, inbound shipments)."""
+    import json
+    from src.inventory.awd_client import awd_probe, AWD_ROLE_HINT
+
+    click.echo("Probing AWD SP-API endpoints…")
+    result = awd_probe()
+    for key, val in result.items():
+        if key == "all_ok":
+            continue
+        if isinstance(val, dict) and val.get("ok"):
+            click.echo(f"  {key}: OK (sample_count={val.get('sample_count', 0)})")
+        else:
+            click.echo(f"  {key}: FAIL — {(val or {}).get('error', val)[:240]}")
+    if result.get("all_ok"):
+        click.echo("\nAll AWD endpoints reachable.")
+    else:
+        click.echo(f"\nOne or more endpoints failed. {AWD_ROLE_HINT}")
+    click.echo(json.dumps(result, indent=2))
 
 
 @cli.command("inventory-supply-plan")
@@ -5519,7 +5545,10 @@ def _run_inventory_sync():
     try:
         from src.inventory.sync import sync_all
         results = sync_all()
-        for name in ["fba_summaries", "awd", "restock", "planning", "inbound_shipments", "awd_replenishments"]:
+        for name in [
+            "fba_summaries", "awd", "restock", "planning",
+            "inbound_shipments", "awd_replenishments", "awd_inbound",
+        ]:
             r = results.get(name, {})
             if "error" in r:
                 print(f"[Inventory] {name}: {r['error'][:100]}")

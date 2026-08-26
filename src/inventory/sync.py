@@ -25,8 +25,15 @@ from src.amazon_sp.client import (
     _marketplace_id,
 )
 from src.db import upsert_rows, log_ingestion
+from src.inventory.awd_client import AWD_ROLE_HINT
 
 log = logging.getLogger(__name__)
+
+FBA_ROLE_HINT = (
+    "Ensure SP-API app has 'Amazon Fulfillment' and "
+    "'Inventory and Order Management' roles."
+)
+AWD_SYNC_NAMES = frozenset({"awd", "awd_replenishments", "awd_inbound"})
 
 RESTOCK_REPORT = "GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT"
 PLANNING_REPORT = "GET_FBA_INVENTORY_PLANNING_DATA"
@@ -347,6 +354,7 @@ def sync_all(dry_run: bool = False, on_poll=None) -> dict:
         ("planning", lambda: fetch_planning(dry_run=dry_run, on_poll=on_poll)),
         ("inbound_shipments", lambda: _sync_inbound(dry_run)),
         ("awd_replenishments", lambda: _sync_awd_replenishments(dry_run)),
+        ("awd_inbound", lambda: _sync_awd_inbound(dry_run)),
     ]:
         try:
             results[name] = fn()
@@ -355,13 +363,9 @@ def sync_all(dry_run: bool = False, on_poll=None) -> dict:
             err = str(e)
             results[name] = {"error": err[:300]}
             errors.append(f"{name}: {err[:200]}")
-            # Print clear message about required SP-API roles
             if "403" in err or "Unauthorized" in err or "access denied" in err.lower():
-                log.warning(
-                    "[Inventory] %s access denied — ensure SP-API app has "
-                    "'Amazon Fulfillment' and 'Inventory and Order Management' roles.",
-                    name,
-                )
+                hint = AWD_ROLE_HINT if name in AWD_SYNC_NAMES else FBA_ROLE_HINT
+                log.warning("[Inventory] %s access denied — %s", name, hint)
         except Exception as e:
             results[name] = {"error": str(e)[:300]}
             errors.append(f"{name}: {e}")
@@ -382,6 +386,13 @@ def _sync_awd_replenishments(dry_run: bool) -> dict:
         return {"dry_run": True}
     from src.inventory.awd_replenishments import sync_awd_replenishments
     return sync_awd_replenishments(days_back=180, dry_run=False)
+
+
+def _sync_awd_inbound(dry_run: bool) -> dict:
+    if dry_run:
+        return {"dry_run": True}
+    from src.inventory.awd_inbound import sync_awd_inbound_shipments
+    return sync_awd_inbound_shipments(days_back=180, dry_run=False)
 
 
 # ---------------------------------------------------------------------------

@@ -120,3 +120,33 @@ ALTER TABLE inventory_inbound_shipments
 ALTER TABLE inventory_awd_replenishments
     ADD COLUMN IF NOT EXISTS shipped_at timestamptz,
     ADD COLUMN IF NOT EXISTS replenish_days_basis text;
+
+-- AWD on-hand snapshots (SP-API AWD v2024-05-09 /inventory).
+CREATE TABLE IF NOT EXISTS inventory_awd (
+    sku                     text PRIMARY KEY,
+    awd_on_hand             integer NOT NULL DEFAULT 0,
+    awd_inbound             integer NOT NULL DEFAULT 0,
+    awd_to_fba_in_transit   integer NOT NULL DEFAULT 0,
+    synced_at               timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE inventory_awd
+    ADD COLUMN IF NOT EXISTS awd_to_fba_in_transit integer NOT NULL DEFAULT 0;
+
+-- AWD inbound shipments (warehouse → AWD).
+CREATE TABLE IF NOT EXISTS inventory_awd_inbound_shipments (
+    shipment_id         text PRIMARY KEY,
+    order_id            text,
+    shipment_status     text,
+    created_at          timestamptz,
+    shipped_at          timestamptz,
+    received_at         timestamptz,
+    closed_at           timestamptz,
+    receive_days        integer,
+    receive_days_basis  text,
+    last_updated_at     timestamptz,
+    raw                 jsonb,
+    synced_at           timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_awd_inbound_closed ON inventory_awd_inbound_shipments (closed_at);

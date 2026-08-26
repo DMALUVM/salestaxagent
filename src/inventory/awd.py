@@ -7,14 +7,12 @@ from __future__ import annotations
 
 import logging
 
-import httpx
-
-from src.amazon_sp.client import _headers, _marketplace_id, BASE_URL, SPAPIError
+from src.inventory.awd_client import awd_get
 from src.db import upsert_rows, log_ingestion
 
 log = logging.getLogger(__name__)
 
-AWD_PATH = "/awd/2024-05-09/inventory"
+AWD_PATH = "/inventory"
 
 
 def fetch_awd_inventory(dry_run: bool = False) -> dict:
@@ -23,25 +21,12 @@ def fetch_awd_inventory(dry_run: bool = False) -> dict:
     next_token: str | None = None
 
     while True:
-        params: dict[str, str] = {}
+        params: dict[str, str] = {"details": "SHOW"}
         if next_token:
             params["nextToken"] = next_token
 
-        resp = httpx.get(
-            f"{BASE_URL}{AWD_PATH}",
-            headers=_headers(),
-            params=params,
-            timeout=30,
-        )
-
-        if resp.status_code != 200:
-            raise SPAPIError(
-                f"AWD inventory failed ({resp.status_code}): "
-                f"{resp.text[:500]}"
-            )
-
-        body = resp.json()
-        items = body.get("inventory", [])
+        body = awd_get(AWD_PATH, params=params, timeout=30)
+        items = body.get("inventory") or []
         all_items.extend(items)
 
         next_token = body.get("nextToken")
@@ -53,10 +38,24 @@ def fetch_awd_inventory(dry_run: bool = False) -> dict:
         sku = item.get("sku", "")
         if not sku:
             continue
+        summary = item.get("inventoryDetails") or item.get("inventorySummary") or item
+        on_hand = int(
+            item.get("totalOnhandQuantity")
+            or summary.get("totalOnhandQuantity")
+            or summary.get("availableDistributableQuantity")
+            or 0,
+        )
+        inbound = int(
+            item.get("totalInboundQuantity")
+            or summary.get("totalInboundQuantity")
+            or 0,
+        )
+        to_fba = int(summary.get("replenishmentQuantity") or 0)
         rows.append({
             "sku": sku,
-            "awd_on_hand": int(item.get("totalOnhandQuantity", 0) or 0),
-            "awd_inbound": int(item.get("totalInboundQuantity", 0) or 0),
+            "awd_on_hand": on_hand,
+            "awd_inbound": inbound,
+            "awd_to_fba_in_transit": to_fba,
         })
 
     result = {"rows_total": len(rows), "rows_inserted": 0, "dry_run": dry_run}

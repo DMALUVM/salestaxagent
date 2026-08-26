@@ -5,14 +5,11 @@ import logging
 from datetime import datetime, timedelta, timezone
 from statistics import median
 
-import httpx
-
-from src.amazon_sp.client import BASE_URL, SPAPIError, _headers
 from src.db import fetch_all, upsert_rows
+from src.inventory.awd_client import awd_get
 
 log = logging.getLogger(__name__)
 
-AWD_REPLEN_PATH = "/awd/2024-05-09/replenishmentOrders"
 SUCCESS_STATUSES = frozenset({"SUCCESS", "INVENTORY_OUTBOUND", "CONFIRMED", "EXECUTING"})
 
 
@@ -37,32 +34,17 @@ def _list_orders_page(
     }
     if next_token:
         params["nextToken"] = next_token
-
-    resp = httpx.get(
-        f"{BASE_URL}{AWD_REPLEN_PATH}",
-        headers=_headers(),
-        params=params,
-        timeout=60,
-    )
-    if resp.status_code != 200:
-        raise SPAPIError(
-            f"AWD listReplenishmentOrders failed ({resp.status_code}): {resp.text[:400]}"
-        )
-    return resp.json()
+    return awd_get("/replenishmentOrders", params=params)
 
 
 def _get_order(order_id: str) -> dict | None:
-    resp = httpx.get(
-        f"{BASE_URL}{AWD_REPLEN_PATH}/{order_id}",
-        headers=_headers(),
-        timeout=60,
-    )
-    if resp.status_code == 404:
+    try:
+        body = awd_get(f"/replenishmentOrders/{order_id}")
+    except Exception as e:
+        if "404" in str(e):
+            return None
+        log.warning("AWD getReplenishmentOrder %s: %s", order_id, e)
         return None
-    if resp.status_code != 200:
-        log.warning("AWD getReplenishmentOrder %s: %s", order_id, resp.status_code)
-        return None
-    body = resp.json()
     return body.get("order") or body
 
 
