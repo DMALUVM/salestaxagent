@@ -35,7 +35,7 @@ SEARCH_TERM_TIMEOUT = ADS_SEARCH_TERM_TIMEOUT_SECONDS
 
 def create_report(config: dict) -> str:
     """Create an async report. Returns reportId."""
-    headers = ads_headers()
+    headers = ads_headers(reporting=True)
     report_type = config.get("configuration", {}).get("reportTypeId", "unknown")
     resp = httpx.post(f"{BASE_URL}/reporting/reports",
                       headers=headers, json=config, timeout=20)
@@ -58,7 +58,7 @@ def poll_report(report_id: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
     partway through, throwing away a report that was still being produced.
     Headers are cheap to rebuild; a finished report is not.
     """
-    headers = ads_headers()
+    headers = ads_headers(reporting=True)
     start = time.time()
     last_status = ""
     refreshed = False
@@ -73,7 +73,7 @@ def poll_report(report_id: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
             continue
         if resp.status_code == 401 and not refreshed:
             log.info("Report %s: token expired mid-poll — refreshing", report_id)
-            headers = ads_headers(force_refresh=True)
+            headers = ads_headers(force_refresh=True, reporting=True)
             refreshed = True
             continue
         if resp.status_code in TRANSIENT_POLL_STATUS:

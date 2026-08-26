@@ -36,12 +36,21 @@ def get_access_token(force_refresh: bool = False) -> str:
     return _cached_token
 
 
-def ads_headers(force_refresh: bool = False) -> dict[str, str]:
-    """Standard headers for Amazon Ads API calls."""
-    return {
+def ads_headers(force_refresh: bool = False, *, reporting: bool = False) -> dict[str, str]:
+    """Headers for Amazon Ads API calls.
+
+    Reporting v3 (create/poll) needs the advertisingReports media types.
+    The old default Accept was the Sponsored Products *campaigns* v3 type,
+    which is the wrong contract for Brands/Display reports.
+    """
+    headers = {
         "Amazon-Advertising-API-ClientId": settings.amazon_ads_client_id,
         "Amazon-Advertising-API-Scope": settings.amazon_ads_profile_id,
         "Authorization": f"Bearer {get_access_token(force_refresh)}",
         "Content-Type": "application/json",
-        "Accept": "application/vnd.spCampaign.v3+json",
+        "Accept": "application/json",
     }
+    if reporting:
+        headers["Content-Type"] = "application/vnd.createasyncreportrequest.v3+json"
+        headers["Accept"] = "application/vnd.createasyncreportresponse.v3+json"
+    return headers

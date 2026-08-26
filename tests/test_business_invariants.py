@@ -849,6 +849,7 @@ class TestAdsPollResilience:
         assert "ADS_SB_SD_DAILY_DAYS" in src
         assert "_run_ads_placements_sync" in src
         assert "_run_ads_search_terms_sync" in src
+        assert "_run_ads_sb_sd_heal" in src
         assert 'status == "skipped"' in src
 
     def test_partial_sb_sd_failure_schedules_heal(self):

@@ -28,6 +28,9 @@ log = logging.getLogger(__name__)
 MAX_CHUNK_DAYS = ADS_MAX_CHUNK_DAYS
 SEARCH_TERM_CHUNK_DAYS = ADS_SEARCH_TERM_CHUNK_DAYS
 CAMPAIGN_CHUNK_DAYS = ADS_CAMPAIGN_CHUNK_DAYS
+# Amazon restates the last couple of closed days. Always re-pull those even
+# when the table already has rows, so a late conversion still lands.
+RESTATE_DAYS = 2
 
 # One Ads Reporting v3 pull at a time so we do not stack reports on a
 # slow Amazon queue. Waiters must NOT sit for hours: on 2026-08-24
@@ -86,6 +89,68 @@ def _date_chunks(start: date, end: date,
         chunks.append((cursor, chunk_end))
         cursor = chunk_end + timedelta(days=1)
     return chunks
+
+
+def _days_in_range(start: date, end: date) -> list[date]:
+    out: list[date] = []
+    cursor = start
+    while cursor <= end:
+        out.append(cursor)
+        cursor += timedelta(days=1)
+    return out
+
+
+def loaded_product_dates(product: str, start: date, end: date) -> set[date]:
+    """Dates that already have at least one campaign row for this product."""
+    try:
+        from src.db import get_client
+        client = get_client()
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            page = (
+                client.table("ads_campaigns_daily")
+                .select("date")
+                .eq("campaign_type", product)
+                .gte("date", start.isoformat())
+                .lte("date", end.isoformat())
+                .range(offset, offset + 999)
+                .execute()
+                .data
+            ) or []
+            rows.extend(page)
+            if len(page) < 1000:
+                break
+            offset += 1000
+    except Exception as e:
+        log.info("Could not read loaded %s dates — fetching full window: %s",
+                 product, str(e)[:80])
+        return set()
+    found: set[date] = set()
+    for r in rows:
+        raw = r.get("date")
+        if not raw:
+            continue
+        try:
+            found.add(date.fromisoformat(str(raw)[:10]))
+        except ValueError:
+            continue
+    return found
+
+
+def chunk_needs_fetch(
+    start: date,
+    end: date,
+    loaded: set[date],
+    as_of: date,
+    restate_days: int = RESTATE_DAYS,
+) -> bool:
+    """True when a chunk is missing a day or overlaps the restatement window."""
+    restated = {as_of - timedelta(days=i) for i in range(max(1, restate_days))}
+    for d in _days_in_range(start, end):
+        if d in restated or d not in loaded:
+            return True
+    return False
 
 
 # ── Ad products ────────────────────────────────────────────────
@@ -441,6 +506,29 @@ def fetch_campaigns_daily(start: date, end: date,
             product_chunks = _date_chunks(product_start, end, sb_sd_size)
         # Newest first: if a later chunk times out we still have yesterday.
         product_chunks = list(reversed(product_chunks))
+        loaded = loaded_product_dates(product, product_chunks[-1][0], end) if product_chunks else set()
+        skipped = [
+            (cs, ce) for cs, ce in product_chunks
+            if not chunk_needs_fetch(cs, ce, loaded, end)
+        ]
+        if skipped:
+            product_chunks = [
+                (cs, ce) for cs, ce in product_chunks
+                if chunk_needs_fetch(cs, ce, loaded, end)
+            ]
+            say(f"    {product}: skipping {len(skipped)} already-loaded chunk(s); "
+                f"{len(product_chunks)} to fetch")
+            log.info("%s: skipped %d loaded chunk(s), fetching %d",
+                     product, len(skipped), len(product_chunks))
+
+        if not product_chunks:
+            by_type[product] = {
+                "rows": 0, "inserted": 0, "spend": 0, "clicks": 0,
+                "errors": [], "ok": True, "skipped_chunks": len(skipped),
+            }
+            log.info("%s campaigns: already loaded through %s — skipped",
+                     product, end.isoformat())
+            continue
 
         for i, (cs, ce) in enumerate(product_chunks, 1):
             log.info("%s campaigns chunk %d/%d: %s → %s",

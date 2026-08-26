@@ -5839,6 +5839,10 @@ def _run_ads_campaigns_sync(retry: int = 0):
     # this wrapper re-chains once campaigns actually run.
     if status == "skipped":
         return
+    # Do not wait until 13:00 for yesterday's SB/SD. If the nightly window
+    # landed SP but Brands/Display timed out, heal them before placements
+    # and search terms take the lock.
+    _run_ads_sb_sd_heal()
     _run_ads_placements_sync()
     _run_ads_search_terms_sync()
 
