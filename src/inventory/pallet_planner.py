@@ -22,9 +22,17 @@ from collections import defaultdict
 
 from src.db import fetch_all
 from src.inventory.reorder import (
+    PALLET_MAX_UNITS,
     allocate_monthly_units,
     amazon_inventory_reorder,
+    days_of_supply,
+    holiday_demand_with_planning,
+    inventory_flag,
     manufacture_need,
+    month_pallet_fill_pct,
+    pack_pallets,
+    planning_daily,
+    sku_pack_priority,
 )
 
 LIP_BALM_SKUS = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"]
@@ -557,7 +565,19 @@ def build_manufacturer_headsup(
         awd_v = int(awds_data.get(sku, {}).get("awd_on_hand", 0) or 0)
         tpl_v = int(tpls_data.get(sku, {}).get("available", 0) or 0)
         sig = signals_by_sku.get(sku, {})
-        v30 = float(vel_by_sku.get(sku, {}).get("total_u_30", 0) or 0)
+        vel = vel_by_sku.get(sku, {})
+        v30 = float(vel.get("total_u_30", 0) or 0)
+        plan_daily = planning_daily(vel)
+        inv_v30 = sig.get("inventory_u_30")
+        try:
+            inv_v30_f = float(inv_v30) if inv_v30 is not None else None
+        except (TypeError, ValueError):
+            inv_v30_f = None
+        div_pct = sig.get("rate_divergence_pct")
+        try:
+            div_pct_f = float(div_pct) if div_pct is not None else None
+        except (TypeError, ValueError):
+            div_pct_f = None
         rec = amazon_inventory_reorder(
             fba=fba, inbound=inbound, awd=awd_v, tpl=tpl_v,
             daily_velocity=v30, settings=settings,
@@ -567,9 +587,18 @@ def build_manufacturer_headsup(
             fba_receive_median=leadtime.get("fba_receive_median"),
             awd_replenish_median=leadtime.get("awd_replenish_median"),
         )
+        dos = days_of_supply(fba, v30)
+        pipeline = days_of_supply(fba + inbound + awd_v, v30)
+        flag = inventory_flag(dos, v30)
         inv[sku] = {
             "fba": fba, "inbound": inbound, "awd": awd_v, "tpl": tpl_v,
             "v30": v30,
+            "planning_daily": plan_daily,
+            "inv_v30": inv_v30_f,
+            "rate_divergence_pct": div_pct_f,
+            "dos": dos,
+            "pipeline_dos": pipeline,
+            "flag": flag,
             "target_days": rec["target_days"],
             "lead_days": rec["lead_days"],
             "on_hand": rec["on_hand"],
@@ -590,7 +619,9 @@ def build_manufacturer_headsup(
         reorder_by_sku: dict[str, int] = {}
         for sku in target_skus:
             i = inv[sku]
-            demand = demand_by_sku.get(sku, 0)
+            demand = holiday_demand_with_planning(
+                demand_by_sku.get(sku, 0), i.get("planning_daily", 0), include_jan,
+            )
             transfer = i["tpl"] + i["awd"]  # to be moved to FBA
 
             # Holiday gap = demand - FBA - inbound - AWD
@@ -616,6 +647,12 @@ def build_manufacturer_headsup(
                 "holiday_manufacture": holiday_gap,
                 "inventory_reorder": inv_reorder,
                 "v30": round(float(i["v30"]), 1),
+                "planning_daily": round(float(i.get("planning_daily", 0)), 1),
+                "inv_v30": i.get("inv_v30"),
+                "rate_divergence_pct": i.get("rate_divergence_pct"),
+                "dos": i.get("dos"),
+                "pipeline_dos": i.get("pipeline_dos"),
+                "flag": i.get("flag", "OK"),
                 "target_days": i["target_days"],
                 "lead_days": i["lead_days"],
                 "on_hand": i["on_hand"],
@@ -628,12 +665,16 @@ def build_manufacturer_headsup(
             target_skus, reorder_by_sku, holiday_mfg,
             len(production_months), month_weights,
         )
+        flags = {sku: str(inv[sku].get("flag") or "OK") for sku in target_skus}
+        priority = sku_pack_priority(target_skus, flags, reorder_by_sku)
+        cap = pallet_max or PALLET_MAX_UNITS
         entries: list[dict] = []
         today_iso = today.isoformat()
         for mi, month in enumerate(production_months):
             mix = mixes[mi] if mi < len(mixes) else {}
+            packed = pack_pallets(mix, priority, cap)
             total = sum(mix.values())
-            n_pallets = math.ceil(total / pallet_max) if total > 0 else 0
+            n_pallets = len(packed)
             y, mo = month.split("-")
             ship_by = f"{y}-{mo}-20"
             entries.append({
@@ -643,6 +684,9 @@ def build_manufacturer_headsup(
                 "pallets": n_pallets,
                 "units": total,
                 "mix": mix,
+                "packed": packed,
+                "pallet_max": cap,
+                "fill_pct": month_pallet_fill_pct(total, n_pallets, cap),
                 "ship_by": ship_by,
                 "overdue": mi == 0 and today_iso > ship_by,
             })
@@ -809,11 +853,19 @@ def format_manufacturer_sheet(headsup: dict) -> str:
         if entry["units"] == 0:
             a("    No production needed this month.")
         else:
-            a(f"    Pallets: {entry['pallets']}  ({entry['units']:,} units)")
+            a(f"    Pallets: {entry['pallets']}  ({entry['units']:,} units"
+              f" @ 19,000/pallet)")
             for sku in headsup["skus"]:
                 qty = entry["mix"].get(sku, 0)
                 if qty > 0:
                     a(f"      {SKU_LABEL_MAP.get(sku, sku)}: {qty:,}")
+            for packed in entry.get("packed") or []:
+                mix_str = ", ".join(
+                    f"{SKU_SHORT_MAP.get(s, s)} {q:,}"
+                    for s, q in packed["mix"].items()
+                )
+                a(f"      Pallet {packed['pallet_num']}: "
+                  f"{packed['total_units']:,} / 19,000 — {mix_str}")
             ship_note = (
                 f"Ship ASAP (missed {entry['ship_by']})"
                 if entry.get("overdue")
@@ -871,6 +923,8 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("NOTES:")
     a("  - Month 1 includes the inventory-page reorder in full so a")
     a("    CRITICAL SKU is not diluted by the 25/35/40 holiday split.")
+    a("  - One pallet holds 19,000 lip-balm cartons. A month can ship")
+    a("    multiple pallets; CRITICAL / highest reorder packs first.")
     a("  - FIRM months represent committed production volumes.")
     a("    INDICATIVE months are forecasts and may change.")
     a("  - Manufacture volumes assume 3PL stock is transferred")

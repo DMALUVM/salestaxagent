@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 from src.inventory.reorder import (
+    PALLET_MAX_UNITS,
     allocate_monthly_units,
     amazon_inventory_reorder,
     manufacture_need,
+    month_pallet_fill_pct,
+    pack_pallets,
     reorder_qty,
+    sku_pack_priority,
 )
 
 
@@ -108,3 +112,29 @@ def test_mixed_pallet_front_loads_only_the_critical_sku():
     # Other flavors still get their August holiday slice
     assert mixes[0]["DDPE0002Shop"] == round(3832 * 0.25)
     assert mixes[0]["DDPE0004Shop"] == round(18636 * 0.25)
+
+
+def test_pack_pallets_splits_over_19k_and_keeps_critical_first():
+    mix = {
+        "DDPE0001Shop": 8_000,  # CRITICAL
+        "DDPE0002Shop": 8_000,
+        "DDPE0004Shop": 9_000,
+    }
+    priority = sku_pack_priority(
+        list(mix),
+        {"DDPE0001Shop": "CRITICAL", "DDPE0002Shop": "OK", "DDPE0004Shop": "OK"},
+        {"DDPE0001Shop": 8000, "DDPE0002Shop": 0, "DDPE0004Shop": 0},
+    )
+    packed = pack_pallets(mix, priority, PALLET_MAX_UNITS)
+    assert len(packed) == 2
+    assert packed[0]["total_units"] == PALLET_MAX_UNITS
+    assert packed[0]["mix"]["DDPE0001Shop"] == 8_000
+    assert sum(p["total_units"] for p in packed) == 25_000
+    assert packed[1]["total_units"] == 6_000
+
+
+def test_month_under_19k_is_one_pallet():
+    packed = pack_pallets({"DDPE0001Shop": 12_164}, ["DDPE0001Shop"], PALLET_MAX_UNITS)
+    assert len(packed) == 1
+    assert packed[0]["total_units"] == 12_164
+    assert month_pallet_fill_pct(12_164, 1) == round(100 * 12_164 / 19_000)

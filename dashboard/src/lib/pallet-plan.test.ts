@@ -1,7 +1,15 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { allocateMonthlyUnits, manufactureNeed, monthShortfall } from "./pallet-plan";
+import {
+  allocateMonthlyUnits,
+  manufactureNeed,
+  monthPalletFillPct,
+  monthShortfall,
+  packPallets,
+  PALLET_MAX_UNITS,
+  skuPackPriority,
+} from "./pallet-plan";
 
 describe("pallet monthly allocation", () => {
   test("month 1 ships the inventory reorder instead of a 25% holiday slice", () => {
@@ -35,5 +43,26 @@ describe("pallet monthly allocation", () => {
   test("manufacture is the max of reorder and holiday gap", () => {
     assert.equal(manufactureNeed(4252, 6696), 6696);
     assert.equal(manufactureNeed(8000, 6696), 8000);
+  });
+
+  test("months over 19k pack into multiple pallets with CRITICAL first", () => {
+    const mix = { DDPE0001Shop: 8000, DDPE0002Shop: 8000, DDPE0004Shop: 9000 };
+    const priority = skuPackPriority(
+      Object.keys(mix),
+      { DDPE0001Shop: "CRITICAL", DDPE0002Shop: "OK", DDPE0004Shop: "OK" },
+      { DDPE0001Shop: 8000, DDPE0002Shop: 0, DDPE0004Shop: 0 },
+    );
+    const packed = packPallets(mix, priority, PALLET_MAX_UNITS);
+    assert.equal(packed.length, 2);
+    assert.equal(packed[0].units, PALLET_MAX_UNITS);
+    assert.equal(packed[0].mix.DDPE0001Shop, 8000);
+    assert.equal(packed.reduce((s, p) => s + p.units, 0), 25000);
+    assert.equal(monthPalletFillPct(25000, 2), Math.round(100 * 25000 / 38000));
+  });
+
+  test("a 12k month is one pallet", () => {
+    const packed = packPallets({ DDPE0001Shop: 12164 }, ["DDPE0001Shop"]);
+    assert.equal(packed.length, 1);
+    assert.equal(packed[0].units, 12164);
   });
 });

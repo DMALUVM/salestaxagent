@@ -43,7 +43,9 @@ describe("pallet planner vs inventory", () => {
     const page = src("src/app/inventory/pallets/page.tsx");
     assert.match(page, /amazonInventoryReorder/);
     assert.match(page, /allocateMonthlyUnits/);
+    assert.match(page, /packPallets/);
     assert.match(page, /inventoryReorder/);
+    assert.match(page, /19,000|19000|PALLET_MAX/);
     assert.doesNotMatch(
       page,
       /remaining\[sku\] \* w \/ Math\.max\(wSum/,

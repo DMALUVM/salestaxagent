@@ -13,7 +13,20 @@ import {
   amazonInventoryReorder,
   DEFAULT_INVENTORY_SETTINGS,
 } from "@/lib/inventory-reorder";
-import { allocateMonthlyUnits, monthShortfall } from "@/lib/pallet-plan";
+import {
+  allocateMonthlyUnits,
+  daysOfSupply,
+  holidayDemandWithPlanning,
+  inventoryFlag,
+  monthPalletFillPct,
+  monthShortfall,
+  packPallets,
+  PALLET_MAX_UNITS,
+  planningDaily,
+  RATE_DIVERGENCE_WARN_PCT,
+  skuPackPriority,
+} from "@/lib/pallet-plan";
+import { coverTargetDays } from "@/lib/inventory-reorder";
 import { LoadingState } from "@/components/loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,9 +51,8 @@ const SKU_SHORT: Record<string, string> = {
   DDPE0003Shop: "Orange",
   DDPE0004Shop: "Assorted",
 };
-const PALLET_MAX = 19_000;
+const PALLET_MAX = PALLET_MAX_UNITS;
 const TARGET = "2026-10-31";
-const COVER_TARGET = 60;
 const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
@@ -87,7 +99,6 @@ interface SkuPlan {
   sku: string; label: string; novDecDemand: number;
   fba: number; inbound: number; awd: number; tpl: number; supply: number; gap: number;
 }
-interface Pallet { num: number; mix: Record<string, number>; total: number; }
 interface CoverWeek {
   week: string; fba: number; demand: number; receipt: number;
   dailyRate: number; coverDays: number | null; flagged: boolean;
@@ -96,10 +107,13 @@ interface SkuProjection {
   sku: string; label: string; fbaStart: number;
   weeks: CoverWeek[]; flaggedCount: number;
 }
+interface PackedPallet { num: number; mix: Record<string, number>; units: number }
 interface MfgMonthEntry {
   month: string; label: string; status: "FIRM" | "INDICATIVE";
   pallets: number; units: number; mix: Record<string, number>; shipBy: string;
   overdue?: boolean;
+  packed: PackedPallet[];
+  fillPct: number;
 }
 interface MfgScenario { entries: MfgMonthEntry[]; totalUnits: number; totalPallets: number; }
 interface MfgSkuSummary {
@@ -107,7 +121,10 @@ interface MfgSkuSummary {
   fba: number; inbound: number; awd: number; tpl: number;
   transfer: number; manufacture: number;
   holidayManufacture: number; inventoryReorder: number;
-  v30: number; targetDays: number; leadDays: number; onHand: number;
+  v30: number; planningDaily: number; invV30: number | null;
+  rateDivergencePct: number | null; dos: number; pipelineDos: number;
+  flag: "CRITICAL" | "OK";
+  targetDays: number; leadDays: number; onHand: number;
 }
 interface MfgTransfer { sku: string; source: string; units: number; timing: string; }
 
@@ -181,7 +198,7 @@ function buildMfgSheet(
   L.push(""); L.push("SKU REFERENCE:");
   for (const [sku, label] of Object.entries(SKU_LABELS)) L.push(`  ${sku}  =  ${label}`);
   L.push("");   L.push(`Demand period: Nov + Dec + Jan`);
-  L.push(`Pallet capacity: ${fmt(PALLET_MAX)} units`);
+  L.push(`Pallet capacity: ${fmt(PALLET_MAX)} cartons each; multiple pallets/month OK`);
   L.push(`Month 1 ships the inventory-page reorder in full.`);
   L.push(`All units in Amazon FBA by: ${TARGET}`);
   L.push(`3PL policy: transfer only (does NOT reduce manufacture)`);
@@ -256,9 +273,10 @@ export default function PalletPlanPage() {
   const settings = (raw?.settings ?? DEFAULT_INVENTORY_SETTINGS) as InventorySettings;
   const signalRows = (raw?.signals ?? []) as InventorySkuSignals[];
   const leadtime = (raw?.leadtime ?? null) as InventoryLeadtimeSummary | null;
+  const coverTarget = coverTargetDays(settings);
 
   // ── Pallet plan ──
-  const { skuPlans, pallets, totalGap, totalDemand, totalSupply } = useMemo(() => {
+  const { skuPlans, totalGap, totalDemand, totalSupply } = useMemo(() => {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
     const awdMap = new Map(awdList.map((a) => [a.sku, a]));
     const tplMap = new Map(tplList.map((t) => [t.sku, t]));
@@ -284,23 +302,7 @@ export default function PalletPlanPage() {
       tGap += gap; tDemand += novDecDemand; tSupply += supply;
       plans.push({ sku, label: SKU_LABELS[sku] ?? sku, novDecDemand, fba, inbound, awd, tpl, supply, gap });
     }
-    const numPallets = tGap > 0 ? Math.ceil(tGap / PALLET_MAX) : 0;
-    const remaining = Object.fromEntries(plans.map((p) => [p.sku, p.gap]));
-    const pals: Pallet[] = [];
-    for (let i = 0; i < numPallets; i++) {
-      const totalRem = Object.values(remaining).reduce((a, b) => a + b, 0);
-      if (totalRem <= 0) break;
-      const palletUnits = Math.min(PALLET_MAX, totalRem);
-      const mix: Record<string, number> = {};
-      for (const sku of SKUS) {
-        if (remaining[sku] <= 0) continue;
-        const share = remaining[sku] / totalRem;
-        const alloc = Math.min(Math.round(palletUnits * share), remaining[sku]);
-        if (alloc > 0) { mix[sku] = alloc; remaining[sku] -= alloc; }
-      }
-      pals.push({ num: i + 1, mix, total: Object.values(mix).reduce((a, b) => a + b, 0) });
-    }
-    return { skuPlans: plans, pallets: pals, totalGap: tGap, totalDemand: tDemand, totalSupply: tSupply };
+    return { skuPlans: plans, totalGap: tGap, totalDemand: tDemand, totalSupply: tSupply };
   }, [snapshots, forecasts, awdList, tplList, include3pl, includeAwd]);
 
   // ── FBA Cover Projection ──
@@ -375,7 +377,7 @@ export default function PalletPlanPage() {
         if (forwardUnits > 0 && forwardWeeks > 0) {
           dailyRate = forwardUnits / (forwardWeeks * 7);
           coverDays = dailyRate > 0 ? Math.round(fba / dailyRate) : null;
-          flagged = coverDays !== null && coverDays < COVER_TARGET;
+          flagged = coverDays !== null && coverDays < coverTarget;
         }
         if (flagged) { flaggedCount++; alerts.push({ sku, week: wIso, coverDays: coverDays!, fba: Math.round(fba) }); }
         weekData.push({ week: wIso, fba: Math.round(fba), demand: Math.round(demand), receipt, dailyRate: Math.round(dailyRate * 10) / 10, coverDays, flagged });
@@ -383,7 +385,7 @@ export default function PalletPlanPage() {
       projections.push({ sku, label: SKU_LABELS[sku] ?? sku, fbaStart, weeks: weekData, flaggedCount });
     }
     return { coverProjections: projections, coverAlerts: alerts };
-  }, [snapshots, forecasts, awdList, tplList, velocityList, include3pl, includeAwd]);
+  }, [snapshots, forecasts, awdList, tplList, velocityList, include3pl, includeAwd, coverTarget]);
 
   // ── Manufacturer Heads-Up (demand - FBA - inbound - AWD; 3PL = transfer only) ──
   const [tplOffsetsProduction, setTplOffsetsProduction] = useState(false);
@@ -400,27 +402,40 @@ export default function PalletPlanPage() {
 
     const inv: Record<string, {
       fba: number; inbound: number; awd: number; tpl: number;
-      inventoryReorder: number; v30: number; targetDays: number; leadDays: number; onHand: number;
+      inventoryReorder: number; v30: number; planningDaily: number;
+      invV30: number | null; rateDivergencePct: number | null;
+      dos: number; pipelineDos: number; flag: "CRITICAL" | "OK";
+      targetDays: number; leadDays: number; onHand: number;
     }> = {};
     for (const sku of SKUS) {
       const snap = snapMap.get(sku);
+      const vel = velMap.get(sku);
+      const sig = sigMap.get(sku);
       const fba = Number(snap?.fulfillable ?? 0) + Number(snap?.reserved ?? 0) +
         Number(snap?.researching ?? 0) + Number(snap?.unfulfillable ?? 0);
       const inbound = Number(snap?.inbound_working ?? 0) + Number(snap?.inbound_shipped ?? 0) +
         Number(snap?.inbound_receiving ?? 0);
       const awd = Number(awdMap.get(sku)?.awd_on_hand ?? 0);
       const tpl = Number(tplMap.get(sku)?.available ?? 0);
+      const v30 = Number(vel?.total_u_30 ?? 0);
       const rec = amazonInventoryReorder({
         settings,
-        sig: sigMap.get(sku),
+        sig,
         leadtime,
         fba, inbound, awd, tpl,
-        dailyVelocity: Number(velMap.get(sku)?.total_u_30 ?? 0),
+        dailyVelocity: v30,
       });
+      const dos = daysOfSupply(fba, v30);
       inv[sku] = {
         fba, inbound, awd, tpl,
         inventoryReorder: rec.reorderQty,
-        v30: Number(velMap.get(sku)?.total_u_30 ?? 0),
+        v30,
+        planningDaily: planningDaily(vel ?? {}),
+        invV30: sig?.inventory_u_30 != null ? Number(sig.inventory_u_30) : null,
+        rateDivergencePct: sig?.rate_divergence_pct != null ? Number(sig.rate_divergence_pct) : null,
+        dos,
+        pipelineDos: daysOfSupply(fba + inbound + awd, v30),
+        flag: inventoryFlag(dos, v30),
         targetDays: rec.targetDays,
         leadDays: rec.leadDays,
         onHand: rec.onHand,
@@ -434,7 +449,7 @@ export default function PalletPlanPage() {
       const reorderBySku: Record<string, number> = {};
       for (const sku of SKUS) {
         const i = inv[sku];
-        const d = demand[sku] ?? 0;
+        const d = holidayDemandWithPlanning(demand[sku] ?? 0, i.planningDaily, true);
         let deductions = i.fba + i.inbound + i.awd;
         if (tplOffsetsProduction) deductions += i.tpl;
         const holidayManufacture = Math.max(0, d - deductions);
@@ -446,22 +461,29 @@ export default function PalletPlanPage() {
           fba: i.fba, inbound: i.inbound, awd: i.awd, tpl: i.tpl,
           transfer: i.tpl + i.awd, manufacture,
           holidayManufacture, inventoryReorder: i.inventoryReorder,
-          v30: i.v30, targetDays: i.targetDays, leadDays: i.leadDays, onHand: i.onHand,
+          v30: i.v30, planningDaily: i.planningDaily, invV30: i.invV30,
+          rateDivergencePct: i.rateDivergencePct, dos: i.dos, pipelineDos: i.pipelineDos,
+          flag: i.flag, targetDays: i.targetDays, leadDays: i.leadDays, onHand: i.onHand,
         });
       }
 
       const mixes = allocateMonthlyUnits(
         SKUS, reorderBySku, holidayMfg, productionMonths.length, MFG_WEIGHTS,
       );
+      const flags = Object.fromEntries(SKUS.map((sku) => [sku, inv[sku].flag]));
+      const priority = skuPackPriority(SKUS, flags, reorderBySku);
       const entries: MfgMonthEntry[] = productionMonths.map((m, mi) => {
         const mix = mixes[mi] ?? {};
+        const packed = packPallets(mix, priority, PALLET_MAX);
         const total = Object.values(mix).reduce((a, b) => a + b, 0);
         const shipBy = `${m}-20`;
         return {
           month: m, label: monthLabel(m),
           status: committed.has(m) ? "FIRM" : "INDICATIVE",
-          pallets: total > 0 ? Math.ceil(total / PALLET_MAX) : 0,
-          units: total, mix, shipBy,
+          pallets: packed.length,
+          units: total, mix, packed,
+          fillPct: monthPalletFillPct(total, packed.length, PALLET_MAX),
+          shipBy,
           overdue: mi === 0 && todayIso > shipBy,
         };
       });
@@ -505,7 +527,7 @@ export default function PalletPlanPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Pallet Planner</h1>
           <p className="text-sm text-muted-foreground">
-            Month 1 ships the inventory-page reorder in full · leftover holiday build in months 2–3 · In Amazon by {TARGET}
+            Inventory cover math + holiday planning · {fmt(PALLET_MAX)} cartons per pallet · send as many pallets as the month needs · In Amazon by {TARGET}
           </p>
         </div>
         <Link href="/inventory"><Button variant="outline" size="sm">← Inventory</Button></Link>
@@ -527,9 +549,9 @@ export default function PalletPlanPage() {
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
         <Card>
           <CardContent className="p-4">
-            <p className="text-[10px] text-muted-foreground uppercase">Nov+Dec Demand</p>
-            <p className="text-2xl font-semibold tabular-nums">{fmt(totalDemand)}</p>
-            <p className="text-xs text-muted-foreground">correction_factor</p>
+            <p className="text-[10px] text-muted-foreground uppercase">Holiday Demand</p>
+            <p className="text-2xl font-semibold tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.holidayDemand, 0))}</p>
+            <p className="text-xs text-muted-foreground">forecast floored by planning rate</p>
           </CardContent>
         </Card>
         <Card>
@@ -540,10 +562,13 @@ export default function PalletPlanPage() {
         </Card>
         <Card className={totalGap > 0 ? "border-red-500/40" : "border-emerald-500/40"}>
           <CardContent className="p-4">
-            <p className="text-[10px] text-muted-foreground uppercase">Gap to Produce</p>
-            <p className={`text-2xl font-semibold tabular-nums ${totalGap > 0 ? "text-red-500" : "text-emerald-500"}`}>
-              {totalGap > 0 ? fmt(totalGap) : "Covered"}
+            <p className="text-[10px] text-muted-foreground uppercase">Manufacture</p>
+            <p className={`text-2xl font-semibold tabular-nums ${mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0) > 0 ? "text-red-500" : "text-emerald-500"}`}>
+              {mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0) > 0
+                ? fmt(mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0))
+                : "Covered"}
             </p>
+            <p className="text-xs text-muted-foreground">max(inventory reorder, holiday gap)</p>
           </CardContent>
         </Card>
         <Card className={coverAlerts.length > 0 ? "border-red-500/40" : "border-emerald-500/40"}>
@@ -552,7 +577,7 @@ export default function PalletPlanPage() {
             <p className={`text-2xl font-semibold tabular-nums ${coverAlerts.length > 0 ? "text-red-500" : "text-emerald-500"}`}>
               {coverAlerts.length > 0 ? coverAlerts.length : "OK"}
             </p>
-            <p className="text-xs text-muted-foreground">weeks &lt; {COVER_TARGET}d</p>
+            <p className="text-xs text-muted-foreground">weeks &lt; {coverTarget}d</p>
           </CardContent>
         </Card>
       </div>
@@ -595,13 +620,16 @@ export default function PalletPlanPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>SKU</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">V30</TableHead>
+                  <TableHead className="text-right">Inv V30</TableHead>
+                  <TableHead className="text-right">Recv</TableHead>
+                  <TableHead className="text-right">DOS</TableHead>
                   <TableHead className="text-right">Demand</TableHead>
-                  <TableHead className="text-right">Inventory Reorder</TableHead>
+                  <TableHead className="text-right">Reorder</TableHead>
                   <TableHead className="text-right">FBA</TableHead>
-                  <TableHead className="text-right">Inbound</TableHead>
-                  <TableHead className="text-right">AWD</TableHead>
+                  <TableHead className="text-right">Inbnd</TableHead>
                   <TableHead className="text-right">3PL</TableHead>
-                  <TableHead className="text-right">Transfer</TableHead>
                   <TableHead className="text-right font-semibold">Manufacture</TableHead>
                 </TableRow>
               </TableHeader>
@@ -609,24 +637,33 @@ export default function PalletPlanPage() {
                 {mfgSkuSummary.map((s) => (
                   <TableRow key={s.sku}>
                     <TableCell className="font-medium text-xs">{SKU_SHORT[s.sku]}</TableCell>
+                    <TableCell>
+                      <Badge variant={s.flag === "CRITICAL" ? "destructive" : "secondary"} className="text-[10px]">
+                        {s.flag}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{s.v30.toFixed(1)}</TableCell>
+                    <TableCell className={`text-right tabular-nums ${(s.rateDivergencePct ?? 0) > RATE_DIVERGENCE_WARN_PCT ? "text-amber-500" : ""}`}>
+                      {s.invV30 != null ? s.invV30.toFixed(1) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{s.leadDays}d</TableCell>
+                    <TableCell className={`text-right tabular-nums ${s.dos < 60 ? "text-amber-500" : ""}`}>{s.dos}</TableCell>
                     <TableCell className="text-right tabular-nums font-medium">{fmt(s.holidayDemand)}</TableCell>
                     <TableCell className={`text-right tabular-nums font-medium ${s.inventoryReorder > 0 ? "text-amber-500" : "text-muted-foreground"}`}>
                       {s.inventoryReorder > 0 ? fmt(s.inventoryReorder) : "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(s.fba)}</TableCell>
                     <TableCell className="text-right tabular-nums">{s.inbound > 0 ? fmt(s.inbound) : "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums">{s.awd > 0 ? fmt(s.awd) : "—"}</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">{s.tpl > 0 ? fmt(s.tpl) : "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums text-blue-500">{s.transfer > 0 ? fmt(s.transfer) : "—"}</TableCell>
                     <TableCell className="text-right tabular-nums font-semibold text-primary">{fmt(s.manufacture)}</TableCell>
                   </TableRow>
                 ))}
                 <TableRow className="bg-muted/30 font-semibold">
                   <TableCell>TOTAL</TableCell>
+                  <TableCell colSpan={5} />
                   <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.holidayDemand, 0))}</TableCell>
                   <TableCell className="text-right tabular-nums text-amber-500">{fmt(mfgSkuSummary.reduce((a, s) => a + s.inventoryReorder, 0))}</TableCell>
-                  <TableCell colSpan={4} />
-                  <TableCell className="text-right tabular-nums text-blue-500">{fmt(mfgSkuSummary.reduce((a, s) => a + s.transfer, 0))}</TableCell>
+                  <TableCell colSpan={3} />
                   <TableCell className="text-right tabular-nums text-primary">{fmt(mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0))}</TableCell>
                 </TableRow>
               </TableBody>
@@ -672,8 +709,19 @@ export default function PalletPlanPage() {
                       <div className="flex items-baseline gap-2 mb-2">
                         <span className="text-2xl font-semibold tabular-nums">{entry.pallets}</span>
                         <span className="text-xs text-muted-foreground">pallet{entry.pallets !== 1 ? "s" : ""}</span>
-                        <span className="text-xs text-muted-foreground ml-auto tabular-nums">{fmt(entry.units)} units</span>
+                        <span className="text-xs text-muted-foreground ml-auto tabular-nums">{fmt(entry.units)} / {fmt(PALLET_MAX * Math.max(entry.pallets, 1))}</span>
                       </div>
+                      <div className="h-1.5 rounded-full bg-muted mb-2 overflow-hidden">
+                        <div
+                          className="h-full bg-primary"
+                          style={{ width: `${Math.min(100, entry.fillPct)}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mb-2">
+                        {entry.pallets > 1
+                          ? `${entry.pallets} pallets this month · ${fmt(PALLET_MAX)} cartons each · ${entry.fillPct}% of ${fmt(PALLET_MAX * entry.pallets)} slots`
+                          : `${entry.fillPct}% of one ${fmt(PALLET_MAX)} carton pallet`}
+                      </p>
                       <div className="space-y-1">
                         {SKUS.map((sku) => {
                           const qty = entry.mix[sku];
@@ -739,7 +787,9 @@ export default function PalletPlanPage() {
             Inventory reorder = (cover target{settings.holiday_mode ? " 90d holiday" : ` ${settings.target_cover_days}d`} + lead) × V30 − on-hand — same as the inventory page.
             {" "}Manufacture = max(inventory reorder, holiday demand − FBA − inbound − AWD{tplOffsetsProduction ? " − 3PL" : ""}).
             {!tplOffsetsProduction && " 3PL is transfer only, does not reduce production."}
-            {" "}Month 1 front-loads the reorder so a CRITICAL SKU is not sliced to 25%. FIRM = committed. INDICATIVE = may change. Not a purchase order.
+            {" "}Month 1 front-loads the reorder so a CRITICAL SKU is not sliced to 25%.
+            {" "}A pallet holds {fmt(PALLET_MAX)} cartons; ship 2+ in the same month when the mix does not fit one.
+            {" "}FIRM = committed. INDICATIVE = may change. Not a purchase order.
           </p>
         </CardContent>
       </Card>
@@ -793,11 +843,13 @@ export default function PalletPlanPage() {
         </CardContent>
       </Card>
 
-      {/* Pallet breakdown */}
-      {pallets.length > 0 && (
+      {/* Packed 19k pallets across the 3-month plan */}
+      {mfgPrimary.entries.some((e) => e.packed.length > 0) && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Pallet Breakdown</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Pallet Breakdown · {fmt(PALLET_MAX)} cartons each · multiple pallets/month when needed
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
             <Table>
@@ -811,48 +863,65 @@ export default function PalletPlanPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pallets.map((p) => (
-                  <TableRow key={p.num}>
-                    <TableCell className="font-medium">
-                      <Package className="inline mr-1 h-3.5 w-3.5 text-muted-foreground" />
-                      Pallet {p.num}
-                    </TableCell>
-                    {SKUS.map((s) => (
-                      <TableCell key={s} className="text-right tabular-nums">
-                        {p.mix[s] ? fmt(p.mix[s]) : "—"}
+                {mfgPrimary.entries.flatMap((entry) =>
+                  entry.packed.map((p) => (
+                    <TableRow key={`${entry.month}-${p.num}`}>
+                      <TableCell className="font-medium">
+                        <Package className="inline mr-1 h-3.5 w-3.5 text-muted-foreground" />
+                        {entry.label.replace(/ \d{4}$/, "")} P{p.num}
                       </TableCell>
-                    ))}
-                    <TableCell className="text-right tabular-nums font-medium">{fmt(p.total)}</TableCell>
-                  </TableRow>
-                ))}
+                      {SKUS.map((s) => (
+                        <TableCell key={s} className="text-right tabular-nums">
+                          {p.mix[s] ? fmt(p.mix[s]) : "—"}
+                        </TableCell>
+                      ))}
+                      <TableCell className="text-right tabular-nums font-medium">
+                        {fmt(p.units)}
+                        <span className="ml-1 text-[10px] text-muted-foreground">
+                          / {fmt(PALLET_MAX)}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  )),
+                )}
               </TableBody>
             </Table>
           </CardContent>
         </Card>
       )}
 
-      {/* Next pallet card — same mix as month 1 manufacturer card */}
+      {/* Next shipment — every packed pallet in month 1 */}
       {mfgPrimary.entries[0] && mfgPrimary.entries[0].units > 0 && (
         <Card className="border-amber-500/30">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Next Pallet to Order</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Next to ship · {mfgPrimary.entries[0].label}
+              {mfgPrimary.entries[0].pallets > 1 ? ` · ${mfgPrimary.entries[0].pallets} pallets` : ""}
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {SKUS.filter((sku) => (mfgPrimary.entries[0].mix[sku] ?? 0) > 0).map((sku) => (
-                <div key={sku} className="rounded-lg border p-3 text-center">
-                  <p className="text-xs text-muted-foreground">{SKU_LABELS[sku]}</p>
-                  <p className="text-lg font-semibold tabular-nums">{fmt(mfgPrimary.entries[0].mix[sku])}</p>
-                  {(mfgSkuSummary.find((s) => s.sku === sku)?.inventoryReorder ?? 0) > 0 && (
-                    <p className="text-[10px] text-muted-foreground">
-                      inventory need {fmt(mfgSkuSummary.find((s) => s.sku === sku)!.inventoryReorder)}
-                    </p>
-                  )}
+          <CardContent className="space-y-4">
+            {(mfgPrimary.entries[0].packed.length ? mfgPrimary.entries[0].packed : [{
+              num: 1, mix: mfgPrimary.entries[0].mix, units: mfgPrimary.entries[0].units,
+            }]).map((p) => (
+              <div key={p.num}>
+                {mfgPrimary.entries[0].pallets > 1 && (
+                  <p className="text-xs font-medium mb-2">
+                    Pallet {p.num} · {fmt(p.units)} / {fmt(PALLET_MAX)} cartons
+                  </p>
+                )}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {SKUS.filter((sku) => (p.mix[sku] ?? 0) > 0).map((sku) => (
+                    <div key={sku} className="rounded-lg border p-3 text-center">
+                      <p className="text-xs text-muted-foreground">{SKU_LABELS[sku]}</p>
+                      <p className="text-lg font-semibold tabular-nums">{fmt(p.mix[sku])}</p>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Total: {fmt(mfgPrimary.entries[0].units)} units · {mfgPrimary.entries[0].pallets} pallet{mfgPrimary.entries[0].pallets !== 1 ? "s" : ""}
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              Month total {fmt(mfgPrimary.entries[0].units)} cartons · {mfgPrimary.entries[0].pallets} pallet{mfgPrimary.entries[0].pallets !== 1 ? "s" : ""}
+              {" · CRITICAL / highest reorder packed first when a month needs more than one"}
               {" · "}
               {mfgPrimary.entries[0].overdue
                 ? `Ship ASAP — missed ${mfgPrimary.entries[0].shipBy}`
@@ -868,7 +937,7 @@ export default function PalletPlanPage() {
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               {coverAlerts.length > 0 && <AlertTriangle className="h-4 w-4 text-red-500" />}
-              FBA Cover Projection — {COVER_TARGET}-Day Target
+              FBA Cover Projection — {coverTarget}-Day Target
             </CardTitle>
             <div className="flex gap-1">
               {SKUS.map((s) => {
@@ -896,7 +965,7 @@ export default function PalletPlanPage() {
                 <span>FBA start: {fmt(selectedProj.fbaStart)}</span>
                 {selectedProj.flaggedCount > 0 && (
                   <span className="text-red-500 font-medium">
-                    {selectedProj.flaggedCount} week{selectedProj.flaggedCount !== 1 ? "s" : ""} below {COVER_TARGET}d
+                    {selectedProj.flaggedCount} week{selectedProj.flaggedCount !== 1 ? "s" : ""} below {coverTarget}d
                   </span>
                 )}
               </div>
@@ -962,7 +1031,7 @@ export default function PalletPlanPage() {
       <p className="text-xs text-muted-foreground">
         Demand from forecast_weekly (correction_factor scenario), velocity fallback for non-forecast weeks.
         {include3pl ? " 3PL transfer to FBA assumed complete by target date." : " 3PL excluded."}
-        {" "}Cover = FBA on-hand / avg daily demand (next {COVER_TARGET} days). Planning aid — not a purchase order.
+        {" "}Cover = FBA on-hand / avg daily demand (next {coverTarget} days). Planning aid — not a purchase order.
       </p>
     </div>
   );
