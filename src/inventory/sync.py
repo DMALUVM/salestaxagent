@@ -12,7 +12,7 @@ import csv
 import io
 import json
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 
@@ -52,7 +52,7 @@ def fetch_restock(dry_run: bool = False, on_poll=None) -> dict:
         on_poll("requesting restock report", 0)
 
     content = request_and_download(RESTOCK_REPORT, start, end, on_poll=on_poll)
-    rows = _parse_restock(content)
+    rows = _stamp_now(_parse_restock(content), "pulled_at")
 
     result = {"rows_total": len(rows), "rows_inserted": 0, "dry_run": dry_run}
 
@@ -143,7 +143,7 @@ def fetch_planning(dry_run: bool = False, on_poll=None) -> dict:
         on_poll("requesting planning report", 0)
 
     content = request_and_download(PLANNING_REPORT, start, end, on_poll=on_poll)
-    rows = _parse_planning(content)
+    rows = _stamp_now(_parse_planning(content), "pulled_at")
 
     result = {"rows_total": len(rows), "rows_inserted": 0, "dry_run": dry_run}
 
@@ -249,70 +249,7 @@ def fetch_fba_summaries(dry_run: bool = False) -> dict:
         if not next_token:
             break
 
-    # Aggregate by seller SKU (API may split by condition/marketplace)
-    sku_agg: dict[str, dict] = {}
-    for item in all_items:
-        sku = item.get("sellerSku") or item.get("sellerSKU", "")
-        if not sku:
-            continue
-
-        inv = item.get("inventoryDetails") or {}
-
-        # fulfillableQuantity = units available for customer orders
-        fb = int(inv.get("fulfillableQuantity", 0) or 0)
-
-        inbound_w = int(inv.get("inboundWorkingQuantity", 0) or 0)
-        inbound_s = int(inv.get("inboundShippedQuantity", 0) or 0)
-        inbound_r = int(inv.get("inboundReceivingQuantity", 0) or 0)
-
-        reserved_obj = inv.get("reservedQuantity", {})
-        reserved_total = (
-            int(reserved_obj.get("totalReservedQuantity", 0) or 0)
-            if isinstance(reserved_obj, dict) else int(reserved_obj or 0)
-        )
-
-        researching_obj = inv.get("researchingQuantity", {})
-        researching_total = (
-            int(researching_obj.get("totalResearchingQuantity", 0) or 0)
-            if isinstance(researching_obj, dict) else int(researching_obj or 0)
-        )
-
-        unfulfillable_obj = inv.get("unfulfillableQuantity", {})
-        unfulfillable_total = (
-            int(unfulfillable_obj.get("totalUnfulfillableQuantity", 0) or 0)
-            if isinstance(unfulfillable_obj, dict) else int(unfulfillable_obj or 0)
-        )
-
-        total_qty = int(item.get("totalQuantity", 0) or 0)
-
-        if sku in sku_agg:
-            a = sku_agg[sku]
-            a["fulfillable"] += fb
-            a["inbound_working"] += inbound_w
-            a["inbound_shipped"] += inbound_s
-            a["inbound_receiving"] += inbound_r
-            a["reserved"] += reserved_total
-            a["researching"] += researching_total
-            a["unfulfillable"] += unfulfillable_total
-            a["total_quantity"] += total_qty
-        else:
-            sku_agg[sku] = {
-                "sku": sku,
-                "asin": item.get("asin") or None,
-                "fnsku": item.get("fnsku") or item.get("fnSku") or None,
-                "product_name": item.get("productName") or None,
-                "fulfillable": fb,
-                "inbound_working": inbound_w,
-                "inbound_shipped": inbound_s,
-                "inbound_receiving": inbound_r,
-                "reserved": reserved_total,
-                "researching": researching_total,
-                "unfulfillable": unfulfillable_total,
-                "total_quantity": total_qty,
-                "source": "fba_inventory_api",
-            }
-
-    rows = list(sku_agg.values())
+    rows = _stamp_now(_aggregate_fba_summaries(all_items), "snapshot_at")
 
     result = {"rows_total": len(rows), "rows_inserted": 0, "dry_run": dry_run}
 
@@ -417,6 +354,88 @@ def _sync_awd_inbound(dry_run: bool) -> dict:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _stamp_now(
+    rows: list[dict],
+    field: str,
+    now: datetime | None = None,
+) -> list[dict]:
+    """Set pulled_at / snapshot_at so upsert refreshes Postgres DEFAULT now().
+
+    inventory_* tables default those columns on INSERT only. Re-upserts of
+    the same sku left 2026-08-17 timestamps while inventory-sync reported
+    success and ingestion_log advanced.
+    """
+    ts = (now or datetime.now(timezone.utc)).isoformat()
+    for row in rows:
+        row[field] = ts
+    return rows
+
+
+def _aggregate_fba_summaries(all_items: list[dict]) -> list[dict]:
+    """Collapse FBA inventorySummaries payloads to one row per seller SKU."""
+    sku_agg: dict[str, dict] = {}
+    for item in all_items:
+        sku = item.get("sellerSku") or item.get("sellerSKU", "")
+        if not sku:
+            continue
+
+        inv = item.get("inventoryDetails") or {}
+
+        fb = int(inv.get("fulfillableQuantity", 0) or 0)
+        inbound_w = int(inv.get("inboundWorkingQuantity", 0) or 0)
+        inbound_s = int(inv.get("inboundShippedQuantity", 0) or 0)
+        inbound_r = int(inv.get("inboundReceivingQuantity", 0) or 0)
+
+        reserved_obj = inv.get("reservedQuantity", {})
+        reserved_total = (
+            int(reserved_obj.get("totalReservedQuantity", 0) or 0)
+            if isinstance(reserved_obj, dict) else int(reserved_obj or 0)
+        )
+
+        researching_obj = inv.get("researchingQuantity", {})
+        researching_total = (
+            int(researching_obj.get("totalResearchingQuantity", 0) or 0)
+            if isinstance(researching_obj, dict) else int(researching_obj or 0)
+        )
+
+        unfulfillable_obj = inv.get("unfulfillableQuantity", {})
+        unfulfillable_total = (
+            int(unfulfillable_obj.get("totalUnfulfillableQuantity", 0) or 0)
+            if isinstance(unfulfillable_obj, dict) else int(unfulfillable_obj or 0)
+        )
+
+        total_qty = int(item.get("totalQuantity", 0) or 0)
+
+        if sku in sku_agg:
+            a = sku_agg[sku]
+            a["fulfillable"] += fb
+            a["inbound_working"] += inbound_w
+            a["inbound_shipped"] += inbound_s
+            a["inbound_receiving"] += inbound_r
+            a["reserved"] += reserved_total
+            a["researching"] += researching_total
+            a["unfulfillable"] += unfulfillable_total
+            a["total_quantity"] += total_qty
+        else:
+            sku_agg[sku] = {
+                "sku": sku,
+                "asin": item.get("asin") or None,
+                "fnsku": item.get("fnsku") or item.get("fnSku") or None,
+                "product_name": item.get("productName") or None,
+                "fulfillable": fb,
+                "inbound_working": inbound_w,
+                "inbound_shipped": inbound_s,
+                "inbound_receiving": inbound_r,
+                "reserved": reserved_total,
+                "researching": researching_total,
+                "unfulfillable": unfulfillable_total,
+                "total_quantity": total_qty,
+                "source": "fba_inventory_api",
+            }
+
+    return list(sku_agg.values())
+
 
 def _safe_int(v: str) -> int:
     try:
