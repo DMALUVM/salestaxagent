@@ -18,9 +18,11 @@ def build_report() -> dict:
     tpl_snapshots = {r["sku"]: r for r in _safe_fetch("inventory_3pl_snapshots")}
     awd_snapshots = {r["sku"]: r for r in _safe_fetch("inventory_awd")}
     settings = _load_settings()
+    signals = _load_signals()
+    account_summary = _load_leadtime_summary()
+    peak = _is_peak(settings)
 
     target_days = settings["target_cover_days"]
-    lead_days = settings["lead_time_days"]
     include_inbound = settings["include_inbound"]
     include_3pl = settings.get("include_3pl", True)
 
@@ -79,7 +81,14 @@ def build_report() -> dict:
         amz_rec_ship = rec.get("recommended_ship_date")
         amz_dos = rec.get("days_of_supply")
         sold30 = int(rec.get("units_sold_30", 0) or 0)
-        recv_days = settings.get("receiving_days_normal", 28)
+        recv_days = _effective_fba_receive(
+            sku, settings, signals, peak=peak, account_summary=account_summary,
+        )
+        lead_days = _effective_reorder_lead(
+            sku, settings, signals,
+            awd_on_hand=awd_oh, fba_on_hand=fba_on_hand, inbound=inbound_total,
+            account_summary=account_summary,
+        )
 
         if shopify_only:
             # ── Shopify-only: supply = 3PL, demand = Shopify velocity ──
@@ -104,8 +113,9 @@ def build_report() -> dict:
                 stockout_date = None
 
             transfer_to_fba = 0
+            shopify_lead = int(settings.get("lead_time_days", 35) or 35)
             our_reorder = max(
-                math.ceil((target_days + lead_days) * demand_rate) - supply, 0
+                math.ceil((target_days + shopify_lead) * demand_rate) - supply, 0
             )
             breach_date = None
             ship_by = None
@@ -269,6 +279,11 @@ def _load_settings() -> dict:
                 "holiday_mode": bool(s.get("holiday_mode", False)),
                 "include_inbound": bool(s.get("include_inbound", True)),
                 "include_3pl": bool(s.get("include_3pl", True)),
+                "receiving_days_normal": int(s.get("receiving_days_normal", 14) or 14),
+                "receiving_days_peak": int(s.get("receiving_days_peak", 28) or 28),
+                "awd_to_fba_days": int(s.get("awd_to_fba_days", 14) or 14),
+                "peak_start_date": s.get("peak_start_date"),
+                "peak_end_date": s.get("peak_end_date"),
             }
     except Exception:
         pass
@@ -278,7 +293,59 @@ def _load_settings() -> dict:
         "holiday_mode": False,
         "include_inbound": True,
         "include_3pl": True,
+        "receiving_days_normal": 14,
+        "receiving_days_peak": 28,
+        "awd_to_fba_days": 14,
+        "peak_start_date": None,
+        "peak_end_date": None,
     }
+
+
+def _load_signals() -> dict[str, dict]:
+    from src.inventory.leadtime_effective import load_signals_map
+    return load_signals_map()
+
+
+def _load_leadtime_summary() -> dict | None:
+    from src.inventory.leadtime_effective import load_leadtime_summary
+    return load_leadtime_summary()
+
+
+def _is_peak(settings: dict) -> bool:
+    from src.inventory.leadtime_effective import is_peak_receiving
+    return is_peak_receiving(settings)
+
+
+def _effective_fba_receive(
+    sku: str,
+    settings: dict,
+    signals: dict[str, dict],
+    *,
+    peak: bool,
+    account_summary: dict | None,
+) -> int:
+    from src.inventory.leadtime_effective import effective_fba_receive_days
+    return effective_fba_receive_days(
+        sku, settings, signals, peak=peak, account_summary=account_summary,
+    )
+
+
+def _effective_reorder_lead(
+    sku: str,
+    settings: dict,
+    signals: dict[str, dict],
+    *,
+    awd_on_hand: int,
+    fba_on_hand: int,
+    inbound: int,
+    account_summary: dict | None,
+) -> int:
+    from src.inventory.leadtime_effective import effective_reorder_lead_days
+    return effective_reorder_lead_days(
+        sku, settings, signals,
+        awd_on_hand=awd_on_hand, fba_on_hand=fba_on_hand, inbound=inbound,
+        account_summary=account_summary,
+    )
 
 
 def _safe_fetch(table: str) -> list[dict]:

@@ -36,12 +36,24 @@ def build_capacity_plan() -> dict:
     peak_start = _parse_date(settings.get("peak_start_date", "2026-10-01"))
     peak_end = _parse_date(settings.get("peak_end_date", "2027-01-15"))
 
-    receiving_days = (
-        settings["receiving_days_peak"]
-        if peak_start and today >= peak_start - timedelta(days=30)
-        else settings["receiving_days_normal"]
+    from src.inventory.leadtime_effective import (
+        effective_awd_to_fba_days,
+        effective_fba_receive_days,
+        is_peak_receiving,
+        load_leadtime_summary,
+        load_signals_map,
     )
-    awd_to_fba = settings["awd_to_fba_days"]
+
+    signals = load_signals_map()
+    account_summary = load_leadtime_summary()
+    peak = is_peak_receiving(settings)
+
+    receiving_days = effective_fba_receive_days(
+        None, settings, signals, peak=peak, account_summary=account_summary,
+    )
+    awd_to_fba = effective_awd_to_fba_days(
+        None, settings, signals, account_summary=account_summary,
+    )
     production_lead = settings["production_lead_days"]
     target_days = 90 if settings.get("holiday_mode") else settings["target_cover_days"]
 
@@ -127,8 +139,15 @@ def build_capacity_plan() -> dict:
 
         # Capacity impact
         fba_ft3 = send_to_fba * ft3
-        # Assign to arrival month (today + receiving days)
-        arrival_date = today + timedelta(days=receiving_days)
+        sku_recv = effective_fba_receive_days(
+            sku, settings, signals, peak=peak, account_summary=account_summary,
+        )
+        sku_awd = effective_awd_to_fba_days(
+            sku, settings, signals, account_summary=account_summary,
+        )
+        # AWD-sourced sends arrive via AWD→FBA path; direct sends use FBA receive.
+        arrival_lead = sku_awd if send_from_awd > 0 and send_from_awd >= send_to_fba // 2 else sku_recv
+        arrival_date = today + timedelta(days=arrival_lead)
         arrival_month = arrival_date.strftime("%Y-%m")
         monthly_ft3[arrival_month] += fba_ft3
 

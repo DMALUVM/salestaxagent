@@ -113,6 +113,7 @@ interface ComputedRow {
   receive_sample_n: number;
   measured_replenish_days: number | null;
   replenish_sample_n: number;
+  effective_lead_days: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +185,27 @@ export default function InventoryPage() {
     null,
   );
   const s = localSettings ?? settings;
+
+  function effectiveLeadDays(
+    sig: InventorySkuSignals | undefined,
+    awdOnHand: number,
+    fbaOnHand: number,
+    inboundQty: number,
+  ): number {
+    const fba =
+      sig?.measured_receive_days ??
+      leadtime?.fba_optimized_receive_median ??
+      leadtime?.fba_receive_median ??
+      s.receiving_days_normal;
+    const awd =
+      sig?.measured_replenish_days ??
+      leadtime?.awd_replenish_median ??
+      s.awd_to_fba_days;
+    if (awdOnHand > 0 && awdOnHand >= fbaOnHand + inboundQty) {
+      return Math.max(fba, awd);
+    }
+    return fba;
+  }
 
   const rows = useMemo(() => {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
@@ -372,8 +394,10 @@ export default function InventoryPage() {
       const target = s.holiday_mode ? 90 : s.target_cover_days;
       let dos: number, dos_amz_supply: number, pipeline_dos: number;
       let our_reorder: number, stockout_date: string | null = null, flag: string;
+      let effective_lead = s.lead_time_days;
 
       let network_oos_date: string | null = null;
+      const sig = signalMap.get(sku);
 
       if (shopifyOnly) {
         // Shopify-only: supply = 3PL, demand = Shopify velocity
@@ -393,7 +417,8 @@ export default function InventoryPage() {
         dos_amz_supply = total_vel_30 > eps ? amz_supply / total_vel_30 : (amz_supply > 0 ? 9999 : 0);
         const pipeline_supply = fba_on_hand + inbound + awd_on_hand;
         pipeline_dos = total_vel_30 > eps ? Math.round(pipeline_supply / total_vel_30) : (pipeline_supply > 0 ? 9999 : 0);
-        our_reorder = Math.max(Math.ceil((target + s.lead_time_days) * total_vel_30) - on_hand, 0);
+        effective_lead = effectiveLeadDays(sig, awd_on_hand, fba_on_hand, inbound);
+        our_reorder = Math.max(Math.ceil((target + effective_lead) * total_vel_30) - on_hand, 0);
         // FBA-only stockout (forecast + seasonal walk-forward)
         stockout_date = seasonalStockoutDate(fba_on_hand, total_vel_30, sku);
         // Network OOS: all owned stock (forecast + seasonal walk-forward)
@@ -403,7 +428,6 @@ export default function InventoryPage() {
       }
 
       const shopify_share = total_vel_30 > 0 ? Math.round((shopify_vel_30 / total_vel_30) * 100) : 0;
-      const sig = signalMap.get(sku);
 
       result.push({
         sku,
@@ -440,11 +464,12 @@ export default function InventoryPage() {
         receive_sample_n: sig?.receive_sample_n != null ? Number(sig.receive_sample_n) : 0,
         measured_replenish_days: sig?.measured_replenish_days != null ? Number(sig.measured_replenish_days) : null,
         replenish_sample_n: sig?.replenish_sample_n != null ? Number(sig.replenish_sample_n) : 0,
+        effective_lead_days: effective_lead,
       });
     }
 
     return result;
-  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, signalRows, s]);
+  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, signalRows, leadtime, s]);
 
   // Filter + sort
   const filtered = useMemo(() => {
@@ -640,7 +665,8 @@ export default function InventoryPage() {
               <strong>V30</strong> = orders report (SP-API). <strong>Inv V30</strong> = total FBA quantity
               day-over-day (ledger receipts counted). When they diverge &gt;25%, investigate before reordering.
               <strong> Recv</strong> = median warehouse→FBA receive days from closed direct inbound shipments
-              {accountReceive != null ? ` (~${accountReceive}d vs ${s.lead_time_days}d configured)` : ""}.
+              {accountReceive != null ? ` (~${accountReceive}d measured)` : ""}.
+              Reorder qty uses measured lead time per SKU (falls back to {s.receiving_days_normal}d configured).
               <strong> AWD</strong> = AWD replenishment confirm→Prime-eligible at FC (linked outbound shipment closed).
               {divergent > 0 ? ` ${divergent} SKU(s) flagged.` : ""}
               Daily history builds after each <code className="rounded bg-blue-100/60 px-1 dark:bg-blue-900/40">inventory-sync</code> — needs ~7 days for Inv V30.
@@ -1213,6 +1239,12 @@ export default function InventoryPage() {
                   <p>
                     Measured AWD→Prime: {selected.measured_replenish_days}d
                     {selected.replenish_sample_n ? ` (last ${selected.replenish_sample_n} replenishments)` : ""}
+                  </p>
+                )}
+                {selected.channel !== "shopify_only" && (
+                  <p>
+                    Reorder lead buffer: {selected.effective_lead_days}d
+                    {selected.measured_receive_days != null ? " (measured FBA receive)" : " (configured fallback)"}
                   </p>
                 )}
                 {selected.stockout_date && (
