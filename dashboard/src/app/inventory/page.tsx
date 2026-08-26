@@ -45,6 +45,7 @@ import Link from "next/link";
 import { FourNumbersSummary } from "@/components/inventory/FourNumbersSummary";
 import { useFourNumbersPlan } from "@/lib/use-four-numbers-plan";
 import { inventoryActionSummary } from "@/lib/inventory-actions";
+import { coverTargetDays, effectiveLeadDays, reorderQty } from "@/lib/inventory-reorder";
 import { displayTitle, rawTitle } from "@/lib/display-title";
 
 // ---------------------------------------------------------------------------
@@ -193,31 +194,6 @@ export default function InventoryPage() {
   const s = localSettings ?? settings;
   const { plan: fourNumbersPlan } = useFourNumbersPlan({ raw });
   const logisticsSummary = inventoryActionSummary(raw);
-
-  function effectiveLeadDays(
-    sig: InventorySkuSignals | undefined,
-    awdOnHand: number,
-    fbaOnHand: number,
-    inboundQty: number,
-  ): number {
-    const fba =
-      (sig?.measured_receive_days && sig.measured_receive_days > 0
-        ? sig.measured_receive_days
-        : null) ??
-      leadtime?.fba_optimized_receive_median ??
-      leadtime?.fba_receive_median ??
-      s.receiving_days_normal;
-    const awd =
-      (sig?.measured_replenish_days && sig.measured_replenish_days > 0
-        ? sig.measured_replenish_days
-        : null) ??
-      leadtime?.awd_replenish_median ??
-      s.awd_to_fba_days;
-    if (awdOnHand > 0 && awdOnHand >= fbaOnHand + inboundQty) {
-      return Math.max(fba, awd);
-    }
-    return fba;
-  }
 
   const rows = useMemo(() => {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
@@ -404,7 +380,7 @@ export default function InventoryPage() {
       if (!amazonActive && !shopifyOnly && total_vel_30 <= minVel) continue;
       const channel = shopifyOnly ? "shopify_only" : "amazon";
 
-      const target = s.holiday_mode ? 90 : s.target_cover_days;
+      const target = coverTargetDays(s);
       let dos: number, dos_amz_supply: number, pipeline_dos: number;
       let our_reorder: number, stockout_date: string | null = null, flag: string;
       let effective_lead = s.lead_time_days;
@@ -419,7 +395,7 @@ export default function InventoryPage() {
         dos = demand > eps ? supply / demand : (supply > 0 ? 9999 : 0);
         dos_amz_supply = dos;
         pipeline_dos = Math.round(dos);
-        our_reorder = Math.max(Math.ceil((target + s.lead_time_days) * demand) - supply, 0);
+        our_reorder = reorderQty(target, s.lead_time_days, demand, supply);
         stockout_date = seasonalStockoutDate(supply, demand, sku);
         network_oos_date = stockout_date; // same pool for shop-only
         flag = dos < 30 && demand > eps ? "LOW" : our_reorder > 0 ? "RESTOCK" : "OK";
@@ -430,8 +406,16 @@ export default function InventoryPage() {
         dos_amz_supply = total_vel_30 > eps ? amz_supply / total_vel_30 : (amz_supply > 0 ? 9999 : 0);
         const pipeline_supply = fba_on_hand + inbound + awd_on_hand;
         pipeline_dos = total_vel_30 > eps ? Math.round(pipeline_supply / total_vel_30) : (pipeline_supply > 0 ? 9999 : 0);
-        effective_lead = effectiveLeadDays(sig, awd_on_hand, fba_on_hand, inbound);
-        our_reorder = Math.max(Math.ceil((target + effective_lead) * total_vel_30) - on_hand, 0);
+        effective_lead = effectiveLeadDays({
+          sig,
+          leadtime,
+          receivingDaysNormal: s.receiving_days_normal,
+          awdToFbaDays: s.awd_to_fba_days,
+          awdOnHand: awd_on_hand,
+          fbaOnHand: fba_on_hand,
+          inbound,
+        });
+        our_reorder = reorderQty(target, effective_lead, total_vel_30, on_hand);
         // FBA-only stockout (forecast + seasonal walk-forward)
         stockout_date = seasonalStockoutDate(fba_on_hand, total_vel_30, sku);
         // Network OOS: all owned stock (forecast + seasonal walk-forward)
@@ -602,7 +586,7 @@ export default function InventoryPage() {
   if (!isConfigured()) return <SetupPrompt />;
   if (loading) return <LoadingState />;
 
-  const target = s.holiday_mode ? 90 : s.target_cover_days;
+  const target = coverTargetDays(s);
 
   // Seasonality chart data (weeks 1-52)
   const seasonChart = seasonality

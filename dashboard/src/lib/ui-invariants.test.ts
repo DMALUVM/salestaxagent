@@ -38,6 +38,20 @@ describe("entity review cards", () => {
   });
 });
 
+describe("pallet planner vs inventory", () => {
+  test("pallet page uses the shared inventory reorder formula", () => {
+    const page = src("src/app/inventory/pallets/page.tsx");
+    assert.match(page, /amazonInventoryReorder/);
+    assert.match(page, /allocateMonthlyUnits/);
+    assert.match(page, /inventoryReorder/);
+    assert.doesNotMatch(
+      page,
+      /remaining\[sku\] \* w \/ Math\.max\(wSum/,
+      "Must not slice manufacture with the old 25/35/40 remaining-share loop",
+    );
+  });
+});
+
 describe("3pl sign color", () => {
   test("negative ad-hoc amounts are not styled emerald/positive", () => {
     const page = src("src/app/inventory/3pl/page.tsx");

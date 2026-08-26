@@ -3,6 +3,13 @@
  * Mirrors core flag/reorder logic from /inventory without seasonal walk-forward.
  */
 
+import {
+  coverTargetDays,
+  DEFAULT_INVENTORY_SETTINGS,
+  effectiveLeadDays,
+  inventoryOnHand,
+  reorderQty,
+} from "./inventory-reorder";
 import type {
   InventoryLeadtimeSummary,
   InventoryRestock,
@@ -36,50 +43,10 @@ type RawLike = {
   leadtime?: InventoryLeadtimeSummary | null;
 };
 
-function effectiveLead(
-  sig: InventorySkuSignals | undefined,
-  leadtime: InventoryLeadtimeSummary | null | undefined,
-  settings: InventorySettings,
-  awdOnHand: number,
-  fbaOnHand: number,
-  inbound: number,
-): number {
-  const fba =
-    (sig?.measured_receive_days && sig.measured_receive_days > 0
-      ? sig.measured_receive_days
-      : null) ??
-    leadtime?.fba_optimized_receive_median ??
-    leadtime?.fba_receive_median ??
-    settings.receiving_days_normal;
-  const awd =
-    (sig?.measured_replenish_days && sig.measured_replenish_days > 0
-      ? sig.measured_replenish_days
-      : null) ??
-    leadtime?.awd_replenish_median ??
-    settings.awd_to_fba_days;
-  if (awdOnHand > 0 && awdOnHand >= fbaOnHand + inbound) {
-    return Math.max(fba, awd);
-  }
-  return fba;
-}
-
 export function buildInventoryActions(raw: RawLike | null, limit = 8): InventoryAction[] {
   if (!raw) return [];
 
-  const settings = raw.settings ?? {
-    target_cover_days: 60,
-    lead_time_days: 35,
-    holiday_mode: false,
-    include_inbound: true,
-    include_3pl: true,
-    include_awd: true,
-    receiving_days_normal: 14,
-    receiving_days_peak: 28,
-    awd_to_fba_days: 14,
-    production_lead_days: 45,
-    peak_start_date: null,
-    peak_end_date: null,
-  };
+  const settings = raw.settings ?? DEFAULT_INVENTORY_SETTINGS;
 
   const snapMap = new Map((raw.snapshots ?? []).map((s) => [s.sku, s]));
   const velMap = new Map((raw.velocity ?? []).map((v) => [v.sku, v]));
@@ -92,7 +59,7 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
     ...(raw.velocity ?? []).map((v) => v.sku),
   ]);
 
-  const target = settings.holiday_mode ? 90 : settings.target_cover_days;
+  const target = coverTargetDays(settings);
   const actions: InventoryAction[] = [];
   const eps = 0.001;
 
@@ -127,18 +94,32 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
     const shopifyOnly = !amazonActive && (shopifyVel > eps || tplAvail > 0);
     if (!amazonActive && !shopifyOnly && totalVel <= eps) continue;
 
-    let onHand = fbaOnHand + (settings.include_inbound ? inbound : 0);
-    if (settings.include_3pl) onHand += tplAvail;
-    if (settings.include_awd !== false) onHand += awdOnHand;
+    const onHand = inventoryOnHand({
+      fba: fbaOnHand,
+      inbound,
+      awd: awdOnHand,
+      tpl: tplAvail,
+      includeInbound: settings.include_inbound,
+      include3pl: settings.include_3pl,
+      includeAwd: settings.include_awd,
+    });
 
     const lead = shopifyOnly
       ? settings.lead_time_days
-      : effectiveLead(sig, raw.leadtime, settings, awdOnHand, fbaOnHand, inbound);
+      : effectiveLeadDays({
+          sig,
+          leadtime: raw.leadtime,
+          receivingDaysNormal: settings.receiving_days_normal,
+          awdToFbaDays: settings.awd_to_fba_days,
+          awdOnHand,
+          fbaOnHand,
+          inbound,
+        });
 
     const demand = shopifyOnly ? shopifyVel : totalVel;
     const supply = shopifyOnly ? tplAvail : onHand;
     const dos = demand > eps ? fbaOnHand / demand : fbaOnHand > 0 ? 9999 : 0;
-    const reorderQty = Math.max(Math.ceil((target + lead) * demand) - supply, 0);
+    const qty = reorderQty(target, lead, demand, supply);
 
     const productName =
       vel?.product_name ?? snap?.product_name ?? tpl?.product_name ?? sku;
@@ -151,7 +132,7 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
         label: `${sku} — rate divergence`,
         detail: `Inv V30 vs orders ${sig.rate_divergence_pct ?? "?"}% — verify before reorder`,
         href: `/inventory?sku=${encodeURIComponent(sku)}`,
-        reorderQty,
+        reorderQty: qty,
         dos,
         stockoutDate: null,
         sortKey: 150,
@@ -164,22 +145,22 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
         productName,
         severity: "critical",
         label: `${sku} — CRITICAL`,
-        detail: `${Math.round(dos)}d FBA cover · reorder ${reorderQty.toLocaleString()} u`,
+        detail: `${Math.round(dos)}d FBA cover · reorder ${qty.toLocaleString()} u`,
         href: `/inventory/plan?sku=${encodeURIComponent(sku)}`,
-        reorderQty,
+        reorderQty: qty,
         dos,
         stockoutDate: null,
         sortKey: 10 + dos,
       });
-    } else if (reorderQty > 0) {
+    } else if (qty > 0) {
       actions.push({
         sku,
         productName,
         severity: "restock",
         label: `${sku} — reorder`,
-        detail: `${reorderQty.toLocaleString()} u · ${Math.round(dos)}d cover · ${lead}d lead`,
+        detail: `${qty.toLocaleString()} u · ${Math.round(dos)}d cover · ${lead}d lead`,
         href: `/inventory/plan?sku=${encodeURIComponent(sku)}`,
-        reorderQty,
+        reorderQty: qty,
         dos,
         stockoutDate: null,
         sortKey: 100 + dos,
