@@ -29,7 +29,7 @@ type RawLike = {
   snapshots?: InventorySnapshot[];
   velocity?: SkuVelocity[];
   restock?: InventoryRestock[];
-  tpl?: Array<{ sku: string; available: number }>;
+  tpl?: Array<{ sku: string; available: number; product_name?: string | null }>;
   awd?: Array<{ sku: string; awd_on_hand: number }>;
   settings?: InventorySettings | null;
   signals?: InventorySkuSignals[];
