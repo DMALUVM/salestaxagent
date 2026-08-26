@@ -283,6 +283,74 @@ def holiday_demand_with_planning(
     return max(round(float(forecast_units or 0)), round(float(daily_planning or 0) * days))
 
 
+# Canonical holiday sell-through months the Sep/Oct pallets cover.
+# January aliases include 2026-01 so leftover forecast keys still roll in.
+HOLIDAY_DEMAND_MONTHS: tuple[tuple[str, str, int, tuple[str, ...]], ...] = (
+    ("2026-11", "November 2026", 30, ("2026-11",)),
+    ("2026-12", "December 2026", 31, ("2026-12",)),
+    ("2027-01", "January 2027", 31, ("2027-01", "2026-01")),
+)
+
+
+def forecast_by_holiday_month(
+    fc_rows: list[dict],
+    sku: str,
+    scenario: str,
+) -> dict[str, int]:
+    """Raw forecast_weekly units by Nov / Dec / Jan for one SKU."""
+    totals: dict[str, float] = {key: 0.0 for key, *_ in HOLIDAY_DEMAND_MONTHS}
+    alias_to_key: dict[str, str] = {}
+    for key, _label, _days, aliases in HOLIDAY_DEMAND_MONTHS:
+        for alias in aliases:
+            alias_to_key[alias] = key
+    for r in fc_rows:
+        if r.get("sku") != sku or r.get("scenario") != scenario:
+            continue
+        month = str(r.get("week_start", ""))[:7]
+        key = alias_to_key.get(month)
+        if key:
+            totals[key] += float(r.get("units", 0) or 0)
+    return {k: round(v) for k, v in totals.items()}
+
+
+def holiday_month_plan(
+    forecast_by_month: dict[str, int],
+    daily_planning: float,
+    include_jan: bool = True,
+) -> dict:
+    """Per-month forecast + planning floor, plus the combined planned total.
+
+    Manufacture still uses ``holiday_demand_with_planning`` on the 92-day
+    total. Monthly floors are visibility so a trough month is obvious.
+    """
+    months: list[dict] = []
+    forecast_total = 0
+    specs = HOLIDAY_DEMAND_MONTHS if include_jan else HOLIDAY_DEMAND_MONTHS[:2]
+    for key, label, days, _aliases in specs:
+        forecast = int(forecast_by_month.get(key, 0) or 0)
+        floor = round(float(daily_planning or 0) * days)
+        months.append({
+            "month": key,
+            "label": label,
+            "days": days,
+            "forecast": forecast,
+            "floor": floor,
+            "planned": max(forecast, floor),
+        })
+        forecast_total += forecast
+    planned_total = holiday_demand_with_planning(
+        forecast_total, daily_planning, include_jan,
+    )
+    return {
+        "months": months,
+        "forecast_total": forecast_total,
+        "planned_total": planned_total,
+        "floor_total": round(float(daily_planning or 0) * (
+            HOLIDAY_DAYS_NOV_JAN if include_jan else HOLIDAY_DAYS_NOV_DEC
+        )),
+    }
+
+
 def days_of_supply(fba: int, daily_velocity: float) -> int:
     if daily_velocity <= 0.001:
         return 9999 if fba > 0 else 0

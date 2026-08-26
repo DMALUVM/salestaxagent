@@ -5,7 +5,10 @@ from src.inventory.reorder import (
     PALLET_MAX_UNITS,
     allocate_monthly_units,
     amazon_inventory_reorder,
+    forecast_by_holiday_month,
+    holiday_demand_with_planning,
     holiday_inbound_months,
+    holiday_month_plan,
     manufacture_need,
     month_pallet_fill_pct,
     pack_pallets,
@@ -152,6 +155,26 @@ def test_long_lead_keeps_holiday_out_of_october():
     )
     assert mixes[2].get("DDPE0001Shop", 0) == 0
     assert mixes[1].get("DDPE0001Shop") == 4000
+
+
+def test_holiday_demand_splits_nov_dec_jan():
+    rows = [
+        {"sku": "DDPE0001Shop", "week_start": "2026-11-02", "scenario": "correction_factor", "units": 1000},
+        {"sku": "DDPE0001Shop", "week_start": "2026-11-09", "scenario": "correction_factor", "units": 1100},
+        {"sku": "DDPE0001Shop", "week_start": "2026-12-07", "scenario": "correction_factor", "units": 2000},
+        {"sku": "DDPE0001Shop", "week_start": "2027-01-04", "scenario": "correction_factor", "units": 800},
+        {"sku": "DDPE0001Shop", "week_start": "2026-10-05", "scenario": "correction_factor", "units": 999},
+    ]
+    by_month = forecast_by_holiday_month(rows, "DDPE0001Shop", "correction_factor")
+    assert by_month["2026-11"] == 2100
+    assert by_month["2026-12"] == 2000
+    assert by_month["2027-01"] == 800
+    plan = holiday_month_plan(by_month, 100)
+    assert plan["forecast_total"] == 4900
+    assert plan["planned_total"] == holiday_demand_with_planning(4900, 100, True)
+    assert plan["planned_total"] == 9200
+    assert plan["months"][0]["forecast"] == 2100
+    assert plan["months"][0]["planned"] == 3000
 
 
 def test_month_under_19k_is_one_pallet():

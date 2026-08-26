@@ -17,7 +17,9 @@ import {
   allocateMonthlyUnits,
   AMAZON_IN_BY,
   daysOfSupply,
-  holidayDemandWithPlanning,
+  forecastByHolidayMonth,
+  HOLIDAY_DEMAND_MONTHS,
+  holidayMonthPlan,
   inventoryFlag,
   monthPalletFillPct,
   monthShortfall,
@@ -37,7 +39,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { isConfigured } from "@/lib/supabase";
-import { Shield, Package, AlertTriangle, Download, FileText, Lock, Unlock } from "lucide-react";
+import { Shield, Package, AlertTriangle, Download, FileText, Lock, Unlock, Copy, Check } from "lucide-react";
 import Link from "next/link";
 
 const SKUS = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"];
@@ -98,7 +100,9 @@ function SetupPrompt() {
 }
 
 interface SkuPlan {
-  sku: string; label: string; novDecDemand: number;
+  sku: string; label: string;
+  novDemand: number; decDemand: number; janDemand: number;
+  novDecDemand: number; plannedDemand: number;
   fba: number; inbound: number; awd: number; tpl: number; supply: number; gap: number;
 }
 interface CoverWeek {
@@ -121,6 +125,8 @@ interface MfgMonthEntry {
 interface MfgScenario { entries: MfgMonthEntry[]; totalUnits: number; totalPallets: number; }
 interface MfgSkuSummary {
   sku: string; label: string; holidayDemand: number;
+  novDemand: number; decDemand: number; janDemand: number;
+  holidayForecast: number;
   fba: number; inbound: number; awd: number; tpl: number;
   transfer: number; manufacture: number;
   holidayManufacture: number; inventoryReorder: number;
@@ -131,8 +137,6 @@ interface MfgSkuSummary {
 }
 interface MfgTransfer { sku: string; source: string; units: number; timing: string; }
 
-const HOLIDAY_MONTHS = new Set(["2026-11", "2026-12", "2026-01", "2027-01"]);
-
 function getMonday(d: Date): Date {
   const day = d.getDay();
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
@@ -140,19 +144,43 @@ function getMonday(d: Date): Date {
 }
 function toIso(d: Date): string { return d.toISOString().slice(0, 10); }
 
-function holidayDemandBySku(
-  forecasts: { sku: string; week_start: string; scenario: string; units: number }[],
-  scenario: string,
-): Record<string, number> {
-  const totals: Record<string, number> = {};
-  for (const sku of SKUS) totals[sku] = 0;
-  for (const f of forecasts) {
-    if (f.scenario !== scenario) continue;
-    const m = f.week_start?.slice(0, 7);
-    if (m && HOLIDAY_MONTHS.has(m)) totals[f.sku] = (totals[f.sku] ?? 0) + Number(f.units);
+function buildMfgBrief(skuSummary: MfgSkuSummary[]): string {
+  const L: string[] = [];
+  L.push("Tallowbourn holiday sell-through (in Amazon by " + TARGET + ")");
+  L.push("Nov/Dec/Jan are the months we are covering — not the ship months.");
+  L.push("Those units produce now and ship on September / October pallets.");
+  L.push("");
+  L.push(
+    "SKU".padEnd(14) +
+    "Nov".padStart(8) +
+    "Dec".padStart(8) +
+    "Jan".padStart(8) +
+    "Planned".padStart(9) +
+    "Mfg".padStart(9),
+  );
+  for (const s of skuSummary) {
+    L.push(
+      (SKU_SHORT[s.sku] ?? s.sku).padEnd(14) +
+      fmt(s.novDemand).padStart(8) +
+      fmt(s.decDemand).padStart(8) +
+      fmt(s.janDemand).padStart(8) +
+      fmt(s.holidayDemand).padStart(9) +
+      fmt(s.manufacture).padStart(9),
+    );
   }
-  for (const sku of SKUS) totals[sku] = Math.round(totals[sku] ?? 0);
-  return totals;
+  const tot = (pick: (s: MfgSkuSummary) => number) => skuSummary.reduce((a, s) => a + pick(s), 0);
+  L.push(
+    "TOTAL".padEnd(14) +
+    fmt(tot((s) => s.novDemand)).padStart(8) +
+    fmt(tot((s) => s.decDemand)).padStart(8) +
+    fmt(tot((s) => s.janDemand)).padStart(8) +
+    fmt(tot((s) => s.holidayDemand)).padStart(9) +
+    fmt(tot((s) => s.manufacture)).padStart(9),
+  );
+  L.push("");
+  L.push("August pallet = inventory reorder only (keep Amazon from stocking out now).");
+  L.push("Planned = max(forecast Nov+Dec+Jan, planning velocity × 92).");
+  return L.join("\n") + "\n";
 }
 
 // ── Downloads ──
@@ -170,9 +198,9 @@ function buildMfgCsv(
   transfers: MfgTransfer[],
 ): string {
   const L: string[] = [];
-  L.push("Section,SKU,SKU_Label,Holiday_Demand,FBA,Inbound,AWD,TPL,Transfer,Inventory_Reorder,Holiday_Manufacture,Manufacture,V30,Target_Days,Lead_Days,Scenario");
+  L.push("Section,SKU,SKU_Label,Nov_Demand,Dec_Demand,Jan_Demand,Holiday_Forecast,Holiday_Demand,FBA,Inbound,AWD,TPL,Transfer,Inventory_Reorder,Holiday_Manufacture,Manufacture,V30,Target_Days,Lead_Days,Scenario");
   for (const [sc, rows] of [["correction_factor", skuSummary], ["actual_2025", skuSummarySens]] as const) {
-    for (const s of rows) L.push(`SKU_Summary,${s.sku},${s.label},${s.holidayDemand},${s.fba},${s.inbound},${s.awd},${s.tpl},${s.transfer},${s.inventoryReorder},${s.holidayManufacture},${s.manufacture},${s.v30},${s.targetDays},${s.leadDays},${sc}`);
+    for (const s of rows) L.push(`SKU_Summary,${s.sku},${s.label},${s.novDemand},${s.decDemand},${s.janDemand},${s.holidayForecast},${s.holidayDemand},${s.fba},${s.inbound},${s.awd},${s.tpl},${s.transfer},${s.inventoryReorder},${s.holidayManufacture},${s.manufacture},${s.v30},${s.targetDays},${s.leadDays},${sc}`);
   }
   L.push(""); L.push("Section,Month,Month_Label,Status,SKU,SKU_Label,Units,Pallets,Ship_By,Scenario");
   for (const [sc, label] of [[primary, "correction_factor"], [sensitivity, "actual_2025"]] as const) {
@@ -199,18 +227,19 @@ function buildMfgSheet(
   L.push("=================================================================");
   L.push(""); L.push("SKU REFERENCE:");
   for (const [sku, label] of Object.entries(SKU_LABELS)) L.push(`  ${sku}  =  ${label}`);
-  L.push("");   L.push(`Demand period: Nov + Dec + Jan`);
+  L.push("");   L.push(`Demand period: Nov + Dec + Jan (sell-through — alert the manufacturer)`);
   L.push(`Pallet capacity: ${fmt(PALLET_MAX)} cartons each; multiple pallets/month OK`);
-  L.push(`Current month = inventory reorder. Sep/Oct = Nov/Dec/Jan so Amazon is stocked by ${TARGET}.`);
+  L.push(`Current month = inventory reorder. Sep/Oct pallets cover Nov/Dec/Jan so Amazon is stocked by ${TARGET}.`);
   L.push(`All units in Amazon FBA by: ${TARGET}`);
   L.push(`3PL policy: transfer only (does NOT reduce manufacture)`);
   L.push(""); L.push("-----------------------------------------------------------------");
-  L.push("PER-SKU SUMMARY (correction_factor)"); L.push("-----------------------------------------------------------------");
+  L.push("HOLIDAY SELL-THROUGH (correction_factor) — tell the manufacturer"); L.push("-----------------------------------------------------------------");
+  L.push(`  ${"SKU".padEnd(14)} ${"Nov".padStart(7)} ${"Dec".padStart(7)} ${"Jan".padStart(7)} ${"Planned".padStart(8)} ${"Reorder".padStart(8)} ${"Mfg".padStart(8)}`);
   for (const s of skuSummary) {
-    L.push(`  ${(SKU_SHORT[s.sku]??s.sku).padEnd(14)} Demand ${fmt(s.holidayDemand).padStart(7)}  Reorder ${fmt(s.inventoryReorder).padStart(7)}  FBA ${fmt(s.fba).padStart(6)}  Mfg ${fmt(s.manufacture).padStart(7)}`);
+    L.push(`  ${(SKU_SHORT[s.sku]??s.sku).padEnd(14)} ${fmt(s.novDemand).padStart(7)} ${fmt(s.decDemand).padStart(7)} ${fmt(s.janDemand).padStart(7)} ${fmt(s.holidayDemand).padStart(8)} ${fmt(s.inventoryReorder).padStart(8)} ${fmt(s.manufacture).padStart(8)}`);
   }
-  const totalMfg = skuSummary.reduce((a, s) => a + s.manufacture, 0);
-  L.push(`  ${"TOTAL".padEnd(14)} ${"".padStart(7)}  ${"".padStart(10)}  ${"".padStart(9)}  ${"".padStart(9)}  ${"".padStart(10)}  Mfg ${fmt(totalMfg).padStart(7)}`);
+  const tot = (pick: (s: MfgSkuSummary) => number) => skuSummary.reduce((a, s) => a + pick(s), 0);
+  L.push(`  ${"TOTAL".padEnd(14)} ${fmt(tot((s) => s.novDemand)).padStart(7)} ${fmt(tot((s) => s.decDemand)).padStart(7)} ${fmt(tot((s) => s.janDemand)).padStart(7)} ${fmt(tot((s) => s.holidayDemand)).padStart(8)} ${fmt(tot((s) => s.inventoryReorder)).padStart(8)} ${fmt(tot((s) => s.manufacture)).padStart(8)}`);
   L.push(""); L.push("-----------------------------------------------------------------");
   L.push("PRODUCTION SCHEDULE — month 1 = inventory reorder + leftover"); L.push("-----------------------------------------------------------------");
   for (const e of primary.entries) {
@@ -236,7 +265,9 @@ function buildMfgSheet(
     else L.push(`  ${e.label}: no production needed`);
   }
   L.push(""); L.push("-----------------------------------------------------------------");
-  L.push("NOTES:"); L.push("  - Current month = inventory reorder. Holiday build ships Sep/Oct.");
+  L.push("NOTES:"); L.push("  - Nov/Dec/Jan are sell-through months, not production months.");
+  L.push("  - Alert the manufacturer with those totals; they ship on Sep/Oct pallets.");
+  L.push("  - Current month = inventory reorder so Amazon does not stock out now.");
   L.push("  - FIRM = committed. INDICATIVE = forecast-driven, may change.");
   L.push("  - Manufacture assumes 3PL transferred separately."); L.push("  - This is a planning aid, not a purchase order.");
   L.push("-----------------------------------------------------------------");
@@ -249,6 +280,7 @@ export default function PalletPlanPage() {
   const [include3pl, setInclude3pl] = useState(true);
   const [includeAwd, setIncludeAwd] = useState(true);
   const [coverSku, setCoverSku] = useState(SKUS[0]);
+  const [briefCopied, setBriefCopied] = useState(false);
 
   // Committed months (persisted in localStorage)
   const [committed, setCommitted] = useState<Set<string>>(new Set());
@@ -293,16 +325,19 @@ export default function PalletPlanPage() {
       const awd = includeAwd ? Number(awdMap.get(sku)?.awd_on_hand ?? 0) : 0;
       const tpl = include3pl ? Number(tplMap.get(sku)?.available ?? 0) : 0;
       const supply = fba + inbound + awd + tpl;
-      let novDecDemand = 0;
-      for (const f of forecasts) {
-        if (f.sku !== sku || f.scenario !== "correction_factor") continue;
-        const m = f.week_start?.slice(0, 7);
-        if (m === "2026-11" || m === "2026-12") novDecDemand += Number(f.units);
-      }
-      novDecDemand = Math.round(novDecDemand);
-      const gap = Math.max(novDecDemand - supply, 0);
-      tGap += gap; tDemand += novDecDemand; tSupply += supply;
-      plans.push({ sku, label: SKU_LABELS[sku] ?? sku, novDecDemand, fba, inbound, awd, tpl, supply, gap });
+      const monthFc = forecastByHolidayMonth(forecasts, sku, "correction_factor");
+      const novDemand = monthFc["2026-11"] ?? 0;
+      const decDemand = monthFc["2026-12"] ?? 0;
+      const janDemand = monthFc["2027-01"] ?? 0;
+      const novDecDemand = novDemand + decDemand;
+      const plannedDemand = novDecDemand + janDemand;
+      const gap = Math.max(plannedDemand - supply, 0);
+      tGap += gap; tDemand += plannedDemand; tSupply += supply;
+      plans.push({
+        sku, label: SKU_LABELS[sku] ?? sku,
+        novDemand, decDemand, janDemand, novDecDemand, plannedDemand,
+        fba, inbound, awd, tpl, supply, gap,
+      });
     }
     return { skuPlans: plans, totalGap: tGap, totalDemand: tDemand, totalSupply: tSupply };
   }, [snapshots, forecasts, awdList, tplList, include3pl, includeAwd]);
@@ -445,13 +480,20 @@ export default function PalletPlanPage() {
     }
 
     function buildScenario(scenario: string): { sc: MfgScenario; summaries: MfgSkuSummary[] } {
-      const demand = holidayDemandBySku(forecasts, scenario);
       const summaries: MfgSkuSummary[] = [];
       const holidayMfg: Record<string, number> = {};
       const reorderBySku: Record<string, number> = {};
       for (const sku of SKUS) {
         const i = inv[sku];
-        const d = holidayDemandWithPlanning(demand[sku] ?? 0, i.planningDaily, true);
+        const monthPlan = holidayMonthPlan(
+          forecastByHolidayMonth(forecasts, sku, scenario),
+          i.planningDaily,
+          true,
+        );
+        const d = monthPlan.plannedTotal;
+        const nov = monthPlan.months.find((m) => m.month === "2026-11")?.forecast ?? 0;
+        const dec = monthPlan.months.find((m) => m.month === "2026-12")?.forecast ?? 0;
+        const jan = monthPlan.months.find((m) => m.month === "2027-01")?.forecast ?? 0;
         let deductions = i.fba + i.inbound + i.awd;
         if (tplOffsetsProduction) deductions += i.tpl;
         const holidayManufacture = Math.max(0, d - deductions);
@@ -460,6 +502,8 @@ export default function PalletPlanPage() {
         reorderBySku[sku] = i.inventoryReorder;
         summaries.push({
           sku, label: SKU_LABELS[sku] ?? sku, holidayDemand: d,
+          novDemand: nov, decDemand: dec, janDemand: jan,
+          holidayForecast: monthPlan.forecastTotal,
           fba: i.fba, inbound: i.inbound, awd: i.awd, tpl: i.tpl,
           transfer: i.tpl + i.awd, manufacture,
           holidayManufacture, inventoryReorder: i.inventoryReorder,
@@ -535,7 +579,7 @@ export default function PalletPlanPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Pallet Planner</h1>
           <p className="text-sm text-muted-foreground">
-            August = inventory reorder · Sep/Oct carry Nov–Jan so it is in Amazon by {TARGET} · {fmt(PALLET_MAX)} cartons/pallet, multiple OK
+            August = inventory reorder · Sep/Oct ship the Nov–Jan sell-through so it is in Amazon by {TARGET} · {fmt(PALLET_MAX)} cartons/pallet
           </p>
         </div>
         <Link href="/inventory"><Button variant="outline" size="sm">← Inventory</Button></Link>
@@ -559,7 +603,7 @@ export default function PalletPlanPage() {
           <CardContent className="p-4">
             <p className="text-[10px] text-muted-foreground uppercase">Holiday Demand</p>
             <p className="text-2xl font-semibold tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.holidayDemand, 0))}</p>
-            <p className="text-xs text-muted-foreground">forecast floored by planning rate</p>
+            <p className="text-xs text-muted-foreground">Nov+Dec+Jan, floored by planning rate</p>
           </CardContent>
         </Card>
         <Card>
@@ -596,6 +640,19 @@ export default function PalletPlanPage() {
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-medium">Share with Manufacturer</CardTitle>
             <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={async () => {
+                const text = buildMfgBrief(mfgSkuSummary);
+                try {
+                  await navigator.clipboard.writeText(text);
+                  setBriefCopied(true);
+                  window.setTimeout(() => setBriefCopied(false), 2000);
+                } catch {
+                  downloadBlob(text, `mfg_brief_${generated}.txt`, "text/plain");
+                }
+              }}>
+                {briefCopied ? <Check className="mr-1.5 h-3.5 w-3.5" /> : <Copy className="mr-1.5 h-3.5 w-3.5" />}
+                {briefCopied ? "Copied" : "Copy Nov–Jan brief"}
+              </Button>
               <Button variant="outline" size="sm" onClick={() => {
                 downloadBlob(buildMfgCsv(mfgPrimary, mfgSensitivity, mfgSkuSummary, mfgSkuSummarySens, mfgTransfers),
                   `mfg_headsup_${generated}.csv`, "text/csv");
@@ -612,7 +669,7 @@ export default function PalletPlanPage() {
           </div>
           <div className="flex items-center gap-4 mt-1">
             <p className="text-xs text-muted-foreground">
-              Reorder matches Inventory. Nov/Dec/Jan manufacture ships on Sep/Oct pallets so it arrives by {TARGET}.
+              Nov/Dec/Jan are sell-through — copy the brief to alert the manufacturer. Those units ship on Sep/Oct pallets and arrive by {TARGET}.
             </p>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <input type="checkbox" checked={tplOffsetsProduction}
@@ -633,7 +690,10 @@ export default function PalletPlanPage() {
                   <TableHead className="text-right">Inv V30</TableHead>
                   <TableHead className="text-right">Recv</TableHead>
                   <TableHead className="text-right">DOS</TableHead>
-                  <TableHead className="text-right">Demand</TableHead>
+                  <TableHead className="text-right">Nov</TableHead>
+                  <TableHead className="text-right">Dec</TableHead>
+                  <TableHead className="text-right">Jan</TableHead>
+                  <TableHead className="text-right">Planned</TableHead>
                   <TableHead className="text-right">Reorder</TableHead>
                   <TableHead className="text-right">FBA</TableHead>
                   <TableHead className="text-right">Inbnd</TableHead>
@@ -656,6 +716,9 @@ export default function PalletPlanPage() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{s.leadDays}d</TableCell>
                     <TableCell className={`text-right tabular-nums ${s.dos < 60 ? "text-amber-500" : ""}`}>{s.dos}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(s.novDemand)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(s.decDemand)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(s.janDemand)}</TableCell>
                     <TableCell className="text-right tabular-nums font-medium">{fmt(s.holidayDemand)}</TableCell>
                     <TableCell className={`text-right tabular-nums font-medium ${s.inventoryReorder > 0 ? "text-amber-500" : "text-muted-foreground"}`}>
                       {s.inventoryReorder > 0 ? fmt(s.inventoryReorder) : "—"}
@@ -669,6 +732,9 @@ export default function PalletPlanPage() {
                 <TableRow className="bg-muted/30 font-semibold">
                   <TableCell>TOTAL</TableCell>
                   <TableCell colSpan={5} />
+                  <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.novDemand, 0))}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.decDemand, 0))}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.janDemand, 0))}</TableCell>
                   <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.holidayDemand, 0))}</TableCell>
                   <TableCell className="text-right tabular-nums text-amber-500">{fmt(mfgSkuSummary.reduce((a, s) => a + s.inventoryReorder, 0))}</TableCell>
                   <TableCell colSpan={3} />
@@ -676,6 +742,34 @@ export default function PalletPlanPage() {
                 </TableRow>
               </TableBody>
             </Table>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            {HOLIDAY_DEMAND_MONTHS.map((spec) => {
+              const key = spec.month === "2026-11" ? "novDemand"
+                : spec.month === "2026-12" ? "decDemand"
+                  : "janDemand";
+              const total = mfgSkuSummary.reduce((a, s) => a + s[key], 0);
+              return (
+                <div key={spec.month} className="rounded-lg border bg-muted/20 p-3">
+                  <p className="text-[10px] uppercase text-muted-foreground">
+                    {spec.label} · sell-through
+                  </p>
+                  <p className="text-xl font-semibold tabular-nums">{fmt(total)}</p>
+                  <div className="mt-1 space-y-0.5">
+                    {mfgSkuSummary.map((s) => (
+                      <div key={s.sku} className="flex justify-between text-[11px]">
+                        <span className="text-muted-foreground">{SKU_SHORT[s.sku]}</span>
+                        <span className="tabular-nums">{fmt(s[key])}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    Not a production month. Ships on Sep/Oct pallets · in Amazon by {TARGET.slice(5)}
+                  </p>
+                </div>
+              );
+            })}
           </div>
 
           {Object.keys(month1Shortfall).length > 0 && (
@@ -800,7 +894,7 @@ export default function PalletPlanPage() {
             Inventory reorder = (cover target{settings.holiday_mode ? " 90d holiday" : ` ${settings.target_cover_days}d`} + lead) × V30 − on-hand — same as the inventory page.
             {" "}Manufacture = max(inventory reorder, holiday demand − FBA − inbound − AWD{tplOffsetsProduction ? " − 3PL" : ""}).
             {!tplOffsetsProduction && " 3PL is transfer only, does not reduce production."}
-            {" "}Current month covers the inventory-page reorder. Sep/Oct pallets carry Nov/Dec/Jan so stock is in Amazon by {TARGET} (ship-by pulled forward by Recv).
+            {" "}Nov/Dec/Jan are sell-through months for the manufacturer brief. Current month covers the inventory-page reorder. Sep/Oct pallets carry that Nov–Jan stock so it is in Amazon by {TARGET} (ship-by pulled forward by Recv).
             {" "}A pallet holds {fmt(PALLET_MAX)} cartons; ship 2+ in the same month when the mix does not fit one.
             {" "}FIRM = committed. INDICATIVE = may change. Not a purchase order.
           </p>
@@ -810,14 +904,17 @@ export default function PalletPlanPage() {
       {/* Per-SKU table */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Per-SKU Holiday Demand vs Supply</CardTitle>
+          <CardTitle className="text-sm font-medium">Per-SKU Holiday Sell-Through vs Supply</CardTitle>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>SKU</TableHead>
-                <TableHead className="text-right">Nov+Dec</TableHead>
+                <TableHead className="text-right">Nov</TableHead>
+                <TableHead className="text-right">Dec</TableHead>
+                <TableHead className="text-right">Jan</TableHead>
+                <TableHead className="text-right">Planned</TableHead>
                 <TableHead className="text-right">FBA</TableHead>
                 <TableHead className="text-right">Inbound</TableHead>
                 <TableHead className="text-right">AWD</TableHead>
@@ -833,7 +930,10 @@ export default function PalletPlanPage() {
                     {p.label}
                     <span className="ml-1 text-[10px] text-muted-foreground">{p.sku}</span>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums font-medium">{fmt(p.novDecDemand)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(p.novDemand)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(p.decDemand)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(p.janDemand)}</TableCell>
+                  <TableCell className="text-right tabular-nums font-medium">{fmt(p.plannedDemand)}</TableCell>
                   <TableCell className="text-right tabular-nums">{fmt(p.fba)}</TableCell>
                   <TableCell className="text-right tabular-nums">{fmt(p.inbound)}</TableCell>
                   <TableCell className="text-right tabular-nums">{p.awd > 0 ? fmt(p.awd) : "—"}</TableCell>
@@ -846,6 +946,9 @@ export default function PalletPlanPage() {
               ))}
               <TableRow className="font-semibold bg-muted/30">
                 <TableCell>TOTAL</TableCell>
+                <TableCell className="text-right tabular-nums">{fmt(skuPlans.reduce((a, p) => a + p.novDemand, 0))}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmt(skuPlans.reduce((a, p) => a + p.decDemand, 0))}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmt(skuPlans.reduce((a, p) => a + p.janDemand, 0))}</TableCell>
                 <TableCell className="text-right tabular-nums">{fmt(totalDemand)}</TableCell>
                 <TableCell className="text-right tabular-nums" colSpan={4} />
                 <TableCell className="text-right tabular-nums">{fmt(totalSupply)}</TableCell>

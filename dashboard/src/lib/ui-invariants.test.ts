@@ -46,6 +46,9 @@ describe("pallet planner vs inventory", () => {
     assert.match(page, /packPallets/);
     assert.match(page, /inventoryReorder/);
     assert.match(page, /19,000|19000|PALLET_MAX/);
+    assert.match(page, /buildMfgBrief/);
+    assert.match(page, /novDemand/);
+    assert.match(page, /Copy Nov–Jan brief|sell-through/);
     assert.doesNotMatch(
       page,
       /remaining\[sku\] \* w \/ Math\.max\(wSum/,

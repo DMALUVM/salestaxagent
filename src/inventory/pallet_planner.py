@@ -27,7 +27,8 @@ from src.inventory.reorder import (
     allocate_monthly_units,
     amazon_inventory_reorder,
     days_of_supply,
-    holiday_demand_with_planning,
+    forecast_by_holiday_month,
+    holiday_month_plan,
     inventory_flag,
     manufacture_need,
     month_pallet_fill_pct,
@@ -614,18 +615,16 @@ def build_manufacturer_headsup(
     all_sku_summaries: dict[str, list[dict]] = {}
 
     for scenario in ["correction_factor", "actual_2025"]:
-        demand_by_sku = _holiday_demand_by_sku(
-            fc_rows, target_skus, scenario, include_jan,
-        )
-
         sku_summaries: list[dict] = []
         holiday_mfg: dict[str, int] = {}
         reorder_by_sku: dict[str, int] = {}
         for sku in target_skus:
             i = inv[sku]
-            demand = holiday_demand_with_planning(
-                demand_by_sku.get(sku, 0), i.get("planning_daily", 0), include_jan,
+            month_fc = forecast_by_holiday_month(fc_rows, sku, scenario)
+            month_plan = holiday_month_plan(
+                month_fc, i.get("planning_daily", 0), include_jan,
             )
+            demand = month_plan["planned_total"]
             transfer = i["tpl"] + i["awd"]  # to be moved to FBA
 
             # Holiday gap = demand - FBA - inbound - AWD
@@ -643,6 +642,18 @@ def build_manufacturer_headsup(
                 "sku": sku,
                 "label": SKU_LABEL_MAP.get(sku, sku),
                 "holiday_demand": demand,
+                "holiday_forecast_total": month_plan["forecast_total"],
+                "holiday_floor_total": month_plan["floor_total"],
+                "holiday_months": month_plan["months"],
+                "nov_demand": next(
+                    (m["forecast"] for m in month_plan["months"] if m["month"] == "2026-11"), 0,
+                ),
+                "dec_demand": next(
+                    (m["forecast"] for m in month_plan["months"] if m["month"] == "2026-12"), 0,
+                ),
+                "jan_demand": next(
+                    (m["forecast"] for m in month_plan["months"] if m["month"] == "2027-01"), 0,
+                ),
                 "fba": i["fba"],
                 "inbound": i["inbound"],
                 "awd": i["awd"],
@@ -757,14 +768,18 @@ def format_manufacturer_csv(headsup: dict) -> str:
     lines: list[str] = []
 
     # SKU summary section
-    lines.append("Section,SKU,SKU_Label,Holiday_Demand,FBA,Inbound,AWD,TPL,"
+    lines.append("Section,SKU,SKU_Label,Nov_Demand,Dec_Demand,Jan_Demand,"
+                 "Holiday_Forecast,Holiday_Demand,FBA,Inbound,AWD,TPL,"
                  "Transfer,Inventory_Reorder,Holiday_Manufacture,Manufacture,"
                  "V30,Target_Days,Lead_Days,Scenario")
     for scenario, key in [("correction_factor", "sku_summary"),
                           ("actual_2025", "sku_summary_sensitivity")]:
         for s in headsup[key]:
             lines.append(
-                f"SKU_Summary,{s['sku']},{s['label']},{s['holiday_demand']},"
+                f"SKU_Summary,{s['sku']},{s['label']},"
+                f"{s.get('nov_demand', 0)},{s.get('dec_demand', 0)},"
+                f"{s.get('jan_demand', 0)},{s.get('holiday_forecast_total', s['holiday_demand'])},"
+                f"{s['holiday_demand']},"
                 f"{s['fba']},{s['inbound']},{s['awd']},{s['tpl']},"
                 f"{s['transfer']},{s.get('inventory_reorder', 0)},"
                 f"{s.get('holiday_manufacture', s['manufacture'])},"
@@ -826,6 +841,8 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a(f"FBA cover target: {headsup['cover_target_days']} days"
       f" (inventory page; holiday_mode={headsup.get('holiday_mode')})")
     a("Month 1 ships inventory reorder in full (same math as /inventory).")
+    a("Nov/Dec/Jan below are SELL-THROUGH months — tell the manufacturer")
+    a("what Amazon must cover. Those units ship on Sep/Oct pallets.")
     a(f"All units in Amazon FBA by: {headsup['amazon_in_by']}")
     tpl_note = "3PL OFFSETS production" if headsup.get("tpl_offsets_production") \
         else "3PL shown as transfer only (does NOT reduce manufacture)"
@@ -836,21 +853,24 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("-" * 65)
     a("PER-SKU SUMMARY (correction_factor)")
     a("-" * 65)
-    a(f"  {'SKU':<14} {'Demand':>8} {'Reorder':>8} {'FBA':>7} {'Inb':>6}"
-      f" {'AWD':>6} {'3PL':>7} {'Mfg':>8}")
+    a(f"  {'SKU':<14} {'Nov':>7} {'Dec':>7} {'Jan':>7} {'Planned':>8}"
+      f" {'Reorder':>8} {'Mfg':>8}")
     a(f"  {'-'*63}")
     for s in headsup["sku_summary"]:
         a(f"  {SKU_SHORT_MAP.get(s['sku'], s['sku']):<14}"
-          f" {s['holiday_demand']:>8,} {s.get('inventory_reorder', 0):>8,}"
-          f" {s['fba']:>7,} {s['inbound']:>6,}"
-          f" {s['awd']:>6,} {s['tpl']:>7,}"
+          f" {s.get('nov_demand', 0):>7,} {s.get('dec_demand', 0):>7,}"
+          f" {s.get('jan_demand', 0):>7,} {s['holiday_demand']:>8,}"
+          f" {s.get('inventory_reorder', 0):>8,}"
           f" {s['manufacture']:>8,}")
+    total_nov = sum(s.get("nov_demand", 0) for s in headsup["sku_summary"])
+    total_dec = sum(s.get("dec_demand", 0) for s in headsup["sku_summary"])
+    total_jan = sum(s.get("jan_demand", 0) for s in headsup["sku_summary"])
     total_demand = sum(s["holiday_demand"] for s in headsup["sku_summary"])
     total_mfg = sum(s["manufacture"] for s in headsup["sku_summary"])
     total_reorder = sum(s.get("inventory_reorder", 0) for s in headsup["sku_summary"])
     a(f"  {'-'*63}")
-    a(f"  {'TOTAL':<14} {total_demand:>8,} {total_reorder:>8,}"
-      f" {'':>7} {'':>6} {'':>6} {'':>7} {total_mfg:>8,}")
+    a(f"  {'TOTAL':<14} {total_nov:>7,} {total_dec:>7,} {total_jan:>7,}"
+      f" {total_demand:>8,} {total_reorder:>8,} {total_mfg:>8,}")
 
     # ── Production schedule ──
     a("")
@@ -933,8 +953,9 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("-" * 65)
     a("NOTES:")
     a("  - Current month = inventory-page reorder (keep Amazon covered now).")
-    a("  - Nov/Dec/Jan manufacture ships on September and October")
-    a("    pallets so it is in Amazon by end of October.")
+    a("  - Nov/Dec/Jan are sell-through, not production months. Alert the")
+    a("    manufacturer with those totals; they ship on Sep/Oct pallets")
+    a("    so stock is in Amazon by end of October.")
     a("  - One pallet holds 19,000 lip-balm cartons. A month can ship")
     a("    multiple pallets; CRITICAL / highest reorder packs first.")
     a("  - FIRM months represent committed production volumes.")

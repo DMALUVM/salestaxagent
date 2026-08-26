@@ -177,6 +177,76 @@ export function holidayDemandWithPlanning(
   return Math.max(Math.round(forecastUnits), Math.round(dailyPlanning * days));
 }
 
+/** Holiday sell-through months the Sep/Oct pallets cover (not production months). */
+export const HOLIDAY_DEMAND_MONTHS = [
+  { month: "2026-11", label: "November 2026", short: "Nov", days: 30, aliases: ["2026-11"] },
+  { month: "2026-12", label: "December 2026", short: "Dec", days: 31, aliases: ["2026-12"] },
+  { month: "2027-01", label: "January 2027", short: "Jan", days: 31, aliases: ["2027-01", "2026-01"] },
+] as const;
+
+export function forecastByHolidayMonth(
+  forecasts: { sku: string; week_start: string; scenario: string; units: number }[],
+  sku: string,
+  scenario: string,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  const aliasToKey: Record<string, string> = {};
+  for (const spec of HOLIDAY_DEMAND_MONTHS) {
+    out[spec.month] = 0;
+    for (const alias of spec.aliases) aliasToKey[alias] = spec.month;
+  }
+  for (const f of forecasts) {
+    if (f.sku !== sku || f.scenario !== scenario) continue;
+    const key = aliasToKey[f.week_start?.slice(0, 7) ?? ""];
+    if (key) out[key] += Number(f.units);
+  }
+  for (const k of Object.keys(out)) out[k] = Math.round(out[k]);
+  return out;
+}
+
+export type HolidayMonthRow = {
+  month: string;
+  label: string;
+  short: string;
+  days: number;
+  forecast: number;
+  floor: number;
+  planned: number;
+};
+
+export function holidayMonthPlan(
+  forecastByMonth: Record<string, number>,
+  dailyPlanning: number,
+  includeJan = true,
+): {
+  months: HolidayMonthRow[];
+  forecastTotal: number;
+  plannedTotal: number;
+  floorTotal: number;
+} {
+  const specs = includeJan ? HOLIDAY_DEMAND_MONTHS : HOLIDAY_DEMAND_MONTHS.slice(0, 2);
+  const months: HolidayMonthRow[] = specs.map((spec) => {
+    const forecast = forecastByMonth[spec.month] ?? 0;
+    const floor = Math.round(dailyPlanning * spec.days);
+    return {
+      month: spec.month,
+      label: spec.label,
+      short: spec.short,
+      days: spec.days,
+      forecast,
+      floor,
+      planned: Math.max(forecast, floor),
+    };
+  });
+  const forecastTotal = months.reduce((s, m) => s + m.forecast, 0);
+  return {
+    months,
+    forecastTotal,
+    plannedTotal: holidayDemandWithPlanning(forecastTotal, dailyPlanning, includeJan),
+    floorTotal: Math.round(dailyPlanning * (includeJan ? HOLIDAY_DAYS_NOV_JAN : HOLIDAY_DAYS_NOV_DEC)),
+  };
+}
+
 export function daysOfSupply(fba: number, dailyVelocity: number): number {
   if (dailyVelocity <= 0.001) return fba > 0 ? 9999 : 0;
   return Math.round(fba / dailyVelocity);

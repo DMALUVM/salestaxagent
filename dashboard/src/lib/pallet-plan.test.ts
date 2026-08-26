@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 
 import {
   allocateMonthlyUnits,
+  forecastByHolidayMonth,
+  holidayDemandWithPlanning,
   holidayInboundMonths,
+  holidayMonthPlan,
   manufactureNeed,
   monthPalletFillPct,
   monthShortfall,
@@ -93,6 +96,27 @@ describe("pallet monthly allocation", () => {
     assert.equal(packed[0].mix.DDPE0001Shop, 8000);
     assert.equal(packed.reduce((s, p) => s + p.units, 0), 25000);
     assert.equal(monthPalletFillPct(25000, 2), Math.round(100 * 25000 / 38000));
+  });
+
+  test("holiday demand splits Nov/Dec/Jan and floors the 92-day total", () => {
+    const forecasts = [
+      { sku: "DDPE0001Shop", week_start: "2026-11-02", scenario: "correction_factor", units: 1000 },
+      { sku: "DDPE0001Shop", week_start: "2026-11-09", scenario: "correction_factor", units: 1100 },
+      { sku: "DDPE0001Shop", week_start: "2026-12-07", scenario: "correction_factor", units: 2000 },
+      { sku: "DDPE0001Shop", week_start: "2027-01-04", scenario: "correction_factor", units: 800 },
+      { sku: "DDPE0001Shop", week_start: "2026-10-05", scenario: "correction_factor", units: 999 },
+    ];
+    const byMonth = forecastByHolidayMonth(forecasts, "DDPE0001Shop", "correction_factor");
+    assert.equal(byMonth["2026-11"], 2100);
+    assert.equal(byMonth["2026-12"], 2000);
+    assert.equal(byMonth["2027-01"], 800);
+    const plan = holidayMonthPlan(byMonth, 100);
+    assert.equal(plan.forecastTotal, 4900);
+    assert.equal(plan.floorTotal, 9200);
+    assert.equal(plan.plannedTotal, holidayDemandWithPlanning(4900, 100, true));
+    assert.equal(plan.plannedTotal, 9200);
+    assert.equal(plan.months[0].forecast, 2100);
+    assert.equal(plan.months[0].planned, 3000);
   });
 
   test("a 12k month is one pallet", () => {
