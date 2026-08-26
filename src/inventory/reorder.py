@@ -284,11 +284,17 @@ def holiday_demand_with_planning(
 
 
 # Canonical holiday sell-through months the Sep/Oct pallets cover.
-# January aliases include 2026-01 so leftover forecast keys still roll in.
+# 2026-01 is a PROXY for January 2027 only when 2027-01 is missing.
 HOLIDAY_DEMAND_MONTHS: tuple[tuple[str, str, int, tuple[str, ...]], ...] = (
     ("2026-11", "November 2026", 30, ("2026-11",)),
     ("2026-12", "December 2026", 31, ("2026-12",)),
-    ("2027-01", "January 2027", 31, ("2027-01", "2026-01")),
+    ("2027-01", "January 2027", 31, ("2027-01",)),
+)
+JANUARY_PROXY_MONTH = "2026-01"
+HOLIDAY_FORECAST_SCENARIOS = (
+    "correction_factor",
+    "actual_2025",
+    "optimistic",
 )
 
 
@@ -296,9 +302,16 @@ def forecast_by_holiday_month(
     fc_rows: list[dict],
     sku: str,
     scenario: str,
+    *,
+    jan_proxy: bool = True,
 ) -> dict[str, int]:
-    """Raw forecast_weekly units by Nov / Dec / Jan for one SKU."""
+    """Raw forecast_weekly units by Nov / Dec / Jan for one SKU.
+
+    January 2026 weeks are a proxy for January 2027 only when no 2027-01
+    rows exist. They are never mixed into November or December.
+    """
     totals: dict[str, float] = {key: 0.0 for key, *_ in HOLIDAY_DEMAND_MONTHS}
+    proxy_jan = 0.0
     alias_to_key: dict[str, str] = {}
     for key, _label, _days, aliases in HOLIDAY_DEMAND_MONTHS:
         for alias in aliases:
@@ -310,6 +323,10 @@ def forecast_by_holiday_month(
         key = alias_to_key.get(month)
         if key:
             totals[key] += float(r.get("units", 0) or 0)
+        elif month == JANUARY_PROXY_MONTH:
+            proxy_jan += float(r.get("units", 0) or 0)
+    if jan_proxy and totals.get("2027-01", 0) <= 0 and proxy_jan > 0:
+        totals["2027-01"] = proxy_jan
     return {k: round(v) for k, v in totals.items()}
 
 
@@ -335,12 +352,17 @@ def holiday_month_plan(
             "days": days,
             "forecast": forecast,
             "floor": floor,
-            "planned": max(forecast, floor),
+            "planned": forecast,
         })
         forecast_total += forecast
     planned_total = holiday_demand_with_planning(
         forecast_total, daily_planning, include_jan,
     )
+    leftover = planned_total - forecast_total
+    if leftover > 0 and months:
+        # Missing January (or a trough month) gets the 92-day floor residual
+        # so Nov+Dec+Jan always sum to the manufacture input.
+        months[-1]["planned"] = months[-1]["forecast"] + leftover
     return {
         "months": months,
         "forecast_total": forecast_total,
@@ -348,6 +370,62 @@ def holiday_month_plan(
         "floor_total": round(float(daily_planning or 0) * (
             HOLIDAY_DAYS_NOV_JAN if include_jan else HOLIDAY_DAYS_NOV_DEC
         )),
+        "jan_is_proxy": bool(
+            include_jan and any(
+                m["month"] == "2027-01" and m["forecast"] > 0 for m in months
+            )
+        ),
+    }
+
+
+def holiday_demand_covering_projections(
+    fc_rows: list[dict],
+    sku: str,
+    daily_planning: float,
+) -> dict:
+    """Do-not-underbuild holiday demand across every forecast scenario.
+
+    Per month: max(scenario forecasts, planning floor for that month).
+    Planned total is the sum of those months, at least planning × 92.
+    """
+    by_scenario: dict[str, dict[str, int]] = {}
+    best: dict[str, int] = {key: 0 for key, *_ in HOLIDAY_DEMAND_MONTHS}
+    for scenario in HOLIDAY_FORECAST_SCENARIOS:
+        fc = forecast_by_holiday_month(fc_rows, sku, scenario)
+        by_scenario[scenario] = fc
+        for key in best:
+            best[key] = max(best[key], int(fc.get(key, 0) or 0))
+
+    months: list[dict] = []
+    planned_total = 0
+    forecast_total = 0
+    for key, label, days, _aliases in HOLIDAY_DEMAND_MONTHS:
+        forecast = best[key]
+        floor = round(float(daily_planning or 0) * days)
+        planned = max(forecast, floor)
+        months.append({
+            "month": key,
+            "label": label,
+            "days": days,
+            "forecast": forecast,
+            "floor": floor,
+            "planned": planned,
+        })
+        planned_total += planned
+        forecast_total += forecast
+    floor_total = round(float(daily_planning or 0) * HOLIDAY_DAYS_NOV_JAN)
+    planned_total = max(planned_total, floor_total)
+    return {
+        "months": months,
+        "forecast_total": forecast_total,
+        "planned_total": planned_total,
+        "floor_total": floor_total,
+        "by_scenario": by_scenario,
+        "covers_scenarios": list(HOLIDAY_FORECAST_SCENARIOS),
+        "jan_is_proxy": any(
+            (by_scenario.get(sc, {}).get("2027-01") or 0) > 0
+            for sc in HOLIDAY_FORECAST_SCENARIOS
+        ),
     }
 
 

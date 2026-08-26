@@ -38,6 +38,14 @@ describe("entity review cards", () => {
   });
 });
 
+describe("inventory plan fallback rate", () => {
+  test("SKU plan page uses planningDaily when forecast weeks are missing", () => {
+    const page = src("src/app/inventory/plan/page.tsx");
+    assert.match(page, /planningDaily/);
+    assert.match(page, /Math\.max\(baseDaily, planDaily\)/);
+  });
+});
+
 describe("pallet planner vs inventory", () => {
   test("pallet page uses the shared inventory reorder formula", () => {
     const page = src("src/app/inventory/pallets/page.tsx");
@@ -48,6 +56,7 @@ describe("pallet planner vs inventory", () => {
     assert.match(page, /19,000|19000|PALLET_MAX/);
     assert.match(page, /buildMfgBrief/);
     assert.match(page, /novDemand/);
+    assert.match(page, /holidayDemandCoveringProjections/);
     assert.match(page, /Copy Nov–Jan brief|sell-through/);
     assert.doesNotMatch(
       page,

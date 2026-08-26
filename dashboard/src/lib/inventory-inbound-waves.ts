@@ -8,6 +8,11 @@ import {
   type ForecastWeekRow,
   type SeasonalityWeek,
 } from "./inventory-phased-demand";
+import {
+  holidayDemandCoveringProjections,
+  holidayDemandWithPlanning,
+  planningDaily,
+} from "./pallet-plan";
 
 export const DEFAULT_RECEIVING_DAYS = 18;
 export const DEFAULT_COVER_DAYS = 60;
@@ -28,8 +33,10 @@ export type SkuVelocityRow = {
   sku: string;
   product_name?: string;
   total_u_30?: number;
+  total_u_90?: number;
   planning_u_30?: number;
   holiday_prior_daily?: number;
+  summer_prior_daily?: number;
   yoy_growth_mult?: number;
   holiday_surge_mult?: number;
 };
@@ -210,20 +217,17 @@ function weekList(start: Date, end: Date): Date[] {
   return weeks;
 }
 
-/** Holiday demand Nov–Dec + Jan from velocity surge fields (YoY anchored). */
-export function holidayDemandUnits(vel: SkuVelocityRow | undefined): number {
-  if (!vel) return 0;
-  const novDecDays = 61;
-  const janDays = 31;
-  const days = novDecDays + janDays;
-  const plan = Number(vel.planning_u_30 ?? 0);
-  const surge = Number(vel.holiday_surge_mult ?? 1);
-  if (plan > 0 && surge > 1.05) return Math.round(plan * days);
-  const daily = Number(vel.holiday_prior_daily ?? 0);
-  const yoy = Number(vel.yoy_growth_mult ?? 1);
-  if (daily > 0) return Math.round(daily * yoy * days);
-  const v30 = Number(vel.total_u_30 ?? 0);
-  return Math.round(v30 * days);
+/** Holiday demand Nov–Dec + Jan — same covering math as the pallet planner. */
+export function holidayDemandUnits(
+  vel: SkuVelocityRow | undefined,
+  forecasts?: ForecastWeekRow[],
+  sku?: string,
+): number {
+  const daily = planningDaily(vel ?? {});
+  if (forecasts && sku) {
+    return holidayDemandCoveringProjections(forecasts, sku, daily).plannedTotal;
+  }
+  return holidayDemandWithPlanning(0, daily, true);
 }
 
 export function buildInboundWavePlan(opts: {
@@ -299,10 +303,11 @@ export function buildInboundWavePlan(opts: {
     const ownedTotal = fba + inbound + awdOh + tplOh;
     const fbaSupply = fba + inbound + (includeAwd ? awdOh : 0);
 
-    const holidayDemand = holidayDemandUnits(vel);
+    const holidayDemand = holidayDemandUnits(vel, opts.forecast, sku);
     const holidayFbaGap = Math.max(holidayDemand - fbaSupply, 0);
     const warehouseShortStatic = Math.max(holidayFbaGap - tplOh, 0);
-    const produceShort = Math.max(holidayDemand - ownedTotal, 0);
+    // 3PL is a transfer, not a manufacture offset — same as pallet planner.
+    const produceShort = holidayFbaGap;
 
     if (baseDaily <= 0) {
       skuPlans.push({

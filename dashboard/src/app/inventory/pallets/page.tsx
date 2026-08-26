@@ -19,6 +19,7 @@ import {
   daysOfSupply,
   forecastByHolidayMonth,
   HOLIDAY_DEMAND_MONTHS,
+  holidayDemandCoveringProjections,
   holidayMonthPlan,
   inventoryFlag,
   monthPalletFillPct,
@@ -314,6 +315,7 @@ export default function PalletPlanPage() {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
     const awdMap = new Map(awdList.map((a) => [a.sku, a]));
     const tplMap = new Map(tplList.map((t) => [t.sku, t]));
+    const velMap = new Map(velocityList.map((v) => [v.sku, v]));
     const plans: SkuPlan[] = [];
     let tGap = 0, tDemand = 0, tSupply = 0;
     for (const sku of SKUS) {
@@ -325,13 +327,15 @@ export default function PalletPlanPage() {
       const awd = includeAwd ? Number(awdMap.get(sku)?.awd_on_hand ?? 0) : 0;
       const tpl = include3pl ? Number(tplMap.get(sku)?.available ?? 0) : 0;
       const supply = fba + inbound + awd + tpl;
-      const monthFc = forecastByHolidayMonth(forecasts, sku, "correction_factor");
-      const novDemand = monthFc["2026-11"] ?? 0;
-      const decDemand = monthFc["2026-12"] ?? 0;
-      const janDemand = monthFc["2027-01"] ?? 0;
+      const monthPlan = holidayDemandCoveringProjections(
+        forecasts, sku, planningDaily(velMap.get(sku) ?? {}),
+      );
+      const novDemand = monthPlan.months.find((m) => m.month === "2026-11")?.planned ?? 0;
+      const decDemand = monthPlan.months.find((m) => m.month === "2026-12")?.planned ?? 0;
+      const janDemand = monthPlan.months.find((m) => m.month === "2027-01")?.planned ?? 0;
       const novDecDemand = novDemand + decDemand;
-      const plannedDemand = novDecDemand + janDemand;
-      const gap = Math.max(plannedDemand - supply, 0);
+      const plannedDemand = monthPlan.plannedTotal;
+      const gap = Math.max(plannedDemand - (fba + inbound + awd), 0);
       tGap += gap; tDemand += plannedDemand; tSupply += supply;
       plans.push({
         sku, label: SKU_LABELS[sku] ?? sku,
@@ -340,7 +344,7 @@ export default function PalletPlanPage() {
       });
     }
     return { skuPlans: plans, totalGap: tGap, totalDemand: tDemand, totalSupply: tSupply };
-  }, [snapshots, forecasts, awdList, tplList, include3pl, includeAwd]);
+  }, [snapshots, forecasts, awdList, tplList, velocityList, include3pl, includeAwd]);
 
   // ── FBA Cover Projection ──
   const { coverProjections, coverAlerts } = useMemo(() => {
@@ -485,15 +489,17 @@ export default function PalletPlanPage() {
       const reorderBySku: Record<string, number> = {};
       for (const sku of SKUS) {
         const i = inv[sku];
-        const monthPlan = holidayMonthPlan(
-          forecastByHolidayMonth(forecasts, sku, scenario),
-          i.planningDaily,
-          true,
-        );
+        const monthPlan = scenario === "correction_factor"
+          ? holidayDemandCoveringProjections(forecasts, sku, i.planningDaily)
+          : holidayMonthPlan(
+            forecastByHolidayMonth(forecasts, sku, scenario),
+            i.planningDaily,
+            true,
+          );
         const d = monthPlan.plannedTotal;
-        const nov = monthPlan.months.find((m) => m.month === "2026-11")?.forecast ?? 0;
-        const dec = monthPlan.months.find((m) => m.month === "2026-12")?.forecast ?? 0;
-        const jan = monthPlan.months.find((m) => m.month === "2027-01")?.forecast ?? 0;
+        const nov = monthPlan.months.find((m) => m.month === "2026-11")?.planned ?? 0;
+        const dec = monthPlan.months.find((m) => m.month === "2026-12")?.planned ?? 0;
+        const jan = monthPlan.months.find((m) => m.month === "2027-01")?.planned ?? 0;
         let deductions = i.fba + i.inbound + i.awd;
         if (tplOffsetsProduction) deductions += i.tpl;
         const holidayManufacture = Math.max(0, d - deductions);
@@ -603,7 +609,7 @@ export default function PalletPlanPage() {
           <CardContent className="p-4">
             <p className="text-[10px] text-muted-foreground uppercase">Holiday Demand</p>
             <p className="text-2xl font-semibold tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.holidayDemand, 0))}</p>
-            <p className="text-xs text-muted-foreground">Nov+Dec+Jan, floored by planning rate</p>
+            <p className="text-xs text-muted-foreground">covers CF / actual_2025 / optimistic + planning floor</p>
           </CardContent>
         </Card>
         <Card>
@@ -669,7 +675,7 @@ export default function PalletPlanPage() {
           </div>
           <div className="flex items-center gap-4 mt-1">
             <p className="text-xs text-muted-foreground">
-              Nov/Dec/Jan are sell-through — copy the brief to alert the manufacturer. Those units ship on Sep/Oct pallets and arrive by {TARGET}.
+              Nov/Dec/Jan planned covers every forecast scenario and the 92-day planning floor so we do not come in under. January 2026 is a proxy until 2027-01 is in the warehouse.
             </p>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <input type="checkbox" checked={tplOffsetsProduction}
@@ -765,7 +771,7 @@ export default function PalletPlanPage() {
                     ))}
                   </div>
                   <p className="mt-2 text-[10px] text-muted-foreground">
-                    Not a production month. Ships on Sep/Oct pallets · in Amazon by {TARGET.slice(5)}
+                    Not a production month. Highest scenario / floor. Ships on Sep/Oct pallets.
                   </p>
                 </div>
               );
@@ -894,7 +900,7 @@ export default function PalletPlanPage() {
             Inventory reorder = (cover target{settings.holiday_mode ? " 90d holiday" : ` ${settings.target_cover_days}d`} + lead) × V30 − on-hand — same as the inventory page.
             {" "}Manufacture = max(inventory reorder, holiday demand − FBA − inbound − AWD{tplOffsetsProduction ? " − 3PL" : ""}).
             {!tplOffsetsProduction && " 3PL is transfer only, does not reduce production."}
-            {" "}Nov/Dec/Jan are sell-through months for the manufacturer brief. Current month covers the inventory-page reorder. Sep/Oct pallets carry that Nov–Jan stock so it is in Amazon by {TARGET} (ship-by pulled forward by Recv).
+            {" "}Nov/Dec/Jan planned is the highest of correction_factor, actual_2025, optimistic, and the 92-day planning floor — same holiday number as inbound / four-numbers. Current month covers the inventory-page reorder. Sep/Oct pallets carry that stock so it is in Amazon by {TARGET}.
             {" "}A pallet holds {fmt(PALLET_MAX)} cartons; ship 2+ in the same month when the mix does not fit one.
             {" "}FIRM = committed. INDICATIVE = may change. Not a purchase order.
           </p>

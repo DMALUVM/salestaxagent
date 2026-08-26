@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   allocateMonthlyUnits,
   forecastByHolidayMonth,
+  holidayDemandCoveringProjections,
   holidayDemandWithPlanning,
   holidayInboundMonths,
   holidayMonthPlan,
@@ -15,6 +16,7 @@ import {
   shipByForAmazonDeadline,
   skuPackPriority,
 } from "./pallet-plan";
+import { holidayDemandUnits } from "./inventory-inbound-waves";
 
 const MONTHS = ["2026-08", "2026-09", "2026-10"];
 
@@ -116,7 +118,62 @@ describe("pallet monthly allocation", () => {
     assert.equal(plan.plannedTotal, holidayDemandWithPlanning(4900, 100, true));
     assert.equal(plan.plannedTotal, 9200);
     assert.equal(plan.months[0].forecast, 2100);
-    assert.equal(plan.months[0].planned, 3000);
+    assert.equal(plan.months[0].planned, 2100);
+    assert.equal(plan.months.reduce((s, m) => s + m.planned, 0), 9200);
+  });
+
+  test("January 2026 is a proxy only when 2027-01 is missing", () => {
+    const withProxy = forecastByHolidayMonth([
+      { sku: "DDPE0001Shop", week_start: "2026-11-02", scenario: "correction_factor", units: 100 },
+      { sku: "DDPE0001Shop", week_start: "2026-01-03", scenario: "correction_factor", units: 500 },
+    ], "DDPE0001Shop", "correction_factor");
+    assert.equal(withProxy["2027-01"], 500);
+    const withRealJan = forecastByHolidayMonth([
+      { sku: "DDPE0001Shop", week_start: "2026-01-03", scenario: "correction_factor", units: 500 },
+      { sku: "DDPE0001Shop", week_start: "2027-01-04", scenario: "correction_factor", units: 80 },
+    ], "DDPE0001Shop", "correction_factor");
+    assert.equal(withRealJan["2027-01"], 80);
+  });
+
+  test("covering projections take the highest scenario so we do not under-build", () => {
+    const forecasts = [
+      { sku: "DDPE0001Shop", week_start: "2026-11-15", scenario: "correction_factor", units: 3135 },
+      { sku: "DDPE0001Shop", week_start: "2026-12-06", scenario: "correction_factor", units: 6146 },
+      { sku: "DDPE0001Shop", week_start: "2026-01-03", scenario: "correction_factor", units: 3190 },
+      { sku: "DDPE0001Shop", week_start: "2026-11-15", scenario: "optimistic", units: 5830 },
+      { sku: "DDPE0001Shop", week_start: "2026-12-06", scenario: "optimistic", units: 7363 },
+      { sku: "DDPE0001Shop", week_start: "2026-01-03", scenario: "optimistic", units: 4610 },
+      { sku: "DDPE0001Shop", week_start: "2026-11-15", scenario: "actual_2025", units: 1649 },
+      { sku: "DDPE0001Shop", week_start: "2026-12-06", scenario: "actual_2025", units: 3866 },
+      { sku: "DDPE0001Shop", week_start: "2026-01-03", scenario: "actual_2025", units: 2463 },
+    ];
+    const cover = holidayDemandCoveringProjections(forecasts, "DDPE0001Shop", 146.04);
+    assert.equal(cover.months[0].planned, 5830);
+    assert.equal(cover.months[1].planned, 7363);
+    assert.equal(cover.months[2].planned, 4610);
+    assert.equal(cover.plannedTotal, 17803);
+    const mixes = allocateMonthlyUnits(
+      ["DDPE0001Shop"],
+      { DDPE0001Shop: 4355 },
+      { DDPE0001Shop: 17803 - 5774 },
+      MONTHS,
+    );
+    const august = mixes[0].DDPE0001Shop ?? 0;
+    const total = mixes.reduce((s, m) => s + (m.DDPE0001Shop ?? 0), 0);
+    assert.equal(august, 4355);
+    assert.ok(total >= 4355, "three-month plan must cover inventory reorder");
+    assert.equal(total, 12029);
+  });
+
+  test("inbound holidayDemandUnits matches covering projections", () => {
+    const forecasts = [
+      { sku: "DDPE0001Shop", week_start: "2026-11-15", scenario: "optimistic", units: 5830 },
+      { sku: "DDPE0001Shop", week_start: "2026-12-06", scenario: "optimistic", units: 7363 },
+      { sku: "DDPE0001Shop", week_start: "2026-01-03", scenario: "optimistic", units: 4610 },
+    ];
+    const vel = { sku: "DDPE0001Shop", total_u_30: 106.57, planning_u_30: 146.04, holiday_surge_mult: 2.4 };
+    const units = holidayDemandUnits(vel, forecasts, "DDPE0001Shop");
+    assert.equal(units, holidayDemandCoveringProjections(forecasts, "DDPE0001Shop", 146.04).plannedTotal);
   });
 
   test("a 12k month is one pallet", () => {

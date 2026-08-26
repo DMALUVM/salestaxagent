@@ -230,7 +230,7 @@ def build_inbound_wave_plan(
 
     # Holiday demand (Nov–Dec + Jan) for shortfall math
     holiday_by_sku = _holiday_demand_by_sku(
-        fc_rows, target_skus, "yoy_anchored", include_jan=True, velocities=velocities,
+        fc_rows, target_skus, "correction_factor", include_jan=True, velocities=velocities,
     )
 
     sku_results: list[dict] = []
@@ -253,7 +253,7 @@ def build_inbound_wave_plan(
         holiday_demand = holiday_by_sku.get(sku, 0)
         holiday_fba_gap = max(holiday_demand - fba_supply, 0)
         warehouse_short = max(holiday_fba_gap - tpl_oh, 0)
-        produce_short = max(holiday_demand - owned_total, 0)
+        produce_short = holiday_fba_gap  # 3PL is transfer-only, same as pallet planner
 
         if base_daily <= 0:
             sku_results.append({

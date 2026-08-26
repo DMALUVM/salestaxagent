@@ -174,7 +174,56 @@ def test_holiday_demand_splits_nov_dec_jan():
     assert plan["planned_total"] == holiday_demand_with_planning(4900, 100, True)
     assert plan["planned_total"] == 9200
     assert plan["months"][0]["forecast"] == 2100
-    assert plan["months"][0]["planned"] == 3000
+    assert plan["months"][0]["planned"] == 2100
+    assert sum(m["planned"] for m in plan["months"]) == 9200
+
+
+def test_january_2026_is_proxy_only_when_2027_missing():
+    rows = [
+        {"sku": "DDPE0001Shop", "week_start": "2026-11-02", "scenario": "correction_factor", "units": 100},
+        {"sku": "DDPE0001Shop", "week_start": "2026-01-03", "scenario": "correction_factor", "units": 500},
+    ]
+    assert forecast_by_holiday_month(rows, "DDPE0001Shop", "correction_factor")["2027-01"] == 500
+    rows.append(
+        {"sku": "DDPE0001Shop", "week_start": "2027-01-04", "scenario": "correction_factor", "units": 80},
+    )
+    assert forecast_by_holiday_month(rows, "DDPE0001Shop", "correction_factor")["2027-01"] == 80
+
+
+def test_covering_projections_and_unscented_do_not_undershoot_reorder():
+    from src.inventory.reorder import holiday_demand_covering_projections
+
+    rows = []
+    for sc, nov, dec, jan in [
+        ("correction_factor", 3135, 6146, 3190),
+        ("optimistic", 5830, 7363, 4610),
+        ("actual_2025", 1649, 3866, 2463),
+    ]:
+        rows += [
+            {"sku": "DDPE0001Shop", "week_start": "2026-11-15", "scenario": sc, "units": nov},
+            {"sku": "DDPE0001Shop", "week_start": "2026-12-06", "scenario": sc, "units": dec},
+            {"sku": "DDPE0001Shop", "week_start": "2026-01-03", "scenario": sc, "units": jan},
+        ]
+    cover = holiday_demand_covering_projections(rows, "DDPE0001Shop", 146.04)
+    assert cover["planned_total"] == 17803
+    rec = amazon_inventory_reorder(
+        fba=5234, inbound=540, awd=0, tpl=1594,
+        daily_velocity=106.57,
+        settings=SETTINGS,
+        measured_receive_days=20,
+    )
+    assert rec["lead_days"] == 20
+    assert rec["reorder_qty"] == 4355
+    holiday_gap = 17803 - (5234 + 540)
+    assert manufacture_need(rec["reorder_qty"], holiday_gap) >= rec["reorder_qty"]
+    mixes = allocate_monthly_units(
+        ["DDPE0001Shop"],
+        {"DDPE0001Shop": rec["reorder_qty"]},
+        {"DDPE0001Shop": holiday_gap},
+        MONTHS,
+    )
+    assert mixes[0]["DDPE0001Shop"] == 4355
+    assert sum(m.get("DDPE0001Shop", 0) for m in mixes) == holiday_gap
 
 
 def test_month_under_19k_is_one_pallet():

@@ -28,6 +28,7 @@ from src.inventory.reorder import (
     amazon_inventory_reorder,
     days_of_supply,
     forecast_by_holiday_month,
+    holiday_demand_covering_projections,
     holiday_month_plan,
     inventory_flag,
     manufacture_need,
@@ -459,25 +460,25 @@ def _holiday_demand_by_sku(
     include_jan: bool = True,
     velocities: dict | None = None,
 ) -> dict[str, int]:
-    """Sum Nov + Dec (+ optional Jan) forecast per SKU.
-
-    ``velocities`` is accepted for inbound_waves compatibility; unused here.
-    """
-    _ = velocities
+    """Holiday sell-through per SKU. With velocities, covers every scenario."""
     totals: dict[str, float] = {s: 0 for s in target_skus}
-    holiday_months = {"2026-11", "2026-12"}
-    if include_jan:
-        holiday_months |= {"2026-01", "2027-01"}
-    for r in fc_rows:
-        if r.get("scenario") != scenario:
+    for sku in target_skus:
+        vel = (velocities or {}).get(sku, {})
+        if velocities:
+            totals[sku] = holiday_demand_covering_projections(
+                fc_rows, sku, planning_daily(vel),
+            )["planned_total"]
             continue
-        sku = r.get("sku")
-        if sku not in target_skus:
+        if scenario == "yoy_anchored":
+            totals[sku] = holiday_demand_covering_projections(
+                fc_rows, sku, planning_daily(vel),
+            )["planned_total"]
             continue
-        ws = str(r.get("week_start", ""))[:7]
-        if ws in holiday_months:
-            totals[sku] += float(r.get("units", 0) or 0)
-    return {s: round(v) for s, v in totals.items()}
+        fc = forecast_by_holiday_month(fc_rows, sku, scenario)
+        totals[sku] = holiday_month_plan(
+            fc, planning_daily(vel), include_jan,
+        )["planned_total"]
+    return {s: int(v) for s, v in totals.items()}
 
 
 def build_manufacturer_headsup(
@@ -620,10 +621,15 @@ def build_manufacturer_headsup(
         reorder_by_sku: dict[str, int] = {}
         for sku in target_skus:
             i = inv[sku]
-            month_fc = forecast_by_holiday_month(fc_rows, sku, scenario)
-            month_plan = holiday_month_plan(
-                month_fc, i.get("planning_daily", 0), include_jan,
-            )
+            if scenario == "correction_factor":
+                month_plan = holiday_demand_covering_projections(
+                    fc_rows, sku, i.get("planning_daily", 0),
+                )
+            else:
+                month_fc = forecast_by_holiday_month(fc_rows, sku, scenario)
+                month_plan = holiday_month_plan(
+                    month_fc, i.get("planning_daily", 0), include_jan,
+                )
             demand = month_plan["planned_total"]
             transfer = i["tpl"] + i["awd"]  # to be moved to FBA
 

@@ -19,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { isConfigured } from "@/lib/supabase";
+import { planningDaily } from "@/lib/pallet-plan";
 import { Shield, AlertTriangle, Play } from "lucide-react";
 import Link from "next/link";
 
@@ -195,9 +196,10 @@ export default function PlanSkuPage() {
 
       // Use imported forecast if available for this week, else velocity × seasonality
       const forecastUnits = getForecastDemand(cursor.getTime(), weekEnd.getTime());
+      const planDaily = planningDaily(vel ?? {});
       const demand = forecastUnits != null
         ? Math.round(forecastUnits * stress)
-        : Math.round(baseDaily * days * mult * stress);
+        : Math.round(Math.max(baseDaily, planDaily) * days * mult * stress);
       totalDemand += demand;
       remaining -= demand;
 

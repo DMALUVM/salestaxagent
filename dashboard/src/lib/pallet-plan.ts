@@ -181,24 +181,37 @@ export function holidayDemandWithPlanning(
 export const HOLIDAY_DEMAND_MONTHS = [
   { month: "2026-11", label: "November 2026", short: "Nov", days: 30, aliases: ["2026-11"] },
   { month: "2026-12", label: "December 2026", short: "Dec", days: 31, aliases: ["2026-12"] },
-  { month: "2027-01", label: "January 2027", short: "Jan", days: 31, aliases: ["2027-01", "2026-01"] },
+  { month: "2027-01", label: "January 2027", short: "Jan", days: 31, aliases: ["2027-01"] },
+] as const;
+export const JANUARY_PROXY_MONTH = "2026-01";
+export const HOLIDAY_FORECAST_SCENARIOS = [
+  "correction_factor",
+  "actual_2025",
+  "optimistic",
 ] as const;
 
 export function forecastByHolidayMonth(
   forecasts: { sku: string; week_start: string; scenario: string; units: number }[],
   sku: string,
   scenario: string,
+  opts?: { janProxy?: boolean },
 ): Record<string, number> {
   const out: Record<string, number> = {};
   const aliasToKey: Record<string, string> = {};
+  let proxyJan = 0;
   for (const spec of HOLIDAY_DEMAND_MONTHS) {
     out[spec.month] = 0;
     for (const alias of spec.aliases) aliasToKey[alias] = spec.month;
   }
   for (const f of forecasts) {
     if (f.sku !== sku || f.scenario !== scenario) continue;
-    const key = aliasToKey[f.week_start?.slice(0, 7) ?? ""];
+    const month = f.week_start?.slice(0, 7) ?? "";
+    const key = aliasToKey[month];
     if (key) out[key] += Number(f.units);
+    else if (month === JANUARY_PROXY_MONTH) proxyJan += Number(f.units);
+  }
+  if ((opts?.janProxy ?? true) && out["2027-01"] <= 0 && proxyJan > 0) {
+    out["2027-01"] = proxyJan;
   }
   for (const k of Object.keys(out)) out[k] = Math.round(out[k]);
   return out;
@@ -235,16 +248,65 @@ export function holidayMonthPlan(
       days: spec.days,
       forecast,
       floor,
+      planned: forecast,
+    };
+  });
+  const forecastTotal = months.reduce((s, m) => s + m.forecast, 0);
+  const plannedTotal = holidayDemandWithPlanning(forecastTotal, dailyPlanning, includeJan);
+  const leftover = plannedTotal - forecastTotal;
+  if (leftover > 0 && months.length) {
+    const last = months[months.length - 1];
+    last.planned = last.forecast + leftover;
+  }
+  return {
+    months,
+    forecastTotal,
+    plannedTotal,
+    floorTotal: Math.round(dailyPlanning * (includeJan ? HOLIDAY_DAYS_NOV_JAN : HOLIDAY_DAYS_NOV_DEC)),
+  };
+}
+
+export function holidayDemandCoveringProjections(
+  forecasts: { sku: string; week_start: string; scenario: string; units: number }[],
+  sku: string,
+  dailyPlanning: number,
+): {
+  months: HolidayMonthRow[];
+  forecastTotal: number;
+  plannedTotal: number;
+  floorTotal: number;
+  byScenario: Record<string, Record<string, number>>;
+} {
+  const byScenario: Record<string, Record<string, number>> = {};
+  const best: Record<string, number> = {};
+  for (const spec of HOLIDAY_DEMAND_MONTHS) best[spec.month] = 0;
+  for (const scenario of HOLIDAY_FORECAST_SCENARIOS) {
+    const fc = forecastByHolidayMonth(forecasts, sku, scenario);
+    byScenario[scenario] = fc;
+    for (const spec of HOLIDAY_DEMAND_MONTHS) {
+      best[spec.month] = Math.max(best[spec.month], fc[spec.month] ?? 0);
+    }
+  }
+  const months: HolidayMonthRow[] = HOLIDAY_DEMAND_MONTHS.map((spec) => {
+    const forecast = best[spec.month] ?? 0;
+    const floor = Math.round(dailyPlanning * spec.days);
+    return {
+      month: spec.month,
+      label: spec.label,
+      short: spec.short,
+      days: spec.days,
+      forecast,
+      floor,
       planned: Math.max(forecast, floor),
     };
   });
   const forecastTotal = months.reduce((s, m) => s + m.forecast, 0);
-  return {
-    months,
-    forecastTotal,
-    plannedTotal: holidayDemandWithPlanning(forecastTotal, dailyPlanning, includeJan),
-    floorTotal: Math.round(dailyPlanning * (includeJan ? HOLIDAY_DAYS_NOV_JAN : HOLIDAY_DAYS_NOV_DEC)),
-  };
+  const floorTotal = Math.round(dailyPlanning * HOLIDAY_DAYS_NOV_JAN);
+  const plannedTotal = Math.max(
+    months.reduce((s, m) => s + m.planned, 0),
+    floorTotal,
+  );
+  return { months, forecastTotal, plannedTotal, floorTotal, byScenario };
 }
 
 export function daysOfSupply(fba: number, dailyVelocity: number): number {
