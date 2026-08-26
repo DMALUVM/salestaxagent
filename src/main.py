@@ -3936,14 +3936,20 @@ def inventory_calibrate_cmd(dry_run):
     if dry_run:
         click.echo("DRY RUN\n")
     else:
+        from src.inventory.awd_replenishments import recompute_stored_replenish_days
         r = sync_inbound_shipments(days_back=180, dry_run=False)
         click.echo(f"Inbound shipments: {r.get('shipments_found', 0)} found, "
                    f"{r.get('rows_upserted', 0)} upserted")
+        recomputed = recompute_stored_replenish_days()
+        click.echo(f"AWD replenish recompute: {recomputed.get('updated', 0)} rows")
     sig = sync_sku_signals()
     click.echo(f"Rate signals: {sig.get('skus', 0)} SKUs")
     if sig.get("account_receive_days") is not None:
         click.echo(f"Account median receive: {sig['account_receive_days']}d "
                    f"(n={sig.get('account_receive_n', 0)})")
+    if sig.get("account_replenish_days") is not None:
+        click.echo(f"Account median AWD→FBA: {sig['account_replenish_days']}d "
+                   f"(n={sig.get('account_replenish_n', 0)})")
 
 
 @cli.command("inventory-velocity")

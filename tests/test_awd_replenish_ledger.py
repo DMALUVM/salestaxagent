@@ -45,3 +45,23 @@ def test_compute_replenish_days_uses_ledger_when_no_fba_link(monkeypatch):
     days, basis = _compute_replenish_days(order, {})
     assert days == 11
     assert basis == "ledger_shipped_to_sellable"
+
+
+def test_compute_ignores_same_day_ledger_and_uses_success(monkeypatch):
+    monkeypatch.setattr(
+        "src.inventory.awd_replenishments._ledger_any_fc_receipts",
+        lambda skus, start: (
+            datetime(2026, 3, 1, tzinfo=timezone.utc),
+            datetime(2026, 3, 1, tzinfo=timezone.utc),
+        ),
+    )
+    order = {
+        "status": "SUCCESS",
+        "confirmedOn": "2026-03-01T00:00:00Z",
+        "updatedAt": "2026-03-08T00:00:00Z",
+        "outboundShipments": [{"shipmentId": "repl-ship-abc", "shipmentStatus": "IN_TRANSIT"}],
+        "shippedProducts": [{"sku": "SKU1", "quantity": 100}],
+    }
+    days, basis = _compute_replenish_days(order, {})
+    assert days == 7
+    assert basis == "shipped_to_success"

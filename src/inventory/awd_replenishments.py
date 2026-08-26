@@ -208,16 +208,69 @@ def _compute_replenish_days(
     if skus:
         ledger_recv, ledger_sellable = _ledger_any_fc_receipts(skus, start)
         if ledger_sellable:
-            return max((ledger_sellable.date() - start.date()).days, 0), "ledger_shipped_to_sellable"
+            d = (ledger_sellable.date() - start.date()).days
+            if d >= 2:
+                return d, "ledger_shipped_to_sellable"
         if ledger_recv:
-            return max((ledger_recv.date() - start.date()).days, 0), "ledger_shipped_to_received"
+            d = (ledger_recv.date() - start.date()).days
+            if d >= 2:
+                return d, "ledger_shipped_to_received"
 
     status = (order.get("status") or "").upper()
     if status == "SUCCESS":
         end = _parse_ts(order.get("updatedAt"))
         if end:
-            return max((end.date() - start.date()).days, 0), "confirm_to_success_fallback"
+            d = max((end.date() - start.date()).days, 0)
+            if d >= 1:
+                return d, "shipped_to_success"
+            return d, "confirm_to_success_fallback"
     return None, "unknown"
+
+
+def recompute_stored_replenish_days() -> dict:
+    """Recompute lead times from stored AWD replenishment rows (no API calls)."""
+    try:
+        rows = fetch_all("inventory_awd_replenishments")
+    except Exception:
+        return {"rows": 0, "updated": 0}
+    fba_by_id = _fba_shipments_by_id()
+    updates: list[dict] = []
+    for row in rows:
+        raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+        order = dict(raw)
+        if not order.get("status"):
+            order["status"] = row.get("order_status")
+        if not order.get("updatedAt") and row.get("completed_at"):
+            order["updatedAt"] = row.get("completed_at")
+        if not order.get("confirmedOn") and row.get("confirmed_at"):
+            order["confirmedOn"] = row.get("confirmed_at")
+        if not order.get("createdAt") and row.get("created_at"):
+            order["createdAt"] = row.get("created_at")
+        if row.get("shipped_at"):
+            outbound = list(order.get("outboundShipments") or [])
+            if outbound:
+                outbound[0] = dict(outbound[0])
+                outbound[0].setdefault("shipmentStatus", "IN_TRANSIT")
+                outbound[0]["createdAt"] = row["shipped_at"]
+                order["outboundShipments"] = outbound
+        days, basis = _compute_replenish_days(order, fba_by_id)
+        updates.append({
+            "order_id": row["order_id"],
+            "order_status": row.get("order_status"),
+            "created_at": row.get("created_at"),
+            "confirmed_at": row.get("confirmed_at"),
+            "shipped_at": row.get("shipped_at"),
+            "completed_at": row.get("completed_at"),
+            "replenish_days": days,
+            "replenish_days_basis": basis,
+            "outbound_shipment_ids": row.get("outbound_shipment_ids"),
+            "outbound_fc_count": row.get("outbound_fc_count"),
+            "units_requested": row.get("units_requested"),
+            "units_shipped": row.get("units_shipped"),
+            "raw": row.get("raw"),
+        })
+    n = upsert_rows("inventory_awd_replenishments", updates, on_conflict="order_id") if updates else 0
+    return {"rows": len(updates), "updated": n}
 
 
 def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict:
@@ -368,7 +421,7 @@ def median_replenish_days(limit: int = 5, sku: str | None = None) -> tuple[int |
         if (o.get("order_status") or "").upper() != "SUCCESS":
             continue
         basis = (o.get("replenish_days_basis") or "").lower()
-        if basis == "confirm_to_success_fallback":
+        if basis in {"confirm_to_success_fallback", "unknown"}:
             continue
         rd = o.get("replenish_days")
         if rd is None:
@@ -377,8 +430,9 @@ def median_replenish_days(limit: int = 5, sku: str | None = None) -> tuple[int |
             d = int(rd)
         except (TypeError, ValueError):
             continue
-        if d >= 0:
-            vals.append(d)
+        if d < 1:
+            continue
+        vals.append(d)
         if len(vals) >= limit:
             break
     if not vals:
