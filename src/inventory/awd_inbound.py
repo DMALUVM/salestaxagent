@@ -71,9 +71,15 @@ def sync_awd_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> d
         if received_at is None and prev:
             received_at = parse_ts(prev.get("received_at"))
 
-        receive_days, receive_basis = compute_receive_days(
-            shipped_at, received_at, None, closed_at, created,
-        )
+        # First poll often sees CLOSED already — shipped_at == received_at == updated.
+        # Use created→closed as warehouse→AWD transit in that case.
+        if created and closed_at and (shipped_at is None or shipped_at == received_at):
+            receive_days = max((closed_at.date() - created.date()).days, 0)
+            receive_basis = "created_to_closed" if receive_days >= 1 else "unknown"
+        else:
+            receive_days, receive_basis = compute_receive_days(
+                shipped_at, received_at, None, closed_at, created,
+            )
 
         rows.append({
             "shipment_id": sid,
@@ -128,7 +134,7 @@ def median_awd_inbound_days(limit: int = 5) -> tuple[int | None, int]:
             d = int(rd)
         except (TypeError, ValueError):
             continue
-        if d >= 0:
+        if d >= 1:
             vals.append(d)
         if len(vals) >= limit:
             break

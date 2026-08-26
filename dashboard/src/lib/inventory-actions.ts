@@ -45,12 +45,16 @@ function effectiveLead(
   inbound: number,
 ): number {
   const fba =
-    sig?.measured_receive_days ??
+    (sig?.measured_receive_days && sig.measured_receive_days > 0
+      ? sig.measured_receive_days
+      : null) ??
     leadtime?.fba_optimized_receive_median ??
     leadtime?.fba_receive_median ??
     settings.receiving_days_normal;
   const awd =
-    sig?.measured_replenish_days ??
+    (sig?.measured_replenish_days && sig.measured_replenish_days > 0
+      ? sig.measured_replenish_days
+      : null) ??
     leadtime?.awd_replenish_median ??
     settings.awd_to_fba_days;
   if (awdOnHand > 0 && awdOnHand >= fbaOnHand + inbound) {

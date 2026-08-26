@@ -8,22 +8,30 @@ from statistics import median
 from src.db import fetch_all, upsert_rows
 from src.inventory.inbound_shipments import median_receive_days
 from src.inventory.awd_replenishments import median_replenish_days
+from src.inventory.awd_inbound import median_awd_inbound_days
 from src.inventory.snapshots_daily import fba_on_hand, inbound_total
 
 log = logging.getLogger(__name__)
 
 DIVERGENCE_WARN_PCT = 25
+_events_cache: list[dict] | None = None
+
+
+def _inventory_events() -> list[dict]:
+    global _events_cache
+    if _events_cache is None:
+        try:
+            _events_cache = fetch_all("inventory_events")
+        except Exception:
+            _events_cache = []
+    return _events_cache
 
 
 def _ledger_receipts(sku: str, start: date, end: date) -> int:
     """Positive receipt units from inventory ledger in [start, end]."""
-    try:
-        events = fetch_all("inventory_events")
-    except Exception:
-        return 0
     total = 0
     sku_u = sku.upper()
-    for ev in events:
+    for ev in _inventory_events():
         if (ev.get("sku") or "").upper() != sku_u:
             continue
         ed = ev.get("event_date")
@@ -34,6 +42,30 @@ def _ledger_receipts(sku: str, start: date, end: date) -> int:
         if qty > 0 and ("receipt" in et or et in {"receipts", "fc_transfer"}):
             total += qty
     return total
+
+
+def _ledger_shipment_rate(sku: str, window: int, as_of: date) -> float | None:
+    """Units/day from FBA customer Shipments in the ledger (no snapshot history needed)."""
+    start = as_of - timedelta(days=window)
+    sku_u = sku.upper()
+    shipped = 0
+    hits = 0
+    for ev in _inventory_events():
+        if (ev.get("sku") or "").upper() != sku_u:
+            continue
+        if (ev.get("event_type") or "").lower() != "shipments":
+            continue
+        ed = ev.get("event_date")
+        if not ed or str(ed)[:10] < start.isoformat() or str(ed)[:10] > as_of.isoformat():
+            continue
+        qty = abs(int(ev.get("quantity", 0) or 0))
+        if qty <= 0:
+            continue
+        shipped += qty
+        hits += 1
+    if hits == 0:
+        return None
+    return round(shipped / max(window, 1), 2)
 
 
 def _daily_for_sku(sku: str) -> list[dict]:
@@ -54,7 +86,7 @@ def implied_rate(sku: str, window: int, as_of: date | None = None) -> float | No
     start = end - timedelta(days=window)
     daily = _daily_for_sku(sku)
     if len(daily) < 2:
-        return None
+        return _ledger_shipment_rate(sku, window, end)
 
     in_window = [
         r for r in daily
@@ -111,7 +143,11 @@ def sync_sku_signals(configured_lead_days: int = 35) -> dict:
     except Exception:
         pass
 
+    global _events_cache
+    _events_cache = None
     account_recv, account_n = median_receive_days(limit=5)
+    if account_recv is None:
+        account_recv, account_n = median_awd_inbound_days(limit=5)
     account_replen, account_replen_n = median_replenish_days(limit=5)
     today = date.today()
     rows: list[dict] = []
@@ -141,10 +177,10 @@ def sync_sku_signals(configured_lead_days: int = 35) -> dict:
             "inventory_u_30": i30,
             "rate_divergence_pct": div,
             "rate_agreement": agreement,
-            "measured_receive_days": recv,
+            "measured_receive_days": recv if recv and recv > 0 else None,
             "receive_sample_n": rn,
             "configured_lead_days": settings_lead,
-            "measured_replenish_days": replen,
+            "measured_replenish_days": replen if replen and replen > 0 else None,
             "replenish_sample_n": repn,
             "configured_awd_to_fba_days": settings_awd,
         })

@@ -56,9 +56,41 @@ def test_implied_rate_from_daily_snapshots(monkeypatch):
         return []
 
     monkeypatch.setattr("src.inventory.rate_signals.fetch_all", fake_fetch)
+    monkeypatch.setattr("src.inventory.rate_signals._events_cache", None)
     rate = implied_rate(sku, 14, today)
     assert rate is not None
     assert 9.0 <= rate <= 11.0  # 140 units / 14 days
+
+
+def test_implied_rate_from_ledger_shipments_without_snapshots(monkeypatch):
+    sku = "DDPE0001Shop"
+    today = date.today()
+    events = [
+        {
+            "sku": "DDPE0001SHOP",
+            "event_type": "Shipments",
+            "event_date": (today - timedelta(days=2)).isoformat(),
+            "quantity": -40,
+        },
+        {
+            "sku": "DDPE0001SHOP",
+            "event_type": "Shipments",
+            "event_date": (today - timedelta(days=10)).isoformat(),
+            "quantity": -20,
+        },
+    ]
+
+    def fake_fetch(table):
+        if table == "inventory_snapshots_daily":
+            return []
+        if table == "inventory_events":
+            return events
+        return []
+
+    monkeypatch.setattr("src.inventory.rate_signals.fetch_all", fake_fetch)
+    monkeypatch.setattr("src.inventory.rate_signals._events_cache", None)
+    rate = implied_rate(sku, 30, today)
+    assert rate == 2.0  # 60 units / 30 days
 
 
 def test_median_receive_days(monkeypatch):

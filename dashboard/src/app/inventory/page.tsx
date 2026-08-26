@@ -201,12 +201,16 @@ export default function InventoryPage() {
     inboundQty: number,
   ): number {
     const fba =
-      sig?.measured_receive_days ??
+      (sig?.measured_receive_days && sig.measured_receive_days > 0
+        ? sig.measured_receive_days
+        : null) ??
       leadtime?.fba_optimized_receive_median ??
       leadtime?.fba_receive_median ??
       s.receiving_days_normal;
     const awd =
-      sig?.measured_replenish_days ??
+      (sig?.measured_replenish_days && sig.measured_replenish_days > 0
+        ? sig.measured_replenish_days
+        : null) ??
       leadtime?.awd_replenish_median ??
       s.awd_to_fba_days;
     if (awdOnHand > 0 && awdOnHand >= fbaOnHand + inboundQty) {
@@ -971,9 +975,9 @@ export default function InventoryPage() {
                   { key: "inbound", label: "Inbnd", tip: "Amazon inbound — not yet sellable" },
                   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
                   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },
-                  { key: "inventory_u_30", label: "Inv V30", tip: "Implied daily rate from total FBA quantity change + ledger receipts" },
-                  { key: "measured_receive_days", label: "Recv", tip: "Median shipped→received days (FBA inbound). Uses inventory ledger sellable receipt when available." },
-                  { key: "measured_replenish_days", label: "AWD→FBA", tip: "Median AWD outbound shipped→Prime-eligible days at FC (linked FBA shipment + ledger)" },
+                  { key: "inventory_u_30", label: "Inv V30", tip: "FBA units shipped/day from the inventory ledger (last 30 days). Compare to orders V30." },
+                  { key: "measured_receive_days", label: "Recv", tip: "Warehouse → AWD check-in days (created→closed). Direct FBA inbound is unused on this account." },
+                  { key: "measured_replenish_days", label: "AWD→FBA", tip: "AWD replenishment shipped → SUCCESS (inventory arriving at FBA)." },
                   { key: "dos", label: "DOS", tip: "Days of supply — FBA cover (Amazon) or warehouse cover (Shop)" },
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
@@ -1067,10 +1071,10 @@ export default function InventoryPage() {
                       {r.inventory_u_30 != null ? r.inventory_u_30.toFixed(1) : "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground" title={r.receive_sample_n ? `n=${r.receive_sample_n} shipments` : undefined}>
-                      {r.measured_receive_days != null ? `${r.measured_receive_days}d` : "—"}
+                      {r.measured_receive_days != null && r.measured_receive_days > 0 ? `${r.measured_receive_days}d` : "—"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground" title={r.replenish_sample_n ? `n=${r.replenish_sample_n} replenishments` : undefined}>
-                      {r.measured_replenish_days != null ? `${r.measured_replenish_days}d` : "—"}
+                      {r.measured_replenish_days != null && r.measured_replenish_days > 0 ? `${r.measured_replenish_days}d` : "—"}
                     </TableCell>
                     <TableCell
                       className={`text-right tabular-nums font-medium ${
