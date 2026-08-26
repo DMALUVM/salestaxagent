@@ -224,6 +224,7 @@ export default function InventoryPage() {
     const velMap = new Map(velocities.map((v) => [v.sku, v]));
     const recMap = new Map(restockList.map((r) => [r.sku, r]));
     const signalMap = new Map(signalRows.map((r) => [r.sku, r]));
+    const signalMapU = new Map(signalRows.map((r) => [r.sku.toUpperCase(), r]));
     const tplMap = new Map(tplSnapshots.map((t) => [t.sku, t]));
     const awdMap = new Map(awdSnapshots.map((a) => [a.sku, a]));
 
@@ -409,7 +410,7 @@ export default function InventoryPage() {
       let effective_lead = s.lead_time_days;
 
       let network_oos_date: string | null = null;
-      const sig = signalMap.get(sku);
+      const sig = signalMap.get(sku) ?? signalMapU.get(sku.toUpperCase());
 
       if (shopifyOnly) {
         // Shopify-only: supply = 3PL, demand = Shopify velocity
@@ -472,9 +473,19 @@ export default function InventoryPage() {
         inventory_u_30: sig?.inventory_u_30 != null ? Number(sig.inventory_u_30) : null,
         rate_divergence_pct: sig?.rate_divergence_pct != null ? Number(sig.rate_divergence_pct) : null,
         rate_agreement: sig?.rate_agreement ?? null,
-        measured_receive_days: sig?.measured_receive_days != null ? Number(sig.measured_receive_days) : null,
+        measured_receive_days:
+          sig?.measured_receive_days != null && Number(sig.measured_receive_days) > 0
+            ? Number(sig.measured_receive_days)
+            : leadtime?.fba_receive_median != null && leadtime.fba_receive_median > 0
+              ? Number(leadtime.fba_receive_median)
+              : null,
         receive_sample_n: sig?.receive_sample_n != null ? Number(sig.receive_sample_n) : 0,
-        measured_replenish_days: sig?.measured_replenish_days != null ? Number(sig.measured_replenish_days) : null,
+        measured_replenish_days:
+          sig?.measured_replenish_days != null && Number(sig.measured_replenish_days) > 0
+            ? Number(sig.measured_replenish_days)
+            : leadtime?.awd_replenish_median != null && leadtime.awd_replenish_median > 0
+              ? Number(leadtime.awd_replenish_median)
+              : null,
         replenish_sample_n: sig?.replenish_sample_n != null ? Number(sig.replenish_sample_n) : 0,
         effective_lead_days: effective_lead,
       });

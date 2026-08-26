@@ -164,7 +164,7 @@ export function useInventory() {
     async function load() {
       setLoading(true);
       try {
-        const resp = await fetch("/api/inventory");
+        const resp = await fetch("/api/inventory", { cache: "no-store" });
         if (!resp.ok) {
           const body = await resp.json().catch(() => ({}));
           if (!cancelled) setError(body.error ?? `HTTP ${resp.status}`);
