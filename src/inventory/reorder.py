@@ -10,7 +10,9 @@ Cover target is 90 days when holiday_mode is on, otherwise
 """
 from __future__ import annotations
 
+import calendar
 import math
+from datetime import date, timedelta
 
 
 HOLIDAY_COVER_DAYS = 90
@@ -142,58 +144,108 @@ def manufacture_need(inventory_reorder: int, holiday_manufacture: int) -> int:
     return max(int(inventory_reorder or 0), int(holiday_manufacture or 0))
 
 
+AMAZON_IN_BY = "2026-10-31"
+HOLIDAY_SHIP_MONTHS = ("2026-09", "2026-10")
+
+
+def _parse_iso(s: str) -> date:
+    return date.fromisoformat(str(s)[:10])
+
+
+def latest_ship_date(amazon_in_by: str, lead_days: int) -> date:
+    return _parse_iso(amazon_in_by) - timedelta(days=max(int(lead_days), 0))
+
+
+def ship_by_for_amazon_deadline(
+    month: str,
+    amazon_in_by: str = AMAZON_IN_BY,
+    lead_days: int = 19,
+    default_day: int = 20,
+) -> str:
+    """Ship early enough that receiving lead still hits amazon_in_by."""
+    y, mo = (int(p) for p in month.split("-"))
+    last_day = calendar.monthrange(y, mo)[1]
+    nominal = date(y, mo, min(default_day, last_day))
+    latest = latest_ship_date(amazon_in_by, lead_days)
+    first = date(y, mo, 1)
+    last = date(y, mo, last_day)
+    pick = min(nominal, latest)
+    if pick < first:
+        pick = first
+    if pick > last:
+        pick = last
+    return pick.isoformat()
+
+
+def month_can_arrive_by(
+    month: str,
+    amazon_in_by: str = AMAZON_IN_BY,
+    lead_days: int = 19,
+) -> bool:
+    y, mo = (int(p) for p in month.split("-"))
+    return date(y, mo, 1) <= latest_ship_date(amazon_in_by, lead_days)
+
+
+def holiday_inbound_months(
+    months: list[str],
+    amazon_in_by: str = AMAZON_IN_BY,
+    lead_days: int = 19,
+) -> list[str]:
+    preferred = [
+        m for m in months
+        if m in HOLIDAY_SHIP_MONTHS and month_can_arrive_by(m, amazon_in_by, lead_days)
+    ]
+    if preferred:
+        return preferred
+    for m in reversed(months):
+        if month_can_arrive_by(m, amazon_in_by, lead_days):
+            return [m]
+    return months[:1]
+
+
 def allocate_monthly_units(
     skus: list[str],
     inventory_reorder: dict[str, int],
     holiday_manufacture: dict[str, int],
-    n_months: int,
-    weights: tuple[float, ...] | list[float],
+    months: list[str],
+    *,
+    amazon_in_by: str = AMAZON_IN_BY,
+    lead_days: int = 19,
 ) -> list[dict[str, int]]:
-    """Spread production across months, front-loading the inventory reorder.
+    """Current month = inventory reorder. Holiday surplus → Sep/Oct only.
 
-    Month 0 receives each SKU's inventory-page reorder in full, plus that
-    month's weight share of any leftover holiday surplus. Later months
-    split only the leftover. Last month absorbs rounding remainder.
+    Nov/Dec/Jan units must ship in months that can still arrive by
+    ``amazon_in_by`` (end of October) given receiving lead time.
     """
-    if n_months <= 0:
+    if not months:
         return []
 
-    w = list(weights) if weights else [1.0]
-    while len(w) < n_months:
-        w.append(0.0)
-    w_all = sum(w[:n_months]) or 1.0
-
-    leftover: dict[str, int] = {}
-    mixes: list[dict[str, int]] = [dict() for _ in range(n_months)]
+    holiday_months = holiday_inbound_months(months, amazon_in_by, lead_days)
+    mixes: list[dict[str, int]] = [dict() for _ in months]
 
     for sku in skus:
         reorder = int(inventory_reorder.get(sku, 0) or 0)
         holiday = int(holiday_manufacture.get(sku, 0) or 0)
         mfg = manufacture_need(reorder, holiday)
         floor = min(reorder, mfg)
-        extra_pool = mfg - floor
-        extra0 = min(round(extra_pool * w[0] / w_all), extra_pool) if extra_pool > 0 else 0
-        mixes[0][sku] = floor + extra0
-        leftover[sku] = extra_pool - extra0
-
-    rest = n_months - 1
-    if rest <= 0:
-        return [{sku: qty for sku, qty in mix.items() if qty > 0} for mix in mixes]
-
-    rest_w = w[1:n_months]
-    for mi in range(rest):
-        month_idx = mi + 1
-        last = mi == rest - 1
-        w_i = rest_w[mi] if mi < len(rest_w) else 0.0
-        w_sum = sum(rest_w[mi:]) or 0.01
-        for sku in skus:
-            rem = leftover[sku]
-            if rem <= 0:
+        mixes[0][sku] = floor
+        leftover = mfg - floor
+        if leftover <= 0:
+            continue
+        for hi, month in enumerate(holiday_months):
+            try:
+                mi = months.index(month)
+            except ValueError:
                 continue
-            alloc = rem if last else min(round(rem * w_i / w_sum), rem)
+            last = hi == len(holiday_months) - 1
+            alloc = leftover if last else min(
+                round(leftover / (len(holiday_months) - hi)), leftover,
+            )
             if alloc > 0:
-                mixes[month_idx][sku] = alloc
-                leftover[sku] -= alloc
+                mixes[mi][sku] = mixes[mi].get(sku, 0) + alloc
+                leftover -= alloc
+        if leftover > 0:
+            mixes[0][sku] = mixes[0].get(sku, 0) + leftover
 
     return [{sku: qty for sku, qty in mix.items() if qty > 0} for mix in mixes]
 

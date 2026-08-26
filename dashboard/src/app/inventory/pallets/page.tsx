@@ -15,6 +15,7 @@ import {
 } from "@/lib/inventory-reorder";
 import {
   allocateMonthlyUnits,
+  AMAZON_IN_BY,
   daysOfSupply,
   holidayDemandWithPlanning,
   inventoryFlag,
@@ -24,6 +25,7 @@ import {
   PALLET_MAX_UNITS,
   planningDaily,
   RATE_DIVERGENCE_WARN_PCT,
+  shipByForAmazonDeadline,
   skuPackPriority,
 } from "@/lib/pallet-plan";
 import { coverTargetDays } from "@/lib/inventory-reorder";
@@ -52,7 +54,7 @@ const SKU_SHORT: Record<string, string> = {
   DDPE0004Shop: "Assorted",
 };
 const PALLET_MAX = PALLET_MAX_UNITS;
-const TARGET = "2026-10-31";
+const TARGET = AMAZON_IN_BY;
 const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
@@ -114,6 +116,7 @@ interface MfgMonthEntry {
   overdue?: boolean;
   packed: PackedPallet[];
   fillPct: number;
+  arriveBy?: string;
 }
 interface MfgScenario { entries: MfgMonthEntry[]; totalUnits: number; totalPallets: number; }
 interface MfgSkuSummary {
@@ -128,7 +131,6 @@ interface MfgSkuSummary {
 }
 interface MfgTransfer { sku: string; source: string; units: number; timing: string; }
 
-const MFG_WEIGHTS = [0.25, 0.35, 0.40];
 const HOLIDAY_MONTHS = new Set(["2026-11", "2026-12", "2026-01", "2027-01"]);
 
 function getMonday(d: Date): Date {
@@ -199,7 +201,7 @@ function buildMfgSheet(
   for (const [sku, label] of Object.entries(SKU_LABELS)) L.push(`  ${sku}  =  ${label}`);
   L.push("");   L.push(`Demand period: Nov + Dec + Jan`);
   L.push(`Pallet capacity: ${fmt(PALLET_MAX)} cartons each; multiple pallets/month OK`);
-  L.push(`Month 1 ships the inventory-page reorder in full.`);
+  L.push(`Current month = inventory reorder. Sep/Oct = Nov/Dec/Jan so Amazon is stocked by ${TARGET}.`);
   L.push(`All units in Amazon FBA by: ${TARGET}`);
   L.push(`3PL policy: transfer only (does NOT reduce manufacture)`);
   L.push(""); L.push("-----------------------------------------------------------------");
@@ -234,7 +236,7 @@ function buildMfgSheet(
     else L.push(`  ${e.label}: no production needed`);
   }
   L.push(""); L.push("-----------------------------------------------------------------");
-  L.push("NOTES:"); L.push("  - Month 1 includes the inventory-page reorder in full.");
+  L.push("NOTES:"); L.push("  - Current month = inventory reorder. Holiday build ships Sep/Oct.");
   L.push("  - FIRM = committed. INDICATIVE = forecast-driven, may change.");
   L.push("  - Manufacture assumes 3PL transferred separately."); L.push("  - This is a planning aid, not a purchase order.");
   L.push("-----------------------------------------------------------------");
@@ -467,16 +469,21 @@ export default function PalletPlanPage() {
         });
       }
 
+      const leadDays = Math.max(...SKUS.map((sku) => inv[sku].leadDays), 19);
       const mixes = allocateMonthlyUnits(
-        SKUS, reorderBySku, holidayMfg, productionMonths.length, MFG_WEIGHTS,
+        SKUS, reorderBySku, holidayMfg, productionMonths,
+        { amazonInBy: TARGET, leadDays },
       );
       const flags = Object.fromEntries(SKUS.map((sku) => [sku, inv[sku].flag]));
       const priority = skuPackPriority(SKUS, flags, reorderBySku);
-      const entries: MfgMonthEntry[] = productionMonths.map((m, mi) => {
-        const mix = mixes[mi] ?? {};
+      const entries: MfgMonthEntry[] = productionMonths.map((m) => {
+        const mix = mixes[productionMonths.indexOf(m)] ?? {};
         const packed = packPallets(mix, priority, PALLET_MAX);
         const total = Object.values(mix).reduce((a, b) => a + b, 0);
-        const shipBy = `${m}-20`;
+        const shipBy = shipByForAmazonDeadline(m, TARGET, leadDays);
+        const arrive = new Date(`${shipBy}T00:00:00`);
+        arrive.setDate(arrive.getDate() + leadDays);
+        const arriveBy = arrive.toISOString().slice(0, 10);
         return {
           month: m, label: monthLabel(m),
           status: committed.has(m) ? "FIRM" : "INDICATIVE",
@@ -484,7 +491,8 @@ export default function PalletPlanPage() {
           units: total, mix, packed,
           fillPct: monthPalletFillPct(total, packed.length, PALLET_MAX),
           shipBy,
-          overdue: mi === 0 && todayIso > shipBy,
+          arriveBy,
+          overdue: todayIso > shipBy && total > 0,
         };
       });
       return {
@@ -527,7 +535,7 @@ export default function PalletPlanPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Pallet Planner</h1>
           <p className="text-sm text-muted-foreground">
-            Inventory cover math + holiday planning · {fmt(PALLET_MAX)} cartons per pallet · send as many pallets as the month needs · In Amazon by {TARGET}
+            August = inventory reorder · Sep/Oct carry Nov–Jan so it is in Amazon by {TARGET} · {fmt(PALLET_MAX)} cartons/pallet, multiple OK
           </p>
         </div>
         <Link href="/inventory"><Button variant="outline" size="sm">← Inventory</Button></Link>
@@ -604,7 +612,7 @@ export default function PalletPlanPage() {
           </div>
           <div className="flex items-center gap-4 mt-1">
             <p className="text-xs text-muted-foreground">
-              Reorder = same (cover + lead) × V30 − on-hand as Inventory · holiday surplus split after month 1
+              Reorder matches Inventory. Nov/Dec/Jan manufacture ships on Sep/Oct pallets so it arrives by {TARGET}.
             </p>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <input type="checkbox" checked={tplOffsetsProduction}
@@ -691,7 +699,10 @@ export default function PalletPlanPage() {
                         <Badge variant={isFirm ? "default" : "secondary"} className="text-[10px]">
                           {entry.status}
                         </Badge>
-                        {idx === 0 && <Badge variant="outline" className="text-[10px]">ships inventory reorder</Badge>}
+                        {idx === 0 && <Badge variant="outline" className="text-[10px]">inventory reorder</Badge>}
+                        {["2026-09", "2026-10"].includes(entry.month) && (
+                          <Badge variant="outline" className="text-[10px]">holiday in by {TARGET.slice(5)}</Badge>
+                        )}
                         {entry.overdue && <Badge variant="destructive" className="text-[10px]">overdue</Badge>}
                       </div>
                     </div>
@@ -746,7 +757,9 @@ export default function PalletPlanPage() {
                         })}
                       </div>
                       <p className={`text-[10px] mt-2 ${entry.overdue ? "text-amber-500" : "text-muted-foreground"}`}>
-                        {entry.overdue ? `Ship ASAP — missed ${entry.shipBy}` : `Ship by ${entry.shipBy}`}
+                        {entry.overdue
+                          ? `Ship ASAP — missed ${entry.shipBy}`
+                          : `Ship by ${entry.shipBy}${entry.arriveBy ? ` · in Amazon ~${entry.arriveBy}` : ""}`}
                       </p>
                     </>
                   )}
@@ -787,7 +800,7 @@ export default function PalletPlanPage() {
             Inventory reorder = (cover target{settings.holiday_mode ? " 90d holiday" : ` ${settings.target_cover_days}d`} + lead) × V30 − on-hand — same as the inventory page.
             {" "}Manufacture = max(inventory reorder, holiday demand − FBA − inbound − AWD{tplOffsetsProduction ? " − 3PL" : ""}).
             {!tplOffsetsProduction && " 3PL is transfer only, does not reduce production."}
-            {" "}Month 1 front-loads the reorder so a CRITICAL SKU is not sliced to 25%.
+            {" "}Current month covers the inventory-page reorder. Sep/Oct pallets carry Nov/Dec/Jan so stock is in Amazon by {TARGET} (ship-by pulled forward by Recv).
             {" "}A pallet holds {fmt(PALLET_MAX)} cartons; ship 2+ in the same month when the mix does not fit one.
             {" "}FIRM = committed. INDICATIVE = may change. Not a purchase order.
           </p>

@@ -13,6 +13,9 @@ export const HOLIDAY_DAYS_NOV_DEC = 61;
 export const HOLIDAY_DAYS_NOV_JAN = 92;
 export const CRITICAL_DOS_DAYS = 60;
 export const RATE_DIVERGENCE_WARN_PCT = 25;
+export const AMAZON_IN_BY = "2026-10-31";
+/** Holiday build ships in these months so it is Prime-eligible by AMAZON_IN_BY. */
+export const HOLIDAY_SHIP_MONTHS = ["2026-09", "2026-10"];
 
 export function manufactureNeed(
   inventoryReorder: number,
@@ -21,54 +24,106 @@ export function manufactureNeed(
   return Math.max(inventoryReorder, holidayManufacture);
 }
 
+function parseIsoDate(iso: string): Date {
+  return new Date(`${iso}T00:00:00`);
+}
+
+function isoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function lastDayOfMonth(month: string): Date {
+  const [y, mo] = month.split("-").map(Number);
+  return new Date(y, mo, 0);
+}
+
+export function latestShipDate(amazonInBy: string, leadDays: number): string {
+  const d = parseIsoDate(amazonInBy);
+  d.setDate(d.getDate() - Math.max(leadDays, 0));
+  return isoDate(d);
+}
+
+/** Latest day this month can ship and still arrive by amazonInBy. */
+export function shipByForAmazonDeadline(
+  month: string,
+  amazonInBy = AMAZON_IN_BY,
+  leadDays = 19,
+  defaultDay = 20,
+): string {
+  const [y, mo] = month.split("-").map(Number);
+  const last = lastDayOfMonth(month);
+  const nominal = new Date(y, mo - 1, Math.min(defaultDay, last.getDate()));
+  const latest = parseIsoDate(latestShipDate(amazonInBy, leadDays));
+  const pick = nominal.getTime() < latest.getTime() ? nominal : latest;
+  const first = new Date(y, mo - 1, 1);
+  const clamped = pick.getTime() < first.getTime() ? first : pick;
+  const vsLast = clamped.getTime() > last.getTime() ? last : clamped;
+  return isoDate(vsLast);
+}
+
+export function monthCanArriveBy(
+  month: string,
+  amazonInBy = AMAZON_IN_BY,
+  leadDays = 19,
+): boolean {
+  const first = parseIsoDate(`${month}-01`);
+  const latest = parseIsoDate(latestShipDate(amazonInBy, leadDays));
+  return first.getTime() <= latest.getTime();
+}
+
+export function holidayInboundMonths(
+  months: string[],
+  amazonInBy = AMAZON_IN_BY,
+  leadDays = 19,
+): string[] {
+  const preferred = months.filter(
+    (m) => HOLIDAY_SHIP_MONTHS.includes(m) && monthCanArriveBy(m, amazonInBy, leadDays),
+  );
+  if (preferred.length) return preferred;
+  const fallback = [...months].reverse().find((m) => monthCanArriveBy(m, amazonInBy, leadDays));
+  return fallback ? [fallback] : months.slice(0, 1);
+}
+
 export function allocateMonthlyUnits(
   skus: string[],
   inventoryReorder: Record<string, number>,
   holidayManufacture: Record<string, number>,
-  nMonths: number,
-  weights: number[],
+  months: string[],
+  opts?: { amazonInBy?: string; leadDays?: number },
 ): Record<string, number>[] {
-  if (nMonths <= 0) return [];
+  if (!months.length) return [];
 
-  const w = weights.slice();
-  while (w.length < nMonths) w.push(0);
-  const wAll = w.slice(0, nMonths).reduce((a, b) => a + b, 0) || 1;
-
-  const leftover: Record<string, number> = {};
-  const mixes: Record<string, number>[] = Array.from({ length: nMonths }, () => ({}));
+  const amazonInBy = opts?.amazonInBy ?? AMAZON_IN_BY;
+  const leadDays = opts?.leadDays ?? 19;
+  const holidayMonths = holidayInboundMonths(months, amazonInBy, leadDays);
+  const mixes: Record<string, number>[] = Array.from({ length: months.length }, () => ({}));
 
   for (const sku of skus) {
     const reorder = inventoryReorder[sku] ?? 0;
     const holiday = holidayManufacture[sku] ?? 0;
     const mfg = manufactureNeed(reorder, holiday);
     const floor = Math.min(reorder, mfg);
-    const extraPool = mfg - floor;
-    const extra0 =
-      extraPool > 0 ? Math.min(Math.round(extraPool * w[0] / wAll), extraPool) : 0;
-    mixes[0][sku] = floor + extra0;
-    leftover[sku] = extraPool - extra0;
-  }
+    mixes[0][sku] = floor;
+    let leftover = mfg - floor;
+    if (leftover <= 0) continue;
 
-  const rest = nMonths - 1;
-  if (rest <= 0) {
-    return mixes.map((mix) => Object.fromEntries(
-      Object.entries(mix).filter(([, qty]) => qty > 0),
-    ));
-  }
-
-  const restW = w.slice(1, nMonths);
-  for (let mi = 0; mi < rest; mi++) {
-    const last = mi === rest - 1;
-    const wi = restW[mi] ?? 0;
-    const wSum = restW.slice(mi).reduce((a, b) => a + b, 0) || 0.01;
-    for (const sku of skus) {
-      const rem = leftover[sku] ?? 0;
-      if (rem <= 0) continue;
-      const alloc = last ? rem : Math.min(Math.round(rem * wi / wSum), rem);
+    for (let hi = 0; hi < holidayMonths.length; hi++) {
+      const mi = months.indexOf(holidayMonths[hi]);
+      if (mi < 0) continue;
+      const last = hi === holidayMonths.length - 1;
+      const alloc = last
+        ? leftover
+        : Math.min(Math.round(leftover / (holidayMonths.length - hi)), leftover);
       if (alloc > 0) {
-        mixes[mi + 1][sku] = alloc;
-        leftover[sku] = rem - alloc;
+        mixes[mi][sku] = (mixes[mi][sku] ?? 0) + alloc;
+        leftover -= alloc;
       }
+    }
+    if (leftover > 0) {
+      mixes[0][sku] = (mixes[0][sku] ?? 0) + leftover;
     }
   }
 

@@ -22,6 +22,7 @@ from collections import defaultdict
 
 from src.db import fetch_all
 from src.inventory.reorder import (
+    AMAZON_IN_BY,
     PALLET_MAX_UNITS,
     allocate_monthly_units,
     amazon_inventory_reorder,
@@ -32,6 +33,7 @@ from src.inventory.reorder import (
     month_pallet_fill_pct,
     pack_pallets,
     planning_daily,
+    ship_by_for_amazon_deadline,
     sku_pack_priority,
 )
 
@@ -479,7 +481,7 @@ def _holiday_demand_by_sku(
 
 def build_manufacturer_headsup(
     pallet_max: int = 19_000,
-    month_weights: tuple[float, ...] = (0.25, 0.35, 0.40),
+    month_weights: tuple[float, ...] = (0.0, 0.50, 0.50),
     include_jan: bool = True,
     tpl_offsets_production: bool = False,
     committed_months: list[str] | None = None,
@@ -493,15 +495,17 @@ def build_manufacturer_headsup(
       3. Manufacture — max of those two
       4. Transfer to FBA — 3PL + AWD already on hand
 
-    Month 1 ships the inventory reorder in full (so a CRITICAL SKU is not
-    sliced to 25%). Leftover holiday surplus uses *month_weights*.
-    Pallet cap is 19 000 units (may require 2+ pallets in month 1).
+    Month 1 (current) ships the inventory reorder so Amazon does not
+    stock out now. Nov/Dec/Jan manufacture goes on September and October
+    pallets so it is Prime-eligible by ``amazon_in_by`` (end of October).
+    Ship-by is pulled forward by receiving lead time. Pallet = 19 000
+    cartons; a month may ship more than one.
     """
     target_skus = skus or LIP_BALM_SKUS
     today = date.today()
     committed = set(committed_months or [])
     production_months = _month_list(today, 3)
-    amazon_in_by = DEFAULTS["amazon_in_by"]
+    amazon_in_by = DEFAULTS.get("amazon_in_by") or AMAZON_IN_BY
 
     # Load data once
     snaps = {r["sku"]: r for r in fetch_all("inventory_snapshots")}
@@ -661,9 +665,14 @@ def build_manufacturer_headsup(
 
         all_sku_summaries[scenario] = sku_summaries
 
+        lead_days = max((int(inv[s].get("lead_days") or 0) for s in target_skus), default=19)
+        if lead_days <= 0:
+            lead_days = 19
         mixes = allocate_monthly_units(
             target_skus, reorder_by_sku, holiday_mfg,
-            len(production_months), month_weights,
+            production_months,
+            amazon_in_by=amazon_in_by,
+            lead_days=lead_days,
         )
         flags = {sku: str(inv[sku].get("flag") or "OK") for sku in target_skus}
         priority = sku_pack_priority(target_skus, flags, reorder_by_sku)
@@ -675,8 +684,10 @@ def build_manufacturer_headsup(
             packed = pack_pallets(mix, priority, cap)
             total = sum(mix.values())
             n_pallets = len(packed)
-            y, mo = month.split("-")
-            ship_by = f"{y}-{mo}-20"
+            ship_by = ship_by_for_amazon_deadline(month, amazon_in_by, lead_days)
+            arrive_by = (
+                date.fromisoformat(ship_by) + timedelta(days=lead_days)
+            ).isoformat()
             entries.append({
                 "month": month,
                 "month_label": _month_label(month),
@@ -688,7 +699,8 @@ def build_manufacturer_headsup(
                 "pallet_max": cap,
                 "fill_pct": month_pallet_fill_pct(total, n_pallets, cap),
                 "ship_by": ship_by,
-                "overdue": mi == 0 and today_iso > ship_by,
+                "arrive_by": arrive_by,
+                "overdue": today_iso > ship_by and total > 0,
             })
 
         scenarios_out[scenario] = {
@@ -843,8 +855,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     # ── Production schedule ──
     a("")
     a("-" * 65)
-    pct = "/".join(f"{int(w*100)}%" for w in headsup["month_weights"])
-    a(f"PRODUCTION SCHEDULE — month 1 = inventory reorder + leftover ({pct})")
+    a("PRODUCTION SCHEDULE — current month = reorder; Sep/Oct = holiday")
     a("-" * 65)
 
     for entry in headsup["primary"]["entries"]:
@@ -921,8 +932,9 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("")
     a("-" * 65)
     a("NOTES:")
-    a("  - Month 1 includes the inventory-page reorder in full so a")
-    a("    CRITICAL SKU is not diluted by the 25/35/40 holiday split.")
+    a("  - Current month = inventory-page reorder (keep Amazon covered now).")
+    a("  - Nov/Dec/Jan manufacture ships on September and October")
+    a("    pallets so it is in Amazon by end of October.")
     a("  - One pallet holds 19,000 lip-balm cartons. A month can ship")
     a("    multiple pallets; CRITICAL / highest reorder packs first.")
     a("  - FIRM months represent committed production volumes.")

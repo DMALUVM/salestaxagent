@@ -5,10 +5,12 @@ from src.inventory.reorder import (
     PALLET_MAX_UNITS,
     allocate_monthly_units,
     amazon_inventory_reorder,
+    holiday_inbound_months,
     manufacture_need,
     month_pallet_fill_pct,
     pack_pallets,
     reorder_qty,
+    ship_by_for_amazon_deadline,
     sku_pack_priority,
 )
 
@@ -61,30 +63,31 @@ def test_displayed_4249_is_same_formula_at_stored_v30():
     assert qty == 4249
 
 
-def test_month1_front_loads_inventory_reorder_not_25_percent():
-    holiday_mfg = {"DDPE0001Shop": 6696}  # 1,674 was 25% of this
+MONTHS = ["2026-08", "2026-09", "2026-10"]
+
+
+def test_august_is_inventory_reorder_holiday_goes_to_sep_oct():
+    holiday_mfg = {"DDPE0001Shop": 6696}
     reorder = {"DDPE0001Shop": 4252}
     mixes = allocate_monthly_units(
-        ["DDPE0001Shop"], reorder, holiday_mfg, 3, (0.25, 0.35, 0.40),
+        ["DDPE0001Shop"], reorder, holiday_mfg, MONTHS,
     )
-    month1 = mixes[0].get("DDPE0001Shop", 0)
-    old_25pct = round(6696 * 0.25)
-    assert old_25pct == 1674
-    assert month1 >= 4252
-    assert month1 > old_25pct
+    assert mixes[0].get("DDPE0001Shop") == 4252
+    assert mixes[0].get("DDPE0001Shop") != round(6696 * 0.25)
+    later = mixes[1].get("DDPE0001Shop", 0) + mixes[2].get("DDPE0001Shop", 0)
+    assert later == 2444
     assert sum(m.get("DDPE0001Shop", 0) for m in mixes) == 6696
 
 
-def test_ok_sku_with_no_reorder_keeps_holiday_weight_split():
+def test_ok_sku_has_no_august_and_all_holiday_in_sep_oct():
     mixes = allocate_monthly_units(
         ["DDPE0002Shop"],
         {"DDPE0002Shop": 0},
         {"DDPE0002Shop": 3832},
-        3,
-        (0.25, 0.35, 0.40),
+        MONTHS,
     )
-    assert mixes[0].get("DDPE0002Shop") == round(3832 * 0.25)
-    assert sum(m.get("DDPE0002Shop", 0) for m in mixes) == 3832
+    assert mixes[0].get("DDPE0002Shop", 0) == 0
+    assert mixes[1].get("DDPE0002Shop", 0) + mixes[2].get("DDPE0002Shop", 0) == 3832
 
 
 def test_manufacture_is_max_of_reorder_and_holiday():
@@ -107,11 +110,11 @@ def test_mixed_pallet_front_loads_only_the_critical_sku():
         "DDPE0003Shop": 6736,
         "DDPE0004Shop": 18636,
     }
-    mixes = allocate_monthly_units(skus, reorder, holiday, 3, (0.25, 0.35, 0.40))
-    assert mixes[0]["DDPE0001Shop"] >= 4252
-    # Other flavors still get their August holiday slice
-    assert mixes[0]["DDPE0002Shop"] == round(3832 * 0.25)
-    assert mixes[0]["DDPE0004Shop"] == round(18636 * 0.25)
+    mixes = allocate_monthly_units(skus, reorder, holiday, MONTHS)
+    assert mixes[0]["DDPE0001Shop"] == 4252
+    assert mixes[0].get("DDPE0002Shop", 0) == 0
+    assert mixes[0].get("DDPE0004Shop", 0) == 0
+    assert mixes[1].get("DDPE0004Shop", 0) + mixes[2].get("DDPE0004Shop", 0) == 18636
 
 
 def test_pack_pallets_splits_over_19k_and_keeps_critical_first():
@@ -131,6 +134,24 @@ def test_pack_pallets_splits_over_19k_and_keeps_critical_first():
     assert packed[0]["mix"]["DDPE0001Shop"] == 8_000
     assert sum(p["total_units"] for p in packed) == 25_000
     assert packed[1]["total_units"] == 6_000
+
+
+def test_october_ship_by_clears_oct_31_with_19d_recv():
+    assert ship_by_for_amazon_deadline("2026-10", "2026-10-31", 19) == "2026-10-12"
+    assert ship_by_for_amazon_deadline("2026-09", "2026-10-31", 19) == "2026-09-20"
+
+
+def test_long_lead_keeps_holiday_out_of_october():
+    assert holiday_inbound_months(MONTHS, "2026-10-31", 35) == ["2026-09"]
+    mixes = allocate_monthly_units(
+        ["DDPE0001Shop"],
+        {"DDPE0001Shop": 0},
+        {"DDPE0001Shop": 4000},
+        MONTHS,
+        lead_days=35,
+    )
+    assert mixes[2].get("DDPE0001Shop", 0) == 0
+    assert mixes[1].get("DDPE0001Shop") == 4000
 
 
 def test_month_under_19k_is_one_pallet():
