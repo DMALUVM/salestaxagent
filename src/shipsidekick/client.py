@@ -99,10 +99,10 @@ def get_inventory() -> list[dict]:
 def _parse_inventory_items(all_items: list[dict]) -> list[dict]:
     """Parse inventory-levels payloads into snapshot items.
 
-    SKU strings are stripped only — DDPE0001Shop and DDPE00019Shop stay
-    distinct. Digital variants (requiresShipping=false) are skipped only
+    SKU strings are stripped only — similar codes stay distinct (no digit
+    collapse). Digital variants (requiresShipping=false) are skipped only
     when they have no quantity, so a bad shipping flag cannot hide
-    in-stock Tulsa rows.
+    in-stock rows.
     """
     seen_skus: dict[str, dict] = {}
 
@@ -155,10 +155,12 @@ def _carry_forward_missing_instock(
     feed_items: list[dict],
     prior_rows: list[dict],
 ) -> list[dict]:
-    """Re-attach prior in-stock SKUs omitted from this pull.
+    """Re-attach every prior in-stock SKU omitted from this pull.
 
-    Copies last observed quantities — does not invent stock. A SKU that
-    the feed reports at zero stays zero. Prior zeros are not carried.
+    Applies to every SKU already in inventory_3pl_snapshots. No named
+    allowlist and no SKU-specific special case. Copies last observed
+    quantities — does not invent stock. A SKU the feed reports at zero
+    stays zero. Prior zeros are not carried.
     """
     feed_keys = {_sku_key(i.get("sku")) for i in feed_items if i.get("sku")}
     extra: list[dict] = []
@@ -197,8 +199,9 @@ def _carry_forward_missing_instock(
 def live_3pl_snapshots(rows: list[dict]) -> list[dict]:
     """Latest pulled_at cohort plus leftover in-stock SKUs.
 
+    Applies to every SKU in inventory_3pl_snapshots — no named allowlist.
     Upsert-only sync leaves omitted SKUs at their old pulled_at. Treating
-    max(pulled_at) as the sole live snapshot hides Tulsa stock. Keep older
+    max(pulled_at) as the sole live snapshot hides leftover stock. Keep older
     rows with available/incoming > 0 that are absent from the latest
     cohort. Do not invent quantities.
     """

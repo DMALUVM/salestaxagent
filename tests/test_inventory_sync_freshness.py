@@ -29,12 +29,12 @@ STAMP = datetime(2026, 8, 26, 23, 10, tzinfo=timezone.utc)
 STAMP_ISO = STAMP.isoformat()
 
 
-def _fba_item(sku="DDPE0001Shop", fulfillable=12, inbound_shipped=4):
+def _fba_item(sku="SKU-A", fulfillable=12, inbound_shipped=4):
     return {
         "sellerSku": sku,
         "asin": "B00TEST",
         "fnSku": "X00",
-        "productName": "Unscented 3pk",
+        "productName": "Test product",
         "totalQuantity": fulfillable + inbound_shipped,
         "inventoryDetails": {
             "fulfillableQuantity": fulfillable,
@@ -49,7 +49,7 @@ def _fba_item(sku="DDPE0001Shop", fulfillable=12, inbound_shipped=4):
 
 
 def test_stamp_now_writes_field_even_when_qty_unchanged():
-    rows = [{"sku": "DDPE0001Shop", "fulfillable": 12}]
+    rows = [{"sku": "SKU-A", "fulfillable": 12}]
     stamped = _stamp_now(rows, "snapshot_at", now=STAMP)
     assert stamped[0]["fulfillable"] == 12
     assert stamped[0]["snapshot_at"] == STAMP_ISO
@@ -58,7 +58,7 @@ def test_stamp_now_writes_field_even_when_qty_unchanged():
 def test_fba_upsert_payload_includes_fresh_snapshot_at():
     rows = _stamp_now(_aggregate_fba_summaries([_fba_item()]), "snapshot_at", now=STAMP)
     assert len(rows) == 1
-    assert rows[0]["sku"] == "DDPE0001Shop"
+    assert rows[0]["sku"] == "SKU-A"
     assert rows[0]["fulfillable"] == 12
     assert rows[0]["inbound_shipped"] == 4
     assert rows[0]["snapshot_at"] == STAMP_ISO
@@ -76,7 +76,7 @@ def test_same_fba_quantities_still_bump_snapshot_at():
 def test_awd_upsert_payload_includes_fresh_pulled_at():
     rows = _awd_inventory_rows(
         [{
-            "sku": "DDPE0001Shop",
+            "sku": "SKU-A",
             "totalOnhandQuantity": 80,
             "totalInboundQuantity": 20,
             "inventoryDetails": {"replenishmentQuantity": 5},
@@ -91,10 +91,10 @@ def test_awd_upsert_payload_includes_fresh_pulled_at():
 def test_restock_upsert_payload_includes_fresh_pulled_at():
     tsv = (
         "merchant-sku\tasin\trecommended-replenishment-qty\tdays-of-supply\n"
-        "DDPE0001Shop\tB00TEST\t40\t18\n"
+        "SKU-A\tB00TEST\t40\t18\n"
     )
     rows = _stamp_now(_parse_restock(tsv), "pulled_at", now=STAMP)
-    assert rows[0]["sku"] == "DDPE0001Shop"
+    assert rows[0]["sku"] == "SKU-A"
     assert rows[0]["recommended_qty"] == 40
     assert rows[0]["days_of_supply"] == 18.0
     assert rows[0]["pulled_at"] == STAMP_ISO
@@ -103,10 +103,10 @@ def test_restock_upsert_payload_includes_fresh_pulled_at():
 def test_planning_upsert_payload_includes_fresh_pulled_at():
     tsv = (
         "sku\tasin\tavailable\tweeks-of-cover-t30\n"
-        "DDPE0001Shop\tB00TEST\t12\t2.5\n"
+        "SKU-A\tB00TEST\t12\t2.5\n"
     )
     rows = _stamp_now(_parse_planning(tsv), "pulled_at", now=STAMP)
-    assert rows[0]["sku"] == "DDPE0001Shop"
+    assert rows[0]["sku"] == "SKU-A"
     assert rows[0]["available"] == 12
     assert rows[0]["pulled_at"] == STAMP_ISO
 
@@ -115,16 +115,16 @@ def test_sync_success_implies_amazon_timestamps_advance():
     """Row builders used by a successful inventory-sync always emit now()."""
     fba = _stamp_now(_aggregate_fba_summaries([_fba_item()]), "snapshot_at", now=STAMP)
     awd = _awd_inventory_rows(
-        [{"sku": "DDPE0002Shop", "totalOnhandQuantity": 3, "totalInboundQuantity": 0}],
+        [{"sku": "SKU-B", "totalOnhandQuantity": 3, "totalInboundQuantity": 0}],
         pulled_at=STAMP,
     )
     restock = _stamp_now(
-        _parse_restock("merchant-sku\nDDPE0003Shop\n"),
+        _parse_restock("merchant-sku\nSKU-C\n"),
         "pulled_at",
         now=STAMP,
     )
     planning = _stamp_now(
-        _parse_planning("sku\nDDPE0004Shop\n"),
+        _parse_planning("sku\nSKU-D\n"),
         "pulled_at",
         now=STAMP,
     )
@@ -160,7 +160,7 @@ def test_shipment_and_item_upserts_stamp_synced_at():
         now=STAMP,
     )
     items = stamp_now(
-        [{"shipment_id": "FBA1", "sku": "DDPE0001Shop", "quantity_shipped": 10}],
+        [{"shipment_id": "FBA1", "sku": "SKU-A", "quantity_shipped": 10}],
         "synced_at",
         now=STAMP,
     )
@@ -171,10 +171,10 @@ def test_shipment_and_item_upserts_stamp_synced_at():
 
 
 def test_signals_leadtime_daily_stamp_equivalent_last_synced():
-    signals = stamp_now([{"sku": "DDPE0001Shop", "as_of_date": "2026-08-26"}], "updated_at", now=STAMP)
+    signals = stamp_now([{"sku": "SKU-A", "as_of_date": "2026-08-26"}], "updated_at", now=STAMP)
     lead = stamp_now([{"as_of_date": "2026-08-26", "fba_receive_n": 2}], "updated_at", now=STAMP)
     daily = stamp_now(
-        [{"sku": "DDPE0001Shop", "snapshot_date": "2026-08-26", "fba_on_hand": 12}],
+        [{"sku": "SKU-A", "snapshot_date": "2026-08-26", "fba_on_hand": 12}],
         "recorded_at",
         now=STAMP,
     )
@@ -204,7 +204,7 @@ def test_append_daily_snapshots_stamps_recorded_at(monkeypatch):
 
     monkeypatch.setattr("src.inventory.snapshots_daily.upsert_rows", fake_upsert)
     out = append_daily_snapshots([
-        {"sku": "DDPE0001Shop", "fulfillable": 12, "reserved": 0,
+        {"sku": "SKU-A", "fulfillable": 12, "reserved": 0,
          "researching": 0, "unfulfillable": 0, "total_quantity": 12,
          "inbound_working": 0, "inbound_shipped": 4, "inbound_receiving": 0},
     ])

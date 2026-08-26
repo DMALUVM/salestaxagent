@@ -3,7 +3,8 @@
  *
  * inventory_3pl_snapshots is upsert-on-sku. A pull that omits a SKU leaves
  * that row at its old pulled_at. Filtering to max(pulled_at) then hides
- * leftover Tulsa stock (e.g. DDPE0001Shop after the 2026-08-26 cohort).
+ * leftover in-stock SKUs from an older pulled_at. Applies to every SKU
+ * in the snapshot table — no named allowlist.
  */
 
 export type TplSnapshotLike = {
