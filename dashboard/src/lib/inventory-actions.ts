@@ -34,6 +34,10 @@ type RawLike = {
   settings?: InventorySettings | null;
   signals?: InventorySkuSignals[];
   leadtime?: InventoryLeadtimeSummary | null;
+  leadtimeSeasonal?: {
+    planning_receive_days?: number | null;
+    planning_awd_to_fba_days?: number | null;
+  } | null;
 };
 
 function effectiveLead(
@@ -43,18 +47,29 @@ function effectiveLead(
   awdOnHand: number,
   fbaOnHand: number,
   inbound: number,
+  seasonal?: { planning_receive_days?: number | null; planning_awd_to_fba_days?: number | null } | null,
 ): number {
   const fba =
+    (sig?.planning_receive_days && sig.planning_receive_days > 0
+      ? sig.planning_receive_days
+      : null) ??
+    seasonal?.planning_receive_days ??
     (sig?.measured_receive_days && sig.measured_receive_days > 0
       ? sig.measured_receive_days
       : null) ??
+    leadtime?.planning_receive_days ??
     leadtime?.fba_optimized_receive_median ??
     leadtime?.fba_receive_median ??
     settings.receiving_days_normal;
   const awd =
+    (sig?.planning_replenish_days && sig.planning_replenish_days > 0
+      ? sig.planning_replenish_days
+      : null) ??
+    seasonal?.planning_awd_to_fba_days ??
     (sig?.measured_replenish_days && sig.measured_replenish_days > 0
       ? sig.measured_replenish_days
       : null) ??
+    leadtime?.planning_awd_to_fba_days ??
     leadtime?.awd_replenish_median ??
     settings.awd_to_fba_days;
   if (awdOnHand > 0 && awdOnHand >= fbaOnHand + inbound) {
@@ -133,7 +148,7 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
 
     const lead = shopifyOnly
       ? settings.lead_time_days
-      : effectiveLead(sig, raw.leadtime, settings, awdOnHand, fbaOnHand, inbound);
+      : effectiveLead(sig, raw.leadtime, settings, awdOnHand, fbaOnHand, inbound, raw.leadtimeSeasonal);
 
     const demand = shopifyOnly ? shopifyVel : totalVel;
     const supply = shopifyOnly ? tplAvail : onHand;

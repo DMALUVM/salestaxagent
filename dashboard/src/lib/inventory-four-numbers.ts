@@ -118,6 +118,7 @@ export function buildFourNumbersPlan(opts: {
   bufferDays?: number;
   coverTargetDays?: number;
   receivingDays?: number;
+  awdToFbaDays?: number;
 }): FourNumbersPlan {
   const inbound = buildInboundWavePlan({
     skus: opts.skus,
@@ -131,6 +132,7 @@ export function buildFourNumbersPlan(opts: {
     bufferDays: opts.bufferDays,
     coverTargetDays: opts.coverTargetDays,
     receivingDays: opts.receivingDays,
+    awdToFbaDays: opts.awdToFbaDays,
   });
 
   const snapMap = new Map(opts.snapshots.map((s) => [s.sku, s]));

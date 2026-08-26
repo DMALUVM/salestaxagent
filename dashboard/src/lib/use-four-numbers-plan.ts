@@ -6,7 +6,6 @@ import {
   buildFourNumbersPlanFromRaw,
   extractActiveSkus,
   DEFAULT_UNTIL_DATE,
-  DEFAULT_RECEIVING_DAYS,
   type InventoryRawLike,
 } from "@/lib/inventory-supply-shared";
 import type { FourNumbersPlan } from "@/lib/inventory-four-numbers";
@@ -25,7 +24,7 @@ export function useFourNumbersPlan(opts?: {
     return buildFourNumbersPlanFromRaw(raw, {
       skus: opts?.skus,
       untilDate: opts?.untilDate ?? DEFAULT_UNTIL_DATE,
-      receivingDays: opts?.receivingDays ?? DEFAULT_RECEIVING_DAYS,
+      receivingDays: opts?.receivingDays,
     });
   }, [raw, opts?.skus, opts?.untilDate, opts?.receivingDays]);
 

@@ -122,14 +122,13 @@ def build_four_numbers_plan(
     today = date.today()
     peak_end = _parse_date(settings.get("peak_end_date")) or date(2027, 1, 15)
     end = (_parse_date(until_date) or peak_end) + timedelta(days=buffer_days)
-    recv_days = int(settings.get("receiving_days_normal", 18))
-
     inbound = build_inbound_wave_plan(
         skus=target_skus,
         until_date=until_date,
         buffer_days=buffer_days,
         scenario=scenario,
     )
+    recv_days = int(inbound.get("receiving_days") or settings.get("receiving_days_normal", 18))
 
     snaps = {r["sku"]: r for r in fetch_all("inventory_snapshots")}
     awds = {r["sku"]: r for r in fetch_all("inventory_awd")}

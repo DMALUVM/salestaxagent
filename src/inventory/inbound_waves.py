@@ -204,9 +204,47 @@ def build_inbound_wave_plan(
         int(settings.get("target_cover_days", AMAZON_MIN_COVER_DAYS) or AMAZON_MIN_COVER_DAYS),
         holiday_mode=holiday_mode,
     )
-    recv_days = receiving_days or int(settings.get("receiving_days_normal", DEFAULT_RECEIVING_DAYS))
-    awd_days = int(settings.get("awd_to_fba_days", DEFAULT_AWD_TO_FBA_DAYS))
+    snap = None
+    if receiving_days is None:
+        try:
+            from src.inventory.leadtime_seasonal import cached_seasonal_snapshot
+            snap = cached_seasonal_snapshot(settings, today)
+        except Exception:
+            snap = None
+    if receiving_days is not None:
+        recv_days = receiving_days
+    elif snap and snap.get("planning_receive_days"):
+        recv_days = int(snap["planning_receive_days"])
+    else:
+        recv_days = int(settings.get("receiving_days_normal", DEFAULT_RECEIVING_DAYS))
+    if snap and snap.get("planning_awd_to_fba_days"):
+        awd_days = int(snap["planning_awd_to_fba_days"])
+    else:
+        awd_days = int(settings.get("awd_to_fba_days", DEFAULT_AWD_TO_FBA_DAYS))
     awd_week = awd_arrive_week if awd_arrive_week is not None else max(1, math.ceil(awd_days / 7))
+
+    monthly = (snap or {}).get("monthly") or []
+    offpeak_recv = int((snap or {}).get("offpeak_receive_days") or recv_days)
+    offpeak_awd = int((snap or {}).get("offpeak_awd_to_fba_days") or awd_days)
+    obs_recv = (snap or {}).get("observed_receive_days")
+    obs_awd = (snap or {}).get("observed_awd_to_fba_days")
+    peak_cap = int(settings.get("receiving_days_peak") or 35)
+
+    def recv_on(week: date) -> int:
+        if receiving_days is not None:
+            return recv_days
+        from src.inventory.leadtime_seasonal import apply_factor, month_factor
+        planned = apply_factor(
+            offpeak_recv, month_factor(week, monthly, offpeak_recv), peak_cap,
+        ) or recv_days
+        return max(int(obs_recv or 0), planned)
+
+    def awd_on(week: date) -> int:
+        from src.inventory.leadtime_seasonal import apply_factor, month_factor
+        planned = apply_factor(
+            offpeak_awd, month_factor(week, monthly, offpeak_recv), None,
+        ) or awd_days
+        return max(int(obs_awd or 0), planned)
 
     inbound_week = inbound_arrive_week
     if inbound_week is None:
@@ -306,27 +344,29 @@ def build_inbound_wave_plan(
             avg_daily = _forward_phased_avg_daily(
                 w, end, base_daily, target_days, season_map, forecast_weeks,
             )
-            pipeline = _pipeline_receipts_ahead(scheduled, wi, weeks, recv_days)
+            week_recv = recv_on(w)
+            week_awd = awd_on(w)
+            pipeline = _pipeline_receipts_ahead(scheduled, wi, weeks, week_recv)
             effective_fba = fba_sim + pipeline
             if avg_daily > 0:
                 cover_days = effective_fba / avg_daily
             else:
                 cover_days = 999.0
 
-            inbound_grace = max(target_days - 15, recv_days + 7) if inbound > 0 else target_days - 7
+            inbound_grace = max(target_days - 15, week_recv + 7) if inbound > 0 else target_days - 7
             flagged = cover_days < inbound_grace and cover_days < 999
 
             if flagged and avg_daily > 0:
                 target_fba = target_days * avg_daily
                 deficit = math.ceil(max(target_fba - effective_fba, 0))
-                critical_urgent = cover_days < recv_days
+                critical_urgent = cover_days < week_recv
                 wave_cap = (
                     warehouse_pool
                     if critical_urgent
                     else min(
                         warehouse_pool,
                         max(
-                            math.ceil(avg_daily * recv_days),
+                            math.ceil(avg_daily * week_recv),
                             math.ceil(avg_daily * 7),
                         ),
                     )
@@ -343,7 +383,7 @@ def build_inbound_wave_plan(
                             "source": "AWD",
                             "units": from_awd,
                             "arrive_date": w_iso,
-                            "ship_by": (w - timedelta(days=awd_days)).isoformat(),
+                            "ship_by": (w - timedelta(days=week_awd)).isoformat(),
                             "urgent": critical_urgent,
                         })
                         deficit -= from_awd
@@ -358,7 +398,7 @@ def build_inbound_wave_plan(
                         warehouse_pool -= from_tpl
                         scheduled[wi] += from_tpl
                         fba_sim += from_tpl
-                        ship_by = w - timedelta(days=recv_days)
+                        ship_by = w - timedelta(days=week_recv)
                         waves.append({
                             "sku": sku,
                             "source": "3PL",
@@ -453,6 +493,8 @@ def build_inbound_wave_plan(
         "cover_target_days": target_days,
         "receiving_days": recv_days,
         "awd_to_fba_days": awd_days,
+        "seasonal_factor": (snap or {}).get("factor"),
+        "seasonal_window": (snap or {}).get("window"),
         "scenario": scenario,
         "holiday_mode": holiday_mode,
         "sku_plans": sku_results,
@@ -475,6 +517,9 @@ def format_inbound_plan_text(plan: dict) -> str:
     a(f"Generated: {plan['generated']}")
     a(f"Cover target: {plan['cover_target_days']}d forward at phased demand")
     a(f"Receiving lead: {plan['receiving_days']}d (warehouse ship → Prime eligible)")
+    if plan.get("seasonal_factor"):
+        a(f"Seasonal: {plan['seasonal_factor']}× {plan.get('seasonal_window') or ''} "
+          "(late Q3/Q4 look-ahead; learns from monthly history)")
     a(f"Plan through: {plan['until_date']}")
     a("=" * 70)
 

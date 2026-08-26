@@ -191,7 +191,10 @@ def sync_sku_signals(configured_lead_days: int = 35) -> dict:
     log.info("[RateSignals] %d SKUs calibrated", n)
 
     from src.inventory.leadtime_summary import sync_leadtime_summary
+    from src.inventory.leadtime_seasonal import persist_monthly_stats, build_seasonal_snapshot
     summary = sync_leadtime_summary(configured_awd_days=settings_awd)
+    monthly = persist_monthly_stats()
+    seasonal = build_seasonal_snapshot(monthly=monthly)
 
     return {
         "skus": n,
@@ -200,6 +203,7 @@ def sync_sku_signals(configured_lead_days: int = 35) -> dict:
         "account_replenish_days": account_replen,
         "account_replenish_n": account_replen_n,
         "leadtime_summary": summary,
+        "leadtime_seasonal": seasonal,
     }
 
 

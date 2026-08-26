@@ -24,23 +24,61 @@ def effective_fba_receive_days(
     *,
     peak: bool = False,
     account_summary: dict | None = None,
+    planning: bool = True,
+    as_of: date | None = None,
 ) -> int:
-    """Warehouse/direct inbound → FBA sellable (measured receive, else configured)."""
-    sig = _signal_for(sku, signals)
-    if sig and sig.get("measured_receive_days") is not None:
-        return _int(sig["measured_receive_days"], 0)
+    """Warehouse/direct inbound → FBA sellable (measured receive, else configured).
 
+    ``planning=True`` (default) scales the measured/configured days by the
+    late-Q3/Q4 seasonal factor so reorder and capacity look ahead into peak.
+    """
+    sig = _signal_for(sku, signals)
+    if sig and sig.get("planning_receive_days") is not None and planning:
+        return _int(sig["planning_receive_days"], 0)
+    if sig and sig.get("measured_receive_days") is not None:
+        base = _int(sig["measured_receive_days"], 0)
+        return _with_seasonal_receive(base, settings, planning, as_of)
+
+    if account_summary and account_summary.get("planning_receive_days") is not None and planning:
+        return _int(account_summary["planning_receive_days"], 0)
     if account_summary and account_summary.get("fba_optimized_receive_median") is not None:
-        return _int(account_summary["fba_optimized_receive_median"], 0)
+        base = _int(account_summary["fba_optimized_receive_median"], 0)
+        return _with_seasonal_receive(base, settings, planning, as_of)
     if account_summary and account_summary.get("fba_receive_median") is not None:
-        return _int(account_summary["fba_receive_median"], 0)
+        base = _int(account_summary["fba_receive_median"], 0)
+        return _with_seasonal_receive(base, settings, planning, as_of)
 
     if peak:
         return _int(settings.get("receiving_days_peak"), 28)
     recv = settings.get("receiving_days_normal")
     if recv is not None:
-        return _int(recv, 14)
-    return _int(settings.get("lead_time_days"), 35)
+        base = _int(recv, 14)
+        return _with_seasonal_receive(base, settings, planning, as_of)
+    return _with_seasonal_receive(_int(settings.get("lead_time_days"), 35), settings, planning, as_of)
+
+
+def _with_seasonal_receive(
+    base: int, settings: dict, planning: bool, as_of: date | None,
+) -> int:
+    if not planning or base <= 0:
+        return base
+    try:
+        from src.inventory.leadtime_seasonal import planning_receive_days
+        return planning_receive_days(base, settings, as_of)
+    except Exception:
+        return base
+
+
+def _with_seasonal_awd(
+    base: int, settings: dict, planning: bool, as_of: date | None,
+) -> int:
+    if not planning or base <= 0:
+        return base
+    try:
+        from src.inventory.leadtime_seasonal import planning_awd_to_fba_days
+        return planning_awd_to_fba_days(base, settings, as_of)
+    except Exception:
+        return base
 
 
 def effective_awd_to_fba_days(
@@ -48,18 +86,33 @@ def effective_awd_to_fba_days(
     settings: dict,
     signals: dict[str, dict] | None = None,
     account_summary: dict | None = None,
+    *,
+    planning: bool = True,
+    as_of: date | None = None,
 ) -> int:
     """AWD replenishment confirm → Prime-eligible at FC."""
     sig = _signal_for(sku, signals)
+    if sig and sig.get("planning_replenish_days") is not None and planning:
+        return _int(sig["planning_replenish_days"], 0)
     if sig and sig.get("measured_replenish_days") is not None:
-        return _int(sig["measured_replenish_days"], 0)
+        return _with_seasonal_awd(
+            _int(sig["measured_replenish_days"], 0), settings, planning, as_of,
+        )
 
+    if account_summary and account_summary.get("planning_awd_to_fba_days") is not None and planning:
+        return _int(account_summary["planning_awd_to_fba_days"], 0)
     if account_summary and account_summary.get("awd_replenish_median") is not None:
-        return _int(account_summary["awd_replenish_median"], 0)
+        return _with_seasonal_awd(
+            _int(account_summary["awd_replenish_median"], 0), settings, planning, as_of,
+        )
 
     if sig and sig.get("configured_awd_to_fba_days") is not None:
-        return _int(sig["configured_awd_to_fba_days"], 14)
-    return _int(settings.get("awd_to_fba_days"), 14)
+        return _with_seasonal_awd(
+            _int(sig["configured_awd_to_fba_days"], 14), settings, planning, as_of,
+        )
+    return _with_seasonal_awd(
+        _int(settings.get("awd_to_fba_days"), 14), settings, planning, as_of,
+    )
 
 
 def effective_reorder_lead_days(
@@ -75,9 +128,11 @@ def effective_reorder_lead_days(
     """Lead-time buffer in reorder math (target + lead) × demand."""
     fba_lead = effective_fba_receive_days(
         sku, settings, signals, account_summary=account_summary,
+        planning=True,
     )
     awd_lead = effective_awd_to_fba_days(
         sku, settings, signals, account_summary=account_summary,
+        planning=True,
     )
 
     # When AWD dominates supply and FBA is thin, buffer for AWD→FBA path too.

@@ -299,6 +299,8 @@ export interface InventorySkuSignals {
   measured_replenish_days: number | null;
   replenish_sample_n: number;
   configured_awd_to_fba_days: number | null;
+  planning_receive_days?: number | null;
+  planning_replenish_days?: number | null;
 }
 
 export interface InventoryLeadtimeSummary {
@@ -312,6 +314,8 @@ export interface InventoryLeadtimeSummary {
   awd_replenish_median: number | null;
   awd_replenish_n: number;
   configured_awd_to_fba_days: number | null;
+  planning_receive_days?: number | null;
+  planning_awd_to_fba_days?: number | null;
 }
 
 export interface SeasonalityWeekly {

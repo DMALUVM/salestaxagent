@@ -12,6 +12,7 @@ import type {
   InventorySkuSignals,
   InventoryLeadtimeSummary,
 } from "@/lib/types";
+import type { LeadtimeSeasonal } from "@/lib/leadtime-seasonal";
 import { LoadingState } from "@/components/loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -117,6 +118,8 @@ interface ComputedRow {
   receive_sample_n: number;
   measured_replenish_days: number | null;
   replenish_sample_n: number;
+  planning_receive_days: number | null;
+  planning_replenish_days: number | null;
   effective_lead_days: number;
 }
 
@@ -184,6 +187,7 @@ export default function InventoryPage() {
   const awdSnapshots = (raw?.awd ?? []) as { sku: string; awd_on_hand: number; awd_inbound: number }[];
   const signalRows = (raw?.signals ?? []) as InventorySkuSignals[];
   const leadtime = (raw?.leadtime ?? null) as InventoryLeadtimeSummary | null;
+  const leadtimeSeasonal = (raw?.leadtimeSeasonal ?? null) as LeadtimeSeasonal | null;
   const modelStateRows = (raw?.modelState ?? []) as Array<{ sku: string; weights: unknown; seasonal_factors: unknown; model_version: string }>;
   const capacityLimits = (raw?.capacity ?? []) as { month: string; limit_ft3: number; used_ft3: number; source: string }[];
 
@@ -201,6 +205,10 @@ export default function InventoryPage() {
     inboundQty: number,
   ): number {
     const fba =
+      (sig?.planning_receive_days && sig.planning_receive_days > 0
+        ? sig.planning_receive_days
+        : null) ??
+      leadtimeSeasonal?.planning_receive_days ??
       (sig?.measured_receive_days && sig.measured_receive_days > 0
         ? sig.measured_receive_days
         : null) ??
@@ -208,6 +216,10 @@ export default function InventoryPage() {
       leadtime?.fba_receive_median ??
       s.receiving_days_normal;
     const awd =
+      (sig?.planning_replenish_days && sig.planning_replenish_days > 0
+        ? sig.planning_replenish_days
+        : null) ??
+      leadtimeSeasonal?.planning_awd_to_fba_days ??
       (sig?.measured_replenish_days && sig.measured_replenish_days > 0
         ? sig.measured_replenish_days
         : null) ??
@@ -487,12 +499,20 @@ export default function InventoryPage() {
               ? Number(leadtime.awd_replenish_median)
               : null,
         replenish_sample_n: sig?.replenish_sample_n != null ? Number(sig.replenish_sample_n) : 0,
+        planning_receive_days:
+          sig?.planning_receive_days != null && Number(sig.planning_receive_days) > 0
+            ? Number(sig.planning_receive_days)
+            : leadtimeSeasonal?.planning_receive_days ?? null,
+        planning_replenish_days:
+          sig?.planning_replenish_days != null && Number(sig.planning_replenish_days) > 0
+            ? Number(sig.planning_replenish_days)
+            : leadtimeSeasonal?.planning_awd_to_fba_days ?? null,
         effective_lead_days: effective_lead,
       });
     }
 
     return result;
-  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, signalRows, leadtime, s]);
+  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, signalRows, leadtime, leadtimeSeasonal, s]);
 
   // Filter + sort
   const filtered = useMemo(() => {
@@ -633,7 +653,10 @@ export default function InventoryPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Inventory</h1>
           <p className="text-sm text-muted-foreground">
-            Target {target}d FBA cover &middot; {Number(s.receiving_days_normal)}–{Number(s.receiving_days_peak)}d check-in buffer
+            Target {target}d FBA cover &middot;{" "}
+            {leadtimeSeasonal?.planning_receive_days != null
+              ? `plan Recv ${leadtimeSeasonal.planning_receive_days}d (${leadtimeSeasonal.factor}× ${leadtimeSeasonal.window})`
+              : `${Number(s.receiving_days_normal)}–${Number(s.receiving_days_peak)}d check-in buffer`}
             {s.holiday_mode && (
               <Badge variant="outline" className="ml-2 text-amber-600 border-amber-300">Holiday Mode</Badge>
             )}
@@ -730,13 +753,26 @@ export default function InventoryPage() {
             <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
               <strong>V30</strong> = orders report (SP-API). <strong>Inv V30</strong> = total FBA quantity
               day-over-day (ledger receipts counted). When they diverge &gt;25%, investigate before reordering.
-              <strong> Recv</strong> = median <strong>shipped → received</strong> days from closed FBA inbound
-              {accountReceive != null ? ` (~${accountReceive}d measured)` : ""}.
-              Reorder qty uses measured lead time per SKU (falls back to {s.receiving_days_normal}d configured).
-              <strong> AWD→FBA</strong> = outbound <strong>shipped → Prime-eligible</strong> (ledger sellable receipt when available).
+              <strong> Recv</strong> = warehouse→AWD + AWD→FBA (75th percentile, 4–45d samples)
+              {leadtimeSeasonal?.observed_receive_days != null
+                ? ` — ${leadtimeSeasonal.observed_receive_days}d now`
+                : accountReceive != null
+                  ? ` (~${accountReceive}d measured)`
+                  : ""}.
+              Reorder, waves, and the four-number plan use <strong>seasonal planning</strong> days
+              {leadtimeSeasonal?.planning_receive_days != null
+                ? ` (${leadtimeSeasonal.planning_receive_days}d Recv / ${leadtimeSeasonal.planning_awd_to_fba_days}d AWD→FBA, ${leadtimeSeasonal.factor}× ${leadtimeSeasonal.window})`
+                : ` (falls back to ${s.receiving_days_normal}d configured)`}.
+              Late Q3/Q4 is planned longer on purpose. The factor blends calendar priors with monthly history and weights last year more as those months fill in.
               {divergent > 0 ? ` ${divergent} SKU(s) flagged.` : ""}
               Daily history builds after each <code className="rounded bg-blue-100/60 px-1 dark:bg-blue-900/40">inventory-sync</code> — needs ~7 days for Inv V30.
             </p>
+            {leadtimeSeasonal && (
+              <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
+                History {leadtimeSeasonal.history_span ?? "starts as shipments close"}.
+                {" "}{leadtimeSeasonal.note}
+              </p>
+            )}
             {leadtime && (
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <div className="rounded-md border border-blue-200/60 bg-white/50 px-2.5 py-2 dark:border-blue-800 dark:bg-blue-950/30">
@@ -773,11 +809,37 @@ export default function InventoryPage() {
                       ? `${leadtime.awd_replenish_median}d`
                       : "—"}
                     {leadtime.awd_replenish_n ? ` (n=${leadtime.awd_replenish_n})` : ""}
-                    {leadtime.configured_awd_to_fba_days != null
-                      ? ` · ${leadtime.configured_awd_to_fba_days}d configured`
-                      : ""}
+                    {leadtime.planning_awd_to_fba_days != null
+                      ? ` · plan ${leadtime.planning_awd_to_fba_days}d`
+                      : leadtime.configured_awd_to_fba_days != null
+                        ? ` · ${leadtime.configured_awd_to_fba_days}d configured`
+                        : ""}
                   </p>
                 </div>
+              </div>
+            )}
+            {leadtimeSeasonal && leadtimeSeasonal.monthly.length > 0 && (
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-[10px] tabular-nums">
+                  <thead>
+                    <tr className="text-left text-blue-700/70 dark:text-blue-300/70">
+                      <th className="pr-2 font-medium">Month</th>
+                      <th className="pr-2 font-medium">Inbound p75</th>
+                      <th className="pr-2 font-medium">AWD→FBA p75</th>
+                      <th className="font-medium">Path</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leadtimeSeasonal.monthly.map((m) => (
+                      <tr key={m.year_month}>
+                        <td className="pr-2">{m.year_month}</td>
+                        <td className="pr-2">{m.inbound_p75 != null ? `${m.inbound_p75}d` : "—"}{m.inbound_n ? ` n=${m.inbound_n}` : ""}</td>
+                        <td className="pr-2">{m.replenish_p75 != null ? `${m.replenish_p75}d` : "—"}{m.replenish_n ? ` n=${m.replenish_n}` : ""}</td>
+                        <td>{m.recv_p75 != null ? `${m.recv_p75}d` : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </CardContent>
@@ -987,8 +1049,8 @@ export default function InventoryPage() {
                   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
                   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },
                   { key: "inventory_u_30", label: "Inv V30", tip: "FBA units shipped/day from the inventory ledger (last 30 days). Compare to orders V30." },
-                  { key: "measured_receive_days", label: "Recv", tip: "Warehouse ship → FBA sellable: AWD inbound + AWD→FBA (75th percentile, 4–45 day samples). Not the 4-day parcel median." },
-                  { key: "measured_replenish_days", label: "AWD→FBA", tip: "AWD replenish created → SUCCESS at FBA (75th percentile). Drops 1–3 day status flips." },
+                  { key: "measured_receive_days", label: "Recv", tip: "Observed warehouse → FBA sellable (AWD inbound + AWD→FBA, p75). Reorder uses the seasonal planning number when it is longer." },
+                  { key: "measured_replenish_days", label: "AWD→FBA", tip: "Observed AWD replenish created → SUCCESS (p75). Planning uses the seasonal look-ahead into late Q3/Q4." },
                   { key: "dos", label: "DOS", tip: "Days of supply — FBA cover (Amazon) or warehouse cover (Shop)" },
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
@@ -1081,11 +1143,39 @@ export default function InventoryPage() {
                     >
                       {r.inventory_u_30 != null ? r.inventory_u_30.toFixed(1) : "—"}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground" title={r.receive_sample_n ? `n=${r.receive_sample_n} shipments` : undefined}>
+                    <TableCell
+                      className="text-right tabular-nums text-muted-foreground"
+                      title={
+                        r.planning_receive_days != null && r.planning_receive_days !== r.measured_receive_days
+                          ? `Observed ${r.measured_receive_days}d · planning ${r.planning_receive_days}d`
+                          : r.receive_sample_n
+                            ? `n=${r.receive_sample_n} shipments`
+                            : undefined
+                      }
+                    >
                       {r.measured_receive_days != null && r.measured_receive_days > 0 ? `${r.measured_receive_days}d` : "—"}
+                      {r.planning_receive_days != null
+                        && r.measured_receive_days != null
+                        && r.planning_receive_days !== r.measured_receive_days && (
+                        <span className="ml-1 text-[10px] text-amber-600">→{r.planning_receive_days}</span>
+                      )}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums text-muted-foreground" title={r.replenish_sample_n ? `n=${r.replenish_sample_n} replenishments` : undefined}>
+                    <TableCell
+                      className="text-right tabular-nums text-muted-foreground"
+                      title={
+                        r.planning_replenish_days != null && r.planning_replenish_days !== r.measured_replenish_days
+                          ? `Observed ${r.measured_replenish_days}d · planning ${r.planning_replenish_days}d`
+                          : r.replenish_sample_n
+                            ? `n=${r.replenish_sample_n} replenishments`
+                            : undefined
+                      }
+                    >
                       {r.measured_replenish_days != null && r.measured_replenish_days > 0 ? `${r.measured_replenish_days}d` : "—"}
+                      {r.planning_replenish_days != null
+                        && r.measured_replenish_days != null
+                        && r.planning_replenish_days !== r.measured_replenish_days && (
+                        <span className="ml-1 text-[10px] text-amber-600">→{r.planning_replenish_days}</span>
+                      )}
                     </TableCell>
                     <TableCell
                       className={`text-right tabular-nums font-medium ${
@@ -1297,20 +1387,26 @@ export default function InventoryPage() {
                 )}
                 {selected.measured_receive_days != null && (
                   <p>
-                    Measured FBA receive: {selected.measured_receive_days}d (shipped→received)
-                    {selected.receive_sample_n ? ` (last ${selected.receive_sample_n} shipments)` : ""}
+                    Measured FBA receive: {selected.measured_receive_days}d (warehouse→Prime)
+                    {selected.planning_receive_days != null && selected.planning_receive_days !== selected.measured_receive_days
+                      ? ` · plan ${selected.planning_receive_days}d`
+                      : ""}
+                    {selected.receive_sample_n ? ` (n=${selected.receive_sample_n})` : ""}
                   </p>
                 )}
                 {selected.measured_replenish_days != null && (
                   <p>
-                    Measured AWD→Prime: {selected.measured_replenish_days}d (shipped→sellable)
-                    {selected.replenish_sample_n ? ` (last ${selected.replenish_sample_n} replenishments)` : ""}
+                    Measured AWD→Prime: {selected.measured_replenish_days}d
+                    {selected.planning_replenish_days != null && selected.planning_replenish_days !== selected.measured_replenish_days
+                      ? ` · plan ${selected.planning_replenish_days}d`
+                      : ""}
+                    {selected.replenish_sample_n ? ` (n=${selected.replenish_sample_n})` : ""}
                   </p>
                 )}
                 {selected.channel !== "shopify_only" && (
                   <p>
                     Reorder lead buffer: {selected.effective_lead_days}d
-                    {selected.measured_receive_days != null ? " (measured FBA receive)" : " (configured fallback)"}
+                    {selected.planning_receive_days != null ? " (seasonal planning)" : selected.measured_receive_days != null ? " (measured FBA receive)" : " (configured fallback)"}
                   </p>
                 )}
                 {selected.stockout_date && (

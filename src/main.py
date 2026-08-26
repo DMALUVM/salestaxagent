@@ -3950,6 +3950,16 @@ def inventory_calibrate_cmd(dry_run):
     if sig.get("account_replenish_days") is not None:
         click.echo(f"Account median AWD→FBA: {sig['account_replenish_days']}d "
                    f"(n={sig.get('account_replenish_n', 0)})")
+    seasonal = sig.get("leadtime_seasonal") or {}
+    if seasonal.get("planning_receive_days") is not None:
+        click.echo(
+            f"Seasonal plan Recv {seasonal['planning_receive_days']}d / "
+            f"AWD→FBA {seasonal.get('planning_awd_to_fba_days')}d "
+            f"({seasonal.get('factor')}× {seasonal.get('window')}, "
+            f"history {seasonal.get('history_span') or 'none'})"
+        )
+        if seasonal.get("note"):
+            click.echo(seasonal["note"])
 
 
 @cli.command("inventory-velocity")
