@@ -3824,7 +3824,8 @@ def inventory_sync_cmd(dry_run):
     from src.inventory.sync import sync_all
     if dry_run:
         click.echo("DRY RUN\n")
-    results = sync_all(dry_run=dry_run)
+    click.echo("Inventory sync started (each step prints when it finishes)...")
+    results = sync_all(dry_run=dry_run, echo=click.echo)
     sync_names = [
         "fba_summaries", "awd", "restock", "planning",
         "awd_replenishments", "inbound_shipments", "awd_inbound",
@@ -3833,6 +3834,11 @@ def inventory_sync_cmd(dry_run):
         r = results.get(name, {})
         if "error" in r:
             click.echo(f"{name}: ERROR — {r['error'][:200]}")
+        elif r.get("upsert_error"):
+            click.echo(
+                f"{name}: {r.get('shipments_found', r.get('orders_found', 0))} found, "
+                f"upsert warning — {r['upsert_error'][:200]}"
+            )
         else:
             extra = ""
             if name == "fba_summaries" and r.get("daily"):

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+import re
+from datetime import date, datetime, timedelta, timezone
 from statistics import median
 
 from src.db import fetch_all, upsert_rows
@@ -12,6 +13,8 @@ from src.amazon_sp.client import SPAPIError
 log = logging.getLogger(__name__)
 
 SUCCESS_STATUSES = frozenset({"SUCCESS", "INVENTORY_OUTBOUND", "CONFIRMED", "EXECUTING"})
+DETAIL_FETCH_LIMIT = 20
+FBA_ID_RE = re.compile(r"^FBA[A-Z0-9]+$")
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -56,20 +59,66 @@ def _get_order(order_id: str) -> dict | None:
 
 
 def _needs_order_detail(summary: dict) -> bool:
-    """Fetch detail only when list payload lacks fields needed for lead time."""
+    """Fetch detail when list payload lacks FBA shipment links or SKU breakdown."""
     status = (summary.get("status") or "").upper()
     if status != "SUCCESS":
         return False
     outbound = summary.get("outboundShipments") or []
     if not outbound:
         return True
-    if summary.get("shippedProducts") or summary.get("products"):
-        for ob in outbound:
-            sid = str(ob.get("shipmentId") or ob.get("shipment_id") or "")
-            if sid.startswith("FBA"):
-                return False
-        return True
+    has_fba = any(
+        FBA_ID_RE.match(str(ob.get("shipmentConfirmationId") or ob.get("shipmentId") or ""))
+        for ob in outbound
+    )
+    if has_fba and (summary.get("shippedProducts") or summary.get("products")):
+        return False
     return True
+
+
+def _ledger_any_fc_receipts(
+    skus: list[str],
+    start: datetime,
+    window_days: int = 120,
+) -> tuple[datetime | None, datetime | None]:
+    """First receipt and first sellable receipt at any FC after start."""
+    if not skus:
+        return None, None
+    try:
+        events = fetch_all("inventory_events")
+    except Exception:
+        return None, None
+
+    sku_set = {s.upper() for s in skus if s}
+    end = start.date() + timedelta(days=window_days)
+    first_recv: datetime | None = None
+    first_sellable: datetime | None = None
+
+    for ev in events:
+        if (ev.get("sku") or "").upper() not in sku_set:
+            continue
+        ed = ev.get("event_date")
+        if not ed:
+            continue
+        try:
+            edate = date.fromisoformat(str(ed)[:10])
+        except ValueError:
+            continue
+        if edate < start.date() or edate > end:
+            continue
+        et = (ev.get("event_type") or "").lower()
+        if int(ev.get("quantity", 0) or 0) <= 0:
+            continue
+        if "receipt" not in et:
+            continue
+        ts = datetime.combine(edate, datetime.min.time(), tzinfo=timezone.utc)
+        if first_recv is None or ts < first_recv:
+            first_recv = ts
+        disp = (ev.get("disposition") or "").lower()
+        if "sellable" in disp or disp in {"", "sellable"}:
+            if first_sellable is None or ts < first_sellable:
+                first_sellable = ts
+
+    return first_recv, first_sellable
 
 
 def _fba_shipments_by_id() -> dict[str, dict]:
@@ -154,6 +203,15 @@ def _compute_replenish_days(
         end = max(end_dates)
         return max((end.date() - start.date()).days, 0), "shipped_to_received"
 
+    products = _products_from_order(order, "shippedProducts") or _products_from_order(order, "products")
+    skus = [p["sku"] for p in products if p.get("sku")]
+    if skus:
+        ledger_recv, ledger_sellable = _ledger_any_fc_receipts(skus, start)
+        if ledger_sellable:
+            return max((ledger_sellable.date() - start.date()).days, 0), "ledger_shipped_to_sellable"
+        if ledger_recv:
+            return max((ledger_recv.date() - start.date()).days, 0), "ledger_shipped_to_received"
+
     status = (order.get("status") or "").upper()
     if status == "SUCCESS":
         end = _parse_ts(order.get("updatedAt"))
@@ -182,13 +240,16 @@ def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict
     detail_fetched = 0
     detail_skipped = 0
 
+    detail_budget = DETAIL_FETCH_LIMIT
+
     for summary in orders:
         oid = summary.get("orderId") or summary.get("order_id")
         if not oid:
             continue
-        if _needs_order_detail(summary):
+        if _needs_order_detail(summary) and detail_budget > 0:
             detail = _get_order(oid) or summary
             detail_fetched += 1
+            detail_budget -= 1
         else:
             detail = summary
             detail_skipped += 1
@@ -199,9 +260,9 @@ def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict
 
         outbound = detail.get("outboundShipments") or []
         outbound_ids = [
-            ob.get("shipmentId") or ob.get("shipment_id")
+            ob.get("shipmentConfirmationId") or ob.get("shipmentId") or ob.get("shipment_id")
             for ob in outbound
-            if ob.get("shipmentId") or ob.get("shipment_id")
+            if ob.get("shipmentConfirmationId") or ob.get("shipmentId") or ob.get("shipment_id")
         ]
 
         shipped = _products_from_order(detail, "shippedProducts")
@@ -264,6 +325,7 @@ def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict
         "detail_fetched": detail_fetched,
         "detail_skipped": detail_skipped,
         "dry_run": dry_run,
+        "order_rows": order_rows,
     }
     if dry_run or not order_rows:
         return result

@@ -40,18 +40,34 @@ def upsert_rows(
     rows: list[dict],
     on_conflict: str | None = None,
     batch_size: int = 500,
+    *,
+    drop_columns: frozenset[str] | None = None,
 ) -> int:
     if not rows:
         return 0
     client = get_client()
     total = 0
+    drop = drop_columns or frozenset()
     for i in range(0, len(rows), batch_size):
-        batch = [_clean_row(r) for r in rows[i : i + batch_size]]
-        result = (
-            client.table(table)
-            .upsert(batch, on_conflict=on_conflict)
-            .execute()
-        )
+        batch = [
+            _clean_row({k: v for k, v in r.items() if k not in drop})
+            for r in rows[i : i + batch_size]
+        ]
+        try:
+            result = (
+                client.table(table)
+                .upsert(batch, on_conflict=on_conflict)
+                .execute()
+            )
+        except Exception as e:
+            err = str(e)
+            if "PGRST204" in err and "raw" in err.lower() and "raw" not in drop:
+                log.warning("Retrying %s upsert without raw column: %s", table, err[:120])
+                return upsert_rows(
+                    table, rows, on_conflict=on_conflict, batch_size=batch_size,
+                    drop_columns=drop | frozenset({"raw"}),
+                )
+            raise
         total += len(result.data) if result.data else 0
     return total
 

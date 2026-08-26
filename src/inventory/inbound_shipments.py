@@ -123,12 +123,7 @@ def _get_shipments_by_ids(shipment_ids: list[str]) -> list[dict]:
     return found
 
 
-def _fba_ids_from_awd_replenishments() -> list[str]:
-    """Collect FBA shipment confirmation IDs linked from AWD replenishment orders."""
-    try:
-        orders = fetch_all("inventory_awd_replenishments")
-    except Exception:
-        return []
+def _fba_ids_from_replenishment_rows(orders: list[dict]) -> list[str]:
     ids: set[str] = set()
     for order in orders:
         for sid in order.get("outbound_shipment_ids") or []:
@@ -143,6 +138,17 @@ def _fba_ids_from_awd_replenishments() -> list[str]:
                 val = str(ob.get(key) or "").strip()
                 if FBA_SHIPMENT_RE.match(val):
                     ids.add(val)
+    return sorted(ids)
+
+
+def _fba_ids_from_awd_replenishments(extra_orders: list[dict] | None = None) -> list[str]:
+    """Collect FBA shipment confirmation IDs linked from AWD replenishment orders."""
+    ids = set(_fba_ids_from_replenishment_rows(extra_orders or []))
+    try:
+        orders = fetch_all("inventory_awd_replenishments")
+    except Exception:
+        orders = []
+    ids.update(_fba_ids_from_replenishment_rows(orders))
     return sorted(ids)
 
 
@@ -180,7 +186,11 @@ def _existing_by_id() -> dict[str, dict]:
     return {r["shipment_id"]: r for r in rows if r.get("shipment_id")}
 
 
-def sync_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> dict:
+def sync_inbound_shipments(
+    days_back: int = 180,
+    dry_run: bool = False,
+    replenishment_orders: list[dict] | None = None,
+) -> dict:
     """Pull inbound shipments; measure ship → receive / Prime-eligible days."""
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=days_back)
@@ -211,7 +221,7 @@ def sync_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> dict:
     seen_ids = {r["shipment_id"] for r in ship_rows}
 
     awd_fba_ids = [
-        sid for sid in _fba_ids_from_awd_replenishments()
+        sid for sid in _fba_ids_from_awd_replenishments(replenishment_orders)
         if sid not in seen_ids
     ]
     awd_by_id_count = 0
@@ -256,14 +266,18 @@ def sync_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> dict:
     if dry_run or not ship_rows:
         return result
 
-    result["rows_upserted"] = upsert_rows(
-        "inventory_inbound_shipments", ship_rows, on_conflict="shipment_id",
-    )
-    if item_rows:
-        upsert_rows(
-            "inventory_inbound_shipment_items", item_rows,
-            on_conflict="shipment_id,sku",
+    try:
+        result["rows_upserted"] = upsert_rows(
+            "inventory_inbound_shipments", ship_rows, on_conflict="shipment_id",
         )
+        if item_rows:
+            upsert_rows(
+                "inventory_inbound_shipment_items", item_rows,
+                on_conflict="shipment_id,sku",
+            )
+    except Exception as e:
+        result["upsert_error"] = str(e)[:300]
+        log.error("[Inbound] upsert failed: %s", e)
     return result
 
 

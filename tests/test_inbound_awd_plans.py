@@ -47,4 +47,5 @@ def test_sync_skips_awd_plans_without_warning_spam(monkeypatch):
 
     result = sync_inbound_plans_v2024(days_back=180, dry_run=True)
     assert result["awd_plans_skipped"] == 1
+    assert result["plans_scanned"] == 2
     assert get_plan_calls == ["ip222222222222"]

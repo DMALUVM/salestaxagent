@@ -157,36 +157,52 @@ def sync_inbound_plans_v2024(
     existing = existing if existing is not None else _existing_by_id()
 
     plan_summaries: list[dict] = []
+    awd_plans_skipped = 0
     token: str | None = None
+    all_awd_pages = 0
+
     while True:
         page = _list_plans_page(token)
         batch = page.get("inboundPlans") or []
         if not batch:
             break
+
+        hit_cutoff = False
+        page_all_awd = True
         for p in batch:
             updated = parse_ts(p.get("lastUpdatedAt"))
             if updated and updated < cutoff:
-                token = None
-                batch = []
+                hit_cutoff = True
                 break
-            plan_summaries.append(p)
+            if _is_awd_inbound_plan(p):
+                awd_plans_skipped += 1
+            else:
+                page_all_awd = False
+                plan_summaries.append(p)
+
+        if hit_cutoff:
+            break
+
+        if page_all_awd:
+            all_awd_pages += 1
+            if all_awd_pages >= 1 and not plan_summaries:
+                log.info(
+                    "Inbound v2024: AWD-only inbound plans — skipping FBA Send-to-Amazon sync",
+                )
+                break
         else:
-            token = (page.get("pagination") or {}).get("nextToken")
-            if not token:
-                break
-            continue
-        break
+            all_awd_pages = 0
+
+        token = (page.get("pagination") or {}).get("nextToken")
+        if not token:
+            break
 
     ship_rows: list[dict] = []
     item_rows: list[dict] = []
-    awd_plans_skipped = 0
 
     for summary in plan_summaries:
         plan_id = summary.get("inboundPlanId")
         if not plan_id:
-            continue
-        if _is_awd_inbound_plan(summary):
-            awd_plans_skipped += 1
             continue
         try:
             plan = _get_plan(plan_id)
@@ -307,7 +323,7 @@ def sync_inbound_plans_v2024(
         )
 
     return {
-        "plans_scanned": len(plan_summaries),
+        "plans_scanned": len(plan_summaries) + awd_plans_skipped,
         "awd_plans_skipped": awd_plans_skipped,
         "shipments_found": len(ship_rows),
         "items_found": len(item_rows),

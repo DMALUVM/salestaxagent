@@ -340,12 +340,18 @@ def fetch_fba_summaries(dry_run: bool = False) -> dict:
 # Combined sync
 # ---------------------------------------------------------------------------
 
-def sync_all(dry_run: bool = False, on_poll=None) -> dict:
+def sync_all(dry_run: bool = False, on_poll=None, echo=None) -> dict:
     """Pull restock + planning + FBA summaries + AWD."""
     from src.inventory.awd import fetch_awd_inventory
 
+    def _say(msg: str) -> None:
+        log.info(msg)
+        if echo:
+            echo(msg)
+
     results = {}
     errors = []
+    replenishment_orders: list[dict] | None = None
 
     for name, fn in [
         ("fba_summaries", lambda: fetch_fba_summaries(dry_run=dry_run)),
@@ -353,32 +359,45 @@ def sync_all(dry_run: bool = False, on_poll=None) -> dict:
         ("restock", lambda: fetch_restock(dry_run=dry_run, on_poll=on_poll)),
         ("planning", lambda: fetch_planning(dry_run=dry_run, on_poll=on_poll)),
         ("awd_replenishments", lambda: _sync_awd_replenishments(dry_run)),
-        ("inbound_shipments", lambda: _sync_inbound(dry_run)),
+        ("inbound_shipments", lambda: _sync_inbound(dry_run, replenishment_orders)),
         ("awd_inbound", lambda: _sync_awd_inbound(dry_run)),
     ]:
+        _say(f"  {name}...")
         try:
             results[name] = fn()
-            log.info("[Inventory] %s: %s rows", name, results[name].get("rows_total", 0))
+            if name == "awd_replenishments":
+                replenishment_orders = (results[name] or {}).get("order_rows") or []
+            count = results[name].get(
+                "rows_total",
+                results[name].get("shipments_found", results[name].get("orders_found", 0)),
+            )
+            _say(f"  {name}: {count} rows")
         except SPAPIError as e:
             err = str(e)
             results[name] = {"error": err[:300]}
             errors.append(f"{name}: {err[:200]}")
+            _say(f"  {name}: ERROR")
             if "403" in err or "Unauthorized" in err or "access denied" in err.lower():
                 hint = AWD_ROLE_HINT if name in AWD_SYNC_NAMES else FBA_ROLE_HINT
                 log.warning("[Inventory] %s access denied — %s", name, hint)
         except Exception as e:
             results[name] = {"error": str(e)[:300]}
             errors.append(f"{name}: {e}")
+            _say(f"  {name}: ERROR — {str(e)[:120]}")
 
     results["errors"] = errors
     return results
 
 
-def _sync_inbound(dry_run: bool) -> dict:
+def _sync_inbound(dry_run: bool, replenishment_orders: list[dict] | None = None) -> dict:
     if dry_run:
         return {"dry_run": True}
     from src.inventory.inbound_shipments import sync_inbound_shipments
-    return sync_inbound_shipments(days_back=180, dry_run=False)
+    return sync_inbound_shipments(
+        days_back=180,
+        dry_run=False,
+        replenishment_orders=replenishment_orders,
+    )
 
 
 def _sync_awd_replenishments(dry_run: bool) -> dict:
