@@ -10,6 +10,7 @@ import type {
   SeasonalityWeekly,
   Inventory3plSnapshot,
   InventorySkuSignals,
+  InventoryLeadtimeSummary,
 } from "@/lib/types";
 import { LoadingState } from "@/components/loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -110,6 +111,8 @@ interface ComputedRow {
   rate_agreement: string | null;
   measured_receive_days: number | null;
   receive_sample_n: number;
+  measured_replenish_days: number | null;
+  replenish_sample_n: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +176,7 @@ export default function InventoryPage() {
   const forecasts = (raw?.forecast ?? []) as { sku: string; week_start: string; scenario: string; units: number }[];
   const awdSnapshots = (raw?.awd ?? []) as { sku: string; awd_on_hand: number; awd_inbound: number }[];
   const signalRows = (raw?.signals ?? []) as InventorySkuSignals[];
+  const leadtime = (raw?.leadtime ?? null) as InventoryLeadtimeSummary | null;
   const modelStateRows = (raw?.modelState ?? []) as Array<{ sku: string; weights: unknown; seasonal_factors: unknown; model_version: string }>;
   const capacityLimits = (raw?.capacity ?? []) as { month: string; limit_ft3: number; used_ft3: number; source: string }[];
 
@@ -434,6 +438,8 @@ export default function InventoryPage() {
         rate_agreement: sig?.rate_agreement ?? null,
         measured_receive_days: sig?.measured_receive_days != null ? Number(sig.measured_receive_days) : null,
         receive_sample_n: sig?.receive_sample_n != null ? Number(sig.receive_sample_n) : 0,
+        measured_replenish_days: sig?.measured_replenish_days != null ? Number(sig.measured_replenish_days) : null,
+        replenish_sample_n: sig?.replenish_sample_n != null ? Number(sig.replenish_sample_n) : 0,
       });
     }
 
@@ -626,18 +632,62 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {(signalRows.length > 0 || divergent > 0) && (
+      {(signalRows.length > 0 || divergent > 0 || leadtime) && (
         <Card className="border-blue-200 bg-blue-50/40 dark:border-blue-900 dark:bg-blue-950/20">
           <CardContent className="py-3 text-xs leading-relaxed text-blue-900 dark:text-blue-100">
             <p className="font-medium">Rate & lead-time calibration</p>
             <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
               <strong>V30</strong> = orders report (SP-API). <strong>Inv V30</strong> = total FBA quantity
               day-over-day (ledger receipts counted). When they diverge &gt;25%, investigate before reordering.
-              <strong> Recv</strong> = median days from your last closed inbound shipments
-              {accountReceive != null ? ` (~${accountReceive}d measured vs ${s.lead_time_days}d configured)` : ""}.
+              <strong> Recv</strong> = median warehouse→FBA receive days from closed direct inbound shipments
+              {accountReceive != null ? ` (~${accountReceive}d vs ${s.lead_time_days}d configured)` : ""}.
+              <strong> AWD</strong> = AWD replenishment confirm→Prime-eligible at FC (linked outbound shipment closed).
               {divergent > 0 ? ` ${divergent} SKU(s) flagged.` : ""}
               Daily history builds after each <code className="rounded bg-blue-100/60 px-1 dark:bg-blue-900/40">inventory-sync</code> — needs ~7 days for Inv V30.
             </p>
+            {leadtime && (
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-md border border-blue-200/60 bg-white/50 px-2.5 py-2 dark:border-blue-800 dark:bg-blue-950/30">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700/80 dark:text-blue-300/80">
+                    FBA direct inbound
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium tabular-nums">
+                    {leadtime.fba_receive_median != null ? `${leadtime.fba_receive_median}d` : "—"}
+                    {leadtime.fba_receive_n ? ` (n=${leadtime.fba_receive_n})` : ""}
+                  </p>
+                </div>
+                <div className="rounded-md border border-blue-200/60 bg-white/50 px-2.5 py-2 dark:border-blue-800 dark:bg-blue-950/30">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700/80 dark:text-blue-300/80">
+                    FBA optimized (multi-FC)
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium tabular-nums">
+                    {leadtime.fba_optimized_receive_median != null
+                      ? `${leadtime.fba_optimized_receive_median}d`
+                      : "—"}
+                    {leadtime.fba_optimized_receive_n
+                      ? ` (n=${leadtime.fba_optimized_receive_n} boxes)`
+                      : ""}
+                  </p>
+                  <p className="text-[10px] text-blue-700/70 dark:text-blue-300/70">
+                    Same-day shipments to 2+ FCs (your 5-box optimized splits)
+                  </p>
+                </div>
+                <div className="rounded-md border border-blue-200/60 bg-white/50 px-2.5 py-2 dark:border-blue-800 dark:bg-blue-950/30">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700/80 dark:text-blue-300/80">
+                    AWD → Prime eligible
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium tabular-nums">
+                    {leadtime.awd_replenish_median != null
+                      ? `${leadtime.awd_replenish_median}d`
+                      : "—"}
+                    {leadtime.awd_replenish_n ? ` (n=${leadtime.awd_replenish_n})` : ""}
+                    {leadtime.configured_awd_to_fba_days != null
+                      ? ` · ${leadtime.configured_awd_to_fba_days}d configured`
+                      : ""}
+                  </p>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -845,7 +895,8 @@ export default function InventoryPage() {
                   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
                   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },
                   { key: "inventory_u_30", label: "Inv V30", tip: "Implied daily rate from total FBA quantity change + ledger receipts" },
-                  { key: "measured_receive_days", label: "Recv", tip: "Median warehouse→FBA receive days from your last closed shipments" },
+                  { key: "measured_receive_days", label: "Recv", tip: "Median warehouse→FBA receive days from your last closed direct inbound shipments" },
+                  { key: "measured_replenish_days", label: "AWD→FBA", tip: "Median AWD replenishment confirm→Prime-eligible days (outbound shipment checked in at FC)" },
                   { key: "dos", label: "DOS", tip: "Days of supply — FBA cover (Amazon) or warehouse cover (Shop)" },
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
@@ -940,6 +991,9 @@ export default function InventoryPage() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground" title={r.receive_sample_n ? `n=${r.receive_sample_n} shipments` : undefined}>
                       {r.measured_receive_days != null ? `${r.measured_receive_days}d` : "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground" title={r.replenish_sample_n ? `n=${r.replenish_sample_n} replenishments` : undefined}>
+                      {r.measured_replenish_days != null ? `${r.measured_replenish_days}d` : "—"}
                     </TableCell>
                     <TableCell
                       className={`text-right tabular-nums font-medium ${
@@ -1153,6 +1207,12 @@ export default function InventoryPage() {
                   <p>
                     Measured FBA receive: {selected.measured_receive_days}d
                     {selected.receive_sample_n ? ` (last ${selected.receive_sample_n} shipments)` : ""}
+                  </p>
+                )}
+                {selected.measured_replenish_days != null && (
+                  <p>
+                    Measured AWD→Prime: {selected.measured_replenish_days}d
+                    {selected.replenish_sample_n ? ` (last ${selected.replenish_sample_n} replenishments)` : ""}
                   </p>
                 )}
                 {selected.stockout_date && (

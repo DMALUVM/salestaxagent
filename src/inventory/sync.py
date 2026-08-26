@@ -346,6 +346,7 @@ def sync_all(dry_run: bool = False, on_poll=None) -> dict:
         ("restock", lambda: fetch_restock(dry_run=dry_run, on_poll=on_poll)),
         ("planning", lambda: fetch_planning(dry_run=dry_run, on_poll=on_poll)),
         ("inbound_shipments", lambda: _sync_inbound(dry_run)),
+        ("awd_replenishments", lambda: _sync_awd_replenishments(dry_run)),
     ]:
         try:
             results[name] = fn()
@@ -374,6 +375,13 @@ def _sync_inbound(dry_run: bool) -> dict:
         return {"dry_run": True}
     from src.inventory.inbound_shipments import sync_inbound_shipments
     return sync_inbound_shipments(days_back=180, dry_run=False)
+
+
+def _sync_awd_replenishments(dry_run: bool) -> dict:
+    if dry_run:
+        return {"dry_run": True}
+    from src.inventory.awd_replenishments import sync_awd_replenishments
+    return sync_awd_replenishments(days_back=180, dry_run=False)
 
 
 # ---------------------------------------------------------------------------

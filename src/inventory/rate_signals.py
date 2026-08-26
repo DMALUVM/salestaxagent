@@ -7,6 +7,7 @@ from statistics import median
 
 from src.db import fetch_all, upsert_rows
 from src.inventory.inbound_shipments import median_receive_days
+from src.inventory.awd_replenishments import median_replenish_days
 from src.inventory.snapshots_daily import fba_on_hand, inbound_total
 
 log = logging.getLogger(__name__)
@@ -101,14 +102,17 @@ def sync_sku_signals(configured_lead_days: int = 35) -> dict:
         velocities = []
 
     settings_lead = configured_lead_days
+    settings_awd = 14
     try:
         settings = fetch_all("inventory_settings")
         if settings:
             settings_lead = int(settings[0].get("lead_time_days", configured_lead_days) or configured_lead_days)
+            settings_awd = int(settings[0].get("awd_to_fba_days", 14) or 14)
     except Exception:
         pass
 
     account_recv, account_n = median_receive_days(limit=5)
+    account_replen, account_replen_n = median_replenish_days(limit=5)
     today = date.today()
     rows: list[dict] = []
 
@@ -124,6 +128,9 @@ def sync_sku_signals(configured_lead_days: int = 35) -> dict:
         recv, rn = median_receive_days(limit=5, sku=sku)
         if recv is None and account_recv is not None:
             recv, rn = account_recv, account_n
+        replen, repn = median_replenish_days(limit=5, sku=sku)
+        if replen is None and account_replen is not None:
+            replen, repn = account_replen, account_replen_n
 
         rows.append({
             "sku": sku,
@@ -137,13 +144,27 @@ def sync_sku_signals(configured_lead_days: int = 35) -> dict:
             "measured_receive_days": recv,
             "receive_sample_n": rn,
             "configured_lead_days": settings_lead,
+            "measured_replenish_days": replen,
+            "replenish_sample_n": repn,
+            "configured_awd_to_fba_days": settings_awd,
         })
 
     n = 0
     if rows:
         n = upsert_rows("inventory_sku_signals", rows, on_conflict="sku")
     log.info("[RateSignals] %d SKUs calibrated", n)
-    return {"skus": n, "account_receive_days": account_recv, "account_receive_n": account_n}
+
+    from src.inventory.leadtime_summary import sync_leadtime_summary
+    summary = sync_leadtime_summary(configured_awd_days=settings_awd)
+
+    return {
+        "skus": n,
+        "account_receive_days": account_recv,
+        "account_receive_n": account_n,
+        "account_replenish_days": account_replen,
+        "account_replenish_n": account_replen_n,
+        "leadtime_summary": summary,
+    }
 
 
 def build_snapshot_rows_from_current(snaps: list[dict]) -> list[dict]:

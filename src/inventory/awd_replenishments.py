@@ -1,0 +1,260 @@
+"""Sync AWD replenishment orders and measure AWD → FBA (Prime-eligible) lead time."""
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta, timezone
+from statistics import median
+
+import httpx
+
+from src.amazon_sp.client import BASE_URL, SPAPIError, _headers
+from src.db import fetch_all, upsert_rows
+
+log = logging.getLogger(__name__)
+
+AWD_REPLEN_PATH = "/awd/2024-05-09/replenishmentOrders"
+SUCCESS_STATUSES = frozenset({"SUCCESS", "INVENTORY_OUTBOUND", "CONFIRMED", "EXECUTING"})
+
+
+def _parse_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+def _list_orders_page(
+    updated_after: datetime,
+    next_token: str | None,
+    max_results: int = 100,
+) -> dict:
+    params: dict = {
+        "updatedAfter": updated_after.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "maxResults": max_results,
+        "sortOrder": "DESCENDING",
+    }
+    if next_token:
+        params["nextToken"] = next_token
+
+    resp = httpx.get(
+        f"{BASE_URL}{AWD_REPLEN_PATH}",
+        headers=_headers(),
+        params=params,
+        timeout=60,
+    )
+    if resp.status_code != 200:
+        raise SPAPIError(
+            f"AWD listReplenishmentOrders failed ({resp.status_code}): {resp.text[:400]}"
+        )
+    return resp.json()
+
+
+def _get_order(order_id: str) -> dict | None:
+    resp = httpx.get(
+        f"{BASE_URL}{AWD_REPLEN_PATH}/{order_id}",
+        headers=_headers(),
+        timeout=60,
+    )
+    if resp.status_code == 404:
+        return None
+    if resp.status_code != 200:
+        log.warning("AWD getReplenishmentOrder %s: %s", order_id, resp.status_code)
+        return None
+    body = resp.json()
+    return body.get("order") or body
+
+
+def _fba_shipments_by_id() -> dict[str, dict]:
+    try:
+        ships = fetch_all("inventory_inbound_shipments")
+    except Exception:
+        return {}
+    return {s["shipment_id"]: s for s in ships if s.get("shipment_id")}
+
+
+def _products_from_order(order: dict, key: str) -> list[dict]:
+    items = order.get(key) or []
+    rows: list[dict] = []
+    for p in items:
+        sku = (p.get("sku") or "").strip()
+        if not sku:
+            continue
+        rows.append({
+            "sku": sku,
+            "quantity": int(p.get("quantity", 0) or 0),
+        })
+    return rows
+
+
+def _compute_replenish_days(
+    order: dict,
+    fba_by_id: dict[str, dict],
+) -> int | None:
+    """Days from confirm → last linked FBA shipment closed (Prime-eligible proxy)."""
+    start = _parse_ts(order.get("confirmedOn") or order.get("createdAt"))
+    if not start:
+        return None
+
+    outbound = order.get("outboundShipments") or []
+    closed_dates: list[datetime] = []
+    for ob in outbound:
+        sid = ob.get("shipmentId") or ob.get("shipment_id")
+        if not sid:
+            continue
+        fba = fba_by_id.get(sid)
+        if fba and (fba.get("shipment_status") or "").upper() == "CLOSED":
+            closed = _parse_ts(fba.get("closed_at") or fba.get("last_updated_at"))
+            if closed:
+                closed_dates.append(closed)
+        ob_updated = _parse_ts(ob.get("updatedAt"))
+        ob_status = (ob.get("shipmentStatus") or "").upper()
+        if ob_status in {"CLOSED", "RECEIVED"} and ob_updated:
+            closed_dates.append(ob_updated)
+
+    if closed_dates:
+        end = max(closed_dates)
+        return max((end.date() - start.date()).days, 0)
+
+    status = (order.get("status") or "").upper()
+    if status == "SUCCESS":
+        end = _parse_ts(order.get("updatedAt"))
+        if end:
+            return max((end.date() - start.date()).days, 0)
+    return None
+
+
+def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict:
+    """Pull AWD replenishment orders and compute measured AWD→FBA lead times."""
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days_back)
+    fba_by_id = _fba_shipments_by_id()
+
+    orders: list[dict] = []
+    next_token: str | None = None
+    while True:
+        page = _list_orders_page(start, next_token)
+        orders.extend(page.get("orders") or [])
+        next_token = page.get("nextToken")
+        if not next_token:
+            break
+
+    order_rows: list[dict] = []
+    item_rows: list[dict] = []
+
+    for summary in orders:
+        oid = summary.get("orderId") or summary.get("order_id")
+        if not oid:
+            continue
+        detail = _get_order(oid) or summary
+        status = (detail.get("status") or "").upper()
+        confirmed = _parse_ts(detail.get("confirmedOn"))
+        created = _parse_ts(detail.get("createdAt"))
+        updated = _parse_ts(detail.get("updatedAt"))
+
+        outbound = detail.get("outboundShipments") or []
+        outbound_ids = [
+            ob.get("shipmentId") or ob.get("shipment_id")
+            for ob in outbound
+            if ob.get("shipmentId") or ob.get("shipment_id")
+        ]
+
+        shipped = _products_from_order(detail, "shippedProducts")
+        requested = _products_from_order(detail, "products")
+        products = shipped or requested
+
+        units_requested = sum(p["quantity"] for p in requested)
+        units_shipped = sum(p["quantity"] for p in shipped)
+
+        replenish_days = _compute_replenish_days(detail, fba_by_id)
+
+        order_rows.append({
+            "order_id": oid,
+            "order_status": status,
+            "created_at": created.isoformat() if created else None,
+            "confirmed_at": confirmed.isoformat() if confirmed else None,
+            "completed_at": updated.isoformat() if status == "SUCCESS" and updated else None,
+            "replenish_days": replenish_days,
+            "outbound_shipment_ids": outbound_ids,
+            "outbound_fc_count": len(outbound_ids),
+            "units_requested": units_requested,
+            "units_shipped": units_shipped,
+            "raw": detail,
+        })
+
+        seen_skus: set[str] = set()
+        for p in products:
+            sku = p["sku"]
+            if sku in seen_skus:
+                continue
+            seen_skus.add(sku)
+            req = next((x["quantity"] for x in requested if x["sku"] == sku), 0)
+            shp = next((x["quantity"] for x in shipped if x["sku"] == sku), 0)
+            item_rows.append({
+                "order_id": oid,
+                "sku": sku,
+                "quantity_requested": req,
+                "quantity_shipped": shp,
+            })
+
+    result = {
+        "orders_found": len(order_rows),
+        "items_found": len(item_rows),
+        "rows_upserted": 0,
+        "dry_run": dry_run,
+    }
+    if dry_run or not order_rows:
+        return result
+
+    result["rows_upserted"] = upsert_rows(
+        "inventory_awd_replenishments", order_rows, on_conflict="order_id",
+    )
+    if item_rows:
+        upsert_rows(
+            "inventory_awd_replenishment_items", item_rows,
+            on_conflict="order_id,sku",
+        )
+    return result
+
+
+def median_replenish_days(limit: int = 5, sku: str | None = None) -> tuple[int | None, int]:
+    """Median AWD→FBA days from last N completed replenishment orders."""
+    try:
+        if sku:
+            links = fetch_all("inventory_awd_replenishment_items")
+            order_ids = {
+                r["order_id"] for r in links
+                if r.get("sku") == sku and int(r.get("quantity_shipped", 0) or 0) > 0
+            }
+            orders = [
+                r for r in fetch_all("inventory_awd_replenishments")
+                if r.get("order_id") in order_ids
+            ]
+        else:
+            orders = fetch_all("inventory_awd_replenishments")
+    except Exception:
+        return None, 0
+
+    vals: list[int] = []
+    for o in sorted(
+        orders,
+        key=lambda r: r.get("completed_at") or r.get("confirmed_at") or r.get("created_at") or "",
+        reverse=True,
+    ):
+        if (o.get("order_status") or "").upper() != "SUCCESS":
+            continue
+        rd = o.get("replenish_days")
+        if rd is None:
+            continue
+        try:
+            d = int(rd)
+        except (TypeError, ValueError):
+            continue
+        if d >= 0:
+            vals.append(d)
+        if len(vals) >= limit:
+            break
+    if not vals:
+        return None, 0
+    return int(median(vals)), len(vals)

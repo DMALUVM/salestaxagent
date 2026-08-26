@@ -10,7 +10,7 @@ export async function GET() {
   try {
     const sb = getServerSupabase();
 
-    const [snapshots, velocity, restock, planning, settings, seasonality, tpl, awd, capacity, forecast, signals] =
+    const [snapshots, velocity, restock, planning, settings, seasonality, tpl, awd, capacity, forecast, signals, leadtime] =
       await Promise.all([
         sb.from("inventory_snapshots").select("*").then((r) => r.data ?? []),
         sb.from("sku_velocity").select("*").then((r) => r.data ?? []),
@@ -36,6 +36,15 @@ export async function GET() {
           if (r.error) return [];
           return r.data ?? [];
         })(),
+        (async () => {
+          const r = await sb
+            .from("inventory_leadtime_summary")
+            .select("*")
+            .order("as_of_date", { ascending: false })
+            .limit(1);
+          if (r.error) return null;
+          return r.data?.[0] ?? null;
+        })(),
       ]);
 
     // Forecast model state (calibrated weights) — best-effort
@@ -58,6 +67,7 @@ export async function GET() {
       forecast,
       modelState,
       signals,
+      leadtime,
     });
   } catch (e) {
     return Response.json(

@@ -55,5 +55,51 @@ CREATE TABLE IF NOT EXISTS inventory_sku_signals (
     measured_receive_days   integer,
     receive_sample_n        integer NOT NULL DEFAULT 0,
     configured_lead_days    integer,
+    measured_replenish_days   integer,
+    replenish_sample_n        integer NOT NULL DEFAULT 0,
+    configured_awd_to_fba_days integer,
     updated_at              timestamptz NOT NULL DEFAULT now()
+);
+
+-- AWD replenishment orders (SP-API AWD v2024-05-09).
+CREATE TABLE IF NOT EXISTS inventory_awd_replenishments (
+    order_id                text PRIMARY KEY,
+    order_status            text,
+    created_at              timestamptz,
+    confirmed_at            timestamptz,
+    completed_at            timestamptz,
+    replenish_days          integer,
+    outbound_shipment_ids   text[],
+    outbound_fc_count       integer NOT NULL DEFAULT 0,
+    units_requested         integer NOT NULL DEFAULT 0,
+    units_shipped           integer NOT NULL DEFAULT 0,
+    raw                     jsonb,
+    synced_at               timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_awd_replen_confirmed ON inventory_awd_replenishments (confirmed_at);
+
+CREATE TABLE IF NOT EXISTS inventory_awd_replenishment_items (
+    order_id            text NOT NULL REFERENCES inventory_awd_replenishments (order_id) ON DELETE CASCADE,
+    sku                 text NOT NULL,
+    quantity_requested  integer NOT NULL DEFAULT 0,
+    quantity_shipped    integer NOT NULL DEFAULT 0,
+    PRIMARY KEY (order_id, sku)
+);
+
+CREATE INDEX IF NOT EXISTS idx_awd_replen_items_sku ON inventory_awd_replenishment_items (sku);
+
+-- Account-level comparison: FBA direct vs optimized multi-FC vs AWD→Prime.
+CREATE TABLE IF NOT EXISTS inventory_leadtime_summary (
+    as_of_date                      date PRIMARY KEY,
+    fba_receive_median              integer,
+    fba_receive_n                   integer NOT NULL DEFAULT 0,
+    fba_optimized_receive_median    integer,
+    fba_optimized_receive_n         integer NOT NULL DEFAULT 0,
+    fba_single_receive_median       integer,
+    fba_single_receive_n            integer NOT NULL DEFAULT 0,
+    awd_replenish_median            integer,
+    awd_replenish_n                 integer NOT NULL DEFAULT 0,
+    configured_awd_to_fba_days      integer,
+    updated_at                      timestamptz NOT NULL DEFAULT now()
 );

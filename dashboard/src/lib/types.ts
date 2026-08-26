@@ -292,6 +292,22 @@ export interface InventorySkuSignals {
   measured_receive_days: number | null;
   receive_sample_n: number;
   configured_lead_days: number;
+  measured_replenish_days: number | null;
+  replenish_sample_n: number;
+  configured_awd_to_fba_days: number | null;
+}
+
+export interface InventoryLeadtimeSummary {
+  as_of_date: string;
+  fba_receive_median: number | null;
+  fba_receive_n: number;
+  fba_optimized_receive_median: number | null;
+  fba_optimized_receive_n: number;
+  fba_single_receive_median: number | null;
+  fba_single_receive_n: number;
+  awd_replenish_median: number | null;
+  awd_replenish_n: number;
+  configured_awd_to_fba_days: number | null;
 }
 
 export interface SeasonalityWeekly {
