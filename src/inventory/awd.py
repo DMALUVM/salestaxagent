@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from src.inventory.awd_client import awd_get
 from src.db import upsert_rows, log_ingestion
+from src.inventory.freshness import skip_empty
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,8 @@ def fetch_awd_inventory(dry_run: bool = False) -> dict:
     rows = _awd_inventory_rows(all_items)
 
     result = {"rows_total": len(rows), "rows_inserted": 0, "dry_run": dry_run}
+    if not rows:
+        result.update(skip_empty("amazon returned 0 AWD inventory rows"))
 
     if not dry_run and rows:
         result["rows_inserted"] = upsert_rows(

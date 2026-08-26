@@ -12,7 +12,7 @@ import csv
 import io
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 import httpx
 
@@ -26,6 +26,7 @@ from src.amazon_sp.client import (
 )
 from src.db import upsert_rows, log_ingestion
 from src.inventory.awd_client import AWD_ROLE_HINT
+from src.inventory.freshness import skip_empty, stamp_now as _stamp_now
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,8 @@ def fetch_restock(dry_run: bool = False, on_poll=None) -> dict:
     rows = _stamp_now(_parse_restock(content), "pulled_at")
 
     result = {"rows_total": len(rows), "rows_inserted": 0, "dry_run": dry_run}
+    if not rows:
+        result.update(skip_empty("amazon returned 0 restock rows"))
 
     if not dry_run and rows:
         result["rows_inserted"] = upsert_rows(
@@ -146,6 +149,8 @@ def fetch_planning(dry_run: bool = False, on_poll=None) -> dict:
     rows = _stamp_now(_parse_planning(content), "pulled_at")
 
     result = {"rows_total": len(rows), "rows_inserted": 0, "dry_run": dry_run}
+    if not rows:
+        result.update(skip_empty("amazon returned 0 planning rows"))
 
     if not dry_run and rows:
         result["rows_inserted"] = upsert_rows(
@@ -252,6 +257,8 @@ def fetch_fba_summaries(dry_run: bool = False) -> dict:
     rows = _stamp_now(_aggregate_fba_summaries(all_items), "snapshot_at")
 
     result = {"rows_total": len(rows), "rows_inserted": 0, "dry_run": dry_run}
+    if not rows:
+        result.update(skip_empty("amazon returned 0 FBA summaries"))
 
     if not dry_run and rows:
         result["rows_inserted"] = upsert_rows(
@@ -354,23 +361,6 @@ def _sync_awd_inbound(dry_run: bool) -> dict:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _stamp_now(
-    rows: list[dict],
-    field: str,
-    now: datetime | None = None,
-) -> list[dict]:
-    """Set pulled_at / snapshot_at so upsert refreshes Postgres DEFAULT now().
-
-    inventory_* tables default those columns on INSERT only. Re-upserts of
-    the same sku left 2026-08-17 timestamps while inventory-sync reported
-    success and ingestion_log advanced.
-    """
-    ts = (now or datetime.now(timezone.utc)).isoformat()
-    for row in rows:
-        row[field] = ts
-    return rows
-
 
 def _aggregate_fba_summaries(all_items: list[dict]) -> list[dict]:
     """Collapse FBA inventorySummaries payloads to one row per seller SKU."""

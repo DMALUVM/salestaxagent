@@ -7,6 +7,7 @@ from datetime import date
 from statistics import median
 
 from src.db import fetch_all, upsert_rows
+from src.inventory.freshness import stamp_now
 from src.inventory.awd_replenishments import median_replenish_days
 from src.inventory.inbound_shipments import median_receive_days
 
@@ -92,6 +93,7 @@ def sync_leadtime_summary(configured_awd_days: int = 14) -> dict:
         "awd_replenish_n": awd_n,
         "configured_awd_to_fba_days": configured_awd_days,
     }
+    stamp_now([row], "updated_at")
 
     upsert_rows("inventory_leadtime_summary", [row], on_conflict="as_of_date")
     log.info(

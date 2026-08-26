@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from statistics import median
 
 from src.db import fetch_all, upsert_rows
+from src.inventory.freshness import skip_empty, stamp_now
 from src.inventory.awd_client import awd_get
 from src.amazon_sp.client import SPAPIError
 
@@ -269,6 +270,8 @@ def recompute_stored_replenish_days() -> dict:
             "units_shipped": row.get("units_shipped"),
             "raw": row.get("raw"),
         })
+    if updates:
+        stamp_now(updates, "synced_at")
     n = upsert_rows("inventory_awd_replenishments", updates, on_conflict="order_id") if updates else 0
     return {"rows": len(updates), "updated": n}
 
@@ -380,7 +383,12 @@ def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict
         "dry_run": dry_run,
         "order_rows": order_rows,
     }
-    if dry_run or not order_rows:
+    if not order_rows:
+        result.update(skip_empty("amazon returned 0 AWD replenishment orders"))
+        return result
+    stamp_now(order_rows, "synced_at")
+    stamp_now(item_rows, "synced_at")
+    if dry_run:
         return result
 
     result["rows_upserted"] = upsert_rows(

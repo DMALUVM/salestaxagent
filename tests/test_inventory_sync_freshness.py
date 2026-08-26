@@ -10,6 +10,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from src.inventory.awd import _awd_inventory_rows
+from src.inventory.freshness import (
+    WAREHOUSE_STAMP_FIELDS,
+    collect_skip_reasons,
+    skip_empty,
+    stamp_now,
+)
+from src.inventory.snapshots_daily import append_daily_snapshots
 from src.inventory.sync import (
     _aggregate_fba_summaries,
     _parse_planning,
@@ -125,3 +132,83 @@ def test_sync_success_implies_amazon_timestamps_advance():
     assert awd[0]["pulled_at"] == STAMP_ISO
     assert restock[0]["pulled_at"] == STAMP_ISO
     assert planning[0]["pulled_at"] == STAMP_ISO
+
+
+def test_warehouse_contract_covers_daily_inventory_tables():
+    required = {
+        "inventory_snapshots",
+        "inventory_awd",
+        "inventory_restock",
+        "inventory_planning",
+        "inventory_awd_replenishments",
+        "inventory_awd_replenishment_items",
+        "inventory_inbound_shipments",
+        "inventory_inbound_shipment_items",
+        "inventory_awd_inbound_shipments",
+        "inventory_3pl_snapshots",
+        "inventory_sku_signals",
+        "inventory_leadtime_summary",
+        "inventory_snapshots_daily",
+    }
+    assert required <= set(WAREHOUSE_STAMP_FIELDS)
+
+
+def test_shipment_and_item_upserts_stamp_synced_at():
+    ships = stamp_now(
+        [{"shipment_id": "FBA1", "shipment_status": "CLOSED"}],
+        "synced_at",
+        now=STAMP,
+    )
+    items = stamp_now(
+        [{"shipment_id": "FBA1", "sku": "DDPE0001Shop", "quantity_shipped": 10}],
+        "synced_at",
+        now=STAMP,
+    )
+    assert ships[0]["synced_at"] == STAMP_ISO
+    assert items[0]["synced_at"] == STAMP_ISO
+    assert WAREHOUSE_STAMP_FIELDS["inventory_inbound_shipment_items"] == "synced_at"
+    assert WAREHOUSE_STAMP_FIELDS["inventory_awd_replenishment_items"] == "synced_at"
+
+
+def test_signals_leadtime_daily_stamp_equivalent_last_synced():
+    signals = stamp_now([{"sku": "DDPE0001Shop", "as_of_date": "2026-08-26"}], "updated_at", now=STAMP)
+    lead = stamp_now([{"as_of_date": "2026-08-26", "fba_receive_n": 2}], "updated_at", now=STAMP)
+    daily = stamp_now(
+        [{"sku": "DDPE0001Shop", "snapshot_date": "2026-08-26", "fba_on_hand": 12}],
+        "recorded_at",
+        now=STAMP,
+    )
+    assert signals[0]["updated_at"] == STAMP_ISO
+    assert lead[0]["updated_at"] == STAMP_ISO
+    assert daily[0]["recorded_at"] == STAMP_ISO
+
+
+def test_empty_sync_is_explicit_skip_never_silent_stale():
+    empty = {"rows_total": 0, "rows_inserted": 0, **skip_empty("amazon returned 0 FBA summaries")}
+    assert empty["skipped"] is True
+    assert "amazon returned 0" in empty["skip_reason"]
+    reasons = collect_skip_reasons({
+        "fba_summaries": empty,
+        "awd": {"rows_total": 7, "rows_inserted": 7},
+        "errors": [],
+    })
+    assert reasons == ["fba_summaries: amazon returned 0 FBA summaries"]
+
+
+def test_append_daily_snapshots_stamps_recorded_at(monkeypatch):
+    captured: list[dict] = []
+
+    def fake_upsert(table, rows, on_conflict=None):
+        captured.extend(rows)
+        return len(rows)
+
+    monkeypatch.setattr("src.inventory.snapshots_daily.upsert_rows", fake_upsert)
+    out = append_daily_snapshots([
+        {"sku": "DDPE0001Shop", "fulfillable": 12, "reserved": 0,
+         "researching": 0, "unfulfillable": 0, "total_quantity": 12,
+         "inbound_working": 0, "inbound_shipped": 4, "inbound_receiving": 0},
+    ])
+    assert out["rows"] == 1
+    assert captured[0]["recorded_at"]
+    assert captured[0]["snapshot_date"]
+    assert captured[0]["inbound_total"] == 4

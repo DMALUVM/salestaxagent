@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 
 from src.db import fetch_all, upsert_rows
+from src.inventory.freshness import skip_empty, stamp_now
 from src.inventory.awd_client import awd_get
 from src.inventory.shipment_timing import (
     compute_receive_days,
@@ -100,7 +101,11 @@ def sync_awd_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> d
         "rows_upserted": 0,
         "dry_run": dry_run,
     }
-    if dry_run or not rows:
+    if not rows:
+        result.update(skip_empty("amazon returned 0 AWD inbound shipments"))
+        return result
+    stamp_now(rows, "synced_at")
+    if dry_run:
         return result
 
     result["rows_upserted"] = upsert_rows(
