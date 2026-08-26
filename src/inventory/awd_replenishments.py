@@ -72,7 +72,24 @@ def _fba_shipments_by_id() -> dict[str, dict]:
         ships = fetch_all("inventory_inbound_shipments")
     except Exception:
         return {}
-    return {s["shipment_id"]: s for s in ships if s.get("shipment_id")}
+    by_id: dict[str, dict] = {}
+    for s in ships:
+        sid = s.get("shipment_id")
+        if sid:
+            by_id[sid] = s
+        raw = s.get("raw") or {}
+        if not isinstance(raw, dict):
+            continue
+        for key in ("shipmentConfirmationId", "internalShipmentId"):
+            alt = raw.get(key)
+            if alt:
+                by_id[str(alt)] = s
+        inner = raw.get("shipment") or {}
+        if isinstance(inner, dict):
+            confirm = inner.get("shipmentConfirmationId")
+            if confirm:
+                by_id[str(confirm)] = s
+    return by_id
 
 
 def _products_from_order(order: dict, key: str) -> list[dict]:
@@ -105,7 +122,7 @@ def _compute_replenish_days(
         if ob_status in {"IN_TRANSIT", "DELIVERED", "RECEIVING", "RECEIVED", "CLOSED"} and ob_shipped:
             shipped_dates.append(ob_shipped)
 
-        sid = ob.get("shipmentId") or ob.get("shipment_id")
+        sid = ob.get("shipmentId") or ob.get("shipment_id") or ob.get("shipmentConfirmationId")
         if not sid:
             continue
         fba = fba_by_id.get(sid)
@@ -193,7 +210,7 @@ def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict
 
         earliest_ship = None
         for ob in outbound:
-            sid = ob.get("shipmentId") or ob.get("shipment_id")
+            sid = ob.get("shipmentId") or ob.get("shipment_id") or ob.get("shipmentConfirmationId")
             fba = fba_by_id.get(sid) if sid else None
             for cand in (
                 fba.get("shipped_at") if fba else None,

@@ -132,12 +132,17 @@ def sync_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> dict:
 
     shipments: list[dict] = []
     next_token: str | None = None
-    while True:
-        page = _get_shipments_page(start, now, next_token)
-        shipments.extend(page.get("ShipmentData") or [])
-        next_token = page.get("NextToken")
-        if not next_token:
-            break
+    v0_error: str | None = None
+    try:
+        while True:
+            page = _get_shipments_page(start, now, next_token)
+            shipments.extend(page.get("ShipmentData") or [])
+            next_token = page.get("NextToken")
+            if not next_token:
+                break
+    except SPAPIError as e:
+        v0_error = str(e)[:200]
+        log.warning("[Inbound] v0 getShipments failed: %s", v0_error)
 
     ship_rows: list[dict] = []
     item_rows: list[dict] = []
@@ -230,11 +235,23 @@ def sync_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> dict:
             "raw": sh,
         })
 
+    v2024_result: dict | None = None
+    if not ship_rows:
+        from src.inventory.inbound_plans import sync_inbound_plans_v2024
+        v2024_result = sync_inbound_plans_v2024(
+            days_back=days_back, dry_run=True, existing=existing,
+        )
+        ship_rows.extend(v2024_result.get("ship_rows") or [])
+        item_rows.extend(v2024_result.get("item_rows") or [])
+
     result = {
         "shipments_found": len(ship_rows),
         "items_found": len(item_rows),
         "rows_upserted": 0,
         "dry_run": dry_run,
+        "v0_shipments": len(shipments),
+        "v0_error": v0_error,
+        "v2024_plans": (v2024_result or {}).get("plans_scanned", 0),
     }
     if dry_run or not ship_rows:
         return result
