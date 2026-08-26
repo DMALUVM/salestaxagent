@@ -87,12 +87,48 @@ export function holidayInboundMonths(
   return fallback ? [fallback] : months.slice(0, 1);
 }
 
+export function fillMonthTowardPallet(
+  mixes: Record<string, number>[],
+  priority: string[],
+  palletMax = PALLET_MAX_UNITS,
+  targetIndex = 0,
+): Record<string, number>[] {
+  if (!mixes.length || targetIndex >= mixes.length) return mixes;
+  let room = palletMax - Object.values(mixes[targetIndex]).reduce((s, q) => s + q, 0);
+  if (room <= 0) return mixes;
+  const order = [...priority];
+  for (const mix of mixes) {
+    for (const sku of Object.keys(mix)) {
+      if (!order.includes(sku)) order.push(sku);
+    }
+  }
+  for (let mi = mixes.length - 1; mi > targetIndex; mi--) {
+    if (room <= 0) break;
+    for (const sku of order) {
+      const have = mixes[mi][sku] ?? 0;
+      if (have <= 0) continue;
+      const take = Math.min(have, room);
+      mixes[mi][sku] = have - take;
+      if (mixes[mi][sku] <= 0) delete mixes[mi][sku];
+      mixes[targetIndex][sku] = (mixes[targetIndex][sku] ?? 0) + take;
+      room -= take;
+      if (room <= 0) break;
+    }
+  }
+  return mixes;
+}
+
 export function allocateMonthlyUnits(
   skus: string[],
   inventoryReorder: Record<string, number>,
   holidayManufacture: Record<string, number>,
   months: string[],
-  opts?: { amazonInBy?: string; leadDays?: number },
+  opts?: {
+    amazonInBy?: string;
+    leadDays?: number;
+    priority?: string[];
+    fillFirstPallet?: boolean;
+  },
 ): Record<string, number>[] {
   if (!months.length) return [];
 
@@ -125,6 +161,11 @@ export function allocateMonthlyUnits(
     if (leftover > 0) {
       mixes[0][sku] = (mixes[0][sku] ?? 0) + leftover;
     }
+  }
+
+  if (opts?.fillFirstPallet !== false) {
+    const order = opts?.priority ?? skuPackPriority(skus, {}, inventoryReorder);
+    fillMonthTowardPallet(mixes, order);
   }
 
   return mixes.map((mix) => Object.fromEntries(

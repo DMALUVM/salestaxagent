@@ -179,7 +179,7 @@ function buildMfgBrief(skuSummary: MfgSkuSummary[]): string {
     fmt(tot((s) => s.manufacture)).padStart(9),
   );
   L.push("");
-  L.push("August pallet = inventory reorder only (keep Amazon from stocking out now).");
+  L.push("August = inventory reorder, then freight-fill toward one 19,000 pallet.");
   L.push("Planned = max(forecast Nov+Dec+Jan, planning velocity × 92).");
   return L.join("\n") + "\n";
 }
@@ -268,7 +268,7 @@ function buildMfgSheet(
   L.push(""); L.push("-----------------------------------------------------------------");
   L.push("NOTES:"); L.push("  - Nov/Dec/Jan are sell-through months, not production months.");
   L.push("  - Alert the manufacturer with those totals; they ship on Sep/Oct pallets.");
-  L.push("  - Current month = inventory reorder so Amazon does not stock out now.");
+  L.push("  - Current month = inventory reorder, then freight-fill toward 19,000.");
   L.push("  - FIRM = committed. INDICATIVE = forecast-driven, may change.");
   L.push("  - Manufacture assumes 3PL transferred separately."); L.push("  - This is a planning aid, not a purchase order.");
   L.push("-----------------------------------------------------------------");
@@ -520,12 +520,12 @@ export default function PalletPlanPage() {
       }
 
       const leadDays = Math.max(...SKUS.map((sku) => inv[sku].leadDays), 19);
-      const mixes = allocateMonthlyUnits(
-        SKUS, reorderBySku, holidayMfg, productionMonths,
-        { amazonInBy: TARGET, leadDays },
-      );
       const flags = Object.fromEntries(SKUS.map((sku) => [sku, inv[sku].flag]));
       const priority = skuPackPriority(SKUS, flags, reorderBySku);
+      const mixes = allocateMonthlyUnits(
+        SKUS, reorderBySku, holidayMfg, productionMonths,
+        { amazonInBy: TARGET, leadDays, priority },
+      );
       const entries: MfgMonthEntry[] = productionMonths.map((m) => {
         const mix = mixes[productionMonths.indexOf(m)] ?? {};
         const packed = packPallets(mix, priority, PALLET_MAX);
@@ -585,7 +585,7 @@ export default function PalletPlanPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Pallet Planner</h1>
           <p className="text-sm text-muted-foreground">
-            August = inventory reorder · Sep/Oct ship the Nov–Jan sell-through so it is in Amazon by {TARGET} · {fmt(PALLET_MAX)} cartons/pallet
+            August = inventory reorder, then freight-fill toward {fmt(PALLET_MAX)} · leftover holiday ships Sep/Oct so it is in Amazon by {TARGET}
           </p>
         </div>
         <Link href="/inventory"><Button variant="outline" size="sm">← Inventory</Button></Link>
@@ -800,6 +800,11 @@ export default function PalletPlanPage() {
                           {entry.status}
                         </Badge>
                         {idx === 0 && <Badge variant="outline" className="text-[10px]">inventory reorder</Badge>}
+                        {idx === 0 && entry.units > mfgSkuSummary.reduce((a, s) => a + s.inventoryReorder, 0) && (
+                          <Badge variant="outline" className="text-[10px]">
+                            {entry.units >= PALLET_MAX ? "full pallet" : "freight fill"}
+                          </Badge>
+                        )}
                         {["2026-09", "2026-10"].includes(entry.month) && (
                           <Badge variant="outline" className="text-[10px]">holiday in by {TARGET.slice(5)}</Badge>
                         )}

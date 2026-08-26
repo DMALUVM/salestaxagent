@@ -146,6 +146,7 @@ def manufacture_need(inventory_reorder: int, holiday_manufacture: int) -> int:
 
 AMAZON_IN_BY = "2026-10-31"
 HOLIDAY_SHIP_MONTHS = ("2026-09", "2026-10")
+PALLET_MAX_UNITS = 19_000
 
 
 def _parse_iso(s: str) -> date:
@@ -203,6 +204,47 @@ def holiday_inbound_months(
     return months[:1]
 
 
+def fill_month_toward_pallet(
+    mixes: list[dict[str, int]],
+    priority: list[str],
+    pallet_max: int = PALLET_MAX_UNITS,
+    target_index: int = 0,
+) -> list[dict[str, int]]:
+    """Pull units from later months into the target month up to one pallet.
+
+    Later months are drained last-first (October before September) so a
+    trailing month can drop from two pallets to one. CRITICAL / highest
+    reorder SKUs move first. Inventory reorder already sitting on month 0
+    is never reduced.
+    """
+    if not mixes or target_index >= len(mixes):
+        return mixes
+    room = pallet_max - sum(int(q or 0) for q in mixes[target_index].values())
+    if room <= 0:
+        return mixes
+    order = list(priority)
+    for mix in mixes:
+        for sku in mix:
+            if sku not in order:
+                order.append(sku)
+    for mi in range(len(mixes) - 1, target_index, -1):
+        if room <= 0:
+            break
+        for sku in order:
+            have = int(mixes[mi].get(sku, 0) or 0)
+            if have <= 0:
+                continue
+            take = min(have, room)
+            mixes[mi][sku] = have - take
+            if mixes[mi][sku] <= 0:
+                mixes[mi].pop(sku, None)
+            mixes[target_index][sku] = mixes[target_index].get(sku, 0) + take
+            room -= take
+            if room <= 0:
+                break
+    return mixes
+
+
 def allocate_monthly_units(
     skus: list[str],
     inventory_reorder: dict[str, int],
@@ -211,11 +253,14 @@ def allocate_monthly_units(
     *,
     amazon_in_by: str = AMAZON_IN_BY,
     lead_days: int = 19,
+    priority: list[str] | None = None,
+    fill_first_pallet: bool = True,
 ) -> list[dict[str, int]]:
-    """Current month = inventory reorder. Holiday surplus → Sep/Oct only.
+    """Current month = inventory reorder. Holiday surplus → Sep/Oct, then
+    pulled forward to fill month 1 toward one 19k pallet (freight).
 
-    Nov/Dec/Jan units must ship in months that can still arrive by
-    ``amazon_in_by`` (end of October) given receiving lead time.
+    Nov/Dec/Jan units must still be able to arrive by ``amazon_in_by``.
+    Pulling into August is earlier, so the deadline is unchanged.
     """
     if not months:
         return []
@@ -247,10 +292,15 @@ def allocate_monthly_units(
         if leftover > 0:
             mixes[0][sku] = mixes[0].get(sku, 0) + leftover
 
+    if fill_first_pallet:
+        order = list(priority) if priority else sku_pack_priority(
+            skus, {}, inventory_reorder,
+        )
+        fill_month_toward_pallet(mixes, order)
+
     return [{sku: qty for sku, qty in mix.items() if qty > 0} for mix in mixes]
 
 
-PALLET_MAX_UNITS = 19_000
 HOLIDAY_DAYS_NOV_DEC = 61
 HOLIDAY_DAYS_NOV_JAN = 92
 CRITICAL_DOS_DAYS = 60

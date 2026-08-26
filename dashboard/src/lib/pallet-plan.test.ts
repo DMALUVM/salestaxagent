@@ -27,6 +27,7 @@ describe("pallet monthly allocation", () => {
       { DDPE0001Shop: 4252 },
       { DDPE0001Shop: 6696 },
       MONTHS,
+      { fillFirstPallet: false },
     );
     assert.equal(mixes[0].DDPE0001Shop, 4252);
     assert.notEqual(Math.round(6696 * 0.25), mixes[0].DDPE0001Shop);
@@ -45,6 +46,7 @@ describe("pallet monthly allocation", () => {
       { DDPE0002Shop: 0 },
       { DDPE0002Shop: 3832 },
       MONTHS,
+      { fillFirstPallet: false },
     );
     assert.equal(mixes[0].DDPE0002Shop, undefined);
     assert.equal((mixes[1].DDPE0002Shop ?? 0) + (mixes[2].DDPE0002Shop ?? 0), 3832);
@@ -79,7 +81,7 @@ describe("pallet monthly allocation", () => {
       { DDPE0001Shop: 0 },
       { DDPE0001Shop: 4000 },
       MONTHS,
-      { leadDays: 35 },
+      { leadDays: 35, fillFirstPallet: false },
     );
     assert.equal(mixes[2].DDPE0001Shop, undefined);
     assert.equal(mixes[1].DDPE0001Shop, 4000);
@@ -160,9 +162,30 @@ describe("pallet monthly allocation", () => {
     );
     const august = mixes[0].DDPE0001Shop ?? 0;
     const total = mixes.reduce((s, m) => s + (m.DDPE0001Shop ?? 0), 0);
-    assert.equal(august, 4355);
+    assert.ok(august >= 4355, "August must still cover inventory reorder");
     assert.ok(total >= 4355, "three-month plan must cover inventory reorder");
     assert.equal(total, 12029);
+  });
+
+  test("August freight-fills to 19k from October, Unscented first", () => {
+    const skus = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"];
+    const mixes = allocateMonthlyUnits(
+      skus,
+      { DDPE0001Shop: 4249, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 },
+      {
+        DDPE0001Shop: 4249 + 3890 + 3890,
+        DDPE0002Shop: 3569 + 3568,
+        DDPE0003Shop: 7978 + 7978,
+        DDPE0004Shop: 11592 + 11591,
+      },
+      MONTHS,
+      { priority: ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"] },
+    );
+    const august = Object.values(mixes[0]).reduce((s, q) => s + q, 0);
+    assert.equal(august, PALLET_MAX_UNITS);
+    assert.ok((mixes[0].DDPE0001Shop ?? 0) >= 4249);
+    const oct = Object.values(mixes[2]).reduce((s, q) => s + q, 0);
+    assert.ok(oct < 19000);
   });
 
   test("inbound holidayDemandUnits matches covering projections", () => {

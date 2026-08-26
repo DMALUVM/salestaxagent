@@ -685,14 +685,15 @@ def build_manufacturer_headsup(
         lead_days = max((int(inv[s].get("lead_days") or 0) for s in target_skus), default=19)
         if lead_days <= 0:
             lead_days = 19
+        flags = {sku: str(inv[sku].get("flag") or "OK") for sku in target_skus}
+        priority = sku_pack_priority(target_skus, flags, reorder_by_sku)
         mixes = allocate_monthly_units(
             target_skus, reorder_by_sku, holiday_mfg,
             production_months,
             amazon_in_by=amazon_in_by,
             lead_days=lead_days,
+            priority=priority,
         )
-        flags = {sku: str(inv[sku].get("flag") or "OK") for sku in target_skus}
-        priority = sku_pack_priority(target_skus, flags, reorder_by_sku)
         cap = pallet_max or PALLET_MAX_UNITS
         entries: list[dict] = []
         today_iso = today.isoformat()
@@ -846,7 +847,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a(f"Pallet capacity: {headsup['pallet_max']:,} units")
     a(f"FBA cover target: {headsup['cover_target_days']} days"
       f" (inventory page; holiday_mode={headsup.get('holiday_mode')})")
-    a("Month 1 ships inventory reorder in full (same math as /inventory).")
+    a("Month 1 ships inventory reorder, then freight-fills toward 19,000.")
     a("Nov/Dec/Jan below are SELL-THROUGH months — tell the manufacturer")
     a("what Amazon must cover. Those units ship on Sep/Oct pallets.")
     a(f"All units in Amazon FBA by: {headsup['amazon_in_by']}")
