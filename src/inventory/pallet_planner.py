@@ -497,11 +497,13 @@ def build_manufacturer_headsup(
       3. Manufacture — max of those two
       4. Transfer to FBA — 3PL + AWD already on hand
 
-    Month 1 (current) ships the inventory reorder so Amazon does not
-    stock out now. Nov/Dec/Jan manufacture goes on September and October
-    pallets so it is Prime-eligible by ``amazon_in_by`` (end of October).
-    Ship-by is pulled forward by receiving lead time. Pallet = 19 000
-    cartons; a month may ship more than one.
+    This plan covers Amazon FBA through January 31 (Nov+Dec+Jan
+    sell-through). Month 1 ships the inventory reorder so Amazon does
+    not stock out now. Leftover holiday manufacture is split across
+    every month that can still arrive by ``amazon_in_by`` (end of
+    October). Nov/Dec/Jan are demand months, not inbound months — stock
+    has to land before Halloween. Ship-by is pulled forward by receiving
+    lead time. Pallet = 19 000 cartons; a month may ship more than one.
     """
     target_skus = skus or LIP_BALM_SKUS
     today = date.today()
@@ -847,9 +849,10 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a(f"Pallet capacity: {headsup['pallet_max']:,} units")
     a(f"FBA cover target: {headsup['cover_target_days']} days"
       f" (inventory page; holiday_mode={headsup.get('holiday_mode')})")
+    a("Coverage: Amazon FBA through 2027-01-31 (Nov + Dec + Jan sell-through).")
     a("Month 1 = inventory reorder + a balanced share of holiday leftover.")
-    a("Nov/Dec/Jan below are SELL-THROUGH months — tell the manufacturer")
-    a("what Amazon must cover. Those units ship on Sep/Oct pallets.")
+    a("Nov/Dec/Jan below are DEMAND months — units customers buy.")
+    a("Those units produce now and ship Aug–Oct so they are in FBA by Halloween.")
     a(f"All units in Amazon FBA by: {headsup['amazon_in_by']}")
     tpl_note = "3PL OFFSETS production" if headsup.get("tpl_offsets_production") \
         else "3PL shown as transfer only (does NOT reduce manufacture)"
@@ -882,7 +885,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     # ── Production schedule ──
     a("")
     a("-" * 65)
-    a("PRODUCTION SCHEDULE — current month = reorder; Sep/Oct = holiday")
+    a("PRODUCTION SCHEDULE — Aug–Oct inbound so Amazon is covered through January")
     a("-" * 65)
 
     for entry in headsup["primary"]["entries"]:
@@ -959,10 +962,11 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("")
     a("-" * 65)
     a("NOTES:")
+    a("  - This plan covers Amazon FBA through 2027-01-31.")
     a("  - Current month = inventory-page reorder (keep Amazon covered now).")
-    a("  - Nov/Dec/Jan are sell-through, not production months. Alert the")
-    a("    manufacturer with those totals; they ship on Sep/Oct pallets")
-    a("    so stock is in Amazon by end of October.")
+    a("  - Nov/Dec/Jan are demand months (what customers buy), already on")
+    a("    the Aug–Oct pallets so stock is in Amazon by end of October.")
+    a("  - After January, start a new replenishment / warehouse-reserve plan.")
     a("  - One pallet holds 19,000 lip-balm cartons. A month can ship")
     a("    multiple pallets; CRITICAL / highest reorder packs first.")
     a("  - FIRM months represent committed production volumes.")

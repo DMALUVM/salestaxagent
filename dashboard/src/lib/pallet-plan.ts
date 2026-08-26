@@ -214,7 +214,7 @@ export function holidayDemandWithPlanning(
   return Math.max(Math.round(forecastUnits), Math.round(dailyPlanning * days));
 }
 
-/** Holiday sell-through months the Sep/Oct pallets cover (not production months). */
+/** Holiday demand months this plan covers in Amazon (sell-through through Jan 31). */
 export const HOLIDAY_DEMAND_MONTHS = [
   { month: "2026-11", label: "November 2026", short: "Nov", days: 30, aliases: ["2026-11"] },
   { month: "2026-12", label: "December 2026", short: "Dec", days: 31, aliases: ["2026-12"] },

@@ -59,6 +59,15 @@ describe("pallet planner vs inventory", () => {
     assert.match(page, /holidayDemandCoveringProjections/);
     assert.match(page, /reorder \+ share|balanced/);
     assert.match(page, /Copy Nov–Jan brief|sell-through/);
+    assert.match(page, /What this plan covers/);
+    assert.match(page, /COVER_THROUGH|2027-01-31/);
+    assert.match(page, /Demand — units customers buy/);
+    assert.match(page, /Production — pallets that cover/);
+    assert.doesNotMatch(
+      page,
+      /Not a production month/,
+      "Nov/Dec/Jan cards must not say 'not a production month' — that reads as never produce",
+    );
     assert.doesNotMatch(
       page,
       /remaining\[sku\] \* w \/ Math\.max\(wSum/,

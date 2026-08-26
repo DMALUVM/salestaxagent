@@ -58,6 +58,8 @@ const SKU_SHORT: Record<string, string> = {
 };
 const PALLET_MAX = PALLET_MAX_UNITS;
 const TARGET = AMAZON_IN_BY;
+/** Last day of sell-through this pallet plan is built to cover. */
+const COVER_THROUGH = "2027-01-31";
 const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
@@ -147,9 +149,11 @@ function toIso(d: Date): string { return d.toISOString().slice(0, 10); }
 
 function buildMfgBrief(skuSummary: MfgSkuSummary[]): string {
   const L: string[] = [];
-  L.push("Tallowbourn holiday sell-through (in Amazon by " + TARGET + ")");
-  L.push("Nov/Dec/Jan are the months we are covering — not the ship months.");
-  L.push("Those units produce now and ship on September / October pallets.");
+  L.push("Tallowbourn — what this pallet plan covers");
+  L.push("Coverage: Amazon FBA through " + COVER_THROUGH + " (November, December, January sell-through).");
+  L.push("In Amazon by: " + TARGET + ". Produce and ship Aug–Oct. No holiday inbound pallets in Nov–Jan");
+  L.push("unless demand runs hotter than this plan — that would be a later replenishment / warehouse reserve.");
+  L.push("Nov/Dec/Jan numbers are units customers buy those months, not pallets to build those months.");
   L.push("");
   L.push(
     "SKU".padEnd(14) +
@@ -228,10 +232,10 @@ function buildMfgSheet(
   L.push("=================================================================");
   L.push(""); L.push("SKU REFERENCE:");
   for (const [sku, label] of Object.entries(SKU_LABELS)) L.push(`  ${sku}  =  ${label}`);
-  L.push("");   L.push(`Demand period: Nov + Dec + Jan (sell-through — alert the manufacturer)`);
+  L.push("");   L.push(`Coverage: Amazon FBA through ${COVER_THROUGH} (Nov + Dec + Jan sell-through).`);
   L.push(`Pallet capacity: ${fmt(PALLET_MAX)} cartons each; multiple pallets/month OK`);
-  L.push(`Current month = inventory reorder. Sep/Oct pallets cover Nov/Dec/Jan so Amazon is stocked by ${TARGET}.`);
-  L.push(`All units in Amazon FBA by: ${TARGET}`);
+  L.push(`Production window: Aug–Oct. Ship so every pallet is in FBA by ${TARGET}.`);
+  L.push(`Nov/Dec/Jan numbers are customer demand those months, not inbound pallets those months.`);
   L.push(`3PL policy: transfer only (does NOT reduce manufacture)`);
   L.push(""); L.push("-----------------------------------------------------------------");
   L.push("HOLIDAY SELL-THROUGH (correction_factor) — tell the manufacturer"); L.push("-----------------------------------------------------------------");
@@ -266,8 +270,10 @@ function buildMfgSheet(
     else L.push(`  ${e.label}: no production needed`);
   }
   L.push(""); L.push("-----------------------------------------------------------------");
-  L.push("NOTES:"); L.push("  - Nov/Dec/Jan are sell-through months, not production months.");
-  L.push("  - Alert the manufacturer with those totals; they ship on Sep/Oct pallets.");
+  L.push("NOTES:"); L.push(`  - This plan covers Amazon through ${COVER_THROUGH}.`);
+  L.push("  - Produce and ship Aug–Oct so stock is in FBA by end of October.");
+  L.push("  - Nov/Dec/Jan are demand months (what customers buy), already on those pallets.");
+  L.push("  - After January, start a new replenishment / warehouse-reserve plan.");
   L.push("  - Current month = inventory reorder + a balanced holiday share.");
   L.push("  - FIRM = committed. INDICATIVE = forecast-driven, may change.");
   L.push("  - Manufacture assumes 3PL transferred separately."); L.push("  - This is a planning aid, not a purchase order.");
@@ -578,6 +584,9 @@ export default function PalletPlanPage() {
 
   const selectedProj = coverProjections.find((p) => p.sku === coverSku);
   const generated = new Date().toISOString().slice(0, 10);
+  const recvLead = Math.max(...mfgSkuSummary.map((s) => s.leadDays), 19);
+  const holidayDemandTotal = mfgSkuSummary.reduce((a, s) => a + s.holidayDemand, 0);
+  const manufactureTotal = mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0);
 
   return (
     <div className="space-y-6">
@@ -585,7 +594,7 @@ export default function PalletPlanPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Pallet Planner</h1>
           <p className="text-sm text-muted-foreground">
-            August holds the inventory reorder plus a third of the holiday leftover · Sep/Oct share the rest so Amazon is stocked by {TARGET}
+            Holiday inbound plan — covers Amazon FBA through {COVER_THROUGH}. Produce and ship Aug–Oct so that stock is in FBA by {TARGET}.
           </p>
         </div>
         <Link href="/inventory"><Button variant="outline" size="sm">← Inventory</Button></Link>
@@ -607,9 +616,9 @@ export default function PalletPlanPage() {
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
         <Card>
           <CardContent className="p-4">
-            <p className="text-[10px] text-muted-foreground uppercase">Holiday Demand</p>
-            <p className="text-2xl font-semibold tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.holidayDemand, 0))}</p>
-            <p className="text-xs text-muted-foreground">covers CF / actual_2025 / optimistic + planning floor</p>
+            <p className="text-[10px] text-muted-foreground uppercase">Covered through</p>
+            <p className="text-2xl font-semibold tabular-nums">Jan 2027</p>
+            <p className="text-xs text-muted-foreground">{fmt(holidayDemandTotal)} units Nov–Jan demand</p>
           </CardContent>
         </Card>
         <Card>
@@ -621,10 +630,8 @@ export default function PalletPlanPage() {
         <Card className={totalGap > 0 ? "border-red-500/40" : "border-emerald-500/40"}>
           <CardContent className="p-4">
             <p className="text-[10px] text-muted-foreground uppercase">Manufacture</p>
-            <p className={`text-2xl font-semibold tabular-nums ${mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0) > 0 ? "text-red-500" : "text-emerald-500"}`}>
-              {mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0) > 0
-                ? fmt(mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0))
-                : "Covered"}
+            <p className={`text-2xl font-semibold tabular-nums ${manufactureTotal > 0 ? "text-red-500" : "text-emerald-500"}`}>
+              {manufactureTotal > 0 ? fmt(manufactureTotal) : "Covered"}
             </p>
             <p className="text-xs text-muted-foreground">max(inventory reorder, holiday gap)</p>
           </CardContent>
@@ -639,6 +646,50 @@ export default function PalletPlanPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardContent className="p-4 space-y-3">
+          <div>
+            <p className="text-sm font-medium">What this plan covers</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Enough finished units in Amazon FBA by {TARGET} to sell November,
+              December, and January. Coverage ends {COVER_THROUGH}. After that,
+              this sheet is done — later production is replenishment or warehouse
+              reserve, not this holiday inbound plan.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-md border bg-muted/20 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">1. Produce & ship</p>
+              <p className="text-sm font-semibold">Aug–Oct 2026</p>
+              <p className="text-[10px] text-muted-foreground">
+                The only inbound months on this sheet · {fmt(manufactureTotal)} units to make
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">2. In Amazon by</p>
+              <p className="text-sm font-semibold">Oct 31, 2026</p>
+              <p className="text-[10px] text-muted-foreground">
+                Halloween receiving cutoff · Recv {recvLead}d pulls October ship-by forward
+              </p>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-2.5">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">3. Sell through</p>
+              <p className="text-sm font-semibold">Jan 31, 2027</p>
+              <p className="text-[10px] text-muted-foreground">
+                {fmt(holidayDemandTotal)} units Nov+Dec+Jan demand (highest scenario / floor)
+              </p>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Nov / Dec / Jan are demand months, not inbound months. You will not
+            need holiday pallets those months if Aug–Oct lands by {TARGET}. That
+            is a receiving deadline, not “never produce again.” Top row below is
+            what customers buy. Bottom row is what you ship now so that demand is
+            already sitting in FBA.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* ══════ SHARE WITH MANUFACTURER ══════ */}
       <Card className="border-primary/20">
@@ -675,7 +726,7 @@ export default function PalletPlanPage() {
           </div>
           <div className="flex items-center gap-4 mt-1">
             <p className="text-xs text-muted-foreground">
-              Nov/Dec/Jan planned covers every forecast scenario and the 92-day planning floor so we do not come in under. January 2026 is a proxy until 2027-01 is in the warehouse.
+              Covers Amazon through {COVER_THROUGH}. Nov/Dec/Jan planned is the highest of every forecast scenario and the 92-day planning floor so we do not come in under. January 2026 weeks are a labeled proxy until 2027-01 is in the warehouse.
             </p>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <input type="checkbox" checked={tplOffsetsProduction}
@@ -750,6 +801,10 @@ export default function PalletPlanPage() {
             </Table>
           </div>
 
+          <div>
+            <p className="mb-2 text-xs font-medium">
+              Demand — units customers buy in Amazon these months
+            </p>
           <div className="grid gap-3 sm:grid-cols-3">
             {HOLIDAY_DEMAND_MONTHS.map((spec) => {
               const key = spec.month === "2026-11" ? "novDemand"
@@ -771,11 +826,12 @@ export default function PalletPlanPage() {
                     ))}
                   </div>
                   <p className="mt-2 text-[10px] text-muted-foreground">
-                    Not a production month. Highest scenario / floor. Ships on Sep/Oct pallets.
+                    Demand in FBA this month — already on the Aug–Oct pallets below. Highest scenario / floor.
                   </p>
                 </div>
               );
             })}
+          </div>
           </div>
 
           {Object.keys(month1Shortfall).length > 0 && (
@@ -786,6 +842,10 @@ export default function PalletPlanPage() {
           )}
 
           {/* Month cards */}
+          <div>
+            <p className="mb-2 text-xs font-medium">
+              Production — pallets that cover the Nov–Jan demand above
+            </p>
           <div className="grid gap-4 sm:grid-cols-3">
             {mfgPrimary.entries.map((entry, idx) => {
               const sensEntry = mfgSensitivity.entries[idx];
@@ -800,9 +860,7 @@ export default function PalletPlanPage() {
                           {entry.status}
                         </Badge>
                         {idx === 0 && <Badge variant="outline" className="text-[10px]">reorder + share</Badge>}
-                        {["2026-09", "2026-10"].includes(entry.month) && (
-                          <Badge variant="outline" className="text-[10px]">holiday in by {TARGET.slice(5)}</Badge>
-                        )}
+                        <Badge variant="outline" className="text-[10px]">in FBA by {TARGET.slice(5)}</Badge>
                         {entry.overdue && <Badge variant="destructive" className="text-[10px]">overdue</Badge>}
                       </div>
                     </div>
@@ -878,6 +936,7 @@ export default function PalletPlanPage() {
               );
             })}
           </div>
+          </div>
 
           {/* Transfers */}
           {mfgTransfers.length > 0 && (
@@ -900,7 +959,7 @@ export default function PalletPlanPage() {
             Inventory reorder = (cover target{settings.holiday_mode ? " 90d holiday" : ` ${settings.target_cover_days}d`} + lead) × V30 − on-hand — same as the inventory page.
             {" "}Manufacture = max(inventory reorder, holiday demand − FBA − inbound − AWD{tplOffsetsProduction ? " − 3PL" : ""}).
             {!tplOffsetsProduction && " 3PL is transfer only, does not reduce production."}
-            {" "}Nov/Dec/Jan planned is the highest of correction_factor, actual_2025, optimistic, and the 92-day planning floor — same holiday number as inbound / four-numbers. Current month covers the inventory-page reorder. Sep/Oct pallets carry that stock so it is in Amazon by {TARGET}.
+            {" "}This plan covers Amazon through {COVER_THROUGH}. Nov/Dec/Jan planned is the highest of correction_factor, actual_2025, optimistic, and the 92-day planning floor — same holiday number as inbound / four-numbers. Current month covers the inventory-page reorder. Aug–Oct pallets carry that stock so it is in Amazon by {TARGET}.
             {" "}A pallet holds {fmt(PALLET_MAX)} cartons; ship 2+ in the same month when the mix does not fit one.
             {" "}FIRM = committed. INDICATIVE = may change. Not a purchase order.
           </p>
