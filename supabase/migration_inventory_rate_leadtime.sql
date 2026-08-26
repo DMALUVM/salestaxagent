@@ -115,7 +115,8 @@ ALTER TABLE inventory_inbound_shipments
     ADD COLUMN IF NOT EXISTS shipped_at timestamptz,
     ADD COLUMN IF NOT EXISTS received_at timestamptz,
     ADD COLUMN IF NOT EXISTS prime_eligible_at timestamptz,
-    ADD COLUMN IF NOT EXISTS receive_days_basis text;
+    ADD COLUMN IF NOT EXISTS receive_days_basis text,
+    ADD COLUMN IF NOT EXISTS raw jsonb;
 
 ALTER TABLE inventory_awd_replenishments
     ADD COLUMN IF NOT EXISTS shipped_at timestamptz,

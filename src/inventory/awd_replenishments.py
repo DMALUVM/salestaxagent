@@ -60,10 +60,15 @@ def _needs_order_detail(summary: dict) -> bool:
     status = (summary.get("status") or "").upper()
     if status != "SUCCESS":
         return False
-    if summary.get("outboundShipments"):
-        return False
+    outbound = summary.get("outboundShipments") or []
+    if not outbound:
+        return True
     if summary.get("shippedProducts") or summary.get("products"):
-        return False
+        for ob in outbound:
+            sid = str(ob.get("shipmentId") or ob.get("shipment_id") or "")
+            if sid.startswith("FBA"):
+                return False
+        return True
     return True
 
 

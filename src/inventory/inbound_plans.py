@@ -26,6 +26,28 @@ _last_request_at = 0.0
 CLOSED_STATUSES = frozenset({"CLOSED", "DELIVERED", "CHECKED_IN"})
 SHIPPED_STATUSES = frozenset({"SHIPPED", "IN_TRANSIT", "DELIVERED", "RECEIVING", "CLOSED", "CHECKED_IN"})
 
+_AWD_PLAN_MARKERS = (
+    "amazon warehousing and distribution",
+    "not supported for amazon warehousing",
+)
+
+
+def _is_awd_inbound_plan(summary: dict) -> bool:
+    """AWD warehouse→AWD plans appear in listInboundPlans but reject getInboundPlan."""
+    plan_id = (summary.get("inboundPlanId") or "").strip()
+    if plan_id.startswith("wf"):
+        return True
+    for key in ("source", "inboundPlanType", "planType", "destinationType"):
+        val = str(summary.get(key) or "").upper()
+        if "AWD" in val or "WAREHOUSING" in val:
+            return True
+    return False
+
+
+def _is_awd_plan_error(exc: SPAPIError) -> bool:
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _AWD_PLAN_MARKERS)
+
 
 def _throttle() -> None:
     global _last_request_at
@@ -157,14 +179,21 @@ def sync_inbound_plans_v2024(
 
     ship_rows: list[dict] = []
     item_rows: list[dict] = []
+    awd_plans_skipped = 0
 
     for summary in plan_summaries:
         plan_id = summary.get("inboundPlanId")
         if not plan_id:
             continue
+        if _is_awd_inbound_plan(summary):
+            awd_plans_skipped += 1
+            continue
         try:
             plan = _get_plan(plan_id)
         except SPAPIError as e:
+            if _is_awd_plan_error(e):
+                awd_plans_skipped += 1
+                continue
             log.warning("Inbound plan %s: %s", plan_id, e)
             continue
 
@@ -271,8 +300,15 @@ def sync_inbound_plans_v2024(
                 },
             })
 
+    if awd_plans_skipped:
+        log.info(
+            "Skipped %d AWD inbound plans (use AWD inbound API; not FBA Send-to-Amazon)",
+            awd_plans_skipped,
+        )
+
     return {
         "plans_scanned": len(plan_summaries),
+        "awd_plans_skipped": awd_plans_skipped,
         "shipments_found": len(ship_rows),
         "items_found": len(item_rows),
         "ship_rows": ship_rows,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 from statistics import median
 
@@ -23,6 +24,8 @@ log = logging.getLogger(__name__)
 
 INBOUND_PATH = "/fba/inbound/v0"
 TRANSPORT_FETCH_LIMIT = 25
+SHIPMENT_ID_BATCH = 50
+FBA_SHIPMENT_RE = re.compile(r"^FBA[A-Z0-9]+$")
 
 SHIPMENT_STATUSES = (
     "WORKING",
@@ -89,6 +92,60 @@ def _get_shipments_page(
     return payload
 
 
+def _get_shipments_by_ids(shipment_ids: list[str]) -> list[dict]:
+    """Fetch FBA inbound shipments by ShipmentIdList (AWD replenishment outbound IDs)."""
+    if not shipment_ids:
+        return []
+    found: list[dict] = []
+    for i in range(0, len(shipment_ids), SHIPMENT_ID_BATCH):
+        batch = shipment_ids[i : i + SHIPMENT_ID_BATCH]
+        params: list[tuple[str, str]] = [
+            ("QueryType", "SHIPMENT"),
+            ("MarketplaceId", _marketplace_id()),
+        ]
+        for sid in batch:
+            params.append(("ShipmentIdList", sid))
+        resp = httpx.get(
+            f"{BASE_URL}{INBOUND_PATH}/shipments",
+            headers=_headers(),
+            params=params,
+            timeout=60,
+        )
+        if resp.status_code != 200:
+            log.warning(
+                "Inbound getShipments by ID failed (%s): %s",
+                resp.status_code,
+                resp.text[:200],
+            )
+            continue
+        payload = resp.json().get("payload") or resp.json()
+        found.extend(payload.get("ShipmentData") or [])
+    return found
+
+
+def _fba_ids_from_awd_replenishments() -> list[str]:
+    """Collect FBA shipment confirmation IDs linked from AWD replenishment orders."""
+    try:
+        orders = fetch_all("inventory_awd_replenishments")
+    except Exception:
+        return []
+    ids: set[str] = set()
+    for order in orders:
+        for sid in order.get("outbound_shipment_ids") or []:
+            sid = str(sid or "").strip()
+            if FBA_SHIPMENT_RE.match(sid):
+                ids.add(sid)
+        raw = order.get("raw") or {}
+        if not isinstance(raw, dict):
+            continue
+        for ob in raw.get("outboundShipments") or []:
+            for key in ("shipmentConfirmationId", "shipmentId", "shipment_id"):
+                val = str(ob.get(key) or "").strip()
+                if FBA_SHIPMENT_RE.match(val):
+                    ids.add(val)
+    return sorted(ids)
+
+
 def _get_shipment_items(shipment_id: str) -> list[dict]:
     resp = httpx.get(
         f"{BASE_URL}{INBOUND_PATH}/shipments/{shipment_id}/items",
@@ -144,9 +201,84 @@ def sync_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> dict:
         v0_error = str(e)[:200]
         log.warning("[Inbound] v0 getShipments failed: %s", v0_error)
 
+    ship_rows, item_rows, transport_budget = _rows_from_shipments(
+        shipments,
+        existing=existing,
+        start=start,
+        now=now,
+        transport_budget=transport_budget,
+    )
+    seen_ids = {r["shipment_id"] for r in ship_rows}
+
+    awd_fba_ids = [
+        sid for sid in _fba_ids_from_awd_replenishments()
+        if sid not in seen_ids
+    ]
+    awd_by_id_count = 0
+    if awd_fba_ids:
+        by_id_shipments = _get_shipments_by_ids(awd_fba_ids)
+        awd_by_id_count = len(by_id_shipments)
+        extra_rows, extra_items, transport_budget = _rows_from_shipments(
+            by_id_shipments,
+            existing=existing,
+            start=start,
+            now=now,
+            transport_budget=transport_budget,
+            raw_source="awd_replenishment_outbound",
+        )
+        for row in extra_rows:
+            if row["shipment_id"] not in seen_ids:
+                ship_rows.append(row)
+                seen_ids.add(row["shipment_id"])
+        item_rows.extend(extra_items)
+
+    v2024_result: dict | None = None
+    if not ship_rows:
+        from src.inventory.inbound_plans import sync_inbound_plans_v2024
+        v2024_result = sync_inbound_plans_v2024(
+            days_back=days_back, dry_run=True, existing=existing,
+        )
+        ship_rows.extend(v2024_result.get("ship_rows") or [])
+        item_rows.extend(v2024_result.get("item_rows") or [])
+
+    result = {
+        "shipments_found": len(ship_rows),
+        "items_found": len(item_rows),
+        "rows_upserted": 0,
+        "dry_run": dry_run,
+        "v0_shipments": len(shipments),
+        "v0_error": v0_error,
+        "awd_fba_ids": len(awd_fba_ids),
+        "awd_by_id_shipments": awd_by_id_count,
+        "v2024_plans": (v2024_result or {}).get("plans_scanned", 0),
+        "v2024_awd_skipped": (v2024_result or {}).get("awd_plans_skipped", 0),
+    }
+    if dry_run or not ship_rows:
+        return result
+
+    result["rows_upserted"] = upsert_rows(
+        "inventory_inbound_shipments", ship_rows, on_conflict="shipment_id",
+    )
+    if item_rows:
+        upsert_rows(
+            "inventory_inbound_shipment_items", item_rows,
+            on_conflict="shipment_id,sku",
+        )
+    return result
+
+
+def _rows_from_shipments(
+    shipments: list[dict],
+    *,
+    existing: dict[str, dict],
+    start: datetime,
+    now: datetime,
+    transport_budget: int,
+    raw_source: str = "inbound_v0",
+) -> tuple[list[dict], list[dict], int]:
+    """Build shipment + item rows from v0 ShipmentData payloads."""
     ship_rows: list[dict] = []
     item_rows: list[dict] = []
-    shipment_skus: dict[str, list[str]] = {}
 
     for sh in shipments:
         sid = sh.get("ShipmentId") or sh.get("shipmentId")
@@ -178,7 +310,6 @@ def sync_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> dict:
                 "quantity_shipped": qs,
                 "quantity_received": qr,
             })
-        shipment_skus[sid] = skus
 
         prev = existing.get(sid)
         transport_dt = None
@@ -218,6 +349,7 @@ def sync_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> dict:
             shipped_at, received_at, prime_eligible_at, closed_at, created,
         )
 
+        raw_payload = sh if raw_source == "inbound_v0" else {"source": raw_source, "shipment": sh}
         ship_rows.append({
             "shipment_id": sid,
             "shipment_status": status,
@@ -232,39 +364,10 @@ def sync_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> dict:
             "receive_days": receive_days,
             "receive_days_basis": receive_basis,
             "last_updated_at": updated.isoformat() if updated else None,
-            "raw": sh,
+            "raw": raw_payload,
         })
 
-    v2024_result: dict | None = None
-    if not ship_rows:
-        from src.inventory.inbound_plans import sync_inbound_plans_v2024
-        v2024_result = sync_inbound_plans_v2024(
-            days_back=days_back, dry_run=True, existing=existing,
-        )
-        ship_rows.extend(v2024_result.get("ship_rows") or [])
-        item_rows.extend(v2024_result.get("item_rows") or [])
-
-    result = {
-        "shipments_found": len(ship_rows),
-        "items_found": len(item_rows),
-        "rows_upserted": 0,
-        "dry_run": dry_run,
-        "v0_shipments": len(shipments),
-        "v0_error": v0_error,
-        "v2024_plans": (v2024_result or {}).get("plans_scanned", 0),
-    }
-    if dry_run or not ship_rows:
-        return result
-
-    result["rows_upserted"] = upsert_rows(
-        "inventory_inbound_shipments", ship_rows, on_conflict="shipment_id",
-    )
-    if item_rows:
-        upsert_rows(
-            "inventory_inbound_shipment_items", item_rows,
-            on_conflict="shipment_id,sku",
-        )
-    return result
+    return ship_rows, item_rows, transport_budget
 
 
 def median_receive_days(limit: int = 5, sku: str | None = None) -> tuple[int | None, int]:

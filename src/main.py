@@ -3827,7 +3827,7 @@ def inventory_sync_cmd(dry_run):
     results = sync_all(dry_run=dry_run)
     sync_names = [
         "fba_summaries", "awd", "restock", "planning",
-        "inbound_shipments", "awd_replenishments", "awd_inbound",
+        "awd_replenishments", "inbound_shipments", "awd_inbound",
     ]
     for name in sync_names:
         r = results.get(name, {})

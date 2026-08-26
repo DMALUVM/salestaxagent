@@ -352,8 +352,8 @@ def sync_all(dry_run: bool = False, on_poll=None) -> dict:
         ("awd", lambda: fetch_awd_inventory(dry_run=dry_run)),
         ("restock", lambda: fetch_restock(dry_run=dry_run, on_poll=on_poll)),
         ("planning", lambda: fetch_planning(dry_run=dry_run, on_poll=on_poll)),
-        ("inbound_shipments", lambda: _sync_inbound(dry_run)),
         ("awd_replenishments", lambda: _sync_awd_replenishments(dry_run)),
+        ("inbound_shipments", lambda: _sync_inbound(dry_run)),
         ("awd_inbound", lambda: _sync_awd_inbound(dry_run)),
     ]:
         try:
