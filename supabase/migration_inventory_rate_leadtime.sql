@@ -23,8 +23,12 @@ CREATE TABLE IF NOT EXISTS inventory_inbound_shipments (
     units_shipped       integer NOT NULL DEFAULT 0,
     units_received      integer NOT NULL DEFAULT 0,
     created_at          timestamptz,
+    shipped_at          timestamptz,
+    received_at         timestamptz,
+    prime_eligible_at   timestamptz,
     closed_at           timestamptz,
     receive_days        integer,
+    receive_days_basis  text,
     last_updated_at     timestamptz,
     raw                 jsonb,
     synced_at           timestamptz NOT NULL DEFAULT now()
@@ -67,8 +71,10 @@ CREATE TABLE IF NOT EXISTS inventory_awd_replenishments (
     order_status            text,
     created_at              timestamptz,
     confirmed_at            timestamptz,
+    shipped_at              timestamptz,
     completed_at            timestamptz,
     replenish_days          integer,
+    replenish_days_basis    text,
     outbound_shipment_ids   text[],
     outbound_fc_count       integer NOT NULL DEFAULT 0,
     units_requested         integer NOT NULL DEFAULT 0,
@@ -103,3 +109,14 @@ CREATE TABLE IF NOT EXISTS inventory_leadtime_summary (
     configured_awd_to_fba_days      integer,
     updated_at                      timestamptz NOT NULL DEFAULT now()
 );
+
+-- Safe upgrades when table already existed from an earlier migration run.
+ALTER TABLE inventory_inbound_shipments
+    ADD COLUMN IF NOT EXISTS shipped_at timestamptz,
+    ADD COLUMN IF NOT EXISTS received_at timestamptz,
+    ADD COLUMN IF NOT EXISTS prime_eligible_at timestamptz,
+    ADD COLUMN IF NOT EXISTS receive_days_basis text;
+
+ALTER TABLE inventory_awd_replenishments
+    ADD COLUMN IF NOT EXISTS shipped_at timestamptz,
+    ADD COLUMN IF NOT EXISTS replenish_days_basis text;

@@ -21,11 +21,12 @@ def _group_inbound_batches(ships: list[dict]) -> tuple[list[int], list[int]]:
         s for s in ships
         if (s.get("shipment_status") or "").upper() == "CLOSED"
         and s.get("receive_days") is not None
-        and s.get("created_at")
+        and (s.get("receive_days_basis") or "") != "created_to_closed_fallback"
+        and (s.get("shipped_at") or s.get("created_at"))
     ]
     by_day: dict[str, list[dict]] = defaultdict(list)
     for s in closed:
-        day = str(s.get("created_at", ""))[:10]
+        day = str(s.get("shipped_at") or s.get("created_at", ""))[:10]
         if day:
             by_day[day].append(s)
 

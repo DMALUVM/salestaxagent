@@ -64,10 +64,13 @@ def test_implied_rate_from_daily_snapshots(monkeypatch):
 def test_median_receive_days(monkeypatch):
     ships = [
         {"shipment_id": "A", "shipment_status": "CLOSED", "receive_days": 19,
+         "receive_days_basis": "shipped_to_received",
          "closed_at": "2026-08-01"},
         {"shipment_id": "B", "shipment_status": "CLOSED", "receive_days": 23,
+         "receive_days_basis": "shipped_to_received",
          "closed_at": "2026-07-01"},
         {"shipment_id": "C", "shipment_status": "WORKING", "receive_days": 5,
+         "receive_days_basis": "created_to_closed_fallback",
          "closed_at": None},
     ]
 

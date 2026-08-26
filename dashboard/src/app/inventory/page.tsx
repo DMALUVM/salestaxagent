@@ -715,10 +715,10 @@ export default function InventoryPage() {
             <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
               <strong>V30</strong> = orders report (SP-API). <strong>Inv V30</strong> = total FBA quantity
               day-over-day (ledger receipts counted). When they diverge &gt;25%, investigate before reordering.
-              <strong> Recv</strong> = median warehouse→FBA receive days from closed direct inbound shipments
+              <strong> Recv</strong> = median <strong>shipped → received</strong> days from closed FBA inbound
               {accountReceive != null ? ` (~${accountReceive}d measured)` : ""}.
               Reorder qty uses measured lead time per SKU (falls back to {s.receiving_days_normal}d configured).
-              <strong> AWD</strong> = AWD replenishment confirm→Prime-eligible at FC (linked outbound shipment closed).
+              <strong> AWD→FBA</strong> = outbound <strong>shipped → Prime-eligible</strong> (ledger sellable receipt when available).
               {divergent > 0 ? ` ${divergent} SKU(s) flagged.` : ""}
               Daily history builds after each <code className="rounded bg-blue-100/60 px-1 dark:bg-blue-900/40">inventory-sync</code> — needs ~7 days for Inv V30.
             </p>
@@ -972,8 +972,8 @@ export default function InventoryPage() {
                   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
                   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },
                   { key: "inventory_u_30", label: "Inv V30", tip: "Implied daily rate from total FBA quantity change + ledger receipts" },
-                  { key: "measured_receive_days", label: "Recv", tip: "Median warehouse→FBA receive days from your last closed direct inbound shipments" },
-                  { key: "measured_replenish_days", label: "AWD→FBA", tip: "Median AWD replenishment confirm→Prime-eligible days (outbound shipment checked in at FC)" },
+                  { key: "measured_receive_days", label: "Recv", tip: "Median shipped→received days (FBA inbound). Uses inventory ledger sellable receipt when available." },
+                  { key: "measured_replenish_days", label: "AWD→FBA", tip: "Median AWD outbound shipped→Prime-eligible days at FC (linked FBA shipment + ledger)" },
                   { key: "dos", label: "DOS", tip: "Days of supply — FBA cover (Amazon) or warehouse cover (Shop)" },
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
@@ -1282,13 +1282,13 @@ export default function InventoryPage() {
                 )}
                 {selected.measured_receive_days != null && (
                   <p>
-                    Measured FBA receive: {selected.measured_receive_days}d
+                    Measured FBA receive: {selected.measured_receive_days}d (shipped→received)
                     {selected.receive_sample_n ? ` (last ${selected.receive_sample_n} shipments)` : ""}
                   </p>
                 )}
                 {selected.measured_replenish_days != null && (
                   <p>
-                    Measured AWD→Prime: {selected.measured_replenish_days}d
+                    Measured AWD→Prime: {selected.measured_replenish_days}d (shipped→sellable)
                     {selected.replenish_sample_n ? ` (last ${selected.replenish_sample_n} replenishments)` : ""}
                   </p>
                 )}

@@ -91,38 +91,52 @@ def _products_from_order(order: dict, key: str) -> list[dict]:
 def _compute_replenish_days(
     order: dict,
     fba_by_id: dict[str, dict],
-) -> int | None:
-    """Days from confirm → last linked FBA shipment closed (Prime-eligible proxy)."""
-    start = _parse_ts(order.get("confirmedOn") or order.get("createdAt"))
-    if not start:
-        return None
-
+) -> tuple[int | None, str]:
+    """AWD outbound ship → FBA received / Prime-eligible (via linked inbound shipment)."""
     outbound = order.get("outboundShipments") or []
-    closed_dates: list[datetime] = []
+    shipped_dates: list[datetime] = []
+    end_dates: list[datetime] = []
+    end_prime: list[datetime] = []
+
     for ob in outbound:
+        ob_status = (ob.get("shipmentStatus") or "").upper()
+        ob_shipped = _parse_ts(ob.get("updatedAt") or ob.get("createdAt"))
+        if ob_status in {"IN_TRANSIT", "DELIVERED", "RECEIVING", "RECEIVED", "CLOSED"} and ob_shipped:
+            shipped_dates.append(ob_shipped)
+
         sid = ob.get("shipmentId") or ob.get("shipment_id")
         if not sid:
             continue
         fba = fba_by_id.get(sid)
-        if fba and (fba.get("shipment_status") or "").upper() == "CLOSED":
-            closed = _parse_ts(fba.get("closed_at") or fba.get("last_updated_at"))
-            if closed:
-                closed_dates.append(closed)
-        ob_updated = _parse_ts(ob.get("updatedAt"))
-        ob_status = (ob.get("shipmentStatus") or "").upper()
-        if ob_status in {"CLOSED", "RECEIVED"} and ob_updated:
-            closed_dates.append(ob_updated)
+        if not fba:
+            continue
+        fba_shipped = _parse_ts(fba.get("shipped_at"))
+        if fba_shipped:
+            shipped_dates.append(fba_shipped)
+        recv = _parse_ts(fba.get("prime_eligible_at") or fba.get("received_at") or fba.get("closed_at"))
+        if recv:
+            end_dates.append(recv)
+        prime = _parse_ts(fba.get("prime_eligible_at"))
+        if prime:
+            end_prime.append(prime)
 
-    if closed_dates:
-        end = max(closed_dates)
-        return max((end.date() - start.date()).days, 0)
+    start = min(shipped_dates) if shipped_dates else _parse_ts(order.get("confirmedOn") or order.get("createdAt"))
+    if not start:
+        return None, "unknown"
+
+    if end_prime:
+        end = max(end_prime)
+        return max((end.date() - start.date()).days, 0), "shipped_to_prime"
+    if end_dates:
+        end = max(end_dates)
+        return max((end.date() - start.date()).days, 0), "shipped_to_received"
 
     status = (order.get("status") or "").upper()
     if status == "SUCCESS":
         end = _parse_ts(order.get("updatedAt"))
         if end:
-            return max((end.date() - start.date()).days, 0)
-    return None
+            return max((end.date() - start.date()).days, 0), "confirm_to_success_fallback"
+    return None, "unknown"
 
 
 def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict:
@@ -167,15 +181,30 @@ def sync_awd_replenishments(days_back: int = 180, dry_run: bool = False) -> dict
         units_requested = sum(p["quantity"] for p in requested)
         units_shipped = sum(p["quantity"] for p in shipped)
 
-        replenish_days = _compute_replenish_days(detail, fba_by_id)
+        replenish_days, replenish_basis = _compute_replenish_days(detail, fba_by_id)
+
+        earliest_ship = None
+        for ob in outbound:
+            sid = ob.get("shipmentId") or ob.get("shipment_id")
+            fba = fba_by_id.get(sid) if sid else None
+            for cand in (
+                fba.get("shipped_at") if fba else None,
+                ob.get("updatedAt"),
+                ob.get("createdAt"),
+            ):
+                dt = _parse_ts(cand)
+                if dt and (earliest_ship is None or dt < earliest_ship):
+                    earliest_ship = dt
 
         order_rows.append({
             "order_id": oid,
             "order_status": status,
             "created_at": created.isoformat() if created else None,
             "confirmed_at": confirmed.isoformat() if confirmed else None,
+            "shipped_at": earliest_ship.isoformat() if earliest_ship else None,
             "completed_at": updated.isoformat() if status == "SUCCESS" and updated else None,
             "replenish_days": replenish_days,
+            "replenish_days_basis": replenish_basis,
             "outbound_shipment_ids": outbound_ids,
             "outbound_fc_count": len(outbound_ids),
             "units_requested": units_requested,
@@ -243,6 +272,9 @@ def median_replenish_days(limit: int = 5, sku: str | None = None) -> tuple[int |
         reverse=True,
     ):
         if (o.get("order_status") or "").upper() != "SUCCESS":
+            continue
+        basis = (o.get("replenish_days_basis") or "").lower()
+        if basis == "confirm_to_success_fallback":
             continue
         rd = o.get("replenish_days")
         if rd is None:
