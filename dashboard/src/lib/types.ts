@@ -250,6 +250,10 @@ export interface SkuVelocity {
   total_u_90: number;
   seasonality_mult: number;
   seasonal_total_u_30: number;
+  planning_u_30?: number;
+  holiday_prior_daily?: number;
+  holiday_surge_mult?: number;
+  yoy_growth_mult?: number;
 }
 
 export interface InventoryRestock {

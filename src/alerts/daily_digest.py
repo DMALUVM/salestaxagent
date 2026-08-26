@@ -106,6 +106,12 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
         # for the MTD numbers; a digest that raises is not sent at all.
         pass
 
+    try:
+        from src.inventory.digest_lines import build_inventory_digest_lines
+        parts.extend(build_inventory_digest_lines())
+    except Exception:
+        pass
+
     # Stale sync warning
     try:
         logs = fetch_all("ingestion_log")

@@ -18,6 +18,7 @@ import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
 import { buildLast30Series } from "@/lib/overview-series";
 import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
 import { agentToday, amazonAsOf, monthNameFromIso, monthStart, shiftDays, windowStart } from "@/lib/as-of";
+import { InventoryLogisticsPanel } from "@/components/inventory/InventoryLogisticsPanel";
 import { LoadingState } from "@/components/loading";
 import { QueryError } from "@/components/query-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -501,6 +502,9 @@ export default function Pulse() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Amazon logistics (solo-operator daily checklist) ── */}
+      {configured && <InventoryLogisticsPanel showSync />}
 
       {/* ── Tax: Actions + Filing + Next Deadlines ── */}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">

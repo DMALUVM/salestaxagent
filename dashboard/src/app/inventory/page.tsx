@@ -39,8 +39,12 @@ import {
   ShoppingBag,
   Settings,
   Play,
+  RefreshCw,
 } from "lucide-react";
 import Link from "next/link";
+import { FourNumbersSummary } from "@/components/inventory/FourNumbersSummary";
+import { useFourNumbersPlan } from "@/lib/use-four-numbers-plan";
+import { inventoryActionSummary } from "@/lib/inventory-actions";
 import { displayTitle, rawTitle } from "@/lib/display-title";
 
 // ---------------------------------------------------------------------------
@@ -124,6 +128,8 @@ export default function InventoryPage() {
   const [selected, setSelected] = useState<ComputedRow | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   // Persisted preferences
   const PREFS_KEY = "inventory-table-prefs";
@@ -185,6 +191,8 @@ export default function InventoryPage() {
     null,
   );
   const s = localSettings ?? settings;
+  const { plan: fourNumbersPlan } = useFourNumbersPlan({ raw });
+  const logisticsSummary = inventoryActionSummary(raw);
 
   function effectiveLeadDays(
     sig: InventorySkuSignals | undefined,
@@ -650,12 +658,55 @@ export default function InventoryPage() {
               Pallet Planner
             </Button>
           </Link>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={syncing}
+            onClick={async () => {
+              setSyncing(true);
+              setSyncMsg(null);
+              try {
+                const r = await fetch("/api/inventory-sync", { method: "POST" });
+                const j = await r.json();
+                if (!r.ok) throw new Error(j.error || "Sync failed");
+                setSyncMsg(j.message || "Sync enqueued");
+              } catch (e) {
+                setSyncMsg(e instanceof Error ? e.message : String(e));
+              } finally {
+                setSyncing(false);
+              }
+            }}
+          >
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+            Sync
+          </Button>
           <Button variant="outline" size="sm" onClick={exportCSV}>
             <Download className="mr-1.5 h-3.5 w-3.5" />
             Export CSV
           </Button>
         </div>
       </div>
+
+      {syncMsg && (
+        <p className="text-xs text-muted-foreground">{syncMsg}</p>
+      )}
+
+      {(fourNumbersPlan || logisticsSummary.critical > 0 || logisticsSummary.restock > 0) && (
+        <Card className={logisticsSummary.critical > 0 ? "border-red-500/40" : "border-orange-500/30"}>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Today&apos;s logistics</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              {logisticsSummary.critical > 0 && `${logisticsSummary.critical} critical · `}
+              {logisticsSummary.restock > 0 && `${logisticsSummary.restock} reorder · `}
+              {logisticsSummary.investigate > 0 && `${logisticsSummary.investigate} rate check`}
+              {logisticsSummary.critical === 0 && logisticsSummary.restock === 0 && "Cover OK"}
+            </p>
+          </CardHeader>
+          <CardContent>
+            <FourNumbersSummary plan={fourNumbersPlan} compact planningHref="/planning?tab=inbound" />
+          </CardContent>
+        </Card>
+      )}
 
       {(signalRows.length > 0 || divergent > 0 || leadtime) && (
         <Card className="border-blue-200 bg-blue-50/40 dark:border-blue-900 dark:bg-blue-950/20">

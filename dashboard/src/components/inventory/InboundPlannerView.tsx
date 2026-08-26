@@ -69,6 +69,34 @@ export function InboundPlannerView() {
   // loader now lives in @/lib/use-inventory-skus and is used by the Demand
   // view; this view no longer makes that unused request.
 
+  async function loadAtRiskSkus() {
+    try {
+      const invResp = await fetch("/api/inventory");
+      const invData = await invResp.json();
+      const snaps = invData.snapshots ?? [];
+      const vels = invData.velocity ?? [];
+      const velMap = new Map(vels.map((v: { sku: string; total_u_30?: number; amazon_u_30?: number }) => [v.sku, v]));
+      const critical: string[] = [];
+      for (const s of snaps) {
+        const sku = String(s.sku ?? "");
+        if (!sku || sku === "UNKNOWN") continue;
+        const vel = velMap.get(sku) as { total_u_30?: number; amazon_u_30?: number } | undefined;
+        const fba =
+          Number(s.fulfillable ?? 0) +
+          Number(s.reserved ?? 0) +
+          Number(s.researching ?? 0) +
+          Number(s.unfulfillable ?? 0);
+        const demand = Number(vel?.total_u_30 ?? 0);
+        if (demand > 0.1 && fba / demand < 60) critical.push(sku);
+      }
+      if (critical.length) {
+        setSkuInput(critical.slice(0, 12).join(","));
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   async function runPlanner() {
     setLoading(true); setError(null); setPlans([]);
     const skus = skuInput.split(",").map((s) => s.trim()).filter(Boolean);
@@ -190,8 +218,13 @@ export function InboundPlannerView() {
           <div className="grid gap-3 sm:grid-cols-5">
             <div className="sm:col-span-2">
               <label className="text-xs font-medium">SKUs (comma-separated)</label>
-              <Input value={skuInput} onChange={(e) => setSkuInput(e.target.value)} className="mt-1"
-                placeholder="DDPE0001Shop,DDPE0002Shop,..." />
+              <div className="mt-1 flex gap-2">
+                <Input value={skuInput} onChange={(e) => setSkuInput(e.target.value)}
+                  placeholder="DDPE0001Shop,DDPE0002Shop,..." className="flex-1" />
+                <Button type="button" variant="outline" size="sm" onClick={loadAtRiskSkus}>
+                  Load &lt;60d
+                </Button>
+              </div>
             </div>
             <div>
               <label className="text-xs font-medium">Cover Through</label>

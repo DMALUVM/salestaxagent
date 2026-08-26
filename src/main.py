@@ -3825,7 +3825,7 @@ def inventory_sync_cmd(dry_run):
     if dry_run:
         click.echo("DRY RUN\n")
     results = sync_all(dry_run=dry_run)
-    for name in ["fba_summaries", "awd", "restock", "planning", "inbound_shipments"]:
+    for name in ["fba_summaries", "awd", "restock", "planning", "inbound_shipments", "awd_replenishments"]:
         r = results.get(name, {})
         if "error" in r:
             click.echo(f"{name}: ERROR — {r['error'][:200]}")
@@ -3833,8 +3833,52 @@ def inventory_sync_cmd(dry_run):
             extra = ""
             if name == "fba_summaries" and r.get("daily"):
                 extra = f", daily={r['daily'].get('rows', 0)}"
-            click.echo(f"{name}: {r.get('rows_total', r.get('shipments_found', 0))} rows "
+            click.echo(f"{name}: {r.get('rows_total', r.get('shipments_found', r.get('orders_found', 0)))} rows "
                        f"({r.get('rows_inserted', r.get('rows_upserted', 0))} upserted){extra}")
+
+
+@cli.command("inventory-supply-plan")
+@click.option("--until", "until_date", default="2027-01-15")
+@click.option("--sku", multiple=True, help="SKU filter (default: all active)")
+def inventory_supply_plan_cmd(until_date, sku):
+    """Four-number supply plan: manufacture, warehouse ship, FBA DOS, network OOS."""
+    from src.inventory.supply_plan import build_four_numbers_plan, format_four_numbers_text
+    skus = list(sku) if sku else None
+    plan = build_four_numbers_plan(skus=skus, until_date=until_date)
+    click.echo(format_four_numbers_text(plan))
+
+
+@cli.command("inventory-inbound-plan")
+@click.option("--until", "until_date", default="2027-01-15")
+@click.option("--sku", multiple=True, help="SKU filter (default: lip balm SKUs)")
+def inventory_inbound_plan_cmd(until_date, sku):
+    """Warehouse → FBA inbound waves with receiving lead time."""
+    from src.inventory.inbound_waves import build_inbound_wave_plan, format_inbound_plan_text
+    skus = list(sku) if sku else None
+    plan = build_inbound_wave_plan(skus=skus, until_date=until_date)
+    click.echo(format_inbound_plan_text(plan))
+
+
+@cli.command("inventory-holiday-surge")
+@click.option("--year", default=None, type=int, help="Prior holiday year (default: last calendar year)")
+def inventory_holiday_surge_cmd(year):
+    """Recompute per-SKU holiday surge from prior-year Nov–Dec sales_by_sku."""
+    from src.inventory.holiday_surge import compute_surge_from_sales
+    click.echo("Computing per-SKU holiday surge from sales_by_sku...\n")
+    r = compute_surge_from_sales(prior_year=year)
+    if r.get("error"):
+        click.echo(f"ERROR: {r['error']}")
+        return
+    click.echo(f"Prior year:        {r['prior_year']}")
+    click.echo(f"Holiday mode:      {r['holiday_mode']}")
+    click.echo(f"SKUs updated:      {r['skus_updated']}")
+    click.echo(f"Surge SKUs (>1.05): {r['surge_skus']}")
+    for t in r.get("top_surge", [])[:8]:
+        click.echo(
+            f"  {t['sku']}: {t['surge']:.2f}×  "
+            f"holiday {t['holiday_daily']:.0f}/d  "
+            f"plan {t['planning_u_30']:.0f}/d"
+        )
 
 
 @cli.command("inventory-calibrate")
@@ -3869,6 +3913,17 @@ def inventory_velocity_cmd(days, dry_run):
     click.echo(f"Total: {r['skus']}, seasonality weeks: {r['seasonality_weeks']}")
     click.echo(f"Forward multiplier: {r['avg_forward_mult']:.3f}")
     click.echo(f"Rows inserted: {r['rows_inserted']}")
+    if not dry_run:
+        from src.inventory.holiday_surge import compute_surge_from_sales
+        click.echo("\nApplying prior-year holiday surge from sales_by_sku...")
+        surge = compute_surge_from_sales()
+        if surge.get("error"):
+            click.echo(f"  Holiday surge ERROR: {surge['error']}")
+        else:
+            click.echo(
+                f"  Prior year {surge['prior_year']}: {surge['surge_skus']} surge SKUs, "
+                f"{surge['skus_updated']} velocity rows patched"
+            )
 
 
 @cli.command("inventory-report")
@@ -5464,16 +5519,26 @@ def _run_inventory_sync():
     try:
         from src.inventory.sync import sync_all
         results = sync_all()
-        for name in ["fba_summaries", "awd", "restock", "planning", "inbound_shipments"]:
+        for name in ["fba_summaries", "awd", "restock", "planning", "inbound_shipments", "awd_replenishments"]:
             r = results.get(name, {})
             if "error" in r:
                 print(f"[Inventory] {name}: {r['error'][:100]}")
                 errors.append(f"{name}: {r['error'][:80]}")
             else:
-                print(f"[Inventory] {name}: {r.get('rows_total', 0)} rows")
+                print(f"[Inventory] {name}: {r.get('rows_total', r.get('shipments_found', r.get('orders_found', 0)))} rows")
     except Exception as e:
         print(f"[Inventory Sync] Error: {e}")
         errors.append(str(e)[:200])
+
+    try:
+        from src.inventory.holiday_surge import approaching_peak, compute_surge_from_sales
+        if approaching_peak():
+            surge = compute_surge_from_sales()
+            print(f"[HolidaySurge] {surge.get('skus_updated', 0)} SKUs, "
+                  f"{surge.get('surge_skus', 0)} surge")
+    except Exception as e:
+        print(f"[HolidaySurge] Error: {e}")
+        errors.append(f"holiday_surge: {e}")
 
     try:
         from src.inventory.velocity import compute_velocity
@@ -6095,6 +6160,8 @@ def _run_job_worker():
             elif job_type in ("ads_sync", "ppc_sync"):
                 days = int(payload.get("days", 14))
                 _run_ads_sync_job("ads_sync", days=days, label="dashboard-enqueue")
+            elif job_type == "inventory_sync":
+                _run_inventory_sync()
             elif job_type == "sqp_sync":
                 _run_sqp_sync()
             else:

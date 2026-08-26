@@ -51,7 +51,8 @@ const primaryLinks: NavItem[] = [
     // Deep links stay at /inventory/returns and /inventory/3pl.
     children: [
       { href: "/inventory/returns", label: "FBA Returns", icon: RotateCcw },
-      { href: "/inventory/3pl", label: "3PL Costs", icon: Package },
+      { href: "/inventory/pallets", label: "Pallet Planner", icon: Package },
+      { href: "/inventory/3pl", label: "3PL Costs", icon: Warehouse },
     ],
   },
   // Demand Forecast + Inbound Planner merged into one destination with tabs.
