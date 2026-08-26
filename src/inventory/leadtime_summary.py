@@ -9,6 +9,7 @@ from statistics import median
 from src.db import fetch_all, upsert_rows
 from src.inventory.awd_replenishments import median_replenish_days
 from src.inventory.inbound_shipments import median_receive_days
+from src.inventory.split_leadtime import first_last_from_replenishments
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +80,12 @@ def sync_leadtime_summary(configured_awd_days: int = 14) -> dict:
     single_med = _median(single_vals[-10:]) if single_vals else None
     single_n = len(single_vals[-10:])
 
+    try:
+        replen_orders = fetch_all("inventory_awd_replenishments")
+    except Exception:
+        replen_orders = []
+    split = first_last_from_replenishments(replen_orders)
+
     today = date.today().isoformat()
     row = {
         "as_of_date": today,
@@ -91,6 +98,10 @@ def sync_leadtime_summary(configured_awd_days: int = 14) -> dict:
         "awd_replenish_median": awd_med,
         "awd_replenish_n": awd_n,
         "configured_awd_to_fba_days": configured_awd_days,
+        "first_box_days": split["first_box_days"],
+        "last_box_days": split["last_box_days"],
+        "box_spread_days": split["box_spread_days"],
+        "split_n": split["split_n"],
     }
 
     upsert_rows("inventory_leadtime_summary", [row], on_conflict="as_of_date")

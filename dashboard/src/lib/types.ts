@@ -312,6 +312,16 @@ export interface InventoryLeadtimeSummary {
   awd_replenish_median: number | null;
   awd_replenish_n: number;
   configured_awd_to_fba_days: number | null;
+  first_box_days?: number | null;
+  last_box_days?: number | null;
+  box_spread_days?: number | null;
+  split_n?: number;
+  open_split?: {
+    shipped_on: string;
+    boxes: number;
+    fcs: string[];
+    age_days: number | null;
+  } | null;
 }
 
 export interface SeasonalityWeekly {

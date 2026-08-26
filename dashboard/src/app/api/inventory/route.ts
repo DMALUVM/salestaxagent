@@ -1,4 +1,5 @@
 import { getServerSupabase } from "@/lib/supabase-server";
+import { firstLastFromReplenishments, openInboundSplit } from "@/lib/split-leadtime";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,7 +34,7 @@ export async function GET() {
   try {
     const sb = getServerSupabase();
 
-    const [snapshots, velocity, restock, planning, settings, seasonality, tpl, awd, capacity, forecast, signalsRaw, leadtime, replenRows, awdInRows] =
+    const [snapshots, velocity, restock, planning, settings, seasonality, tpl, awd, capacity, forecast, signalsRaw, leadtime, replenRows, awdInRows, inboundRows] =
       await Promise.all([
         sb.from("inventory_snapshots").select("*").then((r) => r.data ?? []),
         sb.from("sku_velocity").select("*").then((r) => r.data ?? []),
@@ -70,11 +71,15 @@ export async function GET() {
         })(),
         sb
           .from("inventory_awd_replenishments")
-          .select("created_at,completed_at,order_status")
+          .select("created_at,shipped_at,completed_at,order_status,raw")
           .then((r) => r.data ?? []),
         sb
           .from("inventory_awd_inbound_shipments")
           .select("created_at,closed_at,shipment_status")
+          .then((r) => r.data ?? []),
+        sb
+          .from("inventory_inbound_shipments")
+          .select("created_at,shipped_at,destination_fc,shipment_status")
           .then((r) => r.data ?? []),
       ]);
 
@@ -142,7 +147,25 @@ export async function GET() {
         forecast,
         modelState,
         signals,
-        leadtime,
+        leadtime: {
+          ...(leadtime && typeof leadtime === "object" ? leadtime : {}),
+          ...firstLastFromReplenishments(
+            replenRows as Array<{
+              order_status?: string;
+              shipped_at?: string;
+              created_at?: string;
+              raw?: { outboundShipments?: Array<{ shipmentStatus?: string; createdAt?: string; updatedAt?: string }> };
+            }>,
+          ),
+          open_split: openInboundSplit(
+            inboundRows as Array<{
+              shipment_status?: string;
+              shipped_at?: string;
+              created_at?: string;
+              destination_fc?: string;
+            }>,
+          ),
+        },
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } },
     );

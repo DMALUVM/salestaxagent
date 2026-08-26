@@ -750,18 +750,21 @@ export default function InventoryPage() {
                 </div>
                 <div className="rounded-md border border-blue-200/60 bg-white/50 px-2.5 py-2 dark:border-blue-800 dark:bg-blue-950/30">
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700/80 dark:text-blue-300/80">
-                    FBA optimized (multi-FC)
+                    First box → last box
                   </p>
                   <p className="mt-0.5 text-sm font-medium tabular-nums">
-                    {leadtime.fba_optimized_receive_median != null
-                      ? `${leadtime.fba_optimized_receive_median}d`
+                    {leadtime.first_box_days != null && leadtime.last_box_days != null
+                      ? `${leadtime.first_box_days}d → ${leadtime.last_box_days}d`
                       : "—"}
-                    {leadtime.fba_optimized_receive_n
-                      ? ` (n=${leadtime.fba_optimized_receive_n} boxes)`
-                      : ""}
+                    {leadtime.split_n ? ` (n=${leadtime.split_n} splits)` : ""}
                   </p>
                   <p className="text-[10px] text-blue-700/70 dark:text-blue-300/70">
-                    Same-day shipments to 2+ FCs (your 5-box optimized splits)
+                    {leadtime.box_spread_days != null
+                      ? `${leadtime.box_spread_days}d spread after the first FC is sellable`
+                      : "Multi-FC AWD→FBA splits — first box vs last box delivered"}
+                    {leadtime.open_split
+                      ? ` · in transit: ${leadtime.open_split.boxes} FCs since ${leadtime.open_split.shipped_on.slice(5)}`
+                      : ""}
                   </p>
                 </div>
                 <div className="rounded-md border border-blue-200/60 bg-white/50 px-2.5 py-2 dark:border-blue-800 dark:bg-blue-950/30">
