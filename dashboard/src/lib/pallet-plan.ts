@@ -79,12 +79,8 @@ export function holidayInboundMonths(
   amazonInBy = AMAZON_IN_BY,
   leadDays = 19,
 ): string[] {
-  const preferred = months.filter(
-    (m) => HOLIDAY_SHIP_MONTHS.includes(m) && monthCanArriveBy(m, amazonInBy, leadDays),
-  );
-  if (preferred.length) return preferred;
-  const fallback = [...months].reverse().find((m) => monthCanArriveBy(m, amazonInBy, leadDays));
-  return fallback ? [fallback] : months.slice(0, 1);
+  const capable = months.filter((m) => monthCanArriveBy(m, amazonInBy, leadDays));
+  return capable.length ? capable : months.slice(0, 1);
 }
 
 export function fillMonthTowardPallet(
@@ -163,8 +159,8 @@ export function allocateMonthlyUnits(
     }
   }
 
-  if (opts?.fillFirstPallet !== false) {
-    const order = opts?.priority ?? skuPackPriority(skus, {}, inventoryReorder);
+  if (opts?.fillFirstPallet) {
+    const order = opts.priority ?? skuPackPriority(skus, {}, inventoryReorder);
     fillMonthTowardPallet(mixes, order);
   }
 

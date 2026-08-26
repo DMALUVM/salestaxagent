@@ -21,18 +21,16 @@ import { holidayDemandUnits } from "./inventory-inbound-waves";
 const MONTHS = ["2026-08", "2026-09", "2026-10"];
 
 describe("pallet monthly allocation", () => {
-  test("August is inventory reorder only; holiday surplus goes to Sep/Oct", () => {
+  test("August keeps reorder and takes a balanced holiday share", () => {
     const mixes = allocateMonthlyUnits(
       ["DDPE0001Shop"],
       { DDPE0001Shop: 4252 },
       { DDPE0001Shop: 6696 },
       MONTHS,
-      { fillFirstPallet: false },
     );
-    assert.equal(mixes[0].DDPE0001Shop, 4252);
+    assert.ok((mixes[0].DDPE0001Shop ?? 0) >= 4252);
     assert.notEqual(Math.round(6696 * 0.25), mixes[0].DDPE0001Shop);
-    const later = (mixes[1].DDPE0001Shop ?? 0) + (mixes[2].DDPE0001Shop ?? 0);
-    assert.equal(later, 2444);
+    assert.equal(mixes[0].DDPE0001Shop, 4252 + 815);
     assert.equal(
       mixes.reduce((s, m) => s + (m.DDPE0001Shop ?? 0), 0),
       6696,
@@ -40,16 +38,16 @@ describe("pallet monthly allocation", () => {
     assert.deepEqual(monthShortfall(mixes[0], { DDPE0001Shop: 4252 }, ["DDPE0001Shop"]), {});
   });
 
-  test("OK SKU with no reorder has zero August and all units in Sep/Oct", () => {
+  test("OK SKU leftover is split across Aug/Sep/Oct", () => {
     const mixes = allocateMonthlyUnits(
       ["DDPE0002Shop"],
       { DDPE0002Shop: 0 },
       { DDPE0002Shop: 3832 },
       MONTHS,
-      { fillFirstPallet: false },
     );
-    assert.equal(mixes[0].DDPE0002Shop, undefined);
-    assert.equal((mixes[1].DDPE0002Shop ?? 0) + (mixes[2].DDPE0002Shop ?? 0), 3832);
+    const qty = [0, 1, 2].map((i) => mixes[i].DDPE0002Shop ?? 0);
+    assert.equal(qty.reduce((s, n) => s + n, 0), 3832);
+    assert.ok(Math.max(...qty) - Math.min(...qty) <= 2);
   });
 
   test("old 25% split would show a shortfall vs inventory", () => {
@@ -74,17 +72,17 @@ describe("pallet monthly allocation", () => {
   test("35d lead drops October from the holiday window", () => {
     assert.deepEqual(
       holidayInboundMonths(MONTHS, "2026-10-31", 35),
-      ["2026-09"],
+      ["2026-08", "2026-09"],
     );
     const mixes = allocateMonthlyUnits(
       ["DDPE0001Shop"],
       { DDPE0001Shop: 0 },
       { DDPE0001Shop: 4000 },
       MONTHS,
-      { leadDays: 35, fillFirstPallet: false },
+      { leadDays: 35 },
     );
     assert.equal(mixes[2].DDPE0001Shop, undefined);
-    assert.equal(mixes[1].DDPE0001Shop, 4000);
+    assert.equal((mixes[0].DDPE0001Shop ?? 0) + (mixes[1].DDPE0001Shop ?? 0), 4000);
   });
 
   test("months over 19k pack into multiple pallets with CRITICAL first", () => {
@@ -167,10 +165,9 @@ describe("pallet monthly allocation", () => {
     assert.equal(total, 12029);
   });
 
-  test("August freight-fills to 19k from October, Unscented first", () => {
-    const skus = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"];
+  test("holiday leftover balances across Aug/Sep/Oct without forcing 19k", () => {
     const mixes = allocateMonthlyUnits(
-      skus,
+      ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"],
       { DDPE0001Shop: 4249, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 },
       {
         DDPE0001Shop: 4249 + 3890 + 3890,
@@ -179,13 +176,12 @@ describe("pallet monthly allocation", () => {
         DDPE0004Shop: 11592 + 11591,
       },
       MONTHS,
-      { priority: ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"] },
     );
-    const august = Object.values(mixes[0]).reduce((s, q) => s + q, 0);
-    assert.equal(august, PALLET_MAX_UNITS);
+    const totals = mixes.map((m) => Object.values(m).reduce((s, q) => s + q, 0));
     assert.ok((mixes[0].DDPE0001Shop ?? 0) >= 4249);
-    const oct = Object.values(mixes[2]).reduce((s, q) => s + q, 0);
-    assert.ok(oct < 19000);
+    assert.notEqual(totals[0], PALLET_MAX_UNITS);
+    assert.ok(totals[0] > 15000 && totals[0] < 25000);
+    assert.ok(Math.abs(totals[1] - totals[2]) <= 5);
   });
 
   test("inbound holidayDemandUnits matches covering projections", () => {

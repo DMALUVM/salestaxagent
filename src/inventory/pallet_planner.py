@@ -847,7 +847,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a(f"Pallet capacity: {headsup['pallet_max']:,} units")
     a(f"FBA cover target: {headsup['cover_target_days']} days"
       f" (inventory page; holiday_mode={headsup.get('holiday_mode')})")
-    a("Month 1 ships inventory reorder, then freight-fills toward 19,000.")
+    a("Month 1 = inventory reorder + a balanced share of holiday leftover.")
     a("Nov/Dec/Jan below are SELL-THROUGH months — tell the manufacturer")
     a("what Amazon must cover. Those units ship on Sep/Oct pallets.")
     a(f"All units in Amazon FBA by: {headsup['amazon_in_by']}")

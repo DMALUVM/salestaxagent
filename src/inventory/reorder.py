@@ -192,15 +192,17 @@ def holiday_inbound_months(
     amazon_in_by: str = AMAZON_IN_BY,
     lead_days: int = 19,
 ) -> list[str]:
-    preferred = [
-        m for m in months
-        if m in HOLIDAY_SHIP_MONTHS and month_can_arrive_by(m, amazon_in_by, lead_days)
+    """Months that can still arrive by amazon_in_by — including the current one.
+
+    Holiday leftover is split across these so August is not a 22% pallet
+    while Sep/Oct each carry two. Full pallets are preferred when a
+    month lands near 19k; we do not force-fill August.
+    """
+    capable = [
+        m for m in months if month_can_arrive_by(m, amazon_in_by, lead_days)
     ]
-    if preferred:
-        return preferred
-    for m in reversed(months):
-        if month_can_arrive_by(m, amazon_in_by, lead_days):
-            return [m]
+    if capable:
+        return capable
     return months[:1]
 
 
@@ -254,14 +256,14 @@ def allocate_monthly_units(
     amazon_in_by: str = AMAZON_IN_BY,
     lead_days: int = 19,
     priority: list[str] | None = None,
-    fill_first_pallet: bool = True,
+    fill_first_pallet: bool = False,
 ) -> list[dict[str, int]]:
-    """Current month = inventory reorder. Holiday surplus → Sep/Oct, then
-    pulled forward to fill month 1 toward one 19k pallet (freight).
-
-    Nov/Dec/Jan units must still be able to arrive by ``amazon_in_by``.
-    Pulling into August is earlier, so the deadline is unchanged.
+    """Current month ≥ inventory reorder. Holiday leftover split across
+    every month that can still arrive by ``amazon_in_by`` (Aug/Sep/Oct
+    at 19d lead) so loads stay balanced. Optional freight-fill is off
+    by default — full pallets are preferred, not required.
     """
+    _ = priority
     if not months:
         return []
 

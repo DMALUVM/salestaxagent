@@ -57,7 +57,7 @@ describe("pallet planner vs inventory", () => {
     assert.match(page, /buildMfgBrief/);
     assert.match(page, /novDemand/);
     assert.match(page, /holidayDemandCoveringProjections/);
-    assert.match(page, /freight fill|freight-fill/);
+    assert.match(page, /reorder \+ share|balanced/);
     assert.match(page, /Copy Nov–Jan brief|sell-through/);
     assert.doesNotMatch(
       page,
