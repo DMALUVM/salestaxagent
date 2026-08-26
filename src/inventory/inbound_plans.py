@@ -34,8 +34,12 @@ _AWD_PLAN_MARKERS = (
 
 def _is_awd_inbound_plan(summary: dict) -> bool:
     """AWD warehouse→AWD plans appear in listInboundPlans but reject getInboundPlan."""
-    plan_id = (summary.get("inboundPlanId") or "").strip()
-    if plan_id.startswith("wf"):
+    plan_id = str(
+        summary.get("inboundPlanId")
+        or summary.get("inbound_plan_id")
+        or ""
+    ).strip()
+    if plan_id.lower().startswith("wf"):
         return True
     for key in ("source", "inboundPlanType", "planType", "destinationType"):
         val = str(summary.get(key) or "").upper()
@@ -92,6 +96,10 @@ def _list_plans_page(pagination_token: str | None = None) -> dict:
 
 
 def _get_plan(plan_id: str) -> dict:
+    if str(plan_id).lower().startswith("wf"):
+        raise SPAPIError(
+            f"Skip GetInboundPlan for AWD inbound plan {plan_id}"
+        )
     return _inbound_get(f"/inboundPlans/{plan_id}")
 
 

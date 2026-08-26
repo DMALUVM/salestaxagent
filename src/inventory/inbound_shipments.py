@@ -242,15 +242,10 @@ def sync_inbound_shipments(
                 seen_ids.add(row["shipment_id"])
         item_rows.extend(extra_items)
 
-    v2024_result: dict | None = None
-    if not ship_rows:
-        from src.inventory.inbound_plans import sync_inbound_plans_v2024
-        v2024_result = sync_inbound_plans_v2024(
-            days_back=days_back, dry_run=True, existing=existing,
-        )
-        ship_rows.extend(v2024_result.get("ship_rows") or [])
-        item_rows.extend(v2024_result.get("item_rows") or [])
-
+    # Do not call Fulfillment Inbound v2024 getInboundPlan. This seller's
+    # listInboundPlans results are AWD warehouse→AWD plans (wf* IDs) that
+    # reject GetInboundPlan with 400. Warehouse→AWD timing comes from the
+    # AWD inbound API; AWD→FBA timing comes from replenishment orders.
     result = {
         "shipments_found": len(ship_rows),
         "items_found": len(item_rows),
@@ -260,8 +255,8 @@ def sync_inbound_shipments(
         "v0_error": v0_error,
         "awd_fba_ids": len(awd_fba_ids),
         "awd_by_id_shipments": awd_by_id_count,
-        "v2024_plans": (v2024_result or {}).get("plans_scanned", 0),
-        "v2024_awd_skipped": (v2024_result or {}).get("awd_plans_skipped", 0),
+        "v2024_plans": 0,
+        "v2024_skipped": True,
     }
     if dry_run or not ship_rows:
         return result

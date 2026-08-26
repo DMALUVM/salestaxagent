@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from src.amazon_sp.client import SPAPIError
 from src.inventory.inbound_plans import (
+    _get_plan,
     _is_awd_inbound_plan,
     _is_awd_plan_error,
     sync_inbound_plans_v2024,
@@ -11,7 +12,21 @@ from src.inventory.inbound_plans import (
 
 def test_is_awd_inbound_plan_detects_workflow_ids():
     assert _is_awd_inbound_plan({"inboundPlanId": "wf929c0d09-3ebd-40f6-afaf-54cfc0bbdf57"})
+    assert _is_awd_inbound_plan({"inboundPlanId": "WF929c0d09-3ebd-40f6-afaf-54cfc0bbdf57"})
     assert not _is_awd_inbound_plan({"inboundPlanId": "ip1234567890"})
+
+
+def test_get_plan_refuses_awd_ids(monkeypatch):
+    def boom(path, **kwargs):
+        raise AssertionError(f"must not call API for {path}")
+
+    monkeypatch.setattr("src.inventory.inbound_plans._inbound_get", boom)
+    try:
+        _get_plan("wf929c0d09-3ebd-40f6-afaf-54cfc0bbdf57")
+    except SPAPIError as e:
+        assert "Skip GetInboundPlan" in str(e)
+    else:
+        raise AssertionError("expected SPAPIError")
 
 
 def test_is_awd_plan_error_matches_api_message():

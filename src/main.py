@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 import signal
+import subprocess
 import sys
 import time
 
 import click
+
+
+def _code_revision() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        return "unknown"
 
 
 @click.group()
@@ -3824,6 +3836,7 @@ def inventory_sync_cmd(dry_run):
     from src.inventory.sync import sync_all
     if dry_run:
         click.echo("DRY RUN\n")
+    click.echo(f"inventory-sync {_code_revision()}")
     click.echo("Inventory sync started (each step prints when it finishes)...")
     results = sync_all(dry_run=dry_run, echo=click.echo)
     sync_names = [
@@ -3919,6 +3932,7 @@ def inventory_calibrate_cmd(dry_run):
     """Recompute dual-rate signals + pull inbound shipment history."""
     from src.inventory.inbound_shipments import sync_inbound_shipments
     from src.inventory.rate_signals import sync_sku_signals
+    click.echo(f"inventory-calibrate {_code_revision()}")
     if dry_run:
         click.echo("DRY RUN\n")
     else:
