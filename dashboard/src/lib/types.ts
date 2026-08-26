@@ -329,4 +329,5 @@ export interface Inventory3plSnapshot {
   reserved: number;
   incoming: number;
   warehouse: string | null;
+  pulled_at?: string | null;
 }

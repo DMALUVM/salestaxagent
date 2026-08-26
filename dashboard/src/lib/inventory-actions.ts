@@ -3,6 +3,7 @@
  * Mirrors core flag/reorder logic from /inventory without seasonal walk-forward.
  */
 
+import { live3plSnapshots } from "./inventory-3pl";
 import type {
   InventoryLeadtimeSummary,
   InventoryRestock,
@@ -29,7 +30,12 @@ type RawLike = {
   snapshots?: InventorySnapshot[];
   velocity?: SkuVelocity[];
   restock?: InventoryRestock[];
-  tpl?: Array<{ sku: string; available: number; product_name?: string | null }>;
+  tpl?: Array<{
+    sku: string;
+    available: number;
+    product_name?: string | null;
+    pulled_at?: string | null;
+  }>;
   awd?: Array<{ sku: string; awd_on_hand: number }>;
   settings?: InventorySettings | null;
   signals?: InventorySkuSignals[];
@@ -84,7 +90,7 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
   const snapMap = new Map((raw.snapshots ?? []).map((s) => [s.sku, s]));
   const velMap = new Map((raw.velocity ?? []).map((v) => [v.sku, v]));
   const sigMap = new Map((raw.signals ?? []).map((s) => [s.sku, s]));
-  const tplMap = new Map((raw.tpl ?? []).map((t) => [t.sku, t]));
+  const tplMap = new Map(live3plSnapshots(raw.tpl ?? []).map((t) => [t.sku, t]));
   const awdMap = new Map((raw.awd ?? []).map((a) => [a.sku, a]));
 
   const allSkus = new Set([

@@ -1,3 +1,4 @@
+import { live3plSnapshots } from "@/lib/inventory-3pl";
 import { getServerSupabase } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
@@ -136,7 +137,7 @@ export async function GET() {
         planning,
         settings,
         seasonality,
-        tpl,
+        tpl: live3plSnapshots(tpl),
         awd,
         capacity,
         forecast,

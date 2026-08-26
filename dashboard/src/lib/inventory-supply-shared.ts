@@ -7,13 +7,14 @@ import {
   type FourNumbersPlan,
   type SkuFourNumbers,
 } from "./inventory-four-numbers";
+import { live3plSnapshots } from "./inventory-3pl";
 import type { ForecastWeekRow } from "./inventory-phased-demand";
 import type { InventorySnapshot, SeasonalityWeekly, SkuVelocity } from "./types";
 
 export type InventoryRawLike = {
   snapshots?: InventorySnapshot[];
   velocity?: SkuVelocity[];
-  tpl?: Array<{ sku: string; available: number }>;
+  tpl?: Array<{ sku: string; available: number; pulled_at?: string | null }>;
   awd?: Array<{ sku: string; awd_on_hand: number }>;
   seasonality?: SeasonalityWeekly[];
   forecast?: ForecastWeekRow[];
@@ -50,7 +51,7 @@ export function extractActiveSkus(raw: InventoryRawLike): string[] {
     if (sku) set.add(sku);
   }
   for (const a of raw.awd ?? []) if (a.sku) set.add(a.sku);
-  for (const t of raw.tpl ?? []) if (t.sku) set.add(t.sku);
+  for (const t of live3plSnapshots(raw.tpl ?? [])) if (t.sku) set.add(t.sku);
   for (const v of raw.velocity ?? []) {
     const sku = String(v.sku ?? "");
     if (sku && Number(v.total_u_30 ?? 0) > 0) set.add(sku);
@@ -98,7 +99,7 @@ export function buildFourNumbersPlanFromRaw(
     skus,
     snapshots,
     velocities,
-    tpl: raw.tpl ?? [],
+    tpl: live3plSnapshots(raw.tpl ?? []),
     awd: raw.awd ?? [],
     seasonality: raw.seasonality ?? [],
     forecast: raw.forecast ?? [],
