@@ -230,6 +230,7 @@ export interface InventorySnapshot {
   researching: number;
   unfulfillable: number;
   total_quantity: number;
+  snapshot_at?: string | null;
 }
 
 export interface SkuVelocity {
@@ -267,6 +268,7 @@ export interface InventoryRestock {
   available: number;
   inbound: number;
   alert: string | null;
+  pulled_at?: string | null;
 }
 
 export interface InventorySettings {
@@ -329,4 +331,5 @@ export interface Inventory3plSnapshot {
   reserved: number;
   incoming: number;
   warehouse: string | null;
+  pulled_at?: string | null;
 }

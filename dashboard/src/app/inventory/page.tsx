@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useInventory } from "@/lib/hooks";
+import { live3plSnapshots } from "@/lib/inventory-3pl";
 import type {
   InventorySnapshot,
   SkuVelocity,
@@ -164,7 +165,7 @@ export default function InventoryPage() {
   const snapshots = (raw?.snapshots ?? []) as InventorySnapshot[];
   const velocities = (raw?.velocity ?? []) as SkuVelocity[];
   const restockList = (raw?.restock ?? []) as InventoryRestock[];
-  const tplSnapshots = (raw?.tpl ?? []) as Inventory3plSnapshot[];
+  const tplSnapshots = live3plSnapshots((raw?.tpl ?? []) as Inventory3plSnapshot[]);
   const settings = (raw?.settings ?? {
     target_cover_days: 60,
     lead_time_days: 35,

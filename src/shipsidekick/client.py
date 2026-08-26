@@ -15,9 +15,14 @@ from datetime import datetime, timezone
 import httpx
 
 from src.config import settings
-from src.db import upsert_rows, log_ingestion
+from src.db import fetch_all, upsert_rows, log_ingestion
 
 log = logging.getLogger(__name__)
+
+
+def _sku_key(sku: str | None) -> str:
+    """Case-insensitive match key. Does not rewrite digits or collapse SKUs."""
+    return (sku or "").strip().casefold()
 
 
 class ShipSidekickError(Exception):
@@ -52,7 +57,7 @@ def get_inventory() -> list[dict]:
 
     Filters out:
     - Items with no SKU
-    - Digital products (requiresShipping=false) — gift cards, bundles
+    - Digital products (requiresShipping=false) with no quantity
     - Deduplicates by SKU (keeps highest available qty)
     """
     base = _base_url()
@@ -88,18 +93,33 @@ def get_inventory() -> list[dict]:
         if not cursor:
             break
 
-    # Parse and filter
-    results: list[dict] = []
+    return _parse_inventory_items(all_items)
+
+
+def _parse_inventory_items(all_items: list[dict]) -> list[dict]:
+    """Parse inventory-levels payloads into snapshot items.
+
+    SKU strings are stripped only — similar codes stay distinct (no digit
+    collapse). Digital variants (requiresShipping=false) are skipped only
+    when they have no quantity, so a bad shipping flag cannot hide
+    in-stock rows.
+    """
     seen_skus: dict[str, dict] = {}
 
     for item in all_items:
         variant = item.get("productVariant") or {}
-        sku = (variant.get("sku") or "").strip()
+        sku = (variant.get("sku") or item.get("sku") or "").strip()
         if not sku:
             continue
 
-        # Skip digital / non-physical products
-        if not variant.get("requiresShipping", True):
+        available = int(item.get("availableQuantity", 0) or 0)
+        committed = int(item.get("committedQuantity", 0) or 0)
+        reserved = int(item.get("reservedQuantity", 0) or 0)
+        incoming = int(item.get("incomingQuantity", 0) or 0)
+        damaged = int(item.get("damagedQuantity", 0) or 0)
+        qty_signal = available + committed + reserved + incoming + damaged
+
+        if not variant.get("requiresShipping", True) and qty_signal <= 0:
             continue
 
         warehouse = item.get("warehouse") or {}
@@ -108,11 +128,11 @@ def get_inventory() -> list[dict]:
         entry = {
             "sku": sku,
             "product_name": (variant.get("title") or "")[:200],
-            "available": int(item.get("availableQuantity", 0) or 0),
-            "committed": int(item.get("committedQuantity", 0) or 0),
-            "reserved": int(item.get("reservedQuantity", 0) or 0),
-            "incoming": int(item.get("incomingQuantity", 0) or 0),
-            "damaged": int(item.get("damagedQuantity", 0) or 0),
+            "available": available,
+            "committed": committed,
+            "reserved": reserved,
+            "incoming": incoming,
+            "damaged": damaged,
             "warehouse": wh_name,
             "warehouse_id": item.get("warehouseId"),
             "raw": json.dumps({
@@ -121,14 +141,92 @@ def get_inventory() -> list[dict]:
             }),
         }
 
-        # Deduplicate: keep entry with highest available for each SKU
-        if sku in seen_skus:
-            if entry["available"] > seen_skus[sku]["available"]:
-                seen_skus[sku] = entry
+        key = _sku_key(sku)
+        if key in seen_skus:
+            if entry["available"] > seen_skus[key]["available"]:
+                seen_skus[key] = entry
         else:
-            seen_skus[sku] = entry
+            seen_skus[key] = entry
 
     return list(seen_skus.values())
+
+
+def _carry_forward_missing_instock(
+    feed_items: list[dict],
+    prior_rows: list[dict],
+) -> list[dict]:
+    """Re-attach every prior in-stock SKU omitted from this pull.
+
+    Applies to every SKU already in inventory_3pl_snapshots. No named
+    allowlist and no SKU-specific special case. Copies last observed
+    quantities — does not invent stock. A SKU the feed reports at zero
+    stays zero. Prior zeros are not carried.
+    """
+    feed_keys = {_sku_key(i.get("sku")) for i in feed_items if i.get("sku")}
+    extra: list[dict] = []
+    for row in prior_rows:
+        sku = (row.get("sku") or "").strip()
+        if not sku or _sku_key(sku) in feed_keys:
+            continue
+        available = int(row.get("available") or 0)
+        incoming = int(row.get("incoming") or 0)
+        if available <= 0 and incoming <= 0:
+            continue
+        extra.append({
+            "sku": sku,
+            "product_name": (row.get("product_name") or "")[:200],
+            "available": available,
+            "committed": int(row.get("committed") or 0),
+            "reserved": int(row.get("reserved") or 0),
+            "incoming": incoming,
+            "damaged": int(row.get("damaged") or 0),
+            "warehouse": row.get("warehouse"),
+            "warehouse_id": None,
+            "raw": json.dumps({
+                "carried_forward": True,
+                "prior_pulled_at": str(row.get("pulled_at") or ""),
+                "available": available,
+            }),
+        })
+        log.warning(
+            "3PL feed omitted in-stock SKU %s (available=%s); carrying last known qty",
+            sku,
+            available,
+        )
+    return list(feed_items) + extra
+
+
+def live_3pl_snapshots(rows: list[dict]) -> list[dict]:
+    """Latest pulled_at cohort plus leftover in-stock SKUs.
+
+    Applies to every SKU in inventory_3pl_snapshots — no named allowlist.
+    Upsert-only sync leaves omitted SKUs at their old pulled_at. Treating
+    max(pulled_at) as the sole live snapshot hides leftover stock. Keep older
+    rows with available/incoming > 0 that are absent from the latest
+    cohort. Do not invent quantities.
+    """
+    if not rows:
+        return []
+    latest = ""
+    for row in rows:
+        pulled = str(row.get("pulled_at") or "")
+        if pulled > latest:
+            latest = pulled
+    latest_keys = {
+        _sku_key(row.get("sku"))
+        for row in rows
+        if str(row.get("pulled_at") or "") == latest
+    }
+    live: list[dict] = []
+    for row in rows:
+        if str(row.get("pulled_at") or "") == latest:
+            live.append(row)
+            continue
+        available = int(row.get("available") or 0)
+        incoming = int(row.get("incoming") or 0)
+        if (available > 0 or incoming > 0) and _sku_key(row.get("sku")) not in latest_keys:
+            live.append(row)
+    return live
 
 
 def _snapshot_rows(items: list[dict], pulled_at: str | None = None) -> list[dict]:
@@ -162,6 +260,14 @@ def sync_3pl(dry_run: bool = False) -> dict:
     Returns summary dict.
     """
     items = get_inventory()
+    prior: list[dict] = []
+    try:
+        prior = fetch_all("inventory_3pl_snapshots")
+    except Exception as exc:
+        log.warning("Could not load prior 3PL snapshots for carry-forward: %s", exc)
+
+    feed_keys = {_sku_key(i.get("sku")) for i in items if i.get("sku")}
+    items = _carry_forward_missing_instock(items, prior)
     rows = _snapshot_rows(items)
 
     result = {
@@ -170,6 +276,9 @@ def sync_3pl(dry_run: bool = False) -> dict:
         "rows_inserted": 0,
         "dry_run": dry_run,
         "skus": [r["sku"] for r in rows],
+        "carried_forward": [
+            i["sku"] for i in items if _sku_key(i.get("sku")) not in feed_keys
+        ],
     }
 
     if not dry_run and rows:

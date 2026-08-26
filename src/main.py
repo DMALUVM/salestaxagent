@@ -3847,6 +3847,8 @@ def inventory_sync_cmd(dry_run):
         r = results.get(name, {})
         if "error" in r:
             click.echo(f"{name}: ERROR — {r['error'][:200]}")
+        elif r.get("skipped"):
+            click.echo(f"{name}: SKIPPED — {r.get('skip_reason')}")
         elif r.get("upsert_error"):
             click.echo(
                 f"{name}: {r.get('shipments_found', r.get('orders_found', 0))} found, "
@@ -5568,8 +5570,10 @@ def _run_inventory_sync():
     from src.db import job_start, job_finish
     run_id = job_start("inventory_sync")
     errors = []
+    skip_notes: list[str] = []
     try:
         from src.inventory.sync import sync_all
+        from src.inventory.freshness import collect_skip_reasons
         results = sync_all()
         for name in [
             "fba_summaries", "awd", "restock", "planning",
@@ -5579,8 +5583,11 @@ def _run_inventory_sync():
             if "error" in r:
                 print(f"[Inventory] {name}: {r['error'][:100]}")
                 errors.append(f"{name}: {r['error'][:80]}")
+            elif r.get("skipped"):
+                print(f"[Inventory] {name}: SKIPPED — {r.get('skip_reason')}")
             else:
                 print(f"[Inventory] {name}: {r.get('rows_total', r.get('shipments_found', r.get('orders_found', 0)))} rows")
+        skip_notes.extend(collect_skip_reasons(results))
     except Exception as e:
         print(f"[Inventory Sync] Error: {e}")
         errors.append(str(e)[:200])
@@ -5606,9 +5613,13 @@ def _run_inventory_sync():
     try:
         from src.inventory.rate_signals import sync_sku_signals
         sig = sync_sku_signals()
-        print(f"[RateSignals] {sig.get('skus', 0)} SKUs, "
-              f"account receive ~{sig.get('account_receive_days')}d "
-              f"(n={sig.get('account_receive_n', 0)})")
+        if sig.get("skipped"):
+            print(f"[RateSignals] SKIPPED — {sig.get('skip_reason')}")
+            skip_notes.append(f"sku_signals: {sig.get('skip_reason')}")
+        else:
+            print(f"[RateSignals] {sig.get('skus', 0)} SKUs, "
+                  f"account receive ~{sig.get('account_receive_days')}d "
+                  f"(n={sig.get('account_receive_n', 0)})")
     except Exception as e:
         print(f"[RateSignals] Error: {e}")
         errors.append(f"rate_signals: {e}")
@@ -5616,7 +5627,10 @@ def _run_inventory_sync():
     if errors:
         job_finish(run_id, "fail", "; ".join(errors))
     else:
-        job_finish(run_id, "success", "FBA + AWD + restock + velocity synced")
+        msg = "FBA + AWD + restock + velocity synced"
+        if skip_notes:
+            msg += " | skipped: " + "; ".join(skip_notes)
+        job_finish(run_id, "success", msg)
 
 
 def _run_3pl_sync():

@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from statistics import median
 
 from src.db import fetch_all, upsert_rows
+from src.inventory.freshness import skip_empty, stamp_now
 from src.inventory.inbound_shipments import median_receive_days
 from src.inventory.awd_replenishments import median_replenish_days
 from src.inventory.awd_inbound import median_awd_inbound_days
@@ -186,8 +187,12 @@ def sync_sku_signals(configured_lead_days: int = 35) -> dict:
         })
 
     n = 0
+    skipped = {}
     if rows:
+        stamp_now(rows, "updated_at")
         n = upsert_rows("inventory_sku_signals", rows, on_conflict="sku")
+    else:
+        skipped = skip_empty("no sku_velocity rows to calibrate")
     log.info("[RateSignals] %d SKUs calibrated", n)
 
     from src.inventory.leadtime_summary import sync_leadtime_summary
@@ -200,6 +205,7 @@ def sync_sku_signals(configured_lead_days: int = 35) -> dict:
         "account_replenish_days": account_replen,
         "account_replenish_n": account_replen_n,
         "leadtime_summary": summary,
+        **skipped,
     }
 
 

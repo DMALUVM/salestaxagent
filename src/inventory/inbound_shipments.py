@@ -10,6 +10,7 @@ import httpx
 
 from src.amazon_sp.client import BASE_URL, SPAPIError, _headers, _marketplace_id
 from src.db import fetch_all, upsert_rows
+from src.inventory.freshness import skip_empty, stamp_now
 from src.inventory.shipment_timing import (
     CLOSED_STATUSES,
     compute_receive_days,
@@ -258,7 +259,15 @@ def sync_inbound_shipments(
         "v2024_plans": 0,
         "v2024_skipped": True,
     }
-    if dry_run or not ship_rows:
+    if not ship_rows:
+        reason = "amazon returned 0 inbound shipments"
+        if v0_error:
+            reason = f"inbound v0 failed: {v0_error}"
+        result.update(skip_empty(reason))
+        return result
+    stamp_now(ship_rows, "synced_at")
+    stamp_now(item_rows, "synced_at")
+    if dry_run:
         return result
 
     try:
