@@ -10,7 +10,7 @@ export async function GET() {
   try {
     const sb = getServerSupabase();
 
-    const [snapshots, velocity, restock, planning, settings, seasonality, tpl, awd, capacity, forecast] =
+    const [snapshots, velocity, restock, planning, settings, seasonality, tpl, awd, capacity, forecast, signals] =
       await Promise.all([
         sb.from("inventory_snapshots").select("*").then((r) => r.data ?? []),
         sb.from("sku_velocity").select("*").then((r) => r.data ?? []),
@@ -31,6 +31,11 @@ export async function GET() {
         sb.from("inventory_awd").select("*").then((r) => r.data ?? []),
         sb.from("fba_capacity_limits").select("*").order("month").then((r) => r.data ?? []),
         sb.from("forecast_weekly").select("*").order("week_start").then((r) => r.data ?? []),
+        (async () => {
+          const r = await sb.from("inventory_sku_signals").select("*");
+          if (r.error) return [];
+          return r.data ?? [];
+        })(),
       ]);
 
     // Forecast model state (calibrated weights) — best-effort
@@ -52,6 +57,7 @@ export async function GET() {
       capacity,
       forecast,
       modelState,
+      signals,
     });
   } catch (e) {
     return Response.json(

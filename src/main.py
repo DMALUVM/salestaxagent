@@ -3825,12 +3825,35 @@ def inventory_sync_cmd(dry_run):
     if dry_run:
         click.echo("DRY RUN\n")
     results = sync_all(dry_run=dry_run)
-    for name in ["fba_summaries", "awd", "restock", "planning"]:
+    for name in ["fba_summaries", "awd", "restock", "planning", "inbound_shipments"]:
         r = results.get(name, {})
         if "error" in r:
             click.echo(f"{name}: ERROR — {r['error'][:200]}")
         else:
-            click.echo(f"{name}: {r.get('rows_total', 0)} rows ({r.get('rows_inserted', 0)} inserted)")
+            extra = ""
+            if name == "fba_summaries" and r.get("daily"):
+                extra = f", daily={r['daily'].get('rows', 0)}"
+            click.echo(f"{name}: {r.get('rows_total', r.get('shipments_found', 0))} rows "
+                       f"({r.get('rows_inserted', r.get('rows_upserted', 0))} upserted){extra}")
+
+
+@cli.command("inventory-calibrate")
+@click.option("--dry-run", is_flag=True)
+def inventory_calibrate_cmd(dry_run):
+    """Recompute dual-rate signals + pull inbound shipment history."""
+    from src.inventory.inbound_shipments import sync_inbound_shipments
+    from src.inventory.rate_signals import sync_sku_signals
+    if dry_run:
+        click.echo("DRY RUN\n")
+    else:
+        r = sync_inbound_shipments(days_back=180, dry_run=False)
+        click.echo(f"Inbound shipments: {r.get('shipments_found', 0)} found, "
+                   f"{r.get('rows_upserted', 0)} upserted")
+    sig = sync_sku_signals()
+    click.echo(f"Rate signals: {sig.get('skus', 0)} SKUs")
+    if sig.get("account_receive_days") is not None:
+        click.echo(f"Account median receive: {sig['account_receive_days']}d "
+                   f"(n={sig.get('account_receive_n', 0)})")
 
 
 @cli.command("inventory-velocity")
@@ -5441,7 +5464,7 @@ def _run_inventory_sync():
     try:
         from src.inventory.sync import sync_all
         results = sync_all()
-        for name in ["fba_summaries", "awd", "restock", "planning"]:
+        for name in ["fba_summaries", "awd", "restock", "planning", "inbound_shipments"]:
             r = results.get(name, {})
             if "error" in r:
                 print(f"[Inventory] {name}: {r['error'][:100]}")
@@ -5459,6 +5482,16 @@ def _run_inventory_sync():
     except Exception as e:
         print(f"[Velocity] Error: {e}")
         errors.append(f"velocity: {e}")
+
+    try:
+        from src.inventory.rate_signals import sync_sku_signals
+        sig = sync_sku_signals()
+        print(f"[RateSignals] {sig.get('skus', 0)} SKUs, "
+              f"account receive ~{sig.get('account_receive_days')}d "
+              f"(n={sig.get('account_receive_n', 0)})")
+    except Exception as e:
+        print(f"[RateSignals] Error: {e}")
+        errors.append(f"rate_signals: {e}")
 
     if errors:
         job_finish(run_id, "fail", "; ".join(errors))

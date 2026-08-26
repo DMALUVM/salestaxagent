@@ -9,6 +9,7 @@ import type {
   InventorySettings,
   SeasonalityWeekly,
   Inventory3plSnapshot,
+  InventorySkuSignals,
 } from "@/lib/types";
 import { LoadingState } from "@/components/loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -104,6 +105,11 @@ interface ComputedRow {
   stockout_date: string | null;
   network_oos_date: string | null;
   flag: string;
+  inventory_u_30: number | null;
+  rate_divergence_pct: number | null;
+  rate_agreement: string | null;
+  measured_receive_days: number | null;
+  receive_sample_n: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +172,7 @@ export default function InventoryPage() {
   const seasonality = (raw?.seasonality ?? []) as SeasonalityWeekly[];
   const forecasts = (raw?.forecast ?? []) as { sku: string; week_start: string; scenario: string; units: number }[];
   const awdSnapshots = (raw?.awd ?? []) as { sku: string; awd_on_hand: number; awd_inbound: number }[];
+  const signalRows = (raw?.signals ?? []) as InventorySkuSignals[];
   const modelStateRows = (raw?.modelState ?? []) as Array<{ sku: string; weights: unknown; seasonal_factors: unknown; model_version: string }>;
   const capacityLimits = (raw?.capacity ?? []) as { month: string; limit_ft3: number; used_ft3: number; source: string }[];
 
@@ -178,6 +185,7 @@ export default function InventoryPage() {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
     const velMap = new Map(velocities.map((v) => [v.sku, v]));
     const recMap = new Map(restockList.map((r) => [r.sku, r]));
+    const signalMap = new Map(signalRows.map((r) => [r.sku, r]));
     const tplMap = new Map(tplSnapshots.map((t) => [t.sku, t]));
     const awdMap = new Map(awdSnapshots.map((a) => [a.sku, a]));
 
@@ -391,6 +399,7 @@ export default function InventoryPage() {
       }
 
       const shopify_share = total_vel_30 > 0 ? Math.round((shopify_vel_30 / total_vel_30) * 100) : 0;
+      const sig = signalMap.get(sku);
 
       result.push({
         sku,
@@ -420,11 +429,16 @@ export default function InventoryPage() {
         stockout_date,
         network_oos_date,
         flag,
+        inventory_u_30: sig?.inventory_u_30 != null ? Number(sig.inventory_u_30) : null,
+        rate_divergence_pct: sig?.rate_divergence_pct != null ? Number(sig.rate_divergence_pct) : null,
+        rate_agreement: sig?.rate_agreement ?? null,
+        measured_receive_days: sig?.measured_receive_days != null ? Number(sig.measured_receive_days) : null,
+        receive_sample_n: sig?.receive_sample_n != null ? Number(sig.receive_sample_n) : 0,
       });
     }
 
     return result;
-  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, s]);
+  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, signalRows, s]);
 
   // Filter + sort
   const filtered = useMemo(() => {
@@ -543,6 +557,15 @@ export default function InventoryPage() {
     .sort((a, b) => a.week - b.week);
   const maxMult = Math.max(...seasonChart.map((s) => s.multiplier), 1.5);
 
+  const calSignals = signalRows.filter((x) => x.measured_receive_days != null);
+  const accountReceive = calSignals.length
+    ? Math.round(
+        calSignals.reduce((sum, x) => sum + Number(x.measured_receive_days), 0)
+        / calSignals.length,
+      )
+    : null;
+  const divergent = rows.filter((r) => r.rate_agreement === "investigate").length;
+
   return (
     <div className="space-y-6">
       {error && (
@@ -602,6 +625,22 @@ export default function InventoryPage() {
           </Button>
         </div>
       </div>
+
+      {(signalRows.length > 0 || divergent > 0) && (
+        <Card className="border-blue-200 bg-blue-50/40 dark:border-blue-900 dark:bg-blue-950/20">
+          <CardContent className="py-3 text-xs leading-relaxed text-blue-900 dark:text-blue-100">
+            <p className="font-medium">Rate & lead-time calibration</p>
+            <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
+              <strong>V30</strong> = orders report (SP-API). <strong>Inv V30</strong> = total FBA quantity
+              day-over-day (ledger receipts counted). When they diverge &gt;25%, investigate before reordering.
+              <strong> Recv</strong> = median days from your last closed inbound shipments
+              {accountReceive != null ? ` (~${accountReceive}d measured vs ${s.lead_time_days}d configured)` : ""}.
+              {divergent > 0 ? ` ${divergent} SKU(s) flagged.` : ""}
+              Daily history builds after each <code className="rounded bg-blue-100/60 px-1 dark:bg-blue-900/40">inventory-sync</code> — needs ~7 days for Inv V30.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Summary cards */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-5">
@@ -804,7 +843,9 @@ export default function InventoryPage() {
                   { key: "tpl_available", label: "3PL", tip: "Third-party / own warehouse units" },
                   { key: "inbound", label: "Inbnd", tip: "Amazon inbound — not yet sellable" },
                   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
-                  { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days" },
+                  { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },
+                  { key: "inventory_u_30", label: "Inv V30", tip: "Implied daily rate from total FBA quantity change + ledger receipts" },
+                  { key: "measured_receive_days", label: "Recv", tip: "Median warehouse→FBA receive days from your last closed shipments" },
                   { key: "dos", label: "DOS", tip: "Days of supply — FBA cover (Amazon) or warehouse cover (Shop)" },
                   { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
                   { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
@@ -835,7 +876,7 @@ export default function InventoryPage() {
               {filtered.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={13}
+                    colSpan={15}
                     className="text-center text-muted-foreground py-8"
                   >
                     No inventory data. Run:{" "}
@@ -884,6 +925,21 @@ export default function InventoryPage() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {r.total_u_30.toFixed(1)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right tabular-nums ${
+                        r.rate_agreement === "investigate" ? "text-amber-600 font-medium" : "text-muted-foreground"
+                      }`}
+                      title={
+                        r.inventory_u_30 != null && r.rate_divergence_pct != null
+                          ? `${r.rate_divergence_pct}% vs orders V30`
+                          : "Needs ~7 daily snapshots"
+                      }
+                    >
+                      {r.inventory_u_30 != null ? r.inventory_u_30.toFixed(1) : "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground" title={r.receive_sample_n ? `n=${r.receive_sample_n} shipments` : undefined}>
+                      {r.measured_receive_days != null ? `${r.measured_receive_days}d` : "—"}
                     </TableCell>
                     <TableCell
                       className={`text-right tabular-nums font-medium ${
@@ -1085,8 +1141,20 @@ export default function InventoryPage() {
 
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>
-                  Velocity: {selected.total_u_30.toFixed(1)} u/day
+                  Velocity: {selected.total_u_30.toFixed(1)} u/day (orders)
                 </p>
+                {selected.inventory_u_30 != null && (
+                  <p className={selected.rate_agreement === "investigate" ? "text-amber-600" : ""}>
+                    Inventory-implied: {selected.inventory_u_30.toFixed(1)} u/day
+                    {selected.rate_divergence_pct != null ? ` (${selected.rate_divergence_pct}% vs orders)` : ""}
+                  </p>
+                )}
+                {selected.measured_receive_days != null && (
+                  <p>
+                    Measured FBA receive: {selected.measured_receive_days}d
+                    {selected.receive_sample_n ? ` (last ${selected.receive_sample_n} shipments)` : ""}
+                  </p>
+                )}
                 {selected.stockout_date && (
                   <p>
                     {selected.channel === "shopify_only" ? "Warehouse" : "FBA"} stockout: {selected.stockout_date}

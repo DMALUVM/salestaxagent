@@ -313,6 +313,12 @@ def fetch_fba_summaries(dry_run: bool = False) -> dict:
         result["rows_inserted"] = upsert_rows(
             "inventory_snapshots", rows, on_conflict="sku",
         )
+        try:
+            from src.inventory.snapshots_daily import append_daily_snapshots
+            result["daily"] = append_daily_snapshots(rows)
+        except Exception as e:
+            log.warning("[Inventory] daily snapshot append failed: %s", e)
+            result["daily_error"] = str(e)[:200]
         log_ingestion(
             filename="fba_inventory_summaries",
             file_type="amazon_inventory",
@@ -339,6 +345,7 @@ def sync_all(dry_run: bool = False, on_poll=None) -> dict:
         ("awd", lambda: fetch_awd_inventory(dry_run=dry_run)),
         ("restock", lambda: fetch_restock(dry_run=dry_run, on_poll=on_poll)),
         ("planning", lambda: fetch_planning(dry_run=dry_run, on_poll=on_poll)),
+        ("inbound_shipments", lambda: _sync_inbound(dry_run)),
     ]:
         try:
             results[name] = fn()
@@ -360,6 +367,13 @@ def sync_all(dry_run: bool = False, on_poll=None) -> dict:
 
     results["errors"] = errors
     return results
+
+
+def _sync_inbound(dry_run: bool) -> dict:
+    if dry_run:
+        return {"dry_run": True}
+    from src.inventory.inbound_shipments import sync_inbound_shipments
+    return sync_inbound_shipments(days_back=180, dry_run=False)
 
 
 # ---------------------------------------------------------------------------

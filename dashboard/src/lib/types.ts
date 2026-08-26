@@ -280,6 +280,20 @@ export interface InventorySettings {
   peak_end_date: string | null;
 }
 
+export interface InventorySkuSignals {
+  sku: string;
+  as_of_date: string;
+  orders_u_7: number;
+  orders_u_30: number;
+  inventory_u_7: number | null;
+  inventory_u_30: number | null;
+  rate_divergence_pct: number | null;
+  rate_agreement: string | null;
+  measured_receive_days: number | null;
+  receive_sample_n: number;
+  configured_lead_days: number;
+}
+
 export interface SeasonalityWeekly {
   week: number;
   multiplier: number;
