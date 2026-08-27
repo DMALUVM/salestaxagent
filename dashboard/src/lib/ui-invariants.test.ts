@@ -87,4 +87,15 @@ describe("pallet planner ship view", () => {
     assert.doesNotMatch(page, /weeks of cover/);
     assert.doesNotMatch(page, /target 90d cover/);
   });
+
+  test("owned Total column lives on /inventory, not /inventory/pallets", () => {
+    const page = src("src/app/inventory/page.tsx");
+    const pallets = src("src/app/inventory/pallets/page.tsx");
+    assert.match(page, /owned_total/);
+    assert.match(page, /ownedNetworkTotalForSku/);
+    assert.match(page, /label: "Total"/);
+    assert.doesNotMatch(pallets, /owned_total/);
+    assert.doesNotMatch(pallets, /ownedNetworkTotal/);
+    assert.doesNotMatch(pallets, /inventory-owned-total/);
+  });
 });
