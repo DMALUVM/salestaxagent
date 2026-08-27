@@ -6,7 +6,7 @@
  * stays blank unless inbound exists — then show inbound (+ on-hand).
  * Do not substitute the AWD high-water planning card (76,211) as on-hand.
  *
- * Cell color (AWD cell only, no new column):
+ * Number color only (no cell fill, no new column):
  *   white  = inbound > 0 and on-hand = 0 (shipped, none checked in)
  *   orange = inbound > 0 and on-hand > 0 (partial receive)
  *   green  = on-hand > 0 and inbound = 0 (fully available)
@@ -69,15 +69,16 @@ export function awdCellTone(row: AwdRowLike | null | undefined): AwdCellTone {
   return null;
 }
 
+/** Text color for the AWD number. Never sets a cell background. */
 export function awdCellToneClass(tone: AwdCellTone): string {
   if (tone === "white") {
-    return "bg-white text-zinc-900 dark:bg-zinc-100 dark:text-zinc-900";
+    return "text-zinc-200";
   }
   if (tone === "orange") {
-    return "bg-orange-200 text-orange-950 dark:bg-orange-500/30 dark:text-orange-100";
+    return "text-orange-400";
   }
   if (tone === "green") {
-    return "bg-emerald-200 text-emerald-950 dark:bg-emerald-500/30 dark:text-emerald-100";
+    return "text-emerald-400";
   }
   return "";
 }
