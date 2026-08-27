@@ -38,6 +38,21 @@ export const OPTIMISTIC_AWD_ON_HAND_TARGETS: Record<string, number> = {
   DDPE0004Shop: 24_991,
 };
 export const OPTIMISTIC_AWD_TARGET_CAP = 76_211;
+/** Locked first-wave AWD buy after FBA is maxed. Not the 76,211 high water. */
+export const FIRST_WAVE_AWD_TARGETS: Record<string, number> = {
+  DDPE0004Shop: 17_550,
+  DDPE0003Shop: 17_550,
+  DDPE0001Shop: 17_550,
+  DDPE0002Shop: 8_775,
+};
+export const FIRST_WAVE_AWD_TARGET_CAP = 61_425;
+/** Assorted + orange first (aim end of August if Marpac can), then unscented + peppermint. */
+export const FIRST_WAVE_AWD_SHIP_ORDER = [
+  "DDPE0004Shop",
+  "DDPE0003Shop",
+  "DDPE0001Shop",
+  "DDPE0002Shop",
+] as const;
 export const SEPT_FBA_ON_HAND_TARGETS: Record<string, number> = {
   DDPE0001Shop: 12_800,
   DDPE0002Shop: 8_300,
@@ -379,6 +394,19 @@ export function remainingWantedCover(
 
 export function awdSurgeNeed(target: number, awdOnHand = 0, augustToAwd = 0): number {
   return Math.max(0, (target || 0) - Math.max(0, awdOnHand || 0) - Math.max(0, augustToAwd || 0));
+}
+
+export function firstWaveAwdNeed(target: number, augustToAwd = 0, tplToAwd = 0): number {
+  return Math.max(0, (target || 0) - Math.max(0, augustToAwd || 0) - Math.max(0, tplToAwd || 0));
+}
+
+export function firstWaveShipSkus(skus: string[] = LIP_BALM_SKUS): string[] {
+  const wanted = new Set(skus);
+  const ordered: string[] = FIRST_WAVE_AWD_SHIP_ORDER.filter((sku) => wanted.has(sku));
+  for (const sku of skus) {
+    if (!ordered.includes(sku)) ordered.push(sku);
+  }
+  return ordered;
 }
 
 export function splitAugustToPiles(august: number, fbaGap: number): { toFba: number; toAwd: number } {
@@ -921,7 +949,8 @@ export function buildSeptemberPlan(
   const tulsaFloor = opts?.tulsaFloor ?? TULSA_LIP_FLOOR_UNITS;
   const palletMax = opts?.palletMax ?? PALLET_MAX_UNITS;
   const tgt = SEPT_FBA_ON_HAND_TARGETS;
-  const awdTgt = opts?.skuAwdTargets ?? OPTIMISTIC_AWD_ON_HAND_TARGETS;
+  const useFirstWave = opts?.skuAwdTargets == null;
+  const awdTgt = opts?.skuAwdTargets ?? FIRST_WAVE_AWD_TARGETS;
   const gaps = septFbaGaps(skuFba, skuInbound, tgt, skus);
   const skuAugustOut: Record<string, number> = {};
   const augustToFba: Record<string, number> = {};
@@ -937,7 +966,9 @@ export function buildSeptemberPlan(
   }
   const awdNeedBefore: Record<string, number> = {};
   for (const sku of skus) {
-    awdNeedBefore[sku] = awdSurgeNeed(awdTgt[sku] ?? 0, skuAwd[sku] ?? 0, augustToAwd[sku]);
+    awdNeedBefore[sku] = useFirstWave
+      ? firstWaveAwdNeed(awdTgt[sku] ?? 0, augustToAwd[sku])
+      : awdSurgeNeed(awdTgt[sku] ?? 0, skuAwd[sku] ?? 0, augustToAwd[sku]);
   }
   const awdLoaded = awdCoversOffFbaReserve(skuAwd);
   const sendPlan = allocate3plFbaSend(
@@ -962,12 +993,20 @@ export function buildSeptemberPlan(
     Object.fromEntries(skus.map((s) => [s, sku3pl[s] ?? 0])),
     tulsaFloor, skuAwd,
   );
-  const awdPallets = allocateSingleSkuAwdPallets(skuManufacture, skus, palletMax);
+  const awdPallets = allocateSingleSkuAwdPallets(
+    skuManufacture, firstWaveShipSkus(skus), palletMax,
+  );
   return {
     targets: Object.fromEntries(skus.map((s) => [s, tgt[s] ?? 0])),
     targetCap: SEPT_FBA_TARGET_CAP,
     awdTargets: Object.fromEntries(skus.map((s) => [s, awdTgt[s] ?? 0])),
     awdTargetCap: skus.reduce((a, s) => a + (awdTgt[s] ?? 0), 0),
+    firstWaveAwdTargets: Object.fromEntries(skus.map((s) => [s, FIRST_WAVE_AWD_TARGETS[s] ?? 0])),
+    firstWaveAwdCap: FIRST_WAVE_AWD_TARGET_CAP,
+    firstWaveShipOrder: firstWaveShipSkus(skus),
+    nearTermAwdIsFirstWave: useFirstWave,
+    optimisticAwdTargets: Object.fromEntries(skus.map((s) => [s, OPTIMISTIC_AWD_ON_HAND_TARGETS[s] ?? 0])),
+    optimisticAwdTargetCap: OPTIMISTIC_AWD_TARGET_CAP,
     needInFba: SEPT_FBA_NEED_IN_BY,
     shipBy: septFbaShipBy(receiveDays),
     holidayGateLast3plFba: holidayGateLast3plFba(receiveDays),
@@ -1035,7 +1074,13 @@ export function hopLabel(destination: string, awaitingAugust = false): string {
   return "";
 }
 
-export function assignAwdCardsToMonths<T extends { partial?: boolean; totalUnits: number }>(
+function awdCardShipRank(card: { sku?: string; mix?: Record<string, number>; partial?: boolean; totalUnits: number }): [number, number, number] {
+  const sku = card.sku || Object.keys(card.mix ?? {})[0] || "";
+  const rank = (FIRST_WAVE_AWD_SHIP_ORDER as readonly string[]).indexOf(sku);
+  return [rank < 0 ? 99 : rank, card.partial ? 1 : 0, -card.totalUnits];
+}
+
+export function assignAwdCardsToMonths<T extends { sku?: string; mix?: Record<string, number>; partial?: boolean; totalUnits: number }>(
   cards: T[],
   productionMonths: string[],
 ): Record<string, T[]> {
@@ -1044,19 +1089,14 @@ export function assignAwdCardsToMonths<T extends { partial?: boolean; totalUnits
     months = productionMonths.filter((m) => !m.endsWith("-08") && m.slice(5, 7) >= "09") as typeof months;
   }
   const ordered = [...cards].sort((a, b) => {
-    if (!!a.partial !== !!b.partial) return a.partial ? 1 : -1;
-    return b.totalUnits - a.totalUnits;
+    const ra = awdCardShipRank(a);
+    const rb = awdCardShipRank(b);
+    return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2];
   });
   const out: Record<string, T[]> = Object.fromEntries(months.map((m) => [m, []]));
   let i = 0;
   for (const month of months) {
-    if (i >= ordered.length) break;
-    out[month].push(ordered[i]);
-    i += 1;
-  }
-  for (const month of months) {
-    if (i >= ordered.length) break;
-    if ((out[month]?.length ?? 0) < AWD_CARDS_PER_MONTH_MAX) {
+    while (i < ordered.length && (out[month]?.length ?? 0) < AWD_CARDS_PER_MONTH_MAX) {
       out[month].push(ordered[i]);
       i += 1;
     }
@@ -1121,7 +1161,7 @@ export function buildMonthViewEntries(opts: {
   }
   let awdCards = sept.awdPallets ?? [];
   if (awdCards.length === 0) {
-    awdCards = allocateSingleSkuAwdPallets(sept.skuManufacture ?? {}, skus, palletMax);
+    awdCards = allocateSingleSkuAwdPallets(sept.skuManufacture ?? {}, firstWaveShipSkus(skus), palletMax);
   }
   const awdByMonth = assignAwdCardsToMonths(awdCards, productionMonths);
 

@@ -11,6 +11,10 @@ import {
   AUGUST_HOP_DESTINATION,
   AUGUST_HOP_LABEL,
   AWD_CARDS_PER_MONTH_MAX,
+  FIRST_WAVE_AWD_SHIP_ORDER,
+  FIRST_WAVE_AWD_TARGET_CAP,
+  FIRST_WAVE_AWD_TARGETS,
+  OPTIMISTIC_AWD_TARGET_CAP,
   assignAwdCardsToMonths,
   palletCardSizes,
   palletFill,
@@ -372,7 +376,17 @@ describe("pallet planner model", () => {
     assert.equal(plan.awdLoaded, false);
     assert.ok(plan.awdPallets.length > 0);
     assert.ok(plan.awdPallets.every((c) => c.singleSku && c.destination === "awd"));
+    assert.equal(plan.skuManufacture.DDPE0004Shop, 17_550);
+    assert.equal(plan.skuManufacture.DDPE0003Shop, 17_550);
+    assert.equal(plan.skuManufacture.DDPE0001Shop, 17_550);
+    assert.equal(plan.skuManufacture.DDPE0002Shop, 8_775);
+    assert.equal(plan.awdTargetCap, FIRST_WAVE_AWD_TARGET_CAP);
+    assert.equal(plan.optimisticAwdTargetCap, OPTIMISTIC_AWD_TARGET_CAP);
     assert.notEqual(plan.skuManufacture.DDPE0004Shop, fbaManufactureGap(17_800, 3603, 270));
+    assert.notEqual(
+      Object.values(plan.skuManufacture).reduce((a, b) => a + b, 0),
+      76_211,
+    );
     const full = buildSeptemberPlan(
       { DDPE0001Shop: 12800, DDPE0002Shop: 8300, DDPE0003Shop: 16700, DDPE0004Shop: 17800 },
       { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 },
@@ -406,11 +420,12 @@ describe("pallet planner model", () => {
     assert.equal(fbaCard?.mix.DDPE0002Shop, 2700);
     assert.equal(fbaCard?.mix.DDPE0001Shop ?? 0, 0);
     assert.equal(fbaCard?.nextHop, true);
-    for (const m of ["2026-10", "2026-11", "2026-12"]) {
-      const cards = entries.filter((e) => e.month === m && e.units > 0);
-      assert.ok(cards.length > 0, `${m} missing AWD card`);
-      assert.ok(cards.every((e) => e.destination === "awd" && e.singleSku && e.isPalletCard));
-    }
+    const septAwd = entries.filter((e) => e.month === "2026-09" && e.destination === "awd" && e.units > 0);
+    const octAwd = entries.filter((e) => e.month === "2026-10" && e.destination === "awd" && e.units > 0);
+    assert.deepEqual(new Set(septAwd.map((e) => Object.keys(e.mix)[0])), new Set(["DDPE0004Shop", "DDPE0003Shop"]));
+    assert.deepEqual(new Set(octAwd.map((e) => Object.keys(e.mix)[0])), new Set(["DDPE0001Shop", "DDPE0002Shop"]));
+    assert.ok(octAwd.length > 0, "2026-10 missing first-wave pair");
+    assert.ok(octAwd.every((e) => e.destination === "awd" && e.singleSku && e.isPalletCard));
     for (const e of entries) {
       if (e.destination === "awd" && e.units > 0) {
         assert.ok(e.units >= 8_775);
@@ -485,6 +500,41 @@ describe("pallet planner model", () => {
     assert.notEqual(aug?.destination, "3pl_fba");
     assert.notEqual(aug?.hopLabel, "3PL→FBA");
     assert.match(aug?.hopLabel ?? "", /Marpac→Tulsa/);
+  });
+
+  test("first-wave AWD is 61,425 in ship order, not 76,211", () => {
+    assert.equal(FIRST_WAVE_AWD_TARGETS.DDPE0004Shop, 17_550);
+    assert.equal(FIRST_WAVE_AWD_TARGETS.DDPE0003Shop, 17_550);
+    assert.equal(FIRST_WAVE_AWD_TARGETS.DDPE0001Shop, 17_550);
+    assert.equal(FIRST_WAVE_AWD_TARGETS.DDPE0002Shop, 8_775);
+    assert.equal(
+      Object.values(FIRST_WAVE_AWD_TARGETS).reduce((a, b) => a + b, 0),
+      FIRST_WAVE_AWD_TARGET_CAP,
+    );
+    assert.equal(FIRST_WAVE_AWD_TARGET_CAP, 61_425);
+    assert.notEqual(FIRST_WAVE_AWD_TARGET_CAP, 76_211);
+    assert.deepEqual([...FIRST_WAVE_AWD_SHIP_ORDER], [
+      "DDPE0004Shop", "DDPE0003Shop", "DDPE0001Shop", "DDPE0002Shop",
+    ]);
+    const fba = { DDPE0001Shop: 3248, DDPE0002Shop: 2079, DDPE0003Shop: 3966, DDPE0004Shop: 3603 };
+    const inbound = { DDPE0001Shop: 0, DDPE0002Shop: 1080, DDPE0003Shop: 637, DDPE0004Shop: 270 };
+    const tpl = { DDPE0001Shop: 1594, DDPE0002Shop: 6291, DDPE0003Shop: 6426, DDPE0004Shop: 9177 };
+    const plan = buildSeptemberPlan(fba, inbound, tpl, {}, {}, { DDPE0002Shop: 540 });
+    assert.equal(plan.firstAction.tplToFbaTotal, 16200);
+    assert.equal(plan.skuManufacture.DDPE0002Shop, 8_775);
+    assert.deepEqual(plan.awdPallets.map((c) => c.sku), [...FIRST_WAVE_AWD_SHIP_ORDER]);
+    assert.deepEqual(plan.awdPallets.map((c) => c.totalUnits), [17_550, 17_550, 17_550, 8_775]);
+    const horizon = productionHorizonMonths(new Date(2026, 7, 26), AMAZON_IN_BY, 35);
+    const entries = buildMonthViewEntries({
+      productionMonths: horizon.map((h) => h.month),
+      horizonByMonth: Object.fromEntries(horizon.map((h) => [h.month, h])),
+      sept: plan,
+    });
+    const aug = entries.find((e) => e.month.endsWith("-08"));
+    assert.equal(aug?.hopLabel, "Marpac→Tulsa");
+    assert.equal(aug?.awaitingAugustTotals, true);
+    const awd = entries.filter((e) => e.destination === "awd" && e.units > 0);
+    assert.deepEqual(awd.map((e) => Object.keys(e.mix)[0]), [...FIRST_WAVE_AWD_SHIP_ORDER]);
   });
 
   test("AWD months allow 2 cards, not capped at 1", () => {

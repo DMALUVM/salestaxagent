@@ -13,6 +13,8 @@ import {
   FAMILY_FBA_CAP_PEAK,
   FBA_INBOUND_PREFERRED,
   LIP_BALM_SKUS,
+  FIRST_WAVE_AWD_TARGETS,
+  FIRST_WAVE_AWD_TARGET_CAP,
   OPTIMISTIC_AWD_ON_HAND_TARGETS,
   OPTIMISTIC_AWD_TARGET_CAP,
   PALLET_MAX_UNITS,
@@ -185,13 +187,33 @@ export function HolidayShipPlan({
     </Card>
   );
 
+  const firstWaveCard = (
+    <Card className="border-emerald-500/40">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">First-wave AWD {fmt(FIRST_WAVE_AWD_TARGET_CAP)}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1 text-sm">
+        <p>Locked after FBA is maxed. New Marpac single-SKU → AWD. Not from Tulsa after tonight.</p>
+        <p className="tabular-nums">
+          Assorted {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0004Shop)}
+          {" · "}Orange {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0003Shop)}
+          {" · "}Unscented {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0001Shop)}
+          {" · "}Peppermint {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0002Shop)}
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          Ship assorted + orange first (aim end of August if Marpac can, 2 pallets/month max), then unscented + peppermint.
+        </p>
+      </CardContent>
+    </Card>
+  );
+
   const awdCard = (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium">AWD high water {fmt(OPTIMISTIC_AWD_TARGET_CAP)}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-1 text-sm">
-        <p>Optimistic. AWD is the warehouse.</p>
+        <p>Optimistic context — not the near-term manufacture/buy.</p>
         <p className="tabular-nums text-muted-foreground">
           Orange {fmt(OPTIMISTIC_AWD_ON_HAND_TARGETS.DDPE0003Shop)}
           {" · "}Unscented {fmt(OPTIMISTIC_AWD_ON_HAND_TARGETS.DDPE0001Shop)}
@@ -216,8 +238,8 @@ export function HolidayShipPlan({
         {asOf}
         {firstAction}
         <div className="grid gap-3 sm:grid-cols-2">
+          {firstWaveCard}
           {capCard}
-          {awdCard}
         </div>
         <Link href="/inventory/pallets">
           <Button variant="outline" size="sm">Month cards → Pallet Planner</Button>
@@ -234,7 +256,8 @@ export function HolidayShipPlan({
       <div>
         <p className="text-sm font-medium mb-2">Month cards</p>
         <p className="text-[11px] text-muted-foreground mb-3">
-          Sept = FBA and AWD. Oct / Nov / Dec = mainly single-SKU AWD (up to 2/month).
+          First wave: assorted + orange, then unscented + peppermint (2 AWD cards/month max).
+          Aim end of August if Marpac can. Not the {fmt(OPTIMISTIC_AWD_TARGET_CAP)} high water.
           Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
           {" "}August hop is Marpac→Tulsa, mix TBD.
         </p>
@@ -252,6 +275,7 @@ export function HolidayShipPlan({
         </div>
       </div>
 
+      {firstWaveCard}
       {capCard}
       {awdCard}
     </div>

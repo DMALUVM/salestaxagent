@@ -13,6 +13,9 @@ from src.inventory.pallet_planner import (
     PEAK_END_DEFAULT,
     SEPT_FBA_ON_HAND_TARGETS,
     SEPT_FBA_TARGET_CAP,
+    FIRST_WAVE_AWD_SHIP_ORDER,
+    FIRST_WAVE_AWD_TARGET_CAP,
+    FIRST_WAVE_AWD_TARGETS,
     OPTIMISTIC_AWD_ON_HAND_TARGETS,
     OPTIMISTIC_AWD_TARGET_CAP,
     FBA_INBOUND_PREFERRED,
@@ -132,7 +135,7 @@ def test_live_awd_540_keeps_tulsa_floor_no_empty_out():
     assert sum(plan["tpl_to_fba"].values()) != 22_338
 
 
-def test_manufacture_is_awd_surge_not_fba_hole():
+def test_manufacture_is_first_wave_not_76211_or_fba_hole():
     plan = build_september_plan(
         CONTEXT_FBA, CONTEXT_INBOUND, CONTEXT_3PL,
         sku_awd=CONTEXT_AWD,
@@ -140,13 +143,18 @@ def test_manufacture_is_awd_surge_not_fba_hole():
     fba_hole = sum(plan["gaps"][s]["gap"] for s in LIP)
     assert 40_700 <= fba_hole <= 40_750
     assert sum(plan["sku_manufacture"].values()) != fba_hole
+    assert sum(plan["sku_manufacture"].values()) == FIRST_WAVE_AWD_TARGET_CAP == 61_425
+    assert sum(plan["sku_manufacture"].values()) != OPTIMISTIC_AWD_TARGET_CAP
     assert plan["manufacture_into_fba"]["DDPE0004Shop"] == 0
     assert plan["mixed_need"]["DDPE0001Shop"] == 0
-    for sku in LIP:
-        assert plan["sku_manufacture"][sku] == max(
-            0,
-            OPTIMISTIC_AWD_ON_HAND_TARGETS[sku] - CONTEXT_AWD.get(sku, 0),
-        )
+    assert plan["sku_manufacture"]["DDPE0004Shop"] == 17_550
+    assert plan["sku_manufacture"]["DDPE0003Shop"] == 17_550
+    assert plan["sku_manufacture"]["DDPE0001Shop"] == 17_550
+    assert plan["sku_manufacture"]["DDPE0002Shop"] == 8_775
+    assert plan["sku_manufacture"]["DDPE0002Shop"] != 8_775 - CONTEXT_AWD["DDPE0002Shop"]
+    assert plan["near_term_awd_is_first_wave"] is True
+    assert plan["awd_target_cap"] == 61_425
+    assert plan["optimistic_awd_target_cap"] == 76_211
     assert plan["two_tracks"] is True
     assert plan["august_tbd"] is True
 
@@ -271,14 +279,45 @@ def test_month_view_sept_not_empty_and_not_fba_only():
     assert all(e["single_sku"] for e in awd)
 
 
-def test_month_view_oct_dec_awd_cards():
+def test_first_wave_quantities_and_ship_order():
+    assert FIRST_WAVE_AWD_TARGETS["DDPE0004Shop"] == 17_550
+    assert FIRST_WAVE_AWD_TARGETS["DDPE0003Shop"] == 17_550
+    assert FIRST_WAVE_AWD_TARGETS["DDPE0001Shop"] == 17_550
+    assert FIRST_WAVE_AWD_TARGETS["DDPE0002Shop"] == 8_775
+    assert sum(FIRST_WAVE_AWD_TARGETS.values()) == FIRST_WAVE_AWD_TARGET_CAP == 61_425
+    assert FIRST_WAVE_AWD_SHIP_ORDER == (
+        "DDPE0004Shop", "DDPE0003Shop", "DDPE0001Shop", "DDPE0002Shop",
+    )
+    plan, entries = _locked_month_view()
+    assert plan["sku_manufacture"]["DDPE0004Shop"] == 17_550
+    assert plan["sku_manufacture"]["DDPE0003Shop"] == 17_550
+    assert plan["sku_manufacture"]["DDPE0001Shop"] == 17_550
+    assert plan["sku_manufacture"]["DDPE0002Shop"] == 8_775
+    assert [c["sku"] for c in plan["awd_pallets"]] == list(FIRST_WAVE_AWD_SHIP_ORDER)
+    assert [c["total_units"] for c in plan["awd_pallets"]] == [17_550, 17_550, 17_550, 8_775]
+    awd = [e for e in entries if e["destination"] == "awd" and e["units"] > 0]
+    skus = [next(iter(e["mix"])) for e in awd]
+    assert skus == ["DDPE0004Shop", "DDPE0003Shop", "DDPE0001Shop", "DDPE0002Shop"]
+    sept_awd = [e for e in awd if e["month"] == "2026-09"]
+    oct_awd = [e for e in awd if e["month"] == "2026-10"]
+    assert {next(iter(e["mix"])) for e in sept_awd} == {"DDPE0004Shop", "DDPE0003Shop"}
+    assert {next(iter(e["mix"])) for e in oct_awd} == {"DDPE0001Shop", "DDPE0002Shop"}
+    assert all(e["units"] != 76_211 for e in awd)
+    assert len(sept_awd) <= AWD_CARDS_PER_MONTH_MAX
+    assert len(oct_awd) <= AWD_CARDS_PER_MONTH_MAX
+
+
+def test_month_view_later_awd_follows_first_wave():
     _plan, entries = _locked_month_view()
-    for month in ("2026-10", "2026-11", "2026-12"):
-        cards = [e for e in entries if e["month"] == month and e["units"] > 0]
-        assert cards, f"{month} missing AWD card"
-        assert all(e["destination"] == "awd" for e in cards)
-        assert all(e["single_sku"] for e in cards)
-        assert all(e["is_pallet_card"] for e in cards)
+    oct_cards = [e for e in entries if e["month"] == "2026-10" and e["units"] > 0]
+    assert oct_cards, "October missing first-wave pair"
+    assert all(e["destination"] == "awd" for e in oct_cards)
+    assert all(e["single_sku"] for e in oct_cards)
+    assert all(e["is_pallet_card"] for e in oct_cards)
+    assert {next(iter(e["mix"])) for e in oct_cards} == {"DDPE0001Shop", "DDPE0002Shop"}
+    for month in ("2026-11", "2026-12"):
+        live = [e for e in entries if e["month"] == month and e["units"] > 0]
+        assert all(e["destination"] == "awd" for e in live)
 
 
 def test_no_sub_half_awd_card():
