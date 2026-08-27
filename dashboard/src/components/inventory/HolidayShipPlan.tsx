@@ -321,11 +321,14 @@ function MonthCard({
         <>
           {entry.isPalletCard ? (
             <div className="flex items-baseline gap-2 mb-2">
-              <span className="text-2xl font-semibold tabular-nums">{entry.fullPallets || entry.pallets}</span>
+              <span className="text-2xl font-semibold tabular-nums">{fmt(entry.units)}</span>
               <span className="text-xs text-muted-foreground">
-                {entry.hasPartial ? `full + 1 partial (${fmt(entry.partialUnits ?? 0)})` : "full pallet"}
+                {entry.hasPartial && (entry.fullPallets ?? 0) > 0
+                  ? `${entry.fullPallets} full + 1 partial (${fmt(entry.partialUnits ?? 0)})`
+                  : entry.hasPartial
+                    ? `partial ≥9,500`
+                    : `${entry.fullPallets ?? entry.pallets} full pallet`}
               </span>
-              <span className="text-xs text-muted-foreground ml-auto tabular-nums">{fmt(entry.units)}</span>
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">Held leftover — not a card</p>
