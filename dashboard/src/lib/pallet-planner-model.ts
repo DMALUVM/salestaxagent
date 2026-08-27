@@ -1000,3 +1000,221 @@ export function buildSeptemberPlan(
     unstacked: true,
   };
 }
+
+export const AWD_SCHEDULE_MONTHS = ["2026-09", "2026-10", "2026-11", "2026-12"] as const;
+
+const MONTH_LABELS = [
+  "", "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+function monthViewLabel(month: string): string {
+  const [y, mo] = month.split("-");
+  return `${MONTH_LABELS[Number(mo)] ?? month} ${y}`;
+}
+
+export function assignAwdCardsToMonths<T extends { partial?: boolean; totalUnits: number }>(
+  cards: T[],
+  productionMonths: string[],
+): Record<string, T[]> {
+  let months = AWD_SCHEDULE_MONTHS.filter((m) => productionMonths.includes(m));
+  if (months.length === 0) {
+    months = productionMonths.filter((m) => !m.endsWith("-08") && m.slice(5, 7) >= "09") as typeof months;
+  }
+  const ordered = [...cards].sort((a, b) => {
+    if (!!a.partial !== !!b.partial) return a.partial ? 1 : -1;
+    return b.totalUnits - a.totalUnits;
+  });
+  const out: Record<string, T[]> = Object.fromEntries(months.map((m) => [m, []]));
+  months.forEach((m, i) => {
+    if (ordered[i]) out[m].push(ordered[i]);
+  });
+  for (const card of ordered.slice(months.length)) {
+    if (months[0]) out[months[0]].push(card);
+  }
+  return out;
+}
+
+export type MonthViewEntry = {
+  month: string;
+  label: string;
+  monthLabel: string;
+  role: "gate" | "refill";
+  status: "FIRM" | "INDICATIVE";
+  pallets: number;
+  fullPallets: number;
+  leftoverUnits: number;
+  heldUnits: number;
+  partialUnits: number;
+  hasPartial: boolean;
+  fillPct: number;
+  isPalletCard: boolean;
+  awaitingAugustTotals: boolean;
+  units: number;
+  mix: Record<string, number>;
+  destination: string;
+  singleSku: boolean;
+  track: string;
+  nextHop: boolean;
+  remainingFbaThenAwd: boolean;
+  shipBy: string;
+  inAmazon: string;
+};
+
+export function buildMonthViewEntries(opts: {
+  productionMonths: string[];
+  horizonByMonth: Record<string, HorizonMonth>;
+  sept: ReturnType<typeof buildSeptemberPlan>;
+  skuAugust?: Record<string, number>;
+  committed?: Set<string>;
+  amazonInBy?: string;
+  peakEnd?: string;
+  palletMax?: number;
+  skus?: string[];
+}): MonthViewEntry[] {
+  const productionMonths = opts.productionMonths;
+  const horizonByMonth = opts.horizonByMonth;
+  const sept = opts.sept;
+  const skus = opts.skus ?? LIP_BALM_SKUS;
+  const palletMax = opts.palletMax ?? PALLET_MAX_UNITS;
+  const amazonInBy = opts.amazonInBy ?? AMAZON_IN_BY;
+  const peakEnd = opts.peakEnd ?? PEAK_END_DEFAULT;
+  const committed = opts.committed ?? new Set<string>();
+  const skuAugust = opts.skuAugust ?? sept.skuAugust ?? {};
+  const tplToFba: Record<string, number> = {};
+  const mixedNeed: Record<string, number> = {};
+  for (const sku of skus) {
+    tplToFba[sku] = Math.max(0, Number(sept.tplToFba?.[sku] ?? 0));
+    mixedNeed[sku] = Math.max(0, Number(sept.mixedNeed?.[sku] ?? 0));
+  }
+  let awdCards = sept.awdPallets ?? [];
+  if (awdCards.length === 0) {
+    awdCards = allocateSingleSkuAwdPallets(sept.skuManufacture ?? {}, skus, palletMax);
+  }
+  const awdByMonth = assignAwdCardsToMonths(awdCards, productionMonths);
+
+  function dates(month: string, destination: string) {
+    const h = horizonByMonth[month];
+    const recv = h?.receiveDays ?? 35;
+    if (destination === "3pl_fba") {
+      const shipBy = sept.shipBy || septFbaShipBy(recv);
+      return {
+        role: "gate" as const,
+        shipBy,
+        inAmazon: inAmazonDate(shipBy, recv, SEPT_FBA_NEED_IN_BY, { clamp: true }),
+      };
+    }
+    if (destination === "awd") {
+      const shipBy = shipByForMonth(month, amazonInBy, recv, {
+        role: "refill", needInFba: peakEnd,
+      });
+      return {
+        role: "refill" as const,
+        shipBy,
+        inAmazon: inAmazonDate(shipBy, recv, peakEnd, { clamp: false }),
+      };
+    }
+    const role = (h?.role ?? "gate") as "gate" | "refill";
+    const shipBy = shipByForMonth(month, amazonInBy, recv, {
+      role, needInFba: role === "refill" ? peakEnd : undefined,
+    });
+    const latest = role === "gate" ? amazonInBy : peakEnd;
+    return {
+      role,
+      shipBy,
+      inAmazon: inAmazonDate(shipBy, recv, latest, { clamp: role === "gate" }),
+    };
+  }
+
+  function entry(
+    month: string,
+    mixIn: Record<string, number>,
+    destination: string,
+    extra: { singleSku: boolean; track: string; nextHop?: boolean; awaitingAugust?: boolean },
+  ): MonthViewEntry {
+    const { role, shipBy, inAmazon: arrive } = dates(month, destination);
+    const mix: Record<string, number> = {};
+    for (const [sku, qty] of Object.entries(mixIn)) {
+      if (Number(qty) > 0) mix[sku] = Number(qty);
+    }
+    const total = Object.values(mix).reduce((a, b) => a + b, 0);
+    const fill = palletFill(total, palletMax);
+    const is3pl = destination === "3pl_fba";
+    return {
+      month,
+      label: monthViewLabel(month),
+      monthLabel: monthViewLabel(month),
+      role,
+      status: committed.has(month) ? "FIRM" : "INDICATIVE",
+      pallets: is3pl ? (total > 0 ? 1 : 0) : fill.palletCards,
+      fullPallets: is3pl ? 0 : fill.fullPallets,
+      leftoverUnits: fill.leftoverUnits,
+      heldUnits: is3pl ? 0 : fill.heldUnits,
+      partialUnits: is3pl ? 0 : fill.partialUnits,
+      hasPartial: is3pl ? false : fill.hasPartial,
+      fillPct: fill.fillPct,
+      isPalletCard: is3pl ? total > 0 : fill.isPalletCard,
+      awaitingAugustTotals: !!extra.awaitingAugust,
+      units: total,
+      mix,
+      destination,
+      singleSku: extra.singleSku,
+      track: extra.track,
+      nextHop: !!extra.nextHop,
+      remainingFbaThenAwd: (destination === "awd" || destination === "fba_then_awd") && month.endsWith("-09"),
+      shipBy,
+      inAmazon: arrive,
+    };
+  }
+
+  const entries: MonthViewEntry[] = [];
+  for (const month of productionMonths) {
+    if (month.endsWith("-08")) {
+      const mix: Record<string, number> = {};
+      for (const sku of skus) {
+        const qty = Number(skuAugust[sku] ?? 0);
+        if (qty > 0) mix[sku] = qty;
+      }
+      entries.push(entry(month, mix, "mixed_tulsa_fba", {
+        singleSku: false, track: "mixed_august",
+        awaitingAugust: !!sept.augustTbd && Object.keys(mix).length === 0,
+      }));
+      continue;
+    }
+    if (month.endsWith("-09")) {
+      const sendTotal = Object.values(tplToFba).reduce((a, b) => a + b, 0);
+      if (sendTotal > 0) {
+        entries.push(entry(month, tplToFba, "3pl_fba", {
+          singleSku: false, track: "3pl_fba", nextHop: true,
+        }));
+      }
+      const mixed: Record<string, number> = {};
+      for (const sku of skus) if (mixedNeed[sku] > 0) mixed[sku] = mixedNeed[sku];
+      if (Object.keys(mixed).length > 0) {
+        entries.push(entry(month, mixed, "fba_then_awd", {
+          singleSku: false, track: "remaining_fba",
+        }));
+      }
+      for (const card of awdByMonth[month] ?? []) {
+        entries.push(entry(month, card.mix, "awd", {
+          singleSku: true, track: "single_sku_awd",
+        }));
+      }
+      if (!entries.some((e) => e.month === month && e.units > 0)) {
+        entries.push(entry(month, {}, "awd", { singleSku: true, track: "single_sku_awd" }));
+      }
+      continue;
+    }
+    const monthCards = awdByMonth[month] ?? [];
+    if (monthCards.length > 0) {
+      for (const card of monthCards) {
+        entries.push(entry(month, card.mix, "awd", {
+          singleSku: true, track: "single_sku_awd",
+        }));
+      }
+    } else {
+      entries.push(entry(month, {}, "awd", { singleSku: true, track: "single_sku_awd" }));
+    }
+  }
+  return entries;
+}
