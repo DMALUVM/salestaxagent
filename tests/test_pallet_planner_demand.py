@@ -6,9 +6,11 @@ from datetime import date
 from src.inventory.pallet_planner import (
     ACTUAL_2025_SOURCE,
     AMAZON_IN_BY_DEFAULT,
+    ASSORTED_SKU,
     DEMAND_METHOD,
     PALLET_MAX_UNITS,
     _holiday_demand_by_sku,
+    apply_assorted_correction_display,
     family_yoy_may_jul,
     fba_cover_units,
     holiday_demand_from_sales,
@@ -21,7 +23,9 @@ from src.inventory.pallet_planner import (
     pallet_fill,
     production_months_before_gate,
     ship_by_for_month,
+    sku_production_build,
     sku_yoy_may_jul,
+    workbook_window_units,
 )
 
 # Warehouse amazon_spapi totals used only as test fixtures — not a locked mix.
@@ -313,6 +317,100 @@ def test_cover_is_fulfillable_only_inbound_is_transit():
     assert fba_cover_units(snap) == 2978
     assert inbound_in_transit(snap) == 270
     assert fba_cover_units(snap) + inbound_in_transit(snap) == 3248
+
+
+# Workbook window fixtures — derived totals, not a hardcoded recipe.
+# Assorted CF ≈ Dave's 22,633; optimistic is stock-to-cover, not display.
+FC_WINDOW = [
+    {"sku": "DDPE0004Shop", "scenario": "correction_factor",
+     "week_start": "2026-11-16", "units": 7000},
+    {"sku": "DDPE0004Shop", "scenario": "correction_factor",
+     "week_start": "2026-12-07", "units": 10000},
+    {"sku": "DDPE0004Shop", "scenario": "correction_factor",
+     "week_start": "2027-01-11", "units": 5633},
+    # Other-SKU CF must not rewrite Orange / Unscented / Peppermint display
+    {"sku": "DDPE0001Shop", "scenario": "correction_factor",
+     "week_start": "2026-11-16", "units": 99999},
+    {"sku": "DDPE0001Shop", "scenario": "optimistic",
+     "week_start": "2026-11-16", "units": 17803},
+    {"sku": "DDPE0002Shop", "scenario": "optimistic",
+     "week_start": "2026-11-16", "units": 10590},
+    {"sku": "DDPE0003Shop", "scenario": "optimistic",
+     "week_start": "2026-11-16", "units": 22827},
+    {"sku": "DDPE0004Shop", "scenario": "optimistic",
+     "week_start": "2026-11-16", "units": 24991},
+]
+
+
+def test_assorted_display_uses_correction_factor_not_yoy_or_optimistic():
+    monthly = _monthly(LIP)
+    yoy = holiday_demand_from_sales(monthly, LIP, include_jan=True)
+    yoy_holiday = yoy[ASSORTED_SKU]["holiday_demand"]
+    assert 18_600 <= yoy_holiday <= 18_750
+    displayed = apply_assorted_correction_display(yoy, FC_WINDOW)
+    assorted = displayed[ASSORTED_SKU]
+    cf = workbook_window_units(FC_WINDOW, ASSORTED_SKU, "correction_factor")
+    assert cf == 22633
+    assert assorted["holiday_demand"] == cf
+    assert assorted["holiday_demand"] != yoy_holiday
+    assert assorted["holiday_demand"] != 24991
+    assert assorted["display_method"] == "assorted_correction_factor_scaled"
+    # Own 2025 MoM shape preserved
+    prior_ratio = (
+        monthly[("ddpe0004shop", 2025, 12)]
+        / monthly[("ddpe0004shop", 2025, 11)]
+    )
+    assert abs(
+        assorted["months_2026"][12] / assorted["months_2026"][11] - prior_ratio
+    ) < 0.02
+    # Other SKUs stay on own YoY — CF 99,999 does not apply
+    for sku in ("DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop"):
+        assert displayed[sku]["holiday_demand"] == yoy[sku]["holiday_demand"]
+        assert displayed[sku]["display_method"] == DEMAND_METHOD
+
+
+def test_optimistic_is_stock_to_cover_not_displayed_forecast():
+    monthly = _monthly(LIP)
+    displayed = apply_assorted_correction_display(
+        holiday_demand_from_sales(monthly, LIP, include_jan=True), FC_WINDOW,
+    )
+    family_opt = 0
+    family_display = 0
+    for sku in LIP:
+        opt = workbook_window_units(FC_WINDOW, sku, "optimistic")
+        build = sku_production_build(
+            displayed[sku], cover_days=60, receive_days=35, optimistic_units=opt,
+        )
+        family_opt += opt
+        family_display += build["display_demand"]
+        assert build["display_demand"] == displayed[sku]["holiday_demand"]
+        assert build["optimistic_units"] == opt
+        assert build["cover_fulfill"] == max(build["display_demand"], opt)
+        assert build["sku_build"] == (
+            build["cover_fulfill"] + build["ending_cover"] + build["pipeline"]
+        )
+        # Peak-60d still from display December, not optimistic
+        dec = displayed[sku]["months_2026"][12]
+        assert build["peak_cover"] == round(dec / 31 * 60)
+    assert family_opt == 76211
+    assert 76_000 <= family_opt <= 76_400
+    assert displayed[ASSORTED_SKU]["holiday_demand"] != 24991
+    assert displayed[ASSORTED_SKU]["holiday_demand"] == 22633
+    # Optimistic sits above display — gap is stock-to-cover
+    assert family_opt > family_display
+    assorted_build = sku_production_build(
+        displayed[ASSORTED_SKU],
+        cover_days=60, receive_days=35, optimistic_units=24991,
+    )
+    assert assorted_build["stock_to_cover"] == 24991 - 22633
+    assert assorted_build["cover_fulfill"] == 24991
+
+
+def test_assorted_cf_missing_falls_back_to_yoy():
+    monthly = _monthly(LIP)
+    yoy = holiday_demand_from_sales(monthly, LIP, include_jan=True)
+    displayed = apply_assorted_correction_display(yoy, [])
+    assert displayed[ASSORTED_SKU]["holiday_demand"] == yoy[ASSORTED_SKU]["holiday_demand"]
 
 
 def test_latest_3pl_row_per_sku_not_latest_batch():

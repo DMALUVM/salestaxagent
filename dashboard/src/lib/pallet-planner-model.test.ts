@@ -4,14 +4,21 @@ import assert from "node:assert/strict";
 import {
   ACTUAL_2025_SOURCE,
   AMAZON_IN_BY,
+  ASSORTED_SKU,
   DEMAND_METHOD,
   PALLET_MAX_UNITS,
+  PEAK_END_DEFAULT,
+  applyAssortedCorrectionDisplay,
+  earlyJanFbaShipBy,
   familyTulsaFloor,
   familyYoyMayJul,
   fbaCoverUnits,
   holidayDemandFromSales,
   plannerPolicy,
   productionHorizonMonths,
+  sellableDate,
+  shipByForMonth,
+  shipTooLateForEarlyJan,
   skuProductionBuild,
   inAmazonDate,
   inboundInTransit,
@@ -21,6 +28,8 @@ import {
   palletFill,
   productionMonthsBeforeGate,
   skuYoyMayJul,
+  tulsaAfterChristmasOutbound,
+  workbookWindowUnits,
 } from "./pallet-planner-model";
 
 const LIP = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"];
@@ -151,10 +160,13 @@ describe("pallet planner model", () => {
     const monthly = monthlyAmazonUnits(ROWS, LIP);
     const demand = holidayDemandFromSales(monthly, LIP, { includeJan: true });
     const policy = plannerPolicy(
-      { target_cover_days: 60, receiving_days_peak: 35, receiving_days_normal: 28, awd_to_fba_days: 14, peak_end_date: "2027-01-15" },
+      { target_cover_days: 60, receiving_days_peak: 35, receiving_days_normal: 28, awd_to_fba_days: 14, peak_start_date: "2026-10-01", peak_end_date: "2027-01-15" },
       { fba_receive_median: 20, fba_receive_n: 14, awd_replenish_median: 12, awd_replenish_n: 51 },
     );
-    assert.equal(policy.gateReceiveDays, 20);
+    assert.equal(policy.gateReceiveDays, 35);
+    assert.equal(policy.refillReceiveDays, 35);
+    assert.equal(policy.fbaReceiveMedian, 20);
+    assert.equal(policy.earlyJanFbaShipBy, "2026-12-11");
     assert.equal(policy.tulsaFloorUnits, 5000);
     let familyPeak = 0;
     const leftoverYoy = 11345 / 5416;
@@ -172,17 +184,80 @@ describe("pallet planner model", () => {
     assert.equal(floor.splitPerSku, false);
   });
 
-  test("horizon includes Nov and Dec refill — not late inbound", () => {
-    const horizon = productionHorizonMonths(new Date(2026, 7, 26), AMAZON_IN_BY, 20);
+  test("horizon: Aug/Sep gate at 35d; Oct/Nov/Dec post-Christmas ammo", () => {
+    const horizon = productionHorizonMonths(new Date(2026, 7, 26), AMAZON_IN_BY, 35);
     const months = horizon.map((h) => h.month);
+    assert.equal(months.includes("2026-08"), true);
+    assert.equal(months.includes("2026-09"), true);
     assert.equal(months.includes("2026-10"), true);
     assert.equal(months.includes("2026-11"), true);
     assert.equal(months.includes("2026-12"), true);
+    assert.equal(horizon.find((h) => h.month === "2026-08")?.role, "gate");
+    assert.equal(horizon.find((h) => h.month === "2026-09")?.role, "gate");
+    assert.equal(horizon.find((h) => h.month === "2026-10")?.role, "refill");
     assert.equal(horizon.find((h) => h.month === "2026-11")?.role, "refill");
     assert.equal(horizon.find((h) => h.month === "2026-12")?.role, "refill");
-    assert.equal(horizon.find((h) => h.month === "2026-10")?.role, "gate");
-    assert.equal(monthCanMakeGate("2026-11", AMAZON_IN_BY, 20), false);
-    assert.equal(inAmazonDate("2026-11-20", 20, AMAZON_IN_BY, { clamp: false }) > AMAZON_IN_BY, true);
+    assert.equal(horizon.find((h) => h.month === "2026-10")?.label, "post_christmas_ammo");
+    assert.equal(monthCanMakeGate("2026-10", AMAZON_IN_BY, 35), false);
+    assert.equal(monthCanMakeGate("2026-09", AMAZON_IN_BY, 35), true);
+    assert.equal(inAmazonDate("2026-11-20", 35, AMAZON_IN_BY, { clamp: false }) > AMAZON_IN_BY, true);
+  });
+
+  test("Dec 26 3PL→FBA is too late; early-Jan ship-by is before Christmas", () => {
+    assert.equal(sellableDate("2026-12-26", 35), "2027-01-30");
+    assert.equal(shipTooLateForEarlyJan("2026-12-26", 35, PEAK_END_DEFAULT), true);
+    assert.equal(earlyJanFbaShipBy(PEAK_END_DEFAULT, 35), "2026-12-11");
+    assert.equal(
+      shipByForMonth("2026-12", AMAZON_IN_BY, 35, { role: "refill", needInFba: PEAK_END_DEFAULT }),
+      "2026-12-11",
+    );
+  });
+
+  test("Tulsa keeps 5k after Christmas outbound", () => {
+    const kept = tulsaAfterChristmasOutbound({ a: 2000, b: 2000, c: 3000, d: 1000 }, 2000);
+    assert.equal(kept.outbound, 2000);
+    assert.equal(kept.afterOutbound, 6000);
+    assert.equal(kept.neededBeforeOutbound, 7000);
+    assert.equal(kept.meetsFloorAfterOutbound, true);
+    const capped = tulsaAfterChristmasOutbound({ a: 2000, b: 2000, c: 3000, d: 1000 }, 4000);
+    assert.equal(capped.outbound, 3000);
+    assert.equal(capped.afterOutbound, 5000);
+    assert.equal(capped.doNotDrainToZero, true);
+  });
+
+  test("Assorted display uses correction-factor, not YoY or optimistic", () => {
+    const monthly = monthlyAmazonUnits(ROWS, LIP);
+    const yoy = holidayDemandFromSales(monthly, LIP, { includeJan: true });
+    const fc = [
+      { sku: ASSORTED_SKU, scenario: "correction_factor", week_start: "2026-11-16", units: 7000 },
+      { sku: ASSORTED_SKU, scenario: "correction_factor", week_start: "2026-12-07", units: 10000 },
+      { sku: ASSORTED_SKU, scenario: "correction_factor", week_start: "2027-01-11", units: 5633 },
+      { sku: "DDPE0001Shop", scenario: "correction_factor", week_start: "2026-11-16", units: 99999 },
+      { sku: "DDPE0001Shop", scenario: "optimistic", week_start: "2026-11-16", units: 17803 },
+      { sku: "DDPE0002Shop", scenario: "optimistic", week_start: "2026-11-16", units: 10590 },
+      { sku: "DDPE0003Shop", scenario: "optimistic", week_start: "2026-11-16", units: 22827 },
+      { sku: ASSORTED_SKU, scenario: "optimistic", week_start: "2026-11-16", units: 24991 },
+    ];
+    const displayed = applyAssortedCorrectionDisplay(yoy, fc);
+    assert.equal(workbookWindowUnits(fc, ASSORTED_SKU, "correction_factor"), 22633);
+    assert.equal(displayed[ASSORTED_SKU].holidayDemand, 22633);
+    assert.notEqual(displayed[ASSORTED_SKU].holidayDemand, yoy[ASSORTED_SKU].holidayDemand);
+    assert.notEqual(displayed[ASSORTED_SKU].holidayDemand, 24991);
+    assert.equal(displayed.DDPE0001Shop.holidayDemand, yoy.DDPE0001Shop.holidayDemand);
+    const opt = workbookWindowUnits(fc, ASSORTED_SKU, "optimistic");
+    const build = skuProductionBuild(displayed[ASSORTED_SKU], {
+      coverDays: 60, receiveDays: 35, optimisticUnits: opt,
+    });
+    assert.equal(build.displayDemand, 22633);
+    assert.equal(build.coverFulfill, 24991);
+    assert.equal(build.stockToCover, 24991 - 22633);
+    assert.equal(
+      workbookWindowUnits(fc, "DDPE0001Shop", "optimistic")
+        + workbookWindowUnits(fc, "DDPE0002Shop", "optimistic")
+        + workbookWindowUnits(fc, "DDPE0003Shop", "optimistic")
+        + opt,
+      76211,
+    );
   });
 
   test("leftover 4276 is not a 1-pallet card", () => {
