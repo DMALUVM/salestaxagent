@@ -28,8 +28,9 @@ describe("SKU table default column set", () => {
     ]);
     assert.equal(labels.includes("Reserved"), false);
     assert.equal(labels.includes("Unfulfillable"), false);
-    assert.equal(SKU_TABLE_COLUMNS.some((c) => c.key === "fba_reserved"), false);
-    assert.equal(SKU_TABLE_COLUMNS.some((c) => c.key === "fba_unfulfillable"), false);
+    const keys = SKU_TABLE_COLUMNS.map((c) => c.key as string);
+    assert.equal(keys.includes("fba_reserved"), false);
+    assert.equal(keys.includes("fba_unfulfillable"), false);
     assert.equal(
       SKU_TABLE_COLUMNS.some((c) => /expired|inventory.?age/i.test(c.key) || /expired|age/i.test(c.label)),
       false,
