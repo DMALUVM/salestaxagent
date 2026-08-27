@@ -7,12 +7,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { InventoryLeadtimeSummary, InventorySettings, InventorySnapshot } from "@/lib/types";
 import {
+  AUGUST_HOP_DESTINATION,
+  AUGUST_HOP_LABEL,
   FAMILY_FBA_CAP_OCT_DEC,
   FAMILY_FBA_CAP_PEAK,
   FBA_INBOUND_PREFERRED,
   LIP_BALM_SKUS,
   OPTIMISTIC_AWD_ON_HAND_TARGETS,
   OPTIMISTIC_AWD_TARGET_CAP,
+  PALLET_MAX_UNITS,
+  palletPartialMinUnits,
   buildMonthViewEntries,
   buildSeptemberPlan,
   familyFbaCapForMonth,
@@ -230,7 +234,9 @@ export function HolidayShipPlan({
       <div>
         <p className="text-sm font-medium mb-2">Month cards</p>
         <p className="text-[11px] text-muted-foreground mb-3">
-          Sept = FBA and AWD. Oct / Nov / Dec = mainly single-SKU AWD. Each AWD card ≥9,500. August mixed TBD.
+          Sept = FBA and AWD. Oct / Nov / Dec = mainly single-SKU AWD (up to 2/month).
+          Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
+          {" "}August hop is Marpac→Tulsa, mix TBD.
         </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {entries
@@ -261,14 +267,18 @@ function MonthCard({
   augustQty: Record<string, string>;
   setAugust: (sku: string, value: string) => void;
 }) {
-  const destLabel = entry.destination === "3pl_fba"
-    ? "3PL→FBA"
-    : entry.destination === "awd"
-      ? "single-SKU AWD"
-      : entry.awaitingAugustTotals
-        ? "August mixed TBD"
-        : null;
-  const isAug = entry.month.endsWith("-08") || entry.awaitingAugustTotals;
+  const destLabel = entry.hopLabel
+    || (entry.destination === "3pl_fba"
+      ? "3PL→FBA"
+      : entry.destination === "awd"
+        ? "single-SKU AWD"
+        : entry.destination === AUGUST_HOP_DESTINATION || entry.awaitingAugustTotals
+          ? AUGUST_HOP_LABEL
+          : null);
+  const isAug = entry.month.endsWith("-08")
+    || entry.destination === AUGUST_HOP_DESTINATION
+    || entry.awaitingAugustTotals;
+  const partialMin = palletPartialMinUnits();
 
   return (
     <div
@@ -287,7 +297,7 @@ function MonthCard({
       {isAug && entry.units === 0 ? (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            August mixed TBD — do not invent a mix.
+            Marpac→Tulsa · mix TBD — do not invent a mix.
           </p>
           <div className="grid grid-cols-2 gap-1.5">
             {LIP_BALM_SKUS.map((sku) => (
@@ -326,7 +336,7 @@ function MonthCard({
                 {entry.hasPartial && (entry.fullPallets ?? 0) > 0
                   ? `${entry.fullPallets} full + 1 partial (${fmt(entry.partialUnits ?? 0)})`
                   : entry.hasPartial
-                    ? `partial ≥9,500`
+                    ? `partial ≥${fmt(partialMin)}`
                     : `${entry.fullPallets ?? entry.pallets} full pallet`}
               </span>
             </div>
@@ -334,8 +344,8 @@ function MonthCard({
             <p className="text-xs text-muted-foreground">Held leftover — not a card</p>
           )}
           <SkuLines mix={entry.mix} />
-          {entry.destination === "awd" && entry.units > 0 && entry.units < 9_500 && (
-            <p className="text-[10px] text-amber-600 mt-1">AWD cards must be ≥9,500</p>
+          {entry.destination === "awd" && entry.units > 0 && entry.units < partialMin && (
+            <p className="text-[10px] text-amber-600 mt-1">AWD cards must be ≥{fmt(partialMin)}</p>
           )}
         </>
       )}

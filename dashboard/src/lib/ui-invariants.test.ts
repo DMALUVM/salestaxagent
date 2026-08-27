@@ -52,6 +52,7 @@ describe("pallet planner ship view", () => {
   test("pallets page keeps only the ship plan, not cover-chrome", () => {
     const page = src("src/app/inventory/pallets/page.tsx");
     const ship = src("src/components/inventory/HolidayShipPlan.tsx");
+    const model = src("src/lib/pallet-planner-model.ts");
     const both = page + "\n" + ship;
     assert.match(page, /HolidayShipPlan/);
     assert.match(ship, /NEXT HOP/);
@@ -59,7 +60,11 @@ describe("pallet planner ship view", () => {
     assert.match(ship, /Tulsa hold/);
     assert.match(ship, /AWD high water/);
     assert.match(ship, /FBA cap vs on-hand/);
-    assert.match(ship, /August mixed TBD/);
+    assert.match(ship, /Marpac→Tulsa/);
+    assert.match(model, /Marpac→Tulsa/);
+    assert.match(ship, /mix TBD/);
+    assert.doesNotMatch(ship, /3PL→Marpac/);
+    assert.doesNotMatch(model, /3PL→Marpac/);
     assert.doesNotMatch(both, /FBA Cover Alerts/);
     assert.doesNotMatch(both, /FBA Cover Projection/);
     assert.doesNotMatch(both, /Cover Shortfall/);

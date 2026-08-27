@@ -5,6 +5,9 @@ from datetime import date
 
 from src.inventory.pallet_planner import (
     AMAZON_IN_BY_DEFAULT,
+    AWD_CARDS_PER_MONTH_MAX,
+    AUGUST_HOP_DESTINATION,
+    AUGUST_HOP_LABEL,
     LIP_BALM_SKUS,
     PALLET_MAX_UNITS,
     PEAK_END_DEFAULT,
@@ -18,6 +21,7 @@ from src.inventory.pallet_planner import (
     CARTON_20X16X14_UNITS,
     allocate_single_sku_awd_pallets,
     allocate_3pl_fba_send,
+    assign_awd_cards_to_months,
     awd_covers_off_fba_reserve,
     build_month_view_entries,
     build_september_plan,
@@ -169,6 +173,7 @@ def test_august_tbd_does_not_invent_mix():
     assert plan["august_tbd"] is True
     assert all(qty == 0 for qty in plan["sku_august"].values())
     assert plan["first_action"]["august_is_mixed"] is True
+    assert plan["first_action"]["august_hop"] == AUGUST_HOP_LABEL
     assert plan["first_action"]["after_august_single_sku_awd"] is True
 
 
@@ -225,9 +230,10 @@ def test_sept_ship_dates():
     assert holiday_gate_last_3pl_fba(35).isoformat() == "2026-09-26"
 
 
-def test_partial_threshold_still_9500():
+def test_partial_threshold_is_8775():
     from src.inventory.pallet_planner import pallet_partial_min_units
-    assert pallet_partial_min_units(PALLET_MAX_UNITS) == 9_500
+    assert PALLET_MAX_UNITS == 17_550
+    assert pallet_partial_min_units(PALLET_MAX_UNITS) == 8_775
 
 
 def _locked_month_view():
@@ -279,5 +285,45 @@ def test_no_sub_half_awd_card():
     _plan, entries = _locked_month_view()
     for e in entries:
         if e["destination"] == "awd" and e["units"] > 0:
-            assert e["units"] >= 9_500
+            assert e["units"] >= 8_775
             assert e["is_pallet_card"] is True
+            if not e.get("has_partial"):
+                assert e["units"] == 17_550 or (e.get("full_pallets") or 0) >= 1
+
+
+def test_august_hop_is_marpac_tulsa_not_3pl():
+    plan, entries = _locked_month_view()
+    assert plan["first_action"]["august_hop"] == "Marpac→Tulsa"
+    aug = [e for e in entries if e["month"].endswith("-08")]
+    assert aug, "August card missing"
+    card = aug[0]
+    assert card["destination"] == AUGUST_HOP_DESTINATION == "marpac_tulsa"
+    assert card["hop_label"] == AUGUST_HOP_LABEL == "Marpac→Tulsa"
+    assert card["awaiting_august_totals"] is True
+    assert card["units"] == 0
+    assert card["mix"] == {}
+    assert card["destination"] != "3pl_fba"
+    assert card["hop_label"] != "3PL→FBA"
+    assert "Marpac" in card["hop_label"]
+    assert "Tulsa" in card["hop_label"]
+    assert "3PL→Marpac" not in card["hop_label"]
+
+
+def test_awd_allows_two_pallets_per_month_not_one():
+    assert AWD_CARDS_PER_MONTH_MAX == 2
+    cards = [
+        {"partial": False, "total_units": 17_550},
+        {"partial": False, "total_units": 17_550},
+        {"partial": False, "total_units": 17_550},
+        {"partial": True, "total_units": 8_775},
+        {"partial": True, "total_units": 10_000},
+    ]
+    assigned = assign_awd_cards_to_months(
+        cards, ["2026-09", "2026-10", "2026-11", "2026-12"],
+    )
+    counts = [len(assigned[m]) for m in ("2026-09", "2026-10", "2026-11", "2026-12")]
+    assert sum(counts) == 5
+    assert max(counts) == 2
+    assert max(counts) <= AWD_CARDS_PER_MONTH_MAX
+    assert assigned["2026-09"]  # earliest month can take 2
+    assert len(assigned["2026-09"]) == 2

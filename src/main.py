@@ -4155,7 +4155,7 @@ def plan_sku_cmd(sku, until_date, scenario):
 @cli.command("pallet-plan")
 @click.option("--scenario", default="correction_factor",
               type=click.Choice(["correction_factor", "actual_2025", "optimistic"]))
-@click.option("--pallet-max", default=19000, help="Units per pallet")
+@click.option("--pallet-max", default=17550, help="Units per Amazon pallet (65×270)")
 @click.option("--target", default="2026-10-31", help="In-Amazon-by date")
 @click.option("--no-3pl", is_flag=True, help="Exclude 3PL from supply")
 @click.option("--no-awd", is_flag=True, help="Exclude AWD from supply")
