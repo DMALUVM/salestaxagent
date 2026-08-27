@@ -7,8 +7,8 @@ Also projects weekly FBA on-hand through the holiday season and flags
 any week where forward cover drops below the 60-day service target.
 
 Config defaults:
-  pallet_max_units = 19,000
-  amazon_in_by = 2026-10-31
+    pallet_max_units = 17,550  (65 × 270)
+    amazon_in_by = 2026-10-31
   scenario = correction_factor
   include_3pl_transfer = True  (3PL stock counts if transferred by target)
   include_awd = True
@@ -28,11 +28,17 @@ from src.rules import AMAZON_PULSE_SOURCE
 LIP_BALM_SKUS = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"]
 ASSORTED_SKU = "DDPE0004Shop"
 
-# Marpac pallet: 19,000 cartons / 270 per 13×11×9 box.
-# Two full + one ≥50% partial is fine. Under half is merge-or-hold, not a card.
-PALLET_MAX_UNITS = 19_000
-PALLET_PARTIAL_MIN_RATIO = 0.5
+# Amazon pallet: 65 cases of 13×11×9 (270 units) = 17,550. Not 19,000.
+# AWD "full pallet" cards use 17,550. Two full + one ≥50% partial is fine.
+# Under half (~8,775) is merge-or-hold — never a ~1k leftover card.
+AMAZON_CASES_PER_PALLET = 65
 CARTONS_PER_BOX = 270
+PALLET_MAX_UNITS = AMAZON_CASES_PER_PALLET * CARTONS_PER_BOX  # 17,550
+PALLET_PARTIAL_MIN_RATIO = 0.5
+# About 2 AWD pallets/month is the max. Not limited to 1.
+AWD_CARDS_PER_MONTH_MAX = 2
+AUGUST_HOP_LABEL = "Marpac→Tulsa"
+AUGUST_HOP_DESTINATION = "marpac_tulsa"
 AMAZON_IN_BY_DEFAULT = date(2026, 10, 31)
 DEFAULT_RECEIVING_DAYS = 18
 # Pallet-planner YoY window: each SKU's own May–Jul Amazon sales_by_sku.
@@ -898,8 +904,8 @@ def pallet_partial_min_units(pallet_max: int = PALLET_MAX_UNITS) -> int:
 def pallet_fill(units: int, pallet_max: int = PALLET_MAX_UNITS) -> dict:
     """Full pallets plus an optional ≥50% partial. Under half is held, not a card.
 
-    Two full + one partial is fine. Do not require even 19,000 cards.
-    A leftover like 4,276 (23%) is merge-or-hold — never its own pallet.
+    Two full + one partial is fine. Do not require even 17,550 cards.
+    A leftover like 1,000 or 4,276 is merge-or-hold — never its own pallet.
     """
     units = max(0, int(units))
     pallet_max = int(pallet_max)
@@ -1214,6 +1220,7 @@ def build_september_plan(
             "sku_waits_on_august": send_plan["waits_on_august"],
             "waits_on_august": all(qty <= 0 for qty in sku_august_out.values()),
             "august_is_mixed": True,
+            "august_hop": AUGUST_HOP_LABEL,
             "after_august_single_sku_awd": True,
         },
         "path": "mixed_fba_cap_then_single_sku_awd_surge",
@@ -1366,7 +1373,7 @@ def _load_amazon_lip_sales(skus: list[str]) -> list[dict]:
 
 
 def build_pallet_plan(
-    pallet_max: int = 19_000,
+    pallet_max: int = PALLET_MAX_UNITS,
     amazon_in_by: str = "2026-10-31",
     scenario: str = "correction_factor",
     include_3pl: bool = True,
@@ -1839,13 +1846,27 @@ def _month_label(m: str) -> str:
 AWD_SCHEDULE_MONTHS = ("2026-09", "2026-10", "2026-11", "2026-12")
 
 
+def hop_label(destination: str, *, awaiting_august: bool = False) -> str:
+    """Visible hop on a month card. August is Marpac→Tulsa, mix TBD."""
+    if destination == "3pl_fba":
+        return "3PL→FBA"
+    if destination == "awd":
+        return "single-SKU AWD"
+    if destination == AUGUST_HOP_DESTINATION or awaiting_august:
+        return AUGUST_HOP_LABEL
+    if destination == "fba_then_awd":
+        return "remaining FBA then AWD"
+    return ""
+
+
 def assign_awd_cards_to_months(
     cards: list[dict],
     production_months: list[str],
 ) -> dict[str, list[dict]]:
-    """One legal single-SKU AWD card per Sep–Dec month when possible.
+    """Up to two legal single-SKU AWD cards per Sep–Dec month.
 
-    Full pallets ship first (earlier months). Under-half leftovers are
+    Not limited to 1 pallet/month — about 2/month is the max. Full
+    pallets ship first (earlier months). Under-half leftovers are
     never cards — ``allocate_single_sku_awd_pallets`` already held them.
     """
     months = [m for m in AWD_SCHEDULE_MONTHS if m in production_months]
@@ -1859,12 +1880,23 @@ def assign_awd_cards_to_months(
         key=lambda c: (bool(c.get("partial")), -int(c.get("total_units") or 0)),
     )
     out: dict[str, list[dict]] = {m: [] for m in months}
-    for month, card in zip(months, ordered):
-        out[month].append(card)
-    extras_month = months[0] if months else None
-    for card in ordered[len(months):]:
-        if extras_month:
-            out[extras_month].append(card)
+    i = 0
+    # First pass: one card per month so later months still ship.
+    for month in months:
+        if i >= len(ordered):
+            break
+        out[month].append(ordered[i])
+        i += 1
+    # Second pass: a second card on earlier months. About 2/month is the max.
+    for month in months:
+        if i >= len(ordered):
+            break
+        if len(out[month]) < AWD_CARDS_PER_MONTH_MAX:
+            out[month].append(ordered[i])
+            i += 1
+    extras_month = months[-1] if months else None
+    if extras_month and i < len(ordered):
+        out[extras_month].extend(ordered[i:])
     return out
 
 
@@ -1883,9 +1915,10 @@ def build_month_view_entries(
 ) -> list[dict]:
     """Rebuild Aug–Dec cards. Do not skip September.
 
-    August = mixed TBD (never invent). September = 3PL→FBA first hop,
-    then Marpac remaining-FBA (if any) then single-SKU AWD. Oct–Dec =
-    remaining single-SKU AWD cards. Not a zero Sept. Not FBA-only.
+    August = Marpac→Tulsa, mix TBD (never invent). September = 3PL→FBA
+    first hop, then Marpac remaining-FBA (if any) then single-SKU AWD.
+    Oct–Dec = remaining single-SKU AWD cards (up to 2/month). Not a
+    zero Sept. Not FBA-only.
     """
     wanted = target_skus or LIP_BALM_SKUS
     amazon_in_by = amazon_in_by or AMAZON_IN_BY_DEFAULT
@@ -1988,6 +2021,7 @@ def build_month_view_entries(
             "mix": cleaned,
             "mix_locked": False,
             "destination": destination,
+            "hop_label": hop_label(destination, awaiting_august=awaiting_august),
             "single_sku": single_sku,
             "track": track,
             "next_hop": next_hop,
@@ -2005,7 +2039,7 @@ def build_month_view_entries(
             mix = {sku: int(sku_august.get(sku, 0) or 0) for sku in wanted}
             mix = {sku: qty for sku, qty in mix.items() if qty > 0}
             entries.append(_entry(
-                month, mix, "mixed_tulsa_fba",
+                month, mix, AUGUST_HOP_DESTINATION,
                 single_sku=False, track="mixed_august",
                 awaiting_august=bool(sept.get("august_tbd", True)) and not mix,
             ))
@@ -2097,7 +2131,7 @@ def _holiday_demand_by_sku(
 
 
 def build_manufacturer_headsup(
-    pallet_max: int = 19_000,
+    pallet_max: int = PALLET_MAX_UNITS,
     month_weights: tuple[float, ...] = (0.25, 0.35, 0.40),
     include_jan: bool = True,
     tpl_offsets_production: bool = False,
@@ -2540,7 +2574,8 @@ def format_manufacturer_sheet(headsup: dict) -> str:
             "3pl_fba": "3PL→FBA tonight — first hop",
             "awd": "single-SKU AWD",
             "fba_then_awd": "remaining FBA then AWD",
-            "mixed_tulsa_fba": "August mixed TBD",
+            "mixed_tulsa_fba": AUGUST_HOP_LABEL,
+            AUGUST_HOP_DESTINATION: AUGUST_HOP_LABEL,
         }.get(dest, role_note)
         a(f"  {entry['month_label']}  —  {entry['status']}  ({dest_note})")
         if entry["units"] == 0:

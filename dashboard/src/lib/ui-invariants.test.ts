@@ -59,7 +59,9 @@ describe("pallet planner ship view", () => {
     assert.match(ship, /Tulsa hold/);
     assert.match(ship, /AWD high water/);
     assert.match(ship, /FBA cap vs on-hand/);
-    assert.match(ship, /August mixed TBD/);
+    assert.match(ship, /Marpac→Tulsa/);
+    assert.match(ship, /mix TBD/);
+    assert.doesNotMatch(ship, /3PL→Marpac/);
     assert.doesNotMatch(both, /FBA Cover Alerts/);
     assert.doesNotMatch(both, /FBA Cover Projection/);
     assert.doesNotMatch(both, /Cover Shortfall/);

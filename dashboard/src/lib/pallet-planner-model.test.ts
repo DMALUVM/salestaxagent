@@ -7,6 +7,11 @@ import {
   ASSORTED_SKU,
   DEMAND_METHOD,
   PALLET_MAX_UNITS,
+  AMAZON_CASES_PER_PALLET,
+  AUGUST_HOP_DESTINATION,
+  AUGUST_HOP_LABEL,
+  AWD_CARDS_PER_MONTH_MAX,
+  assignAwdCardsToMonths,
   palletCardSizes,
   palletFill,
   palletPartialMinUnits,
@@ -284,21 +289,40 @@ describe("pallet planner model", () => {
     assert.deepEqual(palletCardSizes(fill), []);
   });
 
+  test("Amazon pallet is 17,550 (65×270), not 19,000; min partial is 8,775", () => {
+    assert.equal(AMAZON_CASES_PER_PALLET, 65);
+    assert.equal(PALLET_MAX_UNITS, 17_550);
+    assert.equal(PALLET_MAX_UNITS, 65 * 270);
+    assert.notEqual(PALLET_MAX_UNITS, 19_000);
+    assert.equal(palletPartialMinUnits(), 8_775);
+    const full = palletFill(17_550, PALLET_MAX_UNITS);
+    assert.equal(full.fullPallets, 1);
+    assert.equal(full.hasPartial, false);
+    assert.deepEqual(palletCardSizes(full), [17_550]);
+    const leftover1k = palletFill(1_000, PALLET_MAX_UNITS);
+    assert.equal(leftover1k.mergeOrHold, true);
+    assert.equal(leftover1k.isPalletCard, false);
+    const fullPlus1k = palletFill(17_550 + 1_000, PALLET_MAX_UNITS);
+    assert.equal(fullPlus1k.fullPallets, 1);
+    assert.equal(fullPlus1k.heldUnits, 1_000);
+    assert.deepEqual(palletCardSizes(fullPlus1k), [17_550]);
+  });
+
   test("half-pallet leftover is a partial card; two full + one partial is fine", () => {
-    assert.equal(palletPartialMinUnits(), 9_500);
-    const half = palletFill(9_500, PALLET_MAX_UNITS);
+    assert.equal(palletPartialMinUnits(), 8_775);
+    const half = palletFill(8_775, PALLET_MAX_UNITS);
     assert.equal(half.hasPartial, true);
     assert.equal(half.palletCards, 1);
     assert.equal(half.heldUnits, 0);
-    assert.deepEqual(palletCardSizes(half), [9_500]);
-    const under = palletFill(9_499, PALLET_MAX_UNITS);
+    assert.deepEqual(palletCardSizes(half), [8_775]);
+    const under = palletFill(8_774, PALLET_MAX_UNITS);
     assert.equal(under.mergeOrHold, true);
     assert.equal(under.isPalletCard, false);
-    const twoPlus = palletFill(2 * PALLET_MAX_UNITS + 9_500, PALLET_MAX_UNITS);
+    const twoPlus = palletFill(2 * PALLET_MAX_UNITS + 8_775, PALLET_MAX_UNITS);
     assert.equal(twoPlus.fullPallets, 2);
     assert.equal(twoPlus.hasPartial, true);
     assert.equal(twoPlus.palletCards, 3);
-    assert.deepEqual(palletCardSizes(twoPlus), [19_000, 19_000, 9_500]);
+    assert.deepEqual(palletCardSizes(twoPlus), [17_550, 17_550, 8_775]);
   });
 
   test("November inbound misses the 2026-10-31 gate", () => {
@@ -343,6 +367,7 @@ describe("pallet planner model", () => {
     assert.equal(plan.tplToFba.DDPE0002Shop, 2700);
     assert.equal(plan.tplToFba.DDPE0001Shop, 0);
     assert.equal(plan.firstAction.tplToFbaTotal, 16200);
+    assert.equal(plan.firstAction.augustHop, AUGUST_HOP_LABEL);
     assert.equal(plan.tplToAwd.DDPE0002Shop, 0);
     assert.equal(plan.awdLoaded, false);
     assert.ok(plan.awdPallets.length > 0);
@@ -388,8 +413,11 @@ describe("pallet planner model", () => {
     }
     for (const e of entries) {
       if (e.destination === "awd" && e.units > 0) {
-        assert.ok(e.units >= 9_500);
+        assert.ok(e.units >= 8_775);
         assert.equal(e.isPalletCard, true);
+        if (!e.hasPartial) {
+          assert.ok(e.units === 17_550 || (e.fullPallets ?? 0) >= 1);
+        }
       }
     }
   });
@@ -433,5 +461,45 @@ describe("pallet planner model", () => {
     ]);
     assert.equal(rows.find((r) => r.sku === "DDPE0001Shop")?.pulled_at, "2026-08-26T23:35:59Z");
     assert.equal(rows.find((r) => r.sku === "DDPE0002Shop")?.pulled_at, "2026-08-17T10:00:00Z");
+  });
+
+  test("August hop is Marpac→Tulsa, mix TBD, not 3PL→FBA", () => {
+    const fba = { DDPE0001Shop: 3248, DDPE0002Shop: 2079, DDPE0003Shop: 3966, DDPE0004Shop: 3603 };
+    const inbound = { DDPE0001Shop: 0, DDPE0002Shop: 1080, DDPE0003Shop: 637, DDPE0004Shop: 270 };
+    const tpl = { DDPE0001Shop: 1594, DDPE0002Shop: 6291, DDPE0003Shop: 6426, DDPE0004Shop: 9177 };
+    const plan = buildSeptemberPlan(fba, inbound, tpl, {}, {}, { DDPE0002Shop: 540 });
+    assert.equal(plan.firstAction.augustHop, "Marpac→Tulsa");
+    const horizon = productionHorizonMonths(new Date(2026, 7, 26), AMAZON_IN_BY, 35);
+    const entries = buildMonthViewEntries({
+      productionMonths: horizon.map((h) => h.month),
+      horizonByMonth: Object.fromEntries(horizon.map((h) => [h.month, h])),
+      sept: plan,
+    });
+    const aug = entries.find((e) => e.month.endsWith("-08"));
+    assert.ok(aug, "August card missing");
+    assert.equal(aug?.destination, AUGUST_HOP_DESTINATION);
+    assert.equal(aug?.hopLabel, AUGUST_HOP_LABEL);
+    assert.equal(aug?.awaitingAugustTotals, true);
+    assert.equal(aug?.units, 0);
+    assert.deepEqual(aug?.mix, {});
+    assert.notEqual(aug?.destination, "3pl_fba");
+    assert.notEqual(aug?.hopLabel, "3PL→FBA");
+    assert.match(aug?.hopLabel ?? "", /Marpac→Tulsa/);
+  });
+
+  test("AWD months allow 2 cards, not capped at 1", () => {
+    assert.equal(AWD_CARDS_PER_MONTH_MAX, 2);
+    const cards = [
+      { partial: false, totalUnits: 17_550 },
+      { partial: false, totalUnits: 17_550 },
+      { partial: false, totalUnits: 17_550 },
+      { partial: true, totalUnits: 8_775 },
+      { partial: true, totalUnits: 10_000 },
+    ];
+    const assigned = assignAwdCardsToMonths(cards, ["2026-09", "2026-10", "2026-11", "2026-12"]);
+    const counts = ["2026-09", "2026-10", "2026-11", "2026-12"].map((m) => assigned[m].length);
+    assert.equal(counts.reduce((a, b) => a + b, 0), 5);
+    assert.equal(Math.max(...counts), 2);
+    assert.equal(assigned["2026-09"].length, 2);
   });
 });

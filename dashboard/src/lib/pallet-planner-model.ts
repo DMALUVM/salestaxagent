@@ -3,9 +3,15 @@
  * Mirrors src/inventory/pallet_planner.py. Mix stays unlocked.
  */
 
-export const PALLET_MAX_UNITS = 19_000;
-export const PALLET_PARTIAL_MIN_RATIO = 0.5;
+/** Amazon pallet: 65 cases of 13×11×9 (270 units) = 17,550. Not 19,000. */
+export const AMAZON_CASES_PER_PALLET = 65;
 export const CARTONS_PER_BOX = 270;
+export const PALLET_MAX_UNITS = AMAZON_CASES_PER_PALLET * CARTONS_PER_BOX;
+export const PALLET_PARTIAL_MIN_RATIO = 0.5;
+/** About 2 AWD pallets/month is the max. Not limited to 1. */
+export const AWD_CARDS_PER_MONTH_MAX = 2;
+export const AUGUST_HOP_LABEL = "Marpac→Tulsa";
+export const AUGUST_HOP_DESTINATION = "marpac_tulsa";
 export const AMAZON_IN_BY = "2026-10-31";
 export const DEFAULT_RECEIVING_DAYS = 18;
 export const TULSA_LIP_FLOOR_UNITS = 5_000;
@@ -1000,6 +1006,7 @@ export function buildSeptemberPlan(
       skuWaitsOnAugust: sendPlan.waitsOnAugust,
       waitsOnAugust: skus.every((s) => skuAugustOut[s] <= 0),
       augustIsMixed: true,
+      augustHop: AUGUST_HOP_LABEL,
       afterAugustSingleSkuAwd: true,
     },
     twoTracks: true,
@@ -1020,6 +1027,14 @@ function monthViewLabel(month: string): string {
   return `${MONTH_LABELS[Number(mo)] ?? month} ${y}`;
 }
 
+export function hopLabel(destination: string, awaitingAugust = false): string {
+  if (destination === "3pl_fba") return "3PL→FBA";
+  if (destination === "awd") return "single-SKU AWD";
+  if (destination === AUGUST_HOP_DESTINATION || awaitingAugust) return AUGUST_HOP_LABEL;
+  if (destination === "fba_then_awd") return "remaining FBA then AWD";
+  return "";
+}
+
 export function assignAwdCardsToMonths<T extends { partial?: boolean; totalUnits: number }>(
   cards: T[],
   productionMonths: string[],
@@ -1033,12 +1048,21 @@ export function assignAwdCardsToMonths<T extends { partial?: boolean; totalUnits
     return b.totalUnits - a.totalUnits;
   });
   const out: Record<string, T[]> = Object.fromEntries(months.map((m) => [m, []]));
-  months.forEach((m, i) => {
-    if (ordered[i]) out[m].push(ordered[i]);
-  });
-  for (const card of ordered.slice(months.length)) {
-    if (months[0]) out[months[0]].push(card);
+  let i = 0;
+  for (const month of months) {
+    if (i >= ordered.length) break;
+    out[month].push(ordered[i]);
+    i += 1;
   }
+  for (const month of months) {
+    if (i >= ordered.length) break;
+    if ((out[month]?.length ?? 0) < AWD_CARDS_PER_MONTH_MAX) {
+      out[month].push(ordered[i]);
+      i += 1;
+    }
+  }
+  const extras = months[months.length - 1];
+  if (extras && i < ordered.length) out[extras].push(...ordered.slice(i));
   return out;
 }
 
@@ -1060,6 +1084,7 @@ export type MonthViewEntry = {
   units: number;
   mix: Record<string, number>;
   destination: string;
+  hopLabel: string;
   singleSku: boolean;
   track: string;
   nextHop: boolean;
@@ -1165,6 +1190,7 @@ export function buildMonthViewEntries(opts: {
       units: total,
       mix,
       destination,
+      hopLabel: hopLabel(destination, !!extra.awaitingAugust),
       singleSku: extra.singleSku,
       track: extra.track,
       nextHop: !!extra.nextHop,
@@ -1182,7 +1208,7 @@ export function buildMonthViewEntries(opts: {
         const qty = Number(skuAugust[sku] ?? 0);
         if (qty > 0) mix[sku] = qty;
       }
-      entries.push(entry(month, mix, "mixed_tulsa_fba", {
+      entries.push(entry(month, mix, AUGUST_HOP_DESTINATION, {
         singleSku: false, track: "mixed_august",
         awaitingAugust: !!sept.augustTbd && Object.keys(mix).length === 0,
       }));
