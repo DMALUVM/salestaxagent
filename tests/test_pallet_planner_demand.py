@@ -252,6 +252,9 @@ def test_leftover_4276_is_not_a_one_pallet_card():
     fill = pallet_fill(4276, PALLET_MAX_UNITS)
     assert fill["full_pallets"] == 0
     assert fill["leftover_units"] == 4276
+    assert fill["held_units"] == 4276
+    assert fill["has_partial"] is False
+    assert fill["merge_or_hold"] is True
     assert fill["is_pallet_card"] is False
     assert 0.22 < fill["fill_pct"] < 0.24
 
@@ -260,6 +263,9 @@ def test_full_pallet_plus_remainder_uses_floor():
     fill = pallet_fill(19_000 + 4276, PALLET_MAX_UNITS)
     assert fill["full_pallets"] == 1
     assert fill["leftover_units"] == 4276
+    assert fill["held_units"] == 4276
+    assert fill["has_partial"] is False
+    assert fill["pallet_cards"] == 1
     assert fill["is_pallet_card"] is True
 
 

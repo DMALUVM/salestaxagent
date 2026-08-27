@@ -29,7 +29,9 @@ LIP_BALM_SKUS = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"]
 ASSORTED_SKU = "DDPE0004Shop"
 
 # Marpac pallet: 19,000 cartons / 270 per 13×11×9 box.
+# Two full + one ≥50% partial is fine. Under half is merge-or-hold, not a card.
 PALLET_MAX_UNITS = 19_000
+PALLET_PARTIAL_MIN_RATIO = 0.5
 CARTONS_PER_BOX = 270
 AMAZON_IN_BY_DEFAULT = date(2026, 10, 31)
 DEFAULT_RECEIVING_DAYS = 18
@@ -552,20 +554,85 @@ def production_horizon_months(
     return out
 
 
+def pallet_partial_min_units(pallet_max: int = PALLET_MAX_UNITS) -> int:
+    """Smallest leftover that may render as its own (partial) pallet card."""
+    return int(math.ceil(max(int(pallet_max), 0) * PALLET_PARTIAL_MIN_RATIO))
+
+
 def pallet_fill(units: int, pallet_max: int = PALLET_MAX_UNITS) -> dict:
-    """Full Marpac pallets vs leftover remainder. Leftover is never a 1-pallet card."""
+    """Full pallets plus an optional ≥50% partial. Under half is held, not a card.
+
+    Two full + one partial is fine. Do not require even 19,000 cards.
+    A leftover like 4,276 (23%) is merge-or-hold — never its own pallet.
+    """
     units = max(0, int(units))
     pallet_max = int(pallet_max)
     full = units // pallet_max if pallet_max > 0 else 0
     leftover = units % pallet_max if pallet_max > 0 else units
-    fill_pct = (units / pallet_max) if pallet_max > 0 else 0.0
+    partial_min = pallet_partial_min_units(pallet_max) if pallet_max > 0 else 0
+    leftover_pct = (leftover / pallet_max) if pallet_max > 0 else 0.0
+    has_partial = leftover >= partial_min > 0
+    partial_units = leftover if has_partial else 0
+    held_units = 0 if has_partial else leftover
+    pallet_cards = full + (1 if has_partial else 0)
     return {
         "units": units,
         "full_pallets": full,
         "leftover_units": leftover,
-        "fill_pct": fill_pct,
-        "is_pallet_card": units >= pallet_max,
+        "leftover_pct": leftover_pct,
+        "fill_pct": leftover_pct,
+        "partial_min_units": partial_min,
+        "has_partial": has_partial,
+        "partial_units": partial_units,
+        "held_units": held_units,
+        "pallet_cards": pallet_cards,
+        "is_pallet_card": pallet_cards > 0,
+        "merge_or_hold": (not has_partial) and leftover > 0,
     }
+
+
+def pallet_card_sizes(
+    fill: dict,
+    pallet_max: int = PALLET_MAX_UNITS,
+) -> list[int]:
+    """Card sizes to emit: N full, then one partial if leftover ≥50%."""
+    sizes = [int(pallet_max)] * int(fill.get("full_pallets") or 0)
+    if fill.get("has_partial") and int(fill.get("partial_units") or 0) > 0:
+        sizes.append(int(fill["partial_units"]))
+    return sizes
+
+
+def allocate_pallet_cards(
+    remaining_gaps: dict[str, int],
+    skus: list[str],
+    pallet_max: int = PALLET_MAX_UNITS,
+) -> tuple[list[dict], dict[str, int], dict]:
+    """Build pallet cards from SKU gaps. Mix is indicative, not locked."""
+    remaining = {sku: max(int(remaining_gaps.get(sku, 0) or 0), 0) for sku in skus}
+    fill = pallet_fill(sum(remaining.values()), pallet_max)
+    pallets: list[dict] = []
+    for i, size in enumerate(pallet_card_sizes(fill, pallet_max), start=1):
+        total_remaining = sum(remaining.values())
+        if total_remaining <= 0:
+            break
+        mix: dict[str, int] = {}
+        for sku in skus:
+            if remaining[sku] <= 0:
+                continue
+            share = remaining[sku] / total_remaining
+            alloc = min(int(round(size * share)), remaining[sku])
+            if alloc > 0:
+                mix[sku] = alloc
+                remaining[sku] -= alloc
+        pallets.append({
+            "pallet_num": i,
+            "mix": mix,
+            "total_units": sum(mix.values()),
+            "locked": False,
+            "partial": size < pallet_max,
+        })
+    leftover_mix = {sku: qty for sku, qty in remaining.items() if qty > 0}
+    return pallets, leftover_mix, fill
 
 
 def last_ship_date(
@@ -822,41 +889,12 @@ def build_pallet_plan(
         })
     total_gap += tulsa["top_up"]
 
-    # Full pallets only — leftover remainder is not a 1-pallet card
-    fill = pallet_fill(total_gap, pallet_max)
-    num_pallets = fill["full_pallets"]
-
-    pallets: list[dict] = []
+    # Full pallets + optional ≥50% partial. Under half is held, not a card.
     remaining_gaps = {p["sku"]: p["gap"] for p in sku_plans}
-
-    for i in range(num_pallets):
-        total_remaining = sum(remaining_gaps.values())
-        if total_remaining <= 0:
-            break
-
-        pallet_units = min(pallet_max, total_remaining)
-        if pallet_units < pallet_max:
-            break
-        mix: dict[str, int] = {}
-
-        for sku in target_skus:
-            if remaining_gaps[sku] <= 0:
-                continue
-            # Indicative share only — mix is not locked
-            share = remaining_gaps[sku] / total_remaining
-            alloc = min(round(pallet_units * share), remaining_gaps[sku])
-            if alloc > 0:
-                mix[sku] = alloc
-                remaining_gaps[sku] -= alloc
-
-        pallets.append({
-            "pallet_num": i + 1,
-            "mix": mix,
-            "total_units": sum(mix.values()),
-            "locked": False,
-        })
-
-    leftover_mix = {sku: qty for sku, qty in remaining_gaps.items() if qty > 0}
+    pallets, leftover_mix, fill = allocate_pallet_cards(
+        remaining_gaps, target_skus, pallet_max,
+    )
+    num_pallets = fill["pallet_cards"]
 
     horizon = production_horizon_months(
         today, target_date, receiving_days,
@@ -913,15 +951,18 @@ def build_pallet_plan(
         "total_amazon_supply": sum(p["amazon_supply"] for p in sku_plans),
         "total_gap": total_gap,
         "num_pallets": num_pallets,
-        "leftover_units": fill["leftover_units"],
+        "leftover_units": fill["held_units"],
         "leftover_mix": leftover_mix,
+        "has_partial": fill["has_partial"],
+        "partial_units": fill["partial_units"],
+        "held_units": fill["held_units"],
         "pallets": pallets,
         "monthly_schedule": dict(monthly_pallets),
         "months": months_available,
         "horizon": horizon,
         "gate_months": gate_months,
         "refill_months": refill_months,
-        "units_still_short": sum(remaining_gaps.values()) + tulsa["top_up"],
+        "units_still_short": sum(leftover_mix.values()) + tulsa["top_up"],
         "yoy_by_sku": yoy_by_sku,
         "family_yoy_context_only": family_ctx,
         "tulsa_3pl": tulsa,
@@ -1240,8 +1281,9 @@ def build_manufacturer_headsup(
     Sep/Oct must be in FBA by 2026-10-31. Nov/Dec refill January cover
     and the Tulsa floor — they are not late inbound.
 
-    Mix stays unlocked (indicative shares only). Leftover < pallet_max is
-    not a 1-pallet card. Dave sends hard August totals later.
+    Mix stays unlocked (indicative shares only). Two full + one ≥50%
+    partial is fine. Under half a pallet is merge-or-hold, not a card.
+    Dave sends hard August totals later.
     """
     target_skus = skus or LIP_BALM_SKUS
     today = date.today()
@@ -1405,8 +1447,12 @@ def build_manufacturer_headsup(
                 "month_label": _month_label(month),
                 "role": role,
                 "status": "FIRM" if month in committed else "INDICATIVE",
-                "pallets": fill["full_pallets"],
+                "pallets": fill["pallet_cards"],
+                "full_pallets": fill["full_pallets"],
                 "leftover_units": fill["leftover_units"],
+                "held_units": fill["held_units"],
+                "partial_units": fill["partial_units"],
+                "has_partial": fill["has_partial"],
                 "fill_pct": fill["fill_pct"],
                 "is_pallet_card": fill["is_pallet_card"],
                 "awaiting_august_totals": is_current_month and today.month == 8,
@@ -1537,13 +1583,14 @@ def format_manufacturer_csv(headsup: dict) -> str:
     lines: list[str] = []
 
     # SKU summary section
-    lines.append("Section,SKU,SKU_Label,Holiday_Demand,FBA,Inbound,AWD,TPL,"
+    lines.append("Section,SKU,SKU_Label,Cover_Target,FBA,Inbound,AWD,TPL,"
                  "Transfer,Manufacture,Scenario")
     for scenario, key in [("sales_yoy", "sku_summary"),
                           ("actual_2025", "sku_summary_sensitivity")]:
         for s in headsup[key]:
+            cover = s.get("production_target", s["holiday_demand"])
             lines.append(
-                f"SKU_Summary,{s['sku']},{s['label']},{s['holiday_demand']},"
+                f"SKU_Summary,{s['sku']},{s['label']},{cover},"
                 f"{s['fba']},{s['inbound']},{s['awd']},{s['tpl']},"
                 f"{s['transfer']},{s['manufacture']},{scenario}"
             )
@@ -1596,10 +1643,9 @@ def format_manufacturer_sheet(headsup: dict) -> str:
         a(f"  {sku}  =  {label}")
 
     a("")
-    demand_period = "Nov + Dec + Jan" if headsup.get("include_jan") else "Nov + Dec"
     yoy = headsup.get("yoy") or {}
-    a(f"Demand period: {demand_period} "
-      f"(each SKU: 2025 same-month Amazon × that SKU's own May–Jul YoY)")
+    a("Cover target = Nov–Jan sales + peak 60d FBA + Feb tail "
+      "(not Nov–Jan sell-through alone)")
     yoy_by_sku = headsup.get("yoy_by_sku") or {}
     if yoy_by_sku:
         parts = ", ".join(
@@ -1611,6 +1657,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
           f"({yoy.get('current_year')} / {yoy.get('prior_year')} May–Jul)")
     a(f"Pallet capacity: {headsup['pallet_max']:,} cartons "
       f"({CARTONS_PER_BOX} per 13×11×9 box)")
+    a("Fill: two full + one ≥50% partial is fine. Under half is merge-or-hold, not a card.")
     a(f"FBA cover: fulfillable only · inbound already in transit (do not re-send)")
     a(f"Aug/Sep waves in Amazon FBA by: {headsup['amazon_in_by']}")
     a("Oct/Nov/Dec pallets sit at Tulsa as post-Christmas ammo — not late inbound.")
@@ -1636,15 +1683,19 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("-" * 65)
     a("PER-SKU SUMMARY (sales_yoy)")
     a("-" * 65)
-    a(f"  {'SKU':<14} {'Demand':>8} {'FBA':>7} {'Inb':>6} {'AWD':>6}"
+    a(f"  {'SKU':<14} {'Cover':>8} {'FBA':>7} {'Inb':>6} {'AWD':>6}"
       f" {'3PL':>7} {'Xfer':>7} {'Mfg':>8}")
     a(f"  {'-'*63}")
     for s in headsup["sku_summary"]:
+        cover = s.get("production_target", s["holiday_demand"])
         a(f"  {SKU_SHORT_MAP.get(s['sku'], s['sku']):<14}"
-          f" {s['holiday_demand']:>8,} {s['fba']:>7,} {s['inbound']:>6,}"
+          f" {cover:>8,} {s['fba']:>7,} {s['inbound']:>6,}"
           f" {s['awd']:>6,} {s['tpl']:>7,} {s['transfer']:>7,}"
           f" {s['manufacture']:>8,}")
-    total_demand = sum(s["holiday_demand"] for s in headsup["sku_summary"])
+    total_demand = sum(
+        s.get("production_target", s["holiday_demand"])
+        for s in headsup["sku_summary"]
+    )
     total_mfg = sum(s["manufacture"] for s in headsup["sku_summary"])
     total_xfer = sum(s["transfer"] for s in headsup["sku_summary"])
     a(f"  {'-'*63}")
@@ -1669,10 +1720,18 @@ def format_manufacturer_sheet(headsup: dict) -> str:
         if entry["units"] == 0:
             a("    No production needed this month.")
         else:
-            if entry.get("is_pallet_card"):
-                a(f"    Full pallets: {entry['pallets']}  ({entry['units']:,} units)")
+            if entry.get("has_partial"):
+                a(f"    {entry.get('full_pallets', 0)} full + 1 partial "
+                  f"({entry.get('partial_units', 0):,} ≥50%)  "
+                  f"({entry['units']:,} units)")
+            elif entry.get("is_pallet_card"):
+                a(f"    Full pallets: {entry.get('full_pallets', entry['pallets'])}  "
+                  f"({entry['units']:,} units)")
+                held = int(entry.get("held_units") or 0)
+                if held:
+                    a(f"    Held leftover (under half, not a pallet): {held:,}")
             else:
-                a(f"    Leftover (not a pallet): {entry['units']:,} units "
+                a(f"    Held leftover (under half, not a pallet): {entry['units']:,} units "
                   f"({entry.get('fill_pct', 0):.0%} of {headsup['pallet_max']:,})")
             for sku in headsup["skus"]:
                 qty = entry["mix"].get(sku, 0)
@@ -1704,7 +1763,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("SENSITIVITY: actual_2025 (forecast workbook weekly — not Amazon monthly sales)")
     a(f"  {headsup.get('actual_2025_source', ACTUAL_2025_SOURCE)}")
     a("-" * 65)
-    a(f"  {'SKU':<14} {'Demand':>8} {'Mfg':>8}")
+    a(f"  {'SKU':<14} {'Cover':>8} {'Mfg':>8}")
     a(f"  {'-'*32}")
     for s in headsup["sku_summary_sensitivity"]:
         a(f"  {SKU_SHORT_MAP.get(s['sku'], s['sku']):<14}"

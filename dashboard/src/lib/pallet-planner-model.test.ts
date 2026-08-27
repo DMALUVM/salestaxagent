@@ -7,6 +7,9 @@ import {
   ASSORTED_SKU,
   DEMAND_METHOD,
   PALLET_MAX_UNITS,
+  palletCardSizes,
+  palletFill,
+  palletPartialMinUnits,
   PEAK_END_DEFAULT,
   applyAssortedCorrectionDisplay,
   earlyJanFbaShipBy,
@@ -25,7 +28,6 @@ import {
   latestRowPerSku,
   monthCanMakeGate,
   monthlyAmazonUnits,
-  palletFill,
   productionMonthsBeforeGate,
   skuYoyMayJul,
   tulsaAfterChristmasOutbound,
@@ -260,11 +262,32 @@ describe("pallet planner model", () => {
     );
   });
 
-  test("leftover 4276 is not a 1-pallet card", () => {
+  test("leftover 4276 is held, not a 1-pallet card", () => {
     const fill = palletFill(4276, PALLET_MAX_UNITS);
     assert.equal(fill.fullPallets, 0);
     assert.equal(fill.leftoverUnits, 4276);
+    assert.equal(fill.heldUnits, 4276);
+    assert.equal(fill.hasPartial, false);
+    assert.equal(fill.mergeOrHold, true);
     assert.equal(fill.isPalletCard, false);
+    assert.deepEqual(palletCardSizes(fill), []);
+  });
+
+  test("half-pallet leftover is a partial card; two full + one partial is fine", () => {
+    assert.equal(palletPartialMinUnits(), 9_500);
+    const half = palletFill(9_500, PALLET_MAX_UNITS);
+    assert.equal(half.hasPartial, true);
+    assert.equal(half.palletCards, 1);
+    assert.equal(half.heldUnits, 0);
+    assert.deepEqual(palletCardSizes(half), [9_500]);
+    const under = palletFill(9_499, PALLET_MAX_UNITS);
+    assert.equal(under.mergeOrHold, true);
+    assert.equal(under.isPalletCard, false);
+    const twoPlus = palletFill(2 * PALLET_MAX_UNITS + 9_500, PALLET_MAX_UNITS);
+    assert.equal(twoPlus.fullPallets, 2);
+    assert.equal(twoPlus.hasPartial, true);
+    assert.equal(twoPlus.palletCards, 3);
+    assert.deepEqual(palletCardSizes(twoPlus), [19_000, 19_000, 9_500]);
   });
 
   test("November inbound misses the 2026-10-31 gate", () => {
