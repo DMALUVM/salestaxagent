@@ -9,6 +9,8 @@ from src.inventory.pallet_planner import (
     AUGUST_HOP_DESTINATION,
     AUGUST_HOP_LABEL,
     LIP_BALM_SKUS,
+    LOCKED_TONIGHT_3PL_FBA_SEND,
+    LOCKED_TONIGHT_3PL_FBA_TOTAL,
     PALLET_MAX_UNITS,
     PEAK_END_DEFAULT,
     SEPT_FBA_ON_HAND_TARGETS,
@@ -24,6 +26,7 @@ from src.inventory.pallet_planner import (
     CARTON_20X16X14_UNITS,
     allocate_single_sku_awd_pallets,
     allocate_3pl_fba_send,
+    apply_locked_tonight_3pl_fba_send,
     assign_awd_cards_to_months,
     awd_covers_off_fba_reserve,
     build_month_view_entries,
@@ -64,12 +67,13 @@ CONTEXT_3PL = {
     "DDPE0004Shop": 9_177,  # assorted
 }
 CONTEXT_AWD = {"DDPE0002Shop": 540}
-TONIGHT_SEND = {
+ALLOCATOR_2700_SEND = {
     "DDPE0004Shop": 8_100,  # 3×2,700 = fifteen 540-boxes
     "DDPE0003Shop": 5_400,  # 2×2,700
     "DDPE0002Shop": 2_700,  # five 540-boxes
     "DDPE0001Shop": 0,      # waits August
 }
+TONIGHT_SEND = LOCKED_TONIGHT_3PL_FBA_SEND
 
 
 def test_sept_targets_and_optimistic_awd():
@@ -100,7 +104,7 @@ def test_inbound_carton_fee_paths():
     assert not is_legal_inbound_qty(3_000, 540)
 
 
-def test_tonight_16200_send_not_18488_or_22338():
+def test_allocator_still_2700_chunks():
     gaps = sept_fba_gaps(CONTEXT_FBA, CONTEXT_INBOUND)
     send = allocate_3pl_fba_send(
         CONTEXT_3PL,
@@ -108,7 +112,7 @@ def test_tonight_16200_send_not_18488_or_22338():
         awd_loaded=False,
         skus=LIP,
     )
-    assert send["tpl_to_fba"] == TONIGHT_SEND
+    assert send["tpl_to_fba"] == ALLOCATOR_2700_SEND
     assert send["send_total"] == 16_200
     assert send["tpl_to_awd"]["DDPE0002Shop"] == 0
     assert send["hold_total"] == 7_288
@@ -119,6 +123,45 @@ def test_tonight_16200_send_not_18488_or_22338():
         assert is_legal_inbound_qty(qty, 540)
 
 
+def test_sept_3pl_fba_lock_is_5400_plus_4860():
+    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0004Shop"] == 5_400
+    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0003Shop"] == 4_860
+    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0002Shop"] == 0
+    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0001Shop"] == 0
+    assert LOCKED_TONIGHT_3PL_FBA_TOTAL == 5_400 + 4_860 == 10_260
+    assert is_legal_inbound_qty(4_860, 270)
+    assert 4_860 % 270 == 0
+    assert 4_860 != 5_400
+    gaps = sept_fba_gaps(CONTEXT_FBA, CONTEXT_INBOUND)
+    locked = apply_locked_tonight_3pl_fba_send(
+        CONTEXT_3PL,
+        {s: gaps[s]["gap"] for s in LIP},
+        awd_loaded=False,
+        skus=LIP,
+    )
+    assert locked["tpl_to_fba"]["DDPE0004Shop"] == 5_400
+    assert locked["tpl_to_fba"]["DDPE0003Shop"] == 4_860
+    assert locked["tpl_to_fba"]["DDPE0002Shop"] == 0
+    assert locked["tpl_to_fba"]["DDPE0001Shop"] == 0
+    assert locked["send_total"] == 10_260
+    assert locked["locked"] is True
+    assert locked["tpl_to_awd"]["DDPE0002Shop"] == 0
+    assert locked["tulsa_hold"]["DDPE0004Shop"] == CONTEXT_3PL["DDPE0004Shop"] - 5_400
+    assert locked["tulsa_hold"]["DDPE0003Shop"] == CONTEXT_3PL["DDPE0003Shop"] - 4_860
+    plan = build_september_plan(
+        CONTEXT_FBA, CONTEXT_INBOUND, CONTEXT_3PL,
+        sku_awd=CONTEXT_AWD,
+    )
+    assert plan["tpl_to_fba"]["DDPE0004Shop"] == 5_400
+    assert plan["tpl_to_fba"]["DDPE0003Shop"] == 4_860
+    assert plan["tpl_to_fba"]["DDPE0002Shop"] == 0
+    assert plan["tpl_to_fba"]["DDPE0001Shop"] == 0
+    assert plan["first_action"]["tpl_to_fba_total"] == 10_260
+    assert "DDPE0002Shop" not in {
+        sku for sku, qty in plan["tpl_to_fba"].items() if qty > 0
+    }
+
+
 def test_live_awd_540_keeps_tulsa_floor_no_empty_out():
     assert awd_covers_off_fba_reserve(CONTEXT_AWD) is False
     plan = build_september_plan(
@@ -127,10 +170,11 @@ def test_live_awd_540_keeps_tulsa_floor_no_empty_out():
     )
     assert plan["awd_loaded"] is False
     assert plan["tulsa_floor_units"] == 5_000
-    assert plan["first_action"]["tpl_to_fba_total"] == 16_200
+    assert plan["first_action"]["tpl_to_fba_total"] == 10_260
     assert plan["tpl_to_fba"] == TONIGHT_SEND
     assert plan["tpl_to_awd"]["DDPE0002Shop"] == 0
     assert plan["first_action"]["tulsa_hold_total"] >= 5_000
+    assert sum(plan["tpl_to_fba"].values()) != 16_200
     assert sum(plan["tpl_to_fba"].values()) != 18_488
     assert sum(plan["tpl_to_fba"].values()) != 22_338
 
@@ -268,11 +312,12 @@ def test_month_view_sept_not_empty_and_not_fba_only():
     assert "awd" in dests
     assert dests != {"3pl_fba"}
     fba = next(e for e in sept if e["destination"] == "3pl_fba")
-    assert fba["mix"]["DDPE0004Shop"] == 8_100
-    assert fba["mix"]["DDPE0003Shop"] == 5_400
-    assert fba["mix"]["DDPE0002Shop"] == 2_700
+    assert fba["mix"]["DDPE0004Shop"] == 5_400
+    assert fba["mix"]["DDPE0003Shop"] == 4_860
+    assert fba["mix"].get("DDPE0002Shop", 0) == 0
     assert fba["mix"].get("DDPE0001Shop", 0) == 0
-    assert fba["units"] == 16_200
+    assert "DDPE0002Shop" not in fba["mix"]
+    assert fba["units"] == 10_260
     assert fba["next_hop"] is True
     awd = [e for e in sept if e["destination"] == "awd" and e["units"] > 0]
     assert awd

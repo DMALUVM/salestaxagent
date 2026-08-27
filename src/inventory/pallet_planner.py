@@ -60,7 +60,9 @@ TULSA_LIP_FLOOR_UNITS = 5_000
 #   13×11×9 = 270 units → 5 boxes = 1,350 min, then +270
 #   20×16×14 = 540 units (two 270s) → 5 boxes = 2,700 min, then +540
 # Never recommend a 3PL→FBA SKU under the min for the carton in use.
-# Tonight uses the 540-box path (peppermint = five 540-boxes = 2,700).
+# The usual allocator uses the 540-box path (2,700 min, then +540).
+# Tonight's actual 3PL→FBA is a locked 270-box send — see
+# LOCKED_TONIGHT_3PL_FBA_SEND. Do not "correct" 4,860 up to a 540 multiple.
 CARTON_13X11X9_UNITS = 270
 CARTON_20X16X14_UNITS = 540
 FBA_INBOUND_MIN_BOXES = 5
@@ -68,6 +70,17 @@ FBA_INBOUND_PREFERRED = CARTON_20X16X14_UNITS * FBA_INBOUND_MIN_BOXES  # 2,700
 FBA_INBOUND_MIN_FEE_FREE = CARTON_13X11X9_UNITS * FBA_INBOUND_MIN_BOXES  # 1,350
 FBA_INBOUND_STEP_AFTER = CARTON_20X16X14_UNITS
 DEFAULT_INBOUND_CARTON_UNITS = CARTON_20X16X14_UNITS
+# Dave's actual 3PL→FBA send today. Fee-safe on 270-unit / 13×11×9 boxes
+# (20×270 assorted + 18×270 orange). Peppermint and unscented are not in
+# this send. This month's 3PL→FBA card uses this lock — do not re-run
+# allocate_3pl_fba_send and round 4,860 up to 5,400.
+LOCKED_TONIGHT_3PL_FBA_SEND = {
+    "DDPE0004Shop": 5_400,  # assorted — 20 boxes of 270
+    "DDPE0003Shop": 4_860,  # orange — 18 boxes of 270
+    "DDPE0002Shop": 0,      # peppermint not in this send
+    "DDPE0001Shop": 0,      # unscented not in this send
+}
+LOCKED_TONIGHT_3PL_FBA_TOTAL = 10_260
 # Late-Sept / early-Oct FBA on-hand targets (Amazon's Sept mix). Not a
 # locked production recipe. Cap is the family sum. Oct–Dec family cap
 # falls with Amazon cubic; scale this mix — never recommend over cap.
@@ -613,8 +626,8 @@ def is_legal_inbound_qty(
 ) -> bool:
     """Legal 3PL→FBA qty for the carton in use. 0, or ≥5 boxes, step = carton.
 
-    540-box path: 2,700, 3,240, 3,780, … (tonight’s 8,100 / 5,400 / 2,700).
-    270-box path: 1,350, 1,620, 1,890, …
+    540-box path: 2,700, 3,240, 3,780, … (allocator; not tonight's lock).
+    270-box path: 1,350, 1,620, 1,890, … (4,860 = 18 × 270 is legal).
     Never recommend under the 5-box min for that carton.
     """
     q = int(qty or 0)
@@ -636,7 +649,7 @@ def fee_free_inbound_qty(
 
     Hard rules: never send under 1,350; after 2,700 only 2,700+540n.
     If there is no 2,700 multiple, the SKU waits (August) unless
-    allow_partial and cap ≥ 1,350. Tonight unscented waits.
+    allow_partial and cap ≥ 1,350. Allocator unscented waits.
     """
     cap = min(max(0, int(available or 0)), max(0, int(gap or 0)))
     preferred = max(1, int(preferred or FBA_INBOUND_PREFERRED))
@@ -659,11 +672,12 @@ def allocate_3pl_fba_send(
     preferred: int = FBA_INBOUND_PREFERRED,
     min_send: int = FBA_INBOUND_MIN_FEE_FREE,
 ) -> dict:
-    """Tonight's 3PL→FBA: 2,700 multiples only. Do not empty Tulsa.
+    """Allocator 3PL→FBA: 2,700 multiples only. Do not empty Tulsa.
 
     Live AWD 540 is not loaded — keep ≥5k in Tulsa, leftover stays Tulsa
     (no peppermint→AWD). Drop 2,700 chunks if a send would breach the
-    floor. Never send a SKU under 1,350.
+    floor. Never send a SKU under 1,350. This month's card does not use
+    this — see apply_locked_tonight_3pl_fba_send.
     """
     wanted = skus or list(sku_3pl.keys())
     on_hand = {sku: max(0, int(sku_3pl.get(sku, 0) or 0)) for sku in wanted}
@@ -701,6 +715,49 @@ def allocate_3pl_fba_send(
         "hop_total": sum(hop.values()),
         "preferred": preferred,
         "min_send": min_send,
+        "waits_on_august": {
+            sku: send[sku] == 0 and gap[sku] > 0 and on_hand[sku] > 0
+            for sku in wanted
+        },
+    }
+
+
+def apply_locked_tonight_3pl_fba_send(
+    sku_3pl: dict[str, int],
+    gaps: dict[str, int] | None = None,
+    *,
+    skus: list[str] | None = None,
+    awd_loaded: bool = False,
+    floor: int = TULSA_LIP_FLOOR_UNITS,
+) -> dict:
+    """This month's 3PL→FBA card: Dave's actual send. Do not re-allocate.
+
+    4,860 orange is legal (18 × 270). Do not round it to a 540 / 2,700
+    multiple. Leftover Tulsa is display only — do not invent extra SKUs
+    to fill the floor, and do not hop leftover to AWD.
+    """
+    wanted = skus or LIP_BALM_SKUS
+    on_hand = {sku: max(0, int(sku_3pl.get(sku, 0) or 0)) for sku in wanted}
+    gap = {sku: max(0, int((gaps or {}).get(sku, 0) or 0)) for sku in wanted}
+    send = {
+        sku: int(LOCKED_TONIGHT_3PL_FBA_SEND.get(sku, 0) or 0)
+        for sku in wanted
+    }
+    hold = {sku: max(0, on_hand[sku] - send[sku]) for sku in wanted}
+    hop = {sku: 0 for sku in wanted}
+    floor_now = 0 if awd_loaded else max(0, int(floor or 0))
+    return {
+        "tpl_to_fba": send,
+        "tulsa_hold": hold,
+        "tpl_to_awd": hop,
+        "floor": floor_now,
+        "awd_loaded": awd_loaded,
+        "send_total": sum(send.values()),
+        "hold_total": sum(hold.values()),
+        "hop_total": 0,
+        "preferred": FBA_INBOUND_PREFERRED,
+        "min_send": FBA_INBOUND_MIN_FEE_FREE,
+        "locked": True,
         "waits_on_august": {
             sku: send[sku] == 0 and gap[sku] > 0 and on_hand[sku] > 0
             for sku in wanted
@@ -1187,7 +1244,7 @@ def build_september_plan(
         }
     sku_3pl_wanted = {sku: sku_3pl.get(sku, 0) for sku in wanted}
     awd_loaded_now = awd_covers_off_fba_reserve(sku_awd)
-    send_plan = allocate_3pl_fba_send(
+    send_plan = apply_locked_tonight_3pl_fba_send(
         sku_3pl_wanted,
         sku_gap_after_aug,
         floor=tulsa_floor,
