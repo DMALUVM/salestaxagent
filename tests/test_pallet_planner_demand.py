@@ -6,6 +6,7 @@ from datetime import date
 from src.inventory.pallet_planner import (
     ACTUAL_2025_SOURCE,
     AMAZON_IN_BY_DEFAULT,
+    DEMAND_METHOD,
     PALLET_MAX_UNITS,
     _holiday_demand_by_sku,
     family_yoy_may_jul,
@@ -20,18 +21,22 @@ from src.inventory.pallet_planner import (
     pallet_fill,
     production_months_before_gate,
     ship_by_for_month,
+    sku_yoy_may_jul,
 )
 
 # Warehouse amazon_spapi totals used only as test fixtures — not a locked mix.
 # Verified against sales_by_sku (sum across states) on 2026-08-26.
 LIP = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"]
+DEO = "DDPE00019Shop"
+TALLOW = "DDPE00020Shop"
 
 # (sku, year, month, units) Amazon pulse monthly totals
 AMAZON_MONTHLY = [
-    # 2025 May–Jul (YoY prior) + Nov–Dec
+    # 2025 May–Jul (YoY prior) + Nov–Dec. Oct from warehouse (2026-08-26).
     ("DDPE0001Shop", 2025, 5, 1558),
     ("DDPE0001Shop", 2025, 6, 1106),
     ("DDPE0001Shop", 2025, 7, 1511),
+    ("DDPE0001Shop", 2025, 10, 1670),
     ("DDPE0001Shop", 2025, 11, 2155),
     ("DDPE0001Shop", 2025, 12, 4104),
     ("DDPE0001Shop", 2026, 1, 2904),
@@ -41,6 +46,7 @@ AMAZON_MONTHLY = [
     ("DDPE0002Shop", 2025, 5, 865),
     ("DDPE0002Shop", 2025, 6, 693),
     ("DDPE0002Shop", 2025, 7, 1074),
+    ("DDPE0002Shop", 2025, 10, 1056),
     ("DDPE0002Shop", 2025, 11, 1454),
     ("DDPE0002Shop", 2025, 12, 2850),
     ("DDPE0002Shop", 2026, 1, 1685),
@@ -50,6 +56,7 @@ AMAZON_MONTHLY = [
     ("DDPE0003Shop", 2025, 5, 1677),
     ("DDPE0003Shop", 2025, 6, 1230),
     ("DDPE0003Shop", 2025, 7, 1942),
+    ("DDPE0003Shop", 2025, 10, 2439),
     ("DDPE0003Shop", 2025, 11, 2791),
     ("DDPE0003Shop", 2025, 12, 5009),
     ("DDPE0003Shop", 2026, 1, 3321),
@@ -59,12 +66,25 @@ AMAZON_MONTHLY = [
     ("DDPE0004Shop", 2025, 5, 1458),
     ("DDPE0004Shop", 2025, 6, 1075),
     ("DDPE0004Shop", 2025, 7, 967),
+    ("DDPE0004Shop", 2025, 10, 1452),
     ("DDPE0004Shop", 2025, 11, 2627),
     ("DDPE0004Shop", 2025, 12, 6861),
     ("DDPE0004Shop", 2026, 1, 3435),
     ("DDPE0004Shop", 2026, 5, 1955),
     ("DDPE0004Shop", 2026, 6, 1698),
     ("DDPE0004Shop", 2026, 7, 1406),
+    # Deodorant: own YoY < 1, Dec is not a lip-balm spike.
+    (DEO, 2025, 5, 400),
+    (DEO, 2025, 6, 350),
+    (DEO, 2025, 7, 400),
+    (DEO, 2025, 11, 280),
+    (DEO, 2025, 12, 333),
+    (DEO, 2026, 5, 380),
+    (DEO, 2026, 6, 340),
+    (DEO, 2026, 7, 350),
+    # Tallow balm: no May–Jul prior window → YoY 1.0, keep own 2025 Dec.
+    (TALLOW, 2025, 11, 180),
+    (TALLOW, 2025, 12, 200),
 ]
 
 
@@ -79,6 +99,10 @@ def _rows():
             "source": "amazon_spapi",
         })
     return rows
+
+
+def _monthly(skus=None):
+    return monthly_amazon_units(_rows(), skus or [*LIP, DEO, TALLOW])
 
 
 def test_monthly_amazon_sums_states_and_ignores_quarantine():
@@ -101,37 +125,119 @@ def test_monthly_amazon_sums_states_and_ignores_quarantine():
     assert monthly[("ddpe0001shop", 2025, 11)] == 2165
 
 
-def test_family_yoy_may_jul_matches_warehouse_1_42():
+def test_family_yoy_is_context_only_not_a_sku_multiplier():
     monthly = monthly_amazon_units(_rows(), LIP)
     info = family_yoy_may_jul(monthly, LIP)
     assert info["prior_units"] == 15156
     assert info["current_units"] == 21551
     assert 1.41 < info["yoy"] < 1.43
-    assert info["method"] == "family_may_jul_amazon_sales_by_sku"
+    assert info["method"] == "family_may_jul_context_only"
+    assert info["applied_to_skus"] is False
+    assert DEMAND_METHOD == "sku_2025_same_month_x_sku_may_jul_yoy"
 
 
-def test_unscented_peppermint_nov_dec_from_sales_yoy_not_wave_light():
-    monthly = monthly_amazon_units(_rows(), LIP)
-    yoy = family_yoy_may_jul(monthly, LIP)["yoy"]
-    demand = holiday_demand_from_sales(monthly, LIP, yoy, include_jan=False)
+def test_each_lip_sku_uses_its_own_may_jul_yoy():
+    monthly = _monthly(LIP)
+    yoy = {sku: sku_yoy_may_jul(monthly, sku)["yoy"] for sku in LIP}
+    assert 1.34 < yoy["DDPE0001Shop"] < 1.35   # 5625/4175
+    assert 1.30 < yoy["DDPE0002Shop"] < 1.31   # 3439/2632
+    assert 1.53 < yoy["DDPE0003Shop"] < 1.54   # 7428/4849
+    assert 1.44 < yoy["DDPE0004Shop"] < 1.45   # 5059/3500
+    family = family_yoy_may_jul(monthly, LIP)["yoy"]
+    for sku in LIP:
+        assert abs(yoy[sku] - family) > 0.02
+
+
+def test_unscented_peppermint_use_own_yoy_not_family_1_42():
+    monthly = _monthly(LIP)
+    demand = holiday_demand_from_sales(monthly, LIP, include_jan=False)
     unscented = demand["DDPE0001Shop"]
     peppermint = demand["DDPE0002Shop"]
     assert unscented["nov_dec_prior"] == 6259
     assert peppermint["nov_dec_prior"] == 4304
-    assert 8800 <= unscented["nov_dec_demand"] <= 9000
-    assert 6000 <= peppermint["nov_dec_demand"] <= 6200
-    # Current production cards were ~2,593 / 2,205 per wave — systematically light
+    # Per-SKU: 6259 × 1.347 ≈ 8,432 — not family-blend ~8,900
+    assert 8400 <= unscented["nov_dec_demand"] <= 8460
+    assert unscented["nov_dec_demand"] == (
+        unscented["months_2026"][11] + unscented["months_2026"][12]
+    )
+    # Per-SKU: 4304 × 1.307 ≈ 5,624 — not family-blend ~6,120
+    assert 5590 <= peppermint["nov_dec_demand"] <= 5660
+    family = family_yoy_may_jul(monthly, LIP)["yoy"]
+    family_unscented = round(6259 * family)
+    family_peppermint = round(4304 * family)
+    assert unscented["nov_dec_demand"] != family_unscented
+    assert peppermint["nov_dec_demand"] != family_peppermint
+    assert unscented["nov_dec_demand"] < family_unscented
+    assert peppermint["nov_dec_demand"] < family_peppermint
+    # Still well above the old wave-light cards (~2,593 / 2,205)
     assert unscented["nov_dec_demand"] > 2593 * 2
     assert peppermint["nov_dec_demand"] > 2205 * 2
 
 
+def test_each_sku_keeps_its_own_2025_mom_shape():
+    monthly = _monthly(LIP)
+    demand = holiday_demand_from_sales(monthly, LIP, include_jan=False)
+    for sku in LIP:
+        key = sku.lower()
+        oct_2025 = monthly[(key, 2025, 10)]
+        nov_2025 = monthly[(key, 2025, 11)]
+        dec_2025 = monthly[(key, 2025, 12)]
+        m = demand[sku]["months_2026"]
+        # Same ranking as that SKU's 2025 months
+        assert oct_2025 < nov_2025 < dec_2025
+        assert m[10] < m[11] < m[12]
+        # Dec/Nov ratio preserved (same YoY on each month)
+        prior_ratio = dec_2025 / nov_2025
+        forecast_ratio = m[12] / m[11]
+        assert abs(forecast_ratio - prior_ratio) < 0.01
+
+
+def test_deodorant_and_tallow_do_not_inherit_lip_yoy_or_dec_spike():
+    monthly = _monthly()
+    demand = holiday_demand_from_sales(monthly, [*LIP, DEO, TALLOW], include_jan=False)
+    lip_yoy = sku_yoy_may_jul(monthly, "DDPE0001Shop")["yoy"]
+    family = family_yoy_may_jul(monthly, LIP)["yoy"]
+    deo = demand[DEO]
+    tallow = demand[TALLOW]
+
+    deo_yoy = sku_yoy_may_jul(monthly, DEO)
+    assert deo_yoy["prior_units"] == 1150
+    assert deo_yoy["current_units"] == 1070
+    assert 0.92 < deo["yoy"] < 0.94
+    assert deo["yoy"] != lip_yoy
+    assert deo["yoy"] != family
+    assert deo["nov_dec_prior"] == 613
+    # Own YoY: 280×0.930 + 333×0.930 ≈ 570 — not 1.42× (~872) or lip Dec shape
+    assert 560 <= deo["nov_dec_demand"] <= 580
+    assert deo["months_2026"][12] < 340
+    assert deo["months_2026"][12] != round(333 * family)
+    assert deo["months_2026"][12] != round(333 * lip_yoy)
+    # Dec/Nov stays deodorant-flat (~1.19), not unscented spike (~1.90)
+    deo_ratio = deo["months_2026"][12] / deo["months_2026"][11]
+    lip_ratio = (
+        demand["DDPE0001Shop"]["months_2026"][12]
+        / demand["DDPE0001Shop"]["months_2026"][11]
+    )
+    assert deo_ratio < 1.25
+    assert lip_ratio > 1.85
+
+    tallow_yoy = sku_yoy_may_jul(monthly, TALLOW)
+    assert tallow_yoy["prior_units"] == 0
+    assert tallow["yoy"] == 1.0
+    assert tallow["nov_dec_demand"] == 380
+    assert tallow["months_2026"][12] == 200
+    assert tallow["months_2026"][12] != round(200 * family)
+
+
 def test_demand_is_derived_not_a_hardcoded_mix():
-    monthly = monthly_amazon_units(_rows(), LIP)
-    doubled = {k: v * 2 for k, v in monthly.items()}
-    yoy = family_yoy_may_jul(monthly, LIP)["yoy"]
-    a = holiday_demand_from_sales(monthly, LIP, yoy, include_jan=False)
-    b = holiday_demand_from_sales(doubled, LIP, yoy, include_jan=False)
-    assert b["DDPE0001Shop"]["nov_dec_demand"] == a["DDPE0001Shop"]["nov_dec_demand"] * 2
+    monthly = _monthly(LIP)
+    tweaked = dict(monthly)
+    tweaked[("ddpe0001shop", 2025, 11)] += 100
+    a = holiday_demand_from_sales(monthly, LIP, include_jan=False)
+    b = holiday_demand_from_sales(tweaked, LIP, include_jan=False)
+    assert b["DDPE0001Shop"]["nov_dec_demand"] > a["DDPE0001Shop"]["nov_dec_demand"]
+    assert b["DDPE0002Shop"]["nov_dec_demand"] == a["DDPE0002Shop"]["nov_dec_demand"]
+    assert b["DDPE0003Shop"]["nov_dec_demand"] == a["DDPE0003Shop"]["nov_dec_demand"]
 
 
 def test_leftover_4276_is_not_a_one_pallet_card():

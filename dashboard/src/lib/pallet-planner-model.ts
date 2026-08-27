@@ -8,6 +8,7 @@ export const CARTONS_PER_BOX = 270;
 export const AMAZON_IN_BY = "2026-10-31";
 export const DEFAULT_RECEIVING_DAYS = 18;
 export const YOY_WINDOW_MONTHS = [5, 6, 7] as const;
+export const DEMAND_METHOD = "sku_2025_same_month_x_sku_may_jul_yoy";
 export const LIP_BALM_SKUS = [
   "DDPE0001Shop",
   "DDPE0002Shop",
@@ -64,12 +65,46 @@ export function monthlyAmazonUnits(
   return totals;
 }
 
+export function skuYoyMayJul(
+  monthly: Map<MonthlyKey, number>,
+  sku: string,
+  currentYear = 2026,
+  priorYear = 2025,
+): {
+  sku: string;
+  yoy: number;
+  priorUnits: number;
+  currentUnits: number;
+  method: string;
+} {
+  const key = normalizeSku(sku);
+  let prior = 0;
+  let current = 0;
+  for (const mo of YOY_WINDOW_MONTHS) {
+    prior += monthly.get(`${key}|${priorYear}|${mo}` as MonthlyKey) ?? 0;
+    current += monthly.get(`${key}|${currentYear}|${mo}` as MonthlyKey) ?? 0;
+  }
+  return {
+    sku,
+    yoy: prior > 0 ? current / prior : 1,
+    priorUnits: prior,
+    currentUnits: current,
+    method: "sku_may_jul_amazon_sales_by_sku",
+  };
+}
+
 export function familyYoyMayJul(
   monthly: Map<MonthlyKey, number>,
   skus: string[] = LIP_BALM_SKUS,
   currentYear = 2026,
   priorYear = 2025,
-): { yoy: number; priorUnits: number; currentUnits: number; method: string } {
+): {
+  yoy: number;
+  priorUnits: number;
+  currentUnits: number;
+  method: string;
+  appliedToSkus: boolean;
+} {
   const keys = skus.map(normalizeSku);
   let prior = 0;
   let current = 0;
@@ -83,24 +118,41 @@ export function familyYoyMayJul(
     yoy: prior > 0 ? current / prior : 1,
     priorUnits: prior,
     currentUnits: current,
-    method: "family_may_jul_amazon_sales_by_sku",
+    method: "family_may_jul_context_only",
+    appliedToSkus: false,
   };
+}
+
+export function forecastSameMonth(
+  monthly: Map<MonthlyKey, number>,
+  sku: string,
+  forecastYear: number,
+  month: number,
+  yoy: number,
+): number {
+  const key = normalizeSku(sku);
+  const prior = monthly.get(`${key}|${forecastYear - 1}|${month}` as MonthlyKey) ?? 0;
+  return Math.round(prior * yoy);
 }
 
 export function holidayDemandFromSales(
   monthly: Map<MonthlyKey, number>,
   skus: string[],
-  yoy: number,
-  opts?: { holidayYear?: number; includeJan?: boolean },
+  opts?: { holidayYear?: number; includeJan?: boolean; currentYear?: number; priorYear?: number },
 ): Record<string, {
   novDecPrior: number;
   novDecDemand: number;
   janPrior: number;
   janDemand: number;
   holidayDemand: number;
+  yoy: number;
+  yoyMethod: string;
+  months2026: Record<number, number>;
 }> {
   const holidayYear = opts?.holidayYear ?? 2026;
   const includeJan = opts?.includeJan ?? true;
+  const currentYear = opts?.currentYear ?? 2026;
+  const priorYear = opts?.priorYear ?? 2025;
   const prior = holidayYear - 1;
   const out: Record<string, {
     novDecPrior: number;
@@ -108,21 +160,35 @@ export function holidayDemandFromSales(
     janPrior: number;
     janDemand: number;
     holidayDemand: number;
+    yoy: number;
+    yoyMethod: string;
+    months2026: Record<number, number>;
   }> = {};
   for (const sku of skus) {
     const key = normalizeSku(sku);
+    const yoyInfo = skuYoyMayJul(monthly, sku, currentYear, priorYear);
+    const yoy = yoyInfo.yoy;
+    const months2026: Record<number, number> = {};
+    for (const mo of [9, 10, 11, 12]) {
+      months2026[mo] = forecastSameMonth(monthly, sku, holidayYear, mo, yoy);
+    }
     const novDecPrior =
       (monthly.get(`${key}|${prior}|11` as MonthlyKey) ?? 0) +
       (monthly.get(`${key}|${prior}|12` as MonthlyKey) ?? 0);
-    const novDecDemand = Math.round(novDecPrior * yoy);
+    const novDecDemand = months2026[11] + months2026[12];
     const janPrior = monthly.get(`${key}|${holidayYear}|1` as MonthlyKey) ?? 0;
-    const janDemand = includeJan ? Math.round(janPrior * yoy) : 0;
+    const janDemand = includeJan
+      ? forecastSameMonth(monthly, sku, holidayYear + 1, 1, yoy)
+      : 0;
     out[sku] = {
       novDecPrior,
       novDecDemand,
       janPrior,
       janDemand,
       holidayDemand: novDecDemand + janDemand,
+      yoy,
+      yoyMethod: yoyInfo.method,
+      months2026,
     };
   }
   return out;

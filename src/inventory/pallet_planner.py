@@ -32,9 +32,11 @@ PALLET_MAX_UNITS = 19_000
 CARTONS_PER_BOX = 270
 AMAZON_IN_BY_DEFAULT = date(2026, 10, 31)
 DEFAULT_RECEIVING_DAYS = 18
-# Pallet-planner YoY: lip-balm family May–Jul Amazon sales_by_sku.
+# Pallet-planner YoY window: each SKU's own May–Jul Amazon sales_by_sku.
+# Family 1.42× is context only — never a blended multiplier.
 # Uncapped — not the replen planning_daily 1.40 cap.
 YOY_WINDOW_MONTHS = (5, 6, 7)
+DEMAND_METHOD = "sku_2025_same_month_x_sku_may_jul_yoy"
 ACTUAL_2025_SOURCE = (
     "forecast_weekly scenario=actual_2025 is the holiday workbook's weekly "
     "'2025 actual' column, dated onto 2026 week_start. It is not Amazon "
@@ -95,6 +97,34 @@ def monthly_amazon_units(
     return dict(totals)
 
 
+def sku_yoy_may_jul(
+    monthly: dict[tuple[str, int, int], int],
+    sku: str,
+    *,
+    current_year: int = 2026,
+    prior_year: int = 2025,
+    months: tuple[int, ...] = YOY_WINDOW_MONTHS,
+) -> dict:
+    """That SKU's May–Jul Amazon units current / prior. Never a family blend.
+
+    Same calculation for every SKU. Missing prior window → 1.0 (not family YoY).
+    """
+    key = normalize_sku(sku)
+    prior = sum(monthly.get((key, prior_year, m), 0) for m in months)
+    current = sum(monthly.get((key, current_year, m), 0) for m in months)
+    yoy = (current / prior) if prior > 0 else 1.0
+    return {
+        "sku": sku,
+        "yoy": yoy,
+        "prior_units": prior,
+        "current_units": current,
+        "prior_year": prior_year,
+        "current_year": current_year,
+        "months": list(months),
+        "method": "sku_may_jul_amazon_sales_by_sku",
+    }
+
+
 def family_yoy_may_jul(
     monthly: dict[tuple[str, int, int], int],
     skus: list[str] | None = None,
@@ -103,10 +133,7 @@ def family_yoy_may_jul(
     prior_year: int = 2025,
     months: tuple[int, ...] = YOY_WINDOW_MONTHS,
 ) -> dict:
-    """Lip-balm family May–Jul Amazon units current / prior. Uncapped.
-
-    Documented pallet-planner YoY. Does not use replen planning_daily's 1.40 cap.
-    """
+    """Context only — family May–Jul ratio. Do not apply as a SKU multiplier."""
     wanted = [normalize_sku(s) for s in (skus or LIP_BALM_SKUS)]
     prior = sum(monthly.get((k, prior_year, m), 0) for k in wanted for m in months)
     current = sum(monthly.get((k, current_year, m), 0) for k in wanted for m in months)
@@ -118,34 +145,61 @@ def family_yoy_may_jul(
         "prior_year": prior_year,
         "current_year": current_year,
         "months": list(months),
-        "method": "family_may_jul_amazon_sales_by_sku",
+        "method": "family_may_jul_context_only",
+        "applied_to_skus": False,
     }
+
+
+def forecast_same_month(
+    monthly: dict[tuple[str, int, int], int],
+    sku: str,
+    forecast_year: int,
+    month: int,
+    yoy: float,
+) -> int:
+    """2026 month = that SKU's 2025 same-month Amazon units × that SKU's YoY.
+
+    Never raw 2025-as-2026. Never a family blended factor.
+    """
+    key = normalize_sku(sku)
+    prior = monthly.get((key, forecast_year - 1, month), 0)
+    return int(round(prior * yoy))
 
 
 def holiday_demand_from_sales(
     monthly: dict[tuple[str, int, int], int],
     skus: list[str],
-    yoy: float,
     *,
     holiday_year: int = 2026,
     include_jan: bool = True,
+    current_year: int = 2026,
+    prior_year: int = 2025,
 ) -> dict[str, dict]:
-    """Per-SKU holiday units from prior Amazon months × family YoY.
+    """Same per-SKU calc: each 2026 month = 2025 same month × that SKU's YoY.
 
-    Nov–Dec demand = (Nov + Dec of holiday_year-1) × yoy.
-    Optional Jan = January of holiday_year × yoy (most recent completed January).
-    Does not hardcode implied volumes or lock a scent mix.
+    Keeps each SKU's own 2025 MoM shape. Does not copy another SKU's YoY
+    or December spike. Does not hardcode volumes or lock a mix.
     """
-    prior = holiday_year - 1
     out: dict[str, dict] = {}
     for sku in skus:
-        key = normalize_sku(sku)
-        nov_dec_prior = (
-            monthly.get((key, prior, 11), 0) + monthly.get((key, prior, 12), 0)
+        yoy_info = sku_yoy_may_jul(
+            monthly, sku, current_year=current_year, prior_year=prior_year,
         )
-        nov_dec = int(round(nov_dec_prior * yoy))
-        jan_prior = monthly.get((key, holiday_year, 1), 0)
-        jan = int(round(jan_prior * yoy)) if include_jan else 0
+        yoy = yoy_info["yoy"]
+        months_2026 = {
+            m: forecast_same_month(monthly, sku, holiday_year, m, yoy)
+            for m in (9, 10, 11, 12)
+        }
+        nov_dec_prior = (
+            monthly.get((normalize_sku(sku), holiday_year - 1, 11), 0)
+            + monthly.get((normalize_sku(sku), holiday_year - 1, 12), 0)
+        )
+        nov_dec = months_2026[11] + months_2026[12]
+        jan_prior = monthly.get((normalize_sku(sku), holiday_year, 1), 0)
+        jan = (
+            forecast_same_month(monthly, sku, holiday_year + 1, 1, yoy)
+            if include_jan else 0
+        )
         out[sku] = {
             "nov_dec_prior": nov_dec_prior,
             "nov_dec_demand": nov_dec,
@@ -153,6 +207,8 @@ def holiday_demand_from_sales(
             "jan_demand": jan,
             "holiday_demand": nov_dec + jan,
             "yoy": yoy,
+            "yoy_method": yoy_info["method"],
+            "months_2026": months_2026,
         }
     return out
 
@@ -303,10 +359,11 @@ def build_pallet_plan(
         pass
 
     monthly = monthly_amazon_units(_load_amazon_lip_sales(target_skus), target_skus)
-    yoy_info = family_yoy_may_jul(monthly, target_skus)
+    family_ctx = family_yoy_may_jul(monthly, target_skus)
     sales_demand = holiday_demand_from_sales(
-        monthly, target_skus, yoy_info["yoy"], include_jan=False,
+        monthly, target_skus, include_jan=False,
     )
+    yoy_by_sku = {sku: sku_yoy_may_jul(monthly, sku) for sku in target_skus}
 
     # Per-SKU analysis
     sku_plans: list[dict] = []
@@ -334,6 +391,9 @@ def build_pallet_plan(
             "nov_dec_demand": nov_dec_demand,
             "nov_dec_prior": int(d.get("nov_dec_prior", 0)),
             "jan_demand": jan_demand,
+            "yoy": float(d.get("yoy", 1.0)),
+            "yoy_method": d.get("yoy_method"),
+            "months_2026": d.get("months_2026"),
             "fba": fba,
             "inbound": inbound,
             "awd": awd_oh,
@@ -402,8 +462,9 @@ def build_pallet_plan(
             "pallet_max_units": pallet_max,
             "amazon_in_by": amazon_in_by,
             "scenario": "sales_yoy",
-            "demand_method": yoy_info["method"],
-            "yoy": round(yoy_info["yoy"], 4),
+            "demand_method": DEMAND_METHOD,
+            "yoy_by_sku": {s: round(i["yoy"], 4) for s, i in yoy_by_sku.items()},
+            "family_yoy_context_only": round(family_ctx["yoy"], 4),
             "include_3pl_transfer": include_3pl,
             "include_awd": include_awd,
             "cover": "fba_fulfillable_only",
@@ -420,7 +481,8 @@ def build_pallet_plan(
         "monthly_schedule": dict(monthly_pallets),
         "months": months_available,
         "units_still_short": sum(remaining_gaps.values()),
-        "yoy": yoy_info,
+        "yoy_by_sku": yoy_by_sku,
+        "family_yoy_context_only": family_ctx,
     }
 
 
@@ -757,10 +819,11 @@ def build_manufacturer_headsup(
     fc_rows = fetch_all("forecast_weekly")
 
     monthly = monthly_amazon_units(_load_amazon_lip_sales(target_skus), target_skus)
-    yoy_info = family_yoy_may_jul(monthly, target_skus)
+    family_ctx = family_yoy_may_jul(monthly, target_skus)
     sales_demand = holiday_demand_from_sales(
-        monthly, target_skus, yoy_info["yoy"], include_jan=include_jan,
+        monthly, target_skus, include_jan=include_jan,
     )
+    yoy_by_sku = {sku: sku_yoy_may_jul(monthly, sku) for sku in target_skus}
 
     inv: dict[str, dict[str, int]] = {}
     for sku in target_skus:
@@ -894,8 +957,15 @@ def build_manufacturer_headsup(
         "tpl_offsets_production": tpl_offsets_production,
         "months": production_months,
         "month_weights": list(month_weights),
-        "yoy": yoy_info,
-        "demand_method": yoy_info["method"],
+        "yoy": family_ctx,
+        "demand_method": DEMAND_METHOD,
+        "demand_source": "sales_by_sku amazon+amazon_spapi × sku_own_may_jul_yoy",
+        "demand_note": (
+            "Each SKU: 2026 month = that SKU’s 2025 same-month Amazon units × "
+            "that SKU’s own May–Jul 2026/2025 YoY. Family 1.42× is context only."
+        ),
+        "yoy_by_sku": {k: round(v["yoy"], 4) for k, v in yoy_by_sku.items()},
+        "family_yoy_context": family_ctx,
         "primary": scenarios_out["sales_yoy"],
         "sensitivity": scenarios_out["actual_2025"],
         "primary_scenario": "sales_yoy",
@@ -974,9 +1044,16 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("")
     demand_period = "Nov + Dec + Jan" if headsup.get("include_jan") else "Nov + Dec"
     yoy = headsup.get("yoy") or {}
-    a(f"Demand period: {demand_period} (Amazon sales_by_sku × May–Jul family YoY)")
+    a(f"Demand period: {demand_period} "
+      f"(each SKU: 2025 same-month Amazon × that SKU's own May–Jul YoY)")
+    yoy_by_sku = headsup.get("yoy_by_sku") or {}
+    if yoy_by_sku:
+        parts = ", ".join(
+            f"{SKU_SHORT_MAP.get(s, s)} {v:.2f}×" for s, v in yoy_by_sku.items()
+        )
+        a(f"Per-SKU YoY: {parts}")
     if yoy:
-        a(f"Family YoY: {yoy.get('yoy', 1):.3f}×  "
+        a(f"Family YoY (context only, not applied): {yoy.get('yoy', 1):.3f}×  "
           f"({yoy.get('current_year')} / {yoy.get('prior_year')} May–Jul)")
     a(f"Pallet capacity: {headsup['pallet_max']:,} cartons "
       f"({CARTONS_PER_BOX} per 13×11×9 box)")

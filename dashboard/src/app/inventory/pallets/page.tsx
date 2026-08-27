@@ -75,7 +75,7 @@ function SetupPrompt() {
 }
 
 interface SkuPlan {
-  sku: string; label: string; novDecDemand: number;
+  sku: string; label: string; novDecDemand: number; yoy: number;
   fba: number; inbound: number; awd: number; tpl: number; supply: number; gap: number;
 }
 interface Pallet { num: number; mix: Record<string, number>; total: number; }
@@ -95,7 +95,7 @@ interface MfgMonthEntry {
 }
 interface MfgScenario { entries: MfgMonthEntry[]; totalUnits: number; totalPallets: number; }
 interface MfgSkuSummary {
-  sku: string; label: string; holidayDemand: number;
+  sku: string; label: string; holidayDemand: number; yoy: number;
   fba: number; inbound: number; awd: number; tpl: number;
   transfer: number; manufacture: number;
 }
@@ -170,7 +170,8 @@ function buildMfgSheet(
   L.push("=================================================================");
   L.push(""); L.push("SKU REFERENCE:");
   for (const [sku, label] of Object.entries(SKU_LABELS)) L.push(`  ${sku}  =  ${label}`);
-  L.push(""); L.push(`Demand period: Nov + Dec + Jan (Amazon sales_by_sku × May–Jul family YoY)`);
+  L.push(""); L.push(`Demand period: Nov + Dec + Jan (each SKU: 2025 same-month Amazon × that SKU's own May–Jul YoY)`);
+  L.push("Family YoY is context only — not applied as a blended multiplier.");
   L.push(`Pallet capacity: ${fmt(PALLET_MAX)} cartons (270 per 13×11×9 box)`);
   L.push(`FBA cover: fulfillable only · inbound already in transit`);
   L.push(`All holiday units in Amazon FBA by: ${TARGET}`);
@@ -250,10 +251,10 @@ export default function PalletPlanPage() {
     () => monthlyAmazonUnits(amazonLipSales, SKUS),
     [amazonLipSales],
   );
-  const yoyInfo = useMemo(() => familyYoyMayJul(salesMonthly, SKUS), [salesMonthly]);
+  const familyYoyCtx = useMemo(() => familyYoyMayJul(salesMonthly, SKUS), [salesMonthly]);
   const salesDemand = useMemo(
-    () => holidayDemandFromSales(salesMonthly, SKUS, yoyInfo.yoy, { includeJan: true }),
-    [salesMonthly, yoyInfo.yoy],
+    () => holidayDemandFromSales(salesMonthly, SKUS, { includeJan: true }),
+    [salesMonthly],
   );
   const fbaAsOf = stampDate(snapshots.find((s) => s.snapshot_at)?.snapshot_at);
   const awdAsOf = stampDate(awdList.find((a) => a.pulled_at)?.pulled_at);
@@ -276,7 +277,11 @@ export default function PalletPlanPage() {
       const novDecDemand = salesDemand[sku]?.novDecDemand ?? 0;
       const gap = Math.max(novDecDemand - supply, 0);
       tGap += gap; tDemand += novDecDemand; tSupply += supply;
-      plans.push({ sku, label: SKU_LABELS[sku] ?? sku, novDecDemand, fba, inbound, awd, tpl, supply, gap });
+      plans.push({
+        sku, label: SKU_LABELS[sku] ?? sku, novDecDemand,
+        yoy: salesDemand[sku]?.yoy ?? 1,
+        fba, inbound, awd, tpl, supply, gap,
+      });
     }
     const fill = palletFill(tGap, PALLET_MAX);
     const remaining = Object.fromEntries(plans.map((p) => [p.sku, p.gap]));
@@ -414,6 +419,7 @@ export default function PalletPlanPage() {
         const manufacture = Math.max(0, d - deductions);
         summaries.push({
           sku, label: SKU_LABELS[sku] ?? sku, holidayDemand: d,
+          yoy: salesDemand[sku]?.yoy ?? 1,
           fba: i.fba, inbound: i.inbound, awd: i.awd, tpl: i.tpl,
           transfer: i.tpl + i.awd, manufacture,
         });
@@ -489,13 +495,15 @@ export default function PalletPlanPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Pallet Planner</h1>
           <p className="text-sm text-muted-foreground">
-            Lip Balm holiday build · Nov+Dec+Jan from Amazon sales_by_sku × May–Jul family YoY · In Amazon by {TARGET}
+            Lip Balm holiday build · each SKU: 2025 same-month Amazon × that SKU&apos;s own May–Jul YoY · In Amazon by {TARGET}
           </p>
           <p className="text-[11px] text-muted-foreground mt-1">
             Dated stamps (not “today”): FBA {fbaAsOf ?? "—"}
             {awdAsOf ? ` · AWD ${awdAsOf}` : ""}
             {restockAsOf ? ` · Restock ${restockAsOf}` : ""}
-            {yoyInfo.yoy ? ` · Family YoY ${yoyInfo.yoy.toFixed(2)}×` : ""}
+            {familyYoyCtx.yoy
+              ? ` · Family YoY ${familyYoyCtx.yoy.toFixed(2)}× (context only, not applied)`
+              : ""}
           </p>
         </div>
         <Link href="/inventory"><Button variant="outline" size="sm">← Inventory</Button></Link>
@@ -519,7 +527,7 @@ export default function PalletPlanPage() {
           <CardContent className="p-4">
             <p className="text-[10px] text-muted-foreground uppercase">Nov+Dec Demand</p>
             <p className="text-2xl font-semibold tabular-nums">{fmt(totalDemand)}</p>
-            <p className="text-xs text-muted-foreground">sales_by_sku × {yoyInfo.yoy.toFixed(2)}× YoY</p>
+            <p className="text-xs text-muted-foreground">each SKU&apos;s own May–Jul YoY</p>
           </CardContent>
         </Card>
         <Card>
@@ -569,7 +577,7 @@ export default function PalletPlanPage() {
           </div>
           <div className="flex items-center gap-4 mt-1">
             <p className="text-xs text-muted-foreground">
-              Nov+Dec+Jan from Amazon sales_by_sku × May–Jul family YoY. Mix unlocked. actual_2025 is the forecast workbook weekly column — not monthly Amazon sales.
+              Nov+Dec+Jan = each SKU&apos;s 2025 same-month Amazon × that SKU&apos;s own May–Jul YoY. Mix unlocked. Family 1.42× is context only. actual_2025 is the forecast workbook weekly column — not monthly Amazon sales.
             </p>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <input type="checkbox" checked={tplOffsetsProduction}
@@ -585,6 +593,7 @@ export default function PalletPlanPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>SKU</TableHead>
+                  <TableHead className="text-right">Own YoY</TableHead>
                   <TableHead className="text-right">Demand</TableHead>
                   <TableHead className="text-right">FBA fulfillable</TableHead>
                   <TableHead className="text-right">Inbound (in transit)</TableHead>
@@ -598,6 +607,7 @@ export default function PalletPlanPage() {
                 {mfgSkuSummary.map((s) => (
                   <TableRow key={s.sku}>
                     <TableCell className="font-medium text-xs">{SKU_SHORT[s.sku]}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">{s.yoy.toFixed(2)}×</TableCell>
                     <TableCell className="text-right tabular-nums font-medium">{fmt(s.holidayDemand)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(s.fba)}</TableCell>
                     <TableCell className="text-right tabular-nums">{s.inbound > 0 ? fmt(s.inbound) : "—"}</TableCell>
@@ -609,6 +619,7 @@ export default function PalletPlanPage() {
                 ))}
                 <TableRow className="bg-muted/30 font-semibold">
                   <TableCell>TOTAL</TableCell>
+                  <TableCell />
                   <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.holidayDemand, 0))}</TableCell>
                   <TableCell colSpan={4} />
                   <TableCell className="text-right tabular-nums text-blue-500">{fmt(mfgSkuSummary.reduce((a, s) => a + s.transfer, 0))}</TableCell>
@@ -739,7 +750,8 @@ export default function PalletPlanPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>SKU</TableHead>
-                <TableHead className="text-right">Nov+Dec (sales×YoY)</TableHead>
+                <TableHead className="text-right">Own YoY</TableHead>
+                <TableHead className="text-right">Nov+Dec (own YoY)</TableHead>
                 <TableHead className="text-right">FBA fulfillable</TableHead>
                 <TableHead className="text-right">Inbound (in transit)</TableHead>
                 <TableHead className="text-right">AWD</TableHead>
@@ -755,6 +767,7 @@ export default function PalletPlanPage() {
                     {p.label}
                     <span className="ml-1 text-[10px] text-muted-foreground">{p.sku}</span>
                   </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{p.yoy.toFixed(2)}×</TableCell>
                   <TableCell className="text-right tabular-nums font-medium">{fmt(p.novDecDemand)}</TableCell>
                   <TableCell className="text-right tabular-nums">{fmt(p.fba)}</TableCell>
                   <TableCell className="text-right tabular-nums">{fmt(p.inbound)}</TableCell>
@@ -768,6 +781,7 @@ export default function PalletPlanPage() {
               ))}
               <TableRow className="font-semibold bg-muted/30">
                 <TableCell>TOTAL</TableCell>
+                <TableCell />
                 <TableCell className="text-right tabular-nums">{fmt(totalDemand)}</TableCell>
                 <TableCell className="text-right tabular-nums" colSpan={4} />
                 <TableCell className="text-right tabular-nums">{fmt(totalSupply)}</TableCell>
@@ -964,7 +978,7 @@ export default function PalletPlanPage() {
       )}
 
       <p className="text-xs text-muted-foreground">
-        Holiday demand from Amazon sales_by_sku × May–Jul family YoY (not actual_2025 workbook weekly).
+        Holiday demand = each SKU&apos;s 2025 same-month Amazon × that SKU&apos;s own May–Jul YoY (family 1.42× is context only; not actual_2025 workbook weekly).
         Cover starts from FBA fulfillable only. Inbound is already in transit — do not send it again.
         {include3pl ? " 3PL is latest row per SKU." : " 3PL excluded."}
         {" "}Holiday inbound dates honor {TARGET}. Planning aid — not a purchase order. Mix unlocked.
