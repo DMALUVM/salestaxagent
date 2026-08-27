@@ -61,8 +61,8 @@ ADS_CAMPAIGN_CHUNK_DAYS: int = int(_RULES["ads"].get("campaign_chunk_days", 7))
 # times out used to leave the whole window SP-only; 1-day chunks keep the
 # days that already completed.
 ADS_SB_SD_CHUNK_DAYS: int = int(_RULES["ads"].get("campaign_sb_sd_chunk_days", 1))
-# Nightly SB/SD only pull this many closed days. SP keeps the full nightly
-# range. Sunday backfill still covers the long SP window.
+# Nightly SB/SD only pull this many closed days. Nightly SP uses the same
+# 7-day window. Sunday backfill still covers the long SP window.
 ADS_SB_SD_DAILY_DAYS: int = int(_RULES["ads"].get("campaign_sb_sd_daily_days", 7))
 # Sunday backfill is 90d for SP. SB/SD stay short so 03:00 cannot still
 # hold the process lock when the 05:00 daily jobs fire.
