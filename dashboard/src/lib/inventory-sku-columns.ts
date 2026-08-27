@@ -8,9 +8,11 @@
 export type SkuTableColumnKey =
   | "sku"
   | "fba_fulfillable"
+  | "fba_reserved"
   | "awd_on_hand"
   | "tpl_available"
   | "inbound"
+  | "fba_unfulfillable"
   | "owned_total"
   | "total_u_7"
   | "total_u_30"
@@ -36,7 +38,12 @@ export const SKU_TABLE_COLUMNS: SkuTableColumn[] = [
   {
     key: "fba_fulfillable",
     label: "FBA",
-    tip: "FBA fulfillable units only. Reserved, researching, and unfulfillable are not included.",
+    tip: "FBA fulfillable units only (cover). Reserved, researching, and unfulfillable are not included.",
+  },
+  {
+    key: "fba_reserved",
+    label: "Reserved",
+    tip: "inventory_snapshots.reserved — already includes customer orders, FC processing, and staging. 0 means a FBA row exists at 0. Em dash means no FBA row. In Total, not in the FBA cover column.",
   },
   {
     key: "awd_on_hand",
@@ -46,9 +53,14 @@ export const SKU_TABLE_COLUMNS: SkuTableColumn[] = [
   { key: "tpl_available", label: "3PL", tip: "Third-party / own warehouse units. 0 means a row exists at 0. Em dash means no 3PL row." },
   { key: "inbound", label: "Inbnd", tip: "Amazon inbound to FBA — not yet sellable. AWD inbound is not included." },
   {
+    key: "fba_unfulfillable",
+    label: "Unfulfillable",
+    tip: "FBA unfulfillable units. Visible so they are not hidden. Not in the FBA cover column. Not in Total. 0 means a FBA row exists at 0. Em dash means no FBA row.",
+  },
+  {
     key: "owned_total",
     label: "Total",
-    tip: "Sum of sources that exist: FBA fulfillable + inbound to FBA + 3PL on-hand + AWD on-hand. A missing source is blank and omitted. A known 0 counts as 0. AWD inbound is not included. As-of is the timestamps of the rows used.",
+    tip: "Same formula on every SKU: FBA fulfillable + reserved + inbound to FBA + 3PL on-hand + AWD on-hand. A missing source is blank and omitted. A known 0 counts as 0. Unfulfillable and researching are not included. AWD inbound is not included. As-of is the timestamps of the rows used.",
   },
   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },
@@ -64,7 +76,7 @@ export const SKU_TABLE_COLUMNS: SkuTableColumn[] = [
   { key: "flag", label: "Status", tip: "OK ≥ target cover; CRITICAL/LOW below; RESTOCK approaching" },
 ];
 
-/** Default visible set. Total sits after Inbnd and cannot be omitted. */
+/** Default visible set. Reserved and Unfulfillable are on. Total cannot be omitted. */
 export const DEFAULT_VISIBLE_COLUMN_KEYS: SkuTableColumnKey[] = SKU_TABLE_COLUMNS.map(
   (c) => c.key,
 );
@@ -104,6 +116,13 @@ export function resolveVisibleColumns(saved?: SkuTablePrefs | null): SkuTableCol
         continue;
       }
       if (allowed.has(key as SkuTableColumnKey)) picked.add(key as SkuTableColumnKey);
+    }
+    // Prefs that predate these columns still get them unless explicitly hidden.
+    if (!picked.has("fba_reserved") && !hidden.has("fba_reserved")) {
+      picked.add("fba_reserved");
+    }
+    if (!picked.has("fba_unfulfillable") && !hidden.has("fba_unfulfillable")) {
+      picked.add("fba_unfulfillable");
     }
   } else {
     for (const key of DEFAULT_VISIBLE_COLUMN_KEYS) picked.add(key);
