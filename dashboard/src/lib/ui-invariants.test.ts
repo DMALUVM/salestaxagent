@@ -59,6 +59,11 @@ describe("pallet planner ship view", () => {
     assert.match(ship, /3PL→FBA/);
     assert.match(ship, /Tulsa hold/);
     assert.match(ship, /AWD high water/);
+    assert.match(ship, /not the near-term manufacture\/buy/);
+    assert.match(ship, /First-wave AWD/);
+    assert.match(ship + "\n" + model, /61_425|61425|61,425/);
+    assert.match(ship, /assorted \+ orange/);
+    assert.match(model, /FIRST_WAVE_AWD_TARGET_CAP = 61_425/);
     assert.match(ship, /FBA cap vs on-hand/);
     assert.match(ship, /Marpac→Tulsa/);
     assert.match(model, /Marpac→Tulsa/);
