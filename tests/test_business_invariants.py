@@ -845,6 +845,8 @@ class TestAdsPollResilience:
         import inspect
         from src.main import _run_ads_campaigns_sync
         src = inspect.getsource(_run_ads_campaigns_sync)
+        assert "days=7" in src
+        assert "days=30" not in src
         assert "sb_sd_days" in src
         assert "ADS_SB_SD_DAILY_DAYS" in src
         assert "_run_ads_placements_sync" in src

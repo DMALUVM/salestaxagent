@@ -42,7 +42,7 @@
     "//sku_economics_min_date": "Seller Central SKU Economics exports only retain from this month. Earlier ad months need Ads Console campaign CSV or another source — not SKU Economics.",
     "//campaign_chunk_days": "SP campaign pull uses 7-day chunks, not one 30-day report. Still clamped to max_chunk_days.",
     "//campaign_sb_sd_chunk_days": "SB/SD use 1-day chunks. A single 7-day SB/SD report that times out at 900s used to wipe the whole window (2026-08-25: SB+SD $0, SP kept → Aug 23–24 SP-only vs console). One-day chunks keep prior days when one report stalls.",
-    "//campaign_sb_sd_daily_days": "Nightly SB/SD window. SP keeps the full 30d nightly range. After a partial, ads-heal retries SB/SD only.",
+    "//campaign_sb_sd_daily_days": "Nightly SB/SD window. Nightly SP uses the same 7d range (ads_campaigns_sync days=7). After a partial, ads-heal retries SB/SD only.",
     "//campaign_sb_sd_backfill_days": "Sunday 90d backfill still covers SP for long trends. SB/SD stay on a short window so 03:00 cannot still hold the lock at 05:00."
   },
   "agent": {

@@ -4848,7 +4848,7 @@ def run():
                 coalesce=True,
                 max_instances=1,
             )
-            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (SP 30d, SB/SD 7d×1d chunks, then placements + search terms)")
+            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (SP 7d, SB/SD 7d×1d chunks, then placements + search terms)")
 
             scheduler.add_job(
                 _run_ads_search_terms_sync,
@@ -5840,13 +5840,14 @@ def _run_sqp_sync():
 def _run_ads_campaigns_sync(retry: int = 0):
     """05:00 — campaign dailies for the KPI cards and trend chart.
 
-    SB/SD use a 7-day window in 1-day chunks so one timed-out report cannot
+    SP upserts the last 7 closed days on (date, campaign_id), same window
+    as SB/SD. SB/SD still use 1-day chunks so one timed-out report cannot
     wipe the whole week. After campaigns release the lock this job runs
     placements and search terms itself; those crons are a backup.
     """
     from src.rules import ADS_SB_SD_DAILY_DAYS
     status = _run_ads_sync_job(
-        "ads_campaigns_sync", days=30, campaigns_only=True,
+        "ads_campaigns_sync", days=7, campaigns_only=True,
         label="campaigns", sb_sd_days=ADS_SB_SD_DAILY_DAYS, retry=retry)
     # A skipped run is Sunday-backfill (or a late leftover) still holding
     # the lock. Chaining here would just skip twice more. The retry of
