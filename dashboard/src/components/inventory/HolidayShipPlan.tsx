@@ -236,7 +236,7 @@ export function HolidayShipPlan({
         <p className="text-[11px] text-muted-foreground mb-3">
           Sept = FBA and AWD. Oct / Nov / Dec = mainly single-SKU AWD (up to 2/month).
           Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
-          {" "}August hop is {AUGUST_HOP_LABEL}, mix TBD.
+          {" "}August hop is Marpac→Tulsa, mix TBD.
         </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {entries
@@ -297,7 +297,7 @@ function MonthCard({
       {isAug && entry.units === 0 ? (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            {AUGUST_HOP_LABEL} · mix TBD — do not invent a mix.
+            Marpac→Tulsa · mix TBD — do not invent a mix.
           </p>
           <div className="grid grid-cols-2 gap-1.5">
             {LIP_BALM_SKUS.map((sku) => (
