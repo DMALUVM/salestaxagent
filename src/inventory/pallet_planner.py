@@ -502,11 +502,16 @@ def sku_production_build(
 def awd_covers_off_fba_reserve(
     sku_awd: dict[str, int] | None = None,
     awd_planned: dict[str, int] | None = None,
+    min_units: int = TULSA_LIP_FLOOR_UNITS,
 ) -> bool:
-    """True when AWD on-hand or planned overflow already covers replen reserve."""
+    """True when family AWD can actually replace the Tulsa reserve.
+
+    Loaded = on-hand + planned overflow ≥ 5,000 lip units. A token
+    balance (e.g. 540 peppermint) is not loaded — keep the Tulsa floor.
+    """
     awd_oh = sum(max(int(v or 0), 0) for v in (sku_awd or {}).values())
     awd_plan = sum(max(int(v or 0), 0) for v in (awd_planned or {}).values())
-    return (awd_oh + awd_plan) > 0
+    return (awd_oh + awd_plan) >= max(int(min_units or 0), 0)
 
 
 def effective_tulsa_floor(
@@ -514,10 +519,10 @@ def effective_tulsa_floor(
     awd_planned: dict[str, int] | None = None,
     floor: int = TULSA_LIP_FLOOR_UNITS,
 ) -> int:
-    """Drop the 5k Tulsa floor when AWD is loaded.
+    """Drop the 5k Tulsa floor when AWD is loaded (≥5k family).
 
-    Off-FBA reserve can sit in AWD. Keep 5k only when we'd otherwise
-    plan 0 AWD and 0 Tulsa. Never add 5k Tulsa on top of AWD.
+    Off-FBA reserve can sit in AWD. A token AWD balance is not loaded.
+    Keep 5k when we'd otherwise plan 0 AWD and 0 Tulsa.
     """
     if awd_covers_off_fba_reserve(sku_awd, awd_planned):
         return 0
@@ -530,10 +535,10 @@ def family_tulsa_floor(
     sku_awd: dict[str, int] | None = None,
     awd_planned: dict[str, int] | None = None,
 ) -> dict:
-    """Family Tulsa reserve. 5k only if AWD is empty — not a per-SKU mix.
+    """Family Tulsa reserve. 5k unless AWD ≥5k family can replace it.
 
-    When AWD is loaded, floor and top_up are 0 (do not force leftover
-    Marpac/Tulsa ~5k). Hard rule: never plan 0 AWD and 0 Tulsa.
+    Loaded AWD (on-hand + planned overflow ≥ reserve) drops floor and
+    top_up. Token AWD does not. Never plan 0 AWD and 0 Tulsa.
     """
     awd_loaded = awd_covers_off_fba_reserve(sku_awd, awd_planned)
     effective = effective_tulsa_floor(sku_awd, awd_planned, floor)
@@ -1843,9 +1848,9 @@ def build_manufacturer_headsup(
                     f"3PL→FBA toward Sept FBA target by {sept['ship_by']} "
                     f"(inbound already in transit not sent again). "
                     + (
-                        "AWD is loaded — no 5k Tulsa floor; reserve sits in AWD. "
+                        "Family AWD ≥5k — no Tulsa floor; reserve sits in AWD. "
                         if sept.get("awd_loaded")
-                        else f"AWD empty — keep Tulsa floor {policy['tulsa_floor_units']:,} "
+                        else f"AWD below 5k reserve — keep Tulsa floor {policy['tulsa_floor_units']:,} "
                         "(do not plan 0 AWD and 0 Tulsa). "
                     )
                     + f"Holiday-gate last 3PL→FBA {sept['holiday_gate_last_3pl_fba']}."
@@ -1894,10 +1899,10 @@ def build_manufacturer_headsup(
             "targets are separate — do not add peak-60d or Feb onto sales. "
             "Manufacture = FBA target − FBA fulfillable − inbound − August "
             "(when entered). After FBA is close, leftover wanted cover is "
-            "single-SKU AWD. Drop the 5k Tulsa floor when AWD is loaded — "
-            "do not force leftover Marpac/Tulsa ~5k on top of AWD. Never "
-            "plan 0 AWD and 0 Tulsa. Family 1.42× is context only. August "
-            "is TBD until Dave’s totals."
+            "single-SKU AWD. Drop the 5k Tulsa floor when family AWD "
+            "(on-hand + planned overflow) is ≥5,000 — a token balance "
+            "does not count. Never plan 0 AWD and 0 Tulsa. Family 1.42× "
+            "is context only. August is TBD until Dave’s totals."
         ),
         "yoy_by_sku": {k: round(v["yoy"], 4) for k, v in yoy_by_sku.items()},
         "family_yoy_context": family_ctx,
@@ -2009,11 +2014,11 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     tulsa = headsup.get("tulsa_3pl") or {}
     if tulsa:
         if tulsa.get("awd_loaded"):
-            a("Tulsa floor: 0 — AWD is loaded; off-FBA reserve sits in AWD "
+            a("Tulsa floor: 0 — family AWD ≥5k; off-FBA reserve sits in AWD "
               f"(on hand {tulsa.get('on_hand', 0):,}; transferable {tulsa.get('transferable', 0):,}).")
         else:
             a(f"Tulsa 3PL floor: {tulsa.get('floor', TULSA_LIP_FLOOR_UNITS):,} lip family "
-              f"(AWD empty — do not plan 0 AWD and 0 Tulsa; "
+              f"(AWD below 5k reserve — do not plan 0 AWD and 0 Tulsa; "
               f"on hand {tulsa.get('on_hand', 0):,}; transferable {tulsa.get('transferable', 0):,})")
     a(f"3PL policy: {tpl_note}")
     lt = headsup.get("lead_times") or {}

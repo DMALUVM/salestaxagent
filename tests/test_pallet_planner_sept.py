@@ -116,6 +116,23 @@ def test_awd_overflow_is_wanted_cover_not_stacked_60d():
     assert plan["mix_locked"] is False
 
 
+def test_live_awd_540_does_not_drop_tulsa_floor():
+    fba = {s: CONTEXT_FBA_PLUS_INBOUND[s] for s in LIP}
+    inbound = {s: 0 for s in LIP}
+    tpl = {s: 2000 for s in LIP}
+    awd = {"DDPE0002Shop": 540}
+    # No planned overflow — wanted cover at the FBA target.
+    plan = build_september_plan(
+        fba, inbound, tpl,
+        sku_wanted_cover=dict(SEPT_FBA_ON_HAND_TARGETS),
+        sku_awd=awd,
+    )
+    assert plan["awd_loaded"] is False
+    assert plan["tulsa_floor_units"] == 5000
+    assert plan["tulsa"]["floor"] == 5000
+    assert sum(plan["tpl_to_fba"].values()) == 3_000
+
+
 def test_awd_loaded_drops_tulsa_floor_no_5k_addon():
     fba = {s: CONTEXT_FBA_PLUS_INBOUND[s] for s in LIP}
     inbound = {s: 0 for s in LIP}

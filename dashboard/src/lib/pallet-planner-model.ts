@@ -405,10 +405,11 @@ export function skuProductionBuild(
 export function awdCoversOffFbaReserve(
   skuAwd?: Record<string, number>,
   awdPlanned?: Record<string, number>,
+  minUnits = TULSA_LIP_FLOOR_UNITS,
 ): boolean {
   const oh = Object.values(skuAwd ?? {}).reduce((a, v) => a + Math.max(Number(v) || 0, 0), 0);
   const plan = Object.values(awdPlanned ?? {}).reduce((a, v) => a + Math.max(Number(v) || 0, 0), 0);
-  return oh + plan > 0;
+  return oh + plan >= Math.max(minUnits || 0, 0);
 }
 
 export function effectiveTulsaFloor(
