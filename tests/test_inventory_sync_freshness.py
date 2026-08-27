@@ -73,6 +73,21 @@ def test_same_fba_quantities_still_bump_snapshot_at():
     assert second[0]["snapshot_at"] > first[0]["snapshot_at"]
 
 
+def test_awd_zero_on_hand_row_is_kept_as_zero():
+    rows = _awd_inventory_rows(
+        [{
+            "sku": "DDPE0001Shop",
+            "totalOnhandQuantity": 0,
+            "totalInboundQuantity": 0,
+            "inventoryDetails": {"availableDistributableQuantity": 0},
+        }],
+        pulled_at=STAMP,
+    )
+    assert len(rows) == 1
+    assert rows[0]["awd_on_hand"] == 0
+    assert rows[0]["sku"] == "DDPE0001Shop"
+
+
 def test_awd_upsert_payload_includes_fresh_pulled_at():
     rows = _awd_inventory_rows(
         [{

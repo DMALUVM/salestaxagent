@@ -1,12 +1,14 @@
 /**
  * Owned-network Total for the /inventory SKU table.
  *
- * Total = FBA fulfillable
- *       + inbound to FBA (working + shipped + receiving)
- *       + 3PL on-hand
- *       + AWD on-hand
+ * Total = sum of sources that EXIST:
+ *       FBA fulfillable
+ *     + inbound to FBA (working + shipped + receiving)
+ *     + 3PL on-hand
+ *     + AWD on-hand (only if a latest AWD row exists)
  *
- * Latest-per-SKU only. A missing source row is unknown — never a silent 0.
+ * Latest-per-SKU only. A missing source is blank and omitted from the sum.
+ * A known 0 on a present row counts as 0. Do not require all four sources.
  * AWD inbound is not FBA inbound. reserved / unfulfillable / researching
  * are not added (they are not inside fulfillable).
  */
@@ -50,7 +52,7 @@ export type OwnedTotal = {
   fbaInbound: number | null;
   tplOnHand: number | null;
   awdOnHand: number | null;
-  /** Null when any required source has no latest row. */
+  /** Null only when no source row exists. Missing sources are omitted, not zeroed. */
   total: number | null;
   complete: boolean;
   missing: OwnedSource[];
@@ -149,6 +151,9 @@ export function ownedNetworkTotal(input: {
   if (tplOnHand == null) missing.push("tpl_on_hand");
   if (awdOnHand == null) missing.push("awd_on_hand");
 
+  const present = [fbaFulfillable, fbaInbound, tplOnHand, awdOnHand].filter(
+    (n): n is number => n != null,
+  );
   const complete = missing.length === 0;
   return {
     sku: input.sku,
@@ -156,9 +161,7 @@ export function ownedNetworkTotal(input: {
     fbaInbound,
     tplOnHand,
     awdOnHand,
-    total: complete
-      ? fbaFulfillable! + fbaInbound! + tplOnHand! + awdOnHand!
-      : null,
+    total: present.length ? present.reduce((sum, n) => sum + n, 0) : null,
     complete,
     missing,
     asOf: {
@@ -188,24 +191,23 @@ function ymd(iso: string | null): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
 }
 
-/** Tooltip / title: timestamps of the rows used, plus missing sources. */
+/** Tooltip / title: timestamps of the rows used, plus omitted sources. */
 export function formatOwnedAsOf(total: OwnedTotal): string {
   const parts: string[] = [];
   if (total.asOf.fba) parts.push(`FBA ${total.asOf.fba}`);
   if (total.asOf.tpl) parts.push(`3PL ${total.asOf.tpl}`);
   if (total.asOf.awd) parts.push(`AWD ${total.asOf.awd}`);
-  if (!total.complete) {
+  if (total.missing.length) {
     const miss = total.missing.join(", ");
     return parts.length
-      ? `Incomplete (${miss} missing) · ${parts.join(" · ")}`
-      : `Incomplete (${miss} missing)`;
+      ? `${parts.join(" · ")} · omitted ${miss}`
+      : `No source rows (${miss})`;
   }
   return parts.join(" · ") || "Complete";
 }
 
-/** Oldest YMD among used rows — only when Total is complete. */
+/** Oldest YMD among rows actually used in the sum. */
 export function ownedAsOfLabel(total: OwnedTotal): string | null {
-  if (!total.complete) return null;
   const dates = [ymd(total.asOf.fba), ymd(total.asOf.tpl), ymd(total.asOf.awd)]
     .filter((d): d is string => !!d)
     .sort();

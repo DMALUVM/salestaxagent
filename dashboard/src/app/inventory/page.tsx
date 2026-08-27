@@ -51,6 +51,13 @@ import {
   ownedAsOfLabel,
   ownedNetworkTotalForSku,
 } from "@/lib/inventory-owned-total";
+import { keepAwdInventoryRows } from "@/lib/inventory-awd-rows";
+import {
+  formatSkuQty,
+  migrateSortColumn,
+  resolveVisibleColumns,
+  visibleSkuTableColumns,
+} from "@/lib/inventory-sku-columns";
 
 // ---------------------------------------------------------------------------
 
@@ -92,11 +99,14 @@ interface ComputedRow {
   asin: string;
   product_name: string;
   fulfillable: number;
+  fba_fulfillable: number | null;
   fba_on_hand: number;
   inbound: number;
+  inbound_display: number | null;
   reserved: number;
   tpl_available: number;
-  awd_on_hand: number;
+  tpl_display: number | null;
+  awd_on_hand: number | null;
   owned_total: number | null;
   owned_as_of: string | null;
   owned_as_of_detail: string;
@@ -146,7 +156,9 @@ export default function InventoryPage() {
     try { return JSON.parse(localStorage.getItem(PREFS_KEY) || "null"); } catch { return null; }
   }
   const saved = loadPrefs();
-  const [sortCol, setSortCol] = useState<string>(saved?.sortColumn ?? "fba_on_hand");
+  const visibleColumns = visibleSkuTableColumns(saved);
+  const visibleKeys = new Set(resolveVisibleColumns(saved));
+  const [sortCol, setSortCol] = useState<string>(migrateSortColumn(saved?.sortColumn));
   const [sortAsc, setSortAsc] = useState<boolean>(saved?.sortDir === "asc");
   const [showZeroStock, setShowZeroStock] = useState<boolean>(saved?.hideZeroStock === false);
   const [filterChip, setFilterChip] = useState<string | null>(saved?.activeFilter ?? null);
@@ -157,6 +169,7 @@ export default function InventoryPage() {
       localStorage.setItem(PREFS_KEY, JSON.stringify({
         sortColumn: col, sortDir: asc ? "asc" : "desc",
         hideZeroStock: !zero, activeFilter: chip,
+        columns: resolveVisibleColumns(saved),
       }));
     } catch { /* quota */ }
   }
@@ -189,13 +202,13 @@ export default function InventoryPage() {
   }) as InventorySettings;
   const seasonality = (raw?.seasonality ?? []) as SeasonalityWeekly[];
   const forecasts = (raw?.forecast ?? []) as { sku: string; week_start: string; scenario: string; units: number }[];
-  const awdSnapshots = (raw?.awd ?? []) as {
+  const awdSnapshots = keepAwdInventoryRows((raw?.awd ?? []) as {
     sku: string;
     awd_on_hand: number;
     awd_inbound: number;
     pulled_at?: string | null;
     synced_at?: string | null;
-  }[];
+  }[]);
   const signalRows = (raw?.signals ?? []) as InventorySkuSignals[];
   const leadtime = (raw?.leadtime ?? null) as InventoryLeadtimeSummary | null;
   const modelStateRows = (raw?.modelState ?? []) as Array<{ sku: string; weights: unknown; seasonal_factors: unknown; model_version: string }>;
@@ -238,7 +251,6 @@ export default function InventoryPage() {
     const signalMap = new Map(signalRows.map((r) => [r.sku, r]));
     const signalMapU = new Map(signalRows.map((r) => [r.sku.toUpperCase(), r]));
     const tplMap = new Map(tplSnapshots.map((t) => [t.sku, t]));
-    const awdMap = new Map(awdSnapshots.map((a) => [a.sku, a]));
     const ownedSources = latestOwnedSources({
       snapshots,
       tpl: tplSnapshots,
@@ -391,23 +403,21 @@ export default function InventoryPage() {
       const vel = velMap.get(sku);
       const rec = recMap.get(sku);
       const tpl = tplMap.get(sku);
-      const awdItem = awdMap.get(sku);
 
-      const fulfillable = Number(snap?.fulfillable ?? 0);
+      const owned = ownedNetworkTotalForSku(sku, ownedSources);
+      const fulfillable = owned.fbaFulfillable ?? 0;
       const reserved = Number(snap?.reserved ?? 0);
       const researching = Number(snap?.researching ?? 0);
       const unfulfillable_qty = Number(snap?.unfulfillable ?? 0);
-      // FBA on-hand = fulfillable + reserved + researching + unfulfillable
+      // Planning math still sees reserved+researching+unfulfillable.
+      // The FBA *column* is fulfillable only — see fba_fulfillable.
       const fba_on_hand = fulfillable + reserved + researching + unfulfillable_qty;
-      const inbound =
-        Number(snap?.inbound_working ?? 0) +
-        Number(snap?.inbound_shipped ?? 0) +
-        Number(snap?.inbound_receiving ?? 0);
-      const tpl_available = Number(tpl?.available ?? 0);
-      const awd_on_hand = Number(awdItem?.awd_on_hand ?? 0);
+      const inbound = owned.fbaInbound ?? 0;
+      const tpl_available = owned.tplOnHand ?? 0;
+      const awd_qty = owned.awdOnHand ?? 0;
       let on_hand = fba_on_hand + (s.include_inbound ? inbound : 0);
       if (s.include_3pl) on_hand += tpl_available;
-      if (s.include_awd !== false) on_hand += awd_on_hand;
+      if (s.include_awd !== false) on_hand += awd_qty;
 
       const total_vel_30 = Number(vel?.total_u_30 ?? 0);
       const amazon_vel_30 = Number(vel?.amazon_u_30 ?? 0);
@@ -415,7 +425,7 @@ export default function InventoryPage() {
 
       // Channel detection
       const minVel = 0.1;
-      const amazonActive = fba_on_hand > 0 || awd_on_hand > 0 || inbound > 0 || amazon_vel_30 > minVel;
+      const amazonActive = fba_on_hand > 0 || awd_qty > 0 || inbound > 0 || amazon_vel_30 > minVel;
       const shopifyOnly = !amazonActive && (shopify_vel_30 > minVel || tpl_available > 0);
       // Skip inactive/junk
       if (!amazonActive && !shopifyOnly && total_vel_30 <= minVel) continue;
@@ -443,33 +453,35 @@ export default function InventoryPage() {
       } else {
         // Amazon: FBA rules with 60d floor
         dos = total_vel_30 > eps ? fba_on_hand / total_vel_30 : (fba_on_hand > 0 ? 9999 : 0);
-        const amz_supply = fba_on_hand + inbound + awd_on_hand;
+        const amz_supply = fba_on_hand + inbound + awd_qty;
         dos_amz_supply = total_vel_30 > eps ? amz_supply / total_vel_30 : (amz_supply > 0 ? 9999 : 0);
-        const pipeline_supply = fba_on_hand + inbound + awd_on_hand;
+        const pipeline_supply = fba_on_hand + inbound + awd_qty;
         pipeline_dos = total_vel_30 > eps ? Math.round(pipeline_supply / total_vel_30) : (pipeline_supply > 0 ? 9999 : 0);
-        effective_lead = effectiveLeadDays(sig, awd_on_hand, fba_on_hand, inbound);
+        effective_lead = effectiveLeadDays(sig, awd_qty, fba_on_hand, inbound);
         our_reorder = Math.max(Math.ceil((target + effective_lead) * total_vel_30) - on_hand, 0);
         // FBA-only stockout (forecast + seasonal walk-forward)
         stockout_date = seasonalStockoutDate(fba_on_hand, total_vel_30, sku);
         // Network OOS: all owned stock (forecast + seasonal walk-forward)
-        const network = fba_on_hand + inbound + awd_on_hand + tpl_available;
+        const network = fba_on_hand + inbound + awd_qty + tpl_available;
         network_oos_date = seasonalStockoutDate(network, total_vel_30, sku);
         flag = dos < 60 && total_vel_30 > eps ? "CRITICAL" : our_reorder > 0 ? "RESTOCK" : "OK";
       }
 
       const shopify_share = total_vel_30 > 0 ? Math.round((shopify_vel_30 / total_vel_30) * 100) : 0;
-      const owned = ownedNetworkTotalForSku(sku, ownedSources);
 
       result.push({
         sku,
         asin: vel?.asin ?? rec?.asin ?? snap?.asin ?? "",
         product_name: vel?.product_name ?? rec?.product_name ?? snap?.product_name ?? tpl?.product_name ?? "",
         fulfillable,
+        fba_fulfillable: owned.fbaFulfillable,
         fba_on_hand,
         inbound,
+        inbound_display: owned.fbaInbound,
         reserved,
         tpl_available,
-        awd_on_hand,
+        tpl_display: owned.tplOnHand,
+        awd_on_hand: owned.awdOnHand,
         owned_total: owned.total,
         owned_as_of: ownedAsOfLabel(owned),
         owned_as_of_detail: formatOwnedAsOf(owned),
@@ -525,7 +537,7 @@ export default function InventoryPage() {
     // Hide zero-stock unless toggled
     if (!showZeroStock) {
       list = list.filter(
-        (r) => r.fba_on_hand > 0 || r.awd_on_hand > 0 || r.tpl_available > 0 || r.inbound > 0 || r.total_u_30 > 0.1,
+        (r) => r.fba_on_hand > 0 || (r.awd_on_hand ?? 0) > 0 || r.tpl_available > 0 || r.inbound > 0 || r.total_u_30 > 0.1,
       );
     }
 
@@ -533,7 +545,7 @@ export default function InventoryPage() {
     if (filterChip === "critical") list = list.filter((r) => r.flag === "CRITICAL");
     else if (filterChip === "under60") list = list.filter((r) => r.dos < 60 && r.dos > 0);
     else if (filterChip === "inbound") list = list.filter((r) => r.inbound > 0);
-    else if (filterChip === "awd") list = list.filter((r) => r.awd_on_hand > 0);
+    else if (filterChip === "awd") list = list.filter((r) => (r.awd_on_hand ?? 0) > 0);
     else if (filterChip === "3pl") list = list.filter((r) => r.tpl_available > 0);
 
     // Text search
@@ -552,9 +564,9 @@ export default function InventoryPage() {
     list.sort((a, b) => {
       const av = a[col];
       const bv = b[col];
-      if (col === "owned_total") {
-        const an = a.owned_total;
-        const bn = b.owned_total;
+      if (col === "owned_total" || col === "fba_fulfillable" || col === "awd_on_hand" || col === "tpl_display" || col === "inbound_display") {
+        const an = a[col] as number | null;
+        const bn = b[col] as number | null;
         if (an == null && bn == null) return 0;
         if (an == null) return 1;
         if (bn == null) return -1;
@@ -591,11 +603,11 @@ export default function InventoryPage() {
 
   function exportCSV() {
     const header =
-      "SKU,ASIN,Product,FBA_OnHand,AWD,3PL,Inbound,Total,TotalAsOf,TotalV30,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
+      "SKU,ASIN,Product,FBA_Fulfillable,AWD,3PL,Inbound,Total,TotalAsOf,TotalV30,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
     const body = filtered
       .map(
         (r) =>
-          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_on_hand},${r.awd_on_hand},${r.tpl_available},${r.inbound},${r.owned_total ?? ""},"${(r.owned_as_of_detail ?? "").replace(/"/g, '""')}",${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
+          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_fulfillable ?? ""},${r.awd_on_hand ?? ""},${r.tpl_display ?? ""},${r.inbound_display ?? ""},${r.owned_total ?? ""},"${(r.owned_as_of_detail ?? "").replace(/"/g, '""')}",${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
       )
       .join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
@@ -838,26 +850,7 @@ export default function InventoryPage() {
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-card">
               <TableRow>
-                {[
-                  { key: "sku", label: "SKU", tip: "Seller SKU / MSKU" },
-                  { key: "fba_on_hand", label: "FBA", tip: "Sellable units checked in at Amazon FBA" },
-                  { key: "awd_on_hand", label: "AWD", tip: "AWD on-hand (not FBA sellable until replenished)" },
-                  { key: "tpl_available", label: "3PL", tip: "Third-party / own warehouse units" },
-                  { key: "inbound", label: "Inbnd", tip: "Amazon inbound — not yet sellable" },
-                  { key: "owned_total", label: "Total", tip: "Physical units you own: FBA fulfillable + inbound to FBA + 3PL on-hand + AWD on-hand. Em dash if any source has no latest row (missing is not zero). AWD inbound is not included. As-of is the timestamps of the rows used." },
-                  { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
-                  { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },
-                  { key: "inventory_u_30", label: "Inv V30", tip: "FBA units shipped/day from the inventory ledger (last 30 days). Compare to orders V30." },
-                  { key: "measured_receive_days", label: "Recv", tip: "Warehouse ship → FBA sellable: AWD inbound + AWD→FBA (75th percentile, 4–45 day samples). Not the 4-day parcel median." },
-                  { key: "measured_replenish_days", label: "AWD→FBA", tip: "AWD replenish created → SUCCESS at FBA (75th percentile). Drops 1–3 day status flips." },
-                  { key: "dos", label: "DOS", tip: "Days of supply — FBA cover (Amazon) or warehouse cover (Shop)" },
-                  { key: "pipeline_dos", label: "+Pipe", tip: "Cover in days if FBA+AWD+Inbound all become sellable" },
-                  { key: "amz_rec_qty", label: "AmzRec", tip: "Amazon recommended replenishment quantity" },
-                  { key: "our_reorder_qty", label: "Reorder", tip: "Units to transfer/produce to reach target cover" },
-                  { key: "stockout_date", label: "Out", tip: "FBA reaches 0 (Amazon) or warehouse reaches 0 (Shop) — uses forecast + seasonality" },
-                  { key: "network_oos_date", label: "OOS", tip: "All network stock (FBA+AWD+3PL+Inbound) reaches 0 — uses forecast + seasonality" },
-                  { key: "flag", label: "Status", tip: "OK ≥ target cover; CRITICAL/LOW below; RESTOCK approaching" },
-                ].map(({ key, label, tip }) => (
+                {visibleColumns.map(({ key, label, tip }) => (
                   <TableHead
                     key={key}
                     title={tip}
@@ -880,7 +873,7 @@ export default function InventoryPage() {
               {filtered.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={18}
+                    colSpan={visibleColumns.length}
                     className="text-center text-muted-foreground py-8"
                   >
                     No inventory data. Run:{" "}
@@ -902,6 +895,7 @@ export default function InventoryPage() {
                     }`}
                     onClick={() => setSelected(r)}
                   >
+                    {visibleKeys.has("sku") && (
                     <TableCell className="font-medium max-w-[180px] truncate sticky left-0 z-10 bg-card" title={r.product_name ? displayTitle(r.product_name) : r.sku}>
                       <a href={`/inventory/plan?sku=${encodeURIComponent(r.sku)}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
                         {r.sku}
@@ -912,39 +906,51 @@ export default function InventoryPage() {
                         <ShoppingBag className="inline ml-1 h-3 w-3 text-violet-500" />
                       ) : null}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("fba_fulfillable") && (
                     <TableCell className={`text-right tabular-nums ${r.channel === "shopify_only" ? "text-muted-foreground/30" : ""}`}>
-                      {r.channel === "shopify_only" ? "—" : fmt(r.fba_on_hand)}
+                      {r.channel === "shopify_only" ? "—" : formatSkuQty(r.fba_fulfillable)}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("awd_on_hand") && (
                     <TableCell className="text-right tabular-nums">
-                      {r.awd_on_hand > 0 ? fmt(r.awd_on_hand) : "—"}
+                      {formatSkuQty(r.awd_on_hand)}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("tpl_available") && (
                     <TableCell className="text-right tabular-nums">
-                      {r.tpl_available > 0 ? fmt(r.tpl_available) : "—"}
+                      {formatSkuQty(r.tpl_display)}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("inbound") && (
                     <TableCell className="text-right tabular-nums">
-                      {fmt(r.inbound)}
+                      {formatSkuQty(r.inbound_display)}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("owned_total") && (
                     <TableCell
                       className="text-right tabular-nums font-medium"
                       title={r.owned_as_of_detail}
                     >
-                      {r.owned_total != null ? fmt(r.owned_total) : "—"}
+                      {formatSkuQty(r.owned_total)}
                       {r.owned_as_of ? (
                         <div className="text-[10px] font-normal text-muted-foreground">
                           as of {r.owned_as_of}
                         </div>
-                      ) : r.owned_total == null ? (
-                        <div className="text-[10px] font-normal text-muted-foreground">
-                          incomplete
-                        </div>
                       ) : null}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("total_u_7") && (
                     <TableCell className="text-right tabular-nums">
                       {r.total_u_7.toFixed(1)}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("total_u_30") && (
                     <TableCell className="text-right tabular-nums">
                       {r.total_u_30.toFixed(1)}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("inventory_u_30") && (
                     <TableCell
                       className={`text-right tabular-nums ${
                         r.rate_agreement === "investigate" ? "text-amber-600 font-medium" : "text-muted-foreground"
@@ -957,12 +963,18 @@ export default function InventoryPage() {
                     >
                       {r.inventory_u_30 != null ? r.inventory_u_30.toFixed(1) : "—"}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("measured_receive_days") && (
                     <TableCell className="text-right tabular-nums text-muted-foreground" title={r.receive_sample_n ? `n=${r.receive_sample_n} shipments` : undefined}>
                       {r.measured_receive_days != null && r.measured_receive_days > 0 ? `${r.measured_receive_days}d` : "—"}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("measured_replenish_days") && (
                     <TableCell className="text-right tabular-nums text-muted-foreground" title={r.replenish_sample_n ? `n=${r.replenish_sample_n} replenishments` : undefined}>
                       {r.measured_replenish_days != null && r.measured_replenish_days > 0 ? `${r.measured_replenish_days}d` : "—"}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("dos") && (
                     <TableCell
                       className={`text-right tabular-nums font-medium ${
                         r.dos < 30
@@ -975,14 +987,20 @@ export default function InventoryPage() {
                     >
                       {r.dos > 999 ? "999+" : fmt(r.dos)}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("pipeline_dos") && (
                     <TableCell className="text-right tabular-nums text-muted-foreground">
                       {r.pipeline_dos > 999
                         ? "999+"
                         : fmt(r.pipeline_dos)}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("amz_rec_qty") && (
                     <TableCell className="text-right tabular-nums">
                       {fmt(r.amz_rec_qty)}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("our_reorder_qty") && (
                     <TableCell
                       className={`text-right tabular-nums font-medium ${
                         r.our_reorder_qty > 0 ? "text-amber-600" : ""
@@ -990,14 +1008,20 @@ export default function InventoryPage() {
                     >
                       {fmt(r.our_reorder_qty)}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("stockout_date") && (
                     <TableCell className="text-right text-xs"
                       title={r.channel === "shopify_only" ? "Warehouse reaches 0" : "FBA reaches 0"}>
                       {r.stockout_date?.slice(5) ?? "—"}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("network_oos_date") && (
                     <TableCell className="text-right text-xs text-muted-foreground"
                       title="All owned network stock reaches 0">
                       {r.network_oos_date?.slice(5) ?? "—"}
                     </TableCell>
+                    )}
+                    {visibleKeys.has("flag") && (
                     <TableCell>
                       <Badge
                         variant="outline"
@@ -1006,6 +1030,7 @@ export default function InventoryPage() {
                         {r.flag}
                       </Badge>
                     </TableCell>
+                    )}
                   </TableRow>
                 ))
               )}
@@ -1036,13 +1061,13 @@ export default function InventoryPage() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded-lg border p-3">
                   <p className="text-[10px] text-muted-foreground uppercase">
-                    FBA On-hand
+                    FBA fulfillable
                   </p>
                   <p className="text-lg font-semibold">
-                    {fmt(selected.fba_on_hand)}
+                    {formatSkuQty(selected.fba_fulfillable)}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
-                    {fmt(selected.fulfillable)} avail · {fmt(selected.reserved)} rsv
+                    reserved {fmt(selected.reserved)} · not in FBA or Total
                   </p>
                 </div>
                 <div className="rounded-lg border p-3">
@@ -1050,7 +1075,7 @@ export default function InventoryPage() {
                     AWD
                   </p>
                   <p className="text-lg font-semibold">
-                    {selected.awd_on_hand > 0 ? fmt(selected.awd_on_hand) : "—"}
+                    {formatSkuQty(selected.awd_on_hand)}
                   </p>
                 </div>
                 <div className="rounded-lg border p-3">
@@ -1058,7 +1083,7 @@ export default function InventoryPage() {
                     3PL
                   </p>
                   <p className="text-lg font-semibold">
-                    {selected.tpl_available > 0 ? fmt(selected.tpl_available) : "—"}
+                    {formatSkuQty(selected.tpl_display)}
                   </p>
                 </div>
                 <div className="rounded-lg border p-3">
@@ -1066,7 +1091,7 @@ export default function InventoryPage() {
                     Inbound
                   </p>
                   <p className="text-lg font-semibold">
-                    {fmt(selected.inbound)}
+                    {formatSkuQty(selected.inbound_display)}
                   </p>
                 </div>
                 <div className="rounded-lg border p-3 col-span-2">

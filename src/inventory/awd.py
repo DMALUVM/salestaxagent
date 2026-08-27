@@ -17,6 +17,18 @@ log = logging.getLogger(__name__)
 AWD_PATH = "/inventory"
 
 
+def _first_int(*values: object) -> int:
+    """First present integer, including 0. Missing/blank falls through."""
+    for value in values:
+        if value is None or value == "":
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
 def fetch_awd_inventory(dry_run: bool = False) -> dict:
     """Fetch AWD inventory and upsert to inventory_awd."""
     all_items: list[dict] = []
@@ -74,18 +86,17 @@ def _awd_inventory_rows(
         if not sku:
             continue
         summary = item.get("inventoryDetails") or item.get("inventorySummary") or item
-        on_hand = int(
-            item.get("totalOnhandQuantity")
-            or summary.get("totalOnhandQuantity")
-            or summary.get("availableDistributableQuantity")
-            or 0,
+        # 0 is a real on-hand reading. `x or next` would skip it.
+        on_hand = _first_int(
+            item.get("totalOnhandQuantity"),
+            summary.get("totalOnhandQuantity"),
+            summary.get("availableDistributableQuantity"),
         )
-        inbound = int(
-            item.get("totalInboundQuantity")
-            or summary.get("totalInboundQuantity")
-            or 0,
+        inbound = _first_int(
+            item.get("totalInboundQuantity"),
+            summary.get("totalInboundQuantity"),
         )
-        to_fba = int(summary.get("replenishmentQuantity") or 0)
+        to_fba = _first_int(summary.get("replenishmentQuantity"))
         rows.append({
             "sku": sku,
             "awd_on_hand": on_hand,
