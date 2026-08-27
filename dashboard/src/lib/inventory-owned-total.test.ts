@@ -58,8 +58,8 @@ describe("owned network Total", () => {
     assert.equal(owned.fbaResearching, 10);
     assert.equal(owned.fbaInbound, 30);
     assert.equal(owned.tplOnHand, 40);
-    assert.equal(owned.awdOnHand, 50);
-    assert.equal(owned.totalAmazon, 50 + 100 + 30 + 999 + 10);
+    assert.equal(owned.awdOnHand, 5050);
+    assert.equal(owned.totalAmazon, 5050 + 100 + 30 + 999 + 10);
     assert.equal(owned.total, owned.totalAmazon! + 40);
     assert.equal(owned.complete, true);
     assert.deepEqual(owned.missing, []);
@@ -72,11 +72,11 @@ describe("owned network Total", () => {
 
   test("adds SC reserved + researching; does not add unfulfillable, 3PL incoming, or AWD transit", () => {
     const owned = ownedNetworkTotal({ sku: "DDPE0001Shop", ...completeRows() });
-    assert.equal(owned.totalAmazon, 100 + 999 + 30 + 10 + 50);
+    assert.equal(owned.totalAmazon, 100 + 999 + 30 + 10 + 5050);
     assert.notEqual(owned.total, 100 + 30 + 40 + 50);
-    assert.notEqual(owned.totalAmazon, 100 + 999 + 30 + 10 + 50 + 50);
-    assert.notEqual(owned.total, 100 + 999 + 30 + 10 + 50 + 40 + 200);
-    assert.notEqual(owned.total, 100 + 999 + 30 + 10 + 50 + 40 + 300);
+    assert.notEqual(owned.totalAmazon, 100 + 999 + 30 + 10 + 50);
+    assert.notEqual(owned.total, 100 + 999 + 30 + 10 + 5050 + 40 + 200);
+    assert.notEqual(owned.total, 100 + 999 + 30 + 10 + 5050 + 40 + 300);
   });
 });
 
@@ -250,12 +250,12 @@ describe("missing row is omitted, not required", () => {
     const { fba, awd } = completeRows();
     const owned = ownedNetworkTotal({ sku: "DDPE0001Shop", fba, awd, tpl: null });
     assert.equal(owned.tplOnHand, null);
-    assert.equal(owned.totalAmazon, 100 + 999 + 30 + 10 + 50);
+    assert.equal(owned.totalAmazon, 100 + 999 + 30 + 10 + 5050);
     assert.equal(owned.total, owned.totalAmazon);
     assert.equal(owned.complete, false);
     assert.deepEqual(owned.missing, ["tpl_on_hand"]);
     assert.equal(owned.fbaOnHand, 100);
-    assert.equal(owned.awdOnHand, 50);
+    assert.equal(owned.awdOnHand, 5050);
     assert.match(formatOwnedAsOf(owned), /omitted tpl_on_hand/);
   });
 
@@ -266,8 +266,8 @@ describe("missing row is omitted, not required", () => {
     assert.equal(owned.fbaOnHand, null);
     assert.equal(owned.fbaReserved, null);
     assert.equal(owned.fbaInbound, null);
-    assert.equal(owned.totalAmazon, 50);
-    assert.equal(owned.total, 90);
+    assert.equal(owned.totalAmazon, 5050);
+    assert.equal(owned.total, 5050 + 40);
     assert.deepEqual(owned.missing, [
       "fba_on_hand",
       "fba_reserved",
@@ -282,14 +282,38 @@ describe("missing row is omitted, not required", () => {
     assert.equal(awdOnHandUnits(null), null);
   });
 
-  test("0-row AWD shows 0 and counts as 0 in Total Amazon", () => {
+  test("0-row AWD with no inbound shows 0 and counts as 0 in Total Amazon", () => {
     const rows = completeRows();
     rows.awd.awd_on_hand = 0;
+    rows.awd.awd_inbound = 0;
     const owned = ownedNetworkTotal({ sku: "DDPE0001Shop", ...rows });
     assert.equal(owned.awdOnHand, 0);
     assert.equal(owned.totalAmazon, 100 + 999 + 30 + 10 + 0);
     assert.equal(owned.total, owned.totalAmazon! + 40);
     assert.equal(owned.complete, true);
+  });
+
+  test("unscented AWD is on-hand + inbound 1080, not 0 and not AWD→FBA transit", () => {
+    const owned = ownedNetworkTotal({
+      sku: "DDPE0001Shop",
+      fba: completeRows().fba,
+      tpl: completeRows().tpl,
+      awd: {
+        sku: "DDPE0001Shop",
+        awd_on_hand: 0,
+        awd_inbound: 1_080,
+        awd_to_fba_in_transit: 2,
+        pulled_at: AWD_AT,
+      },
+    });
+    assert.equal(owned.awdOnHand, 1_080);
+    assert.notEqual(owned.awdOnHand, 0);
+    assert.notEqual(owned.awdOnHand, 1_082);
+    assert.equal(owned.fbaInbound, 30);
+    assert.notEqual(owned.fbaInbound, 30 + 1_080);
+    assert.equal(owned.totalAmazon, 1_080 + 100 + 30 + 999 + 10);
+    assert.notEqual(owned.totalAmazon, 100 + 30 + 999 + 10);
+    assert.notEqual(owned.totalAmazon, 1_080 + 100 + 30 + 999 + 10 + 1_080);
   });
 
   test("known zero on a present FBA/3PL row is 0 and still completes Total", () => {
@@ -300,7 +324,7 @@ describe("missing row is omitted, not required", () => {
     assert.equal(owned.tplOnHand, 0);
     assert.equal(owned.fbaOnHand, 0);
     assert.equal(owned.fbaReserved, 999);
-    assert.equal(owned.totalAmazon, 0 + 999 + 30 + 10 + 50);
+    assert.equal(owned.totalAmazon, 0 + 999 + 30 + 10 + 5050);
     assert.equal(owned.total, owned.totalAmazon! + 0);
     assert.equal(owned.complete, true);
   });
@@ -317,7 +341,7 @@ describe("missing row is omitted, not required", () => {
     rows.fba.reserved = 0;
     const zero = ownedNetworkTotal({ sku: "DDPE0001Shop", ...rows });
     assert.equal(zero.fbaReserved, 0);
-    assert.equal(zero.totalAmazon, 100 + 0 + 30 + 10 + 50);
+    assert.equal(zero.totalAmazon, 100 + 0 + 30 + 10 + 5050);
     const missing = ownedNetworkTotal({ sku: "NO-FBA", tpl: rows.tpl, awd: rows.awd });
     assert.equal(missing.fbaReserved, null);
   });
@@ -352,12 +376,14 @@ describe("AWD inbound is excluded from FBA inbound", () => {
     );
   });
 
-  test("Total Amazon uses AWD on-hand only, never awd_inbound", () => {
+  test("Total Amazon includes AWD inbound once, never as FBA inbound", () => {
     const owned = ownedNetworkTotal({ sku: "DDPE0001Shop", ...completeRows() });
-    assert.equal(owned.awdOnHand, 50);
+    assert.equal(owned.awdOnHand, 50 + 5000);
     assert.equal(owned.fbaInbound, 30);
-    assert.notEqual(owned.totalAmazon, 100 + 999 + 30 + 10 + 50 + 5000);
+    assert.equal(owned.totalAmazon, 100 + 999 + 30 + 10 + 5050);
+    assert.notEqual(owned.totalAmazon, 100 + 999 + 30 + 10 + 50);
     assert.notEqual(owned.total, 100 + 999 + 30 + 10 + 50 + 40 + 1000);
+    assert.notEqual(owned.fbaInbound, 30 + 5000);
   });
 });
 

@@ -104,10 +104,16 @@ describe("SKU table default column set", () => {
     assert.match(amz.tip, /researching/i);
     assert.match(amz.tip, /Not unfulfillable/i);
     assert.match(amz.tip, /FC transfer/i);
+    assert.match(amz.tip, /AWD inbound is counted once/i);
     assert.match(total.tip, /Total Amazon \+ 3PL/i);
     assert.match(total.tip, /every SKU/i);
     assert.match(total.tip, /not a column/i);
     assert.doesNotMatch(total.tip, /DDPE0003|lip family|lip-only/i);
+    const awd = SKU_TABLE_COLUMNS.find((c) => c.key === "awd_on_hand");
+    assert.ok(awd);
+    assert.match(awd.tip, /inbound to AWD/i);
+    assert.match(awd.tip, /Not AWD→FBA/i);
+    assert.match(awd.tip, /white/i);
   });
 });
 

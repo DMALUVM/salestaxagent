@@ -342,9 +342,23 @@ describe("pallet planner model", () => {
     assert.match(ACTUAL_2025_SOURCE, /not Amazon monthly/);
   });
 
-  test("cover is fulfillable only; inbound is already in transit", () => {
+  test("cover is SC on-hand; inbound is already in transit; unfulfillable stays out", () => {
     assert.equal(fbaCoverUnits({ fulfillable: 2978, reserved: 2466, researching: 28, unfulfillable: 5 }), 2978);
     assert.equal(inboundInTransit({ inbound_working: 0, inbound_shipped: 270, inbound_receiving: 0 }), 270);
+    assert.equal(
+      fbaCoverUnits(
+        { fulfillable: 3501, reserved: 1953, researching: 9, unfulfillable: 818 },
+        { "FC transfer": 553 },
+      ),
+      4054,
+    );
+    assert.notEqual(
+      fbaCoverUnits(
+        { fulfillable: 3501, reserved: 1953, unfulfillable: 818 },
+        { "FC transfer": 553 },
+      ),
+      3501,
+    );
   });
 
   test("FBA cap is 55,600 in Sep/Jan and ~49,400 in Oct–Dec", () => {
@@ -535,6 +549,47 @@ describe("pallet planner model", () => {
     assert.equal(aug?.awaitingAugustTotals, true);
     const awd = entries.filter((e) => e.destination === "awd" && e.units > 0);
     assert.deepEqual(awd.map((e) => Object.keys(e.mix)[0]), [...FIRST_WAVE_AWD_SHIP_ORDER]);
+  });
+
+  test("August card is Marpac→Tulsa TBD, not first-wave AWD", () => {
+    const fba = { DDPE0001Shop: 3248, DDPE0002Shop: 2079, DDPE0003Shop: 3966, DDPE0004Shop: 3603 };
+    const inbound = { DDPE0001Shop: 0, DDPE0002Shop: 1080, DDPE0003Shop: 637, DDPE0004Shop: 270 };
+    const tpl = { DDPE0001Shop: 1594, DDPE0002Shop: 6291, DDPE0003Shop: 6426, DDPE0004Shop: 9177 };
+    const plan = buildSeptemberPlan(fba, inbound, tpl, {}, {}, { DDPE0002Shop: 540 });
+    const horizon = productionHorizonMonths(new Date(2026, 7, 26), AMAZON_IN_BY, 35);
+    const entries = buildMonthViewEntries({
+      productionMonths: horizon.map((h) => h.month),
+      horizonByMonth: Object.fromEntries(horizon.map((h) => [h.month, h])),
+      sept: plan,
+    });
+    const aug = entries.filter((e) => e.month.endsWith("-08"));
+    assert.ok(aug.length > 0);
+    assert.ok(aug.every((e) => e.destination !== "awd"));
+    assert.ok(aug.every((e) => e.hopLabel === "Marpac→Tulsa"));
+    assert.ok(aug.every((e) => e.awaitingAugustTotals === true));
+    const septAwd = entries.filter((e) => e.month === "2026-09" && e.destination === "awd" && e.units > 0);
+    assert.deepEqual(new Set(septAwd.map((e) => Object.keys(e.mix)[0])), new Set(["DDPE0004Shop", "DDPE0003Shop"]));
+  });
+
+  test("orange FBA in cap uses 4054 not 3501", () => {
+    assert.equal(
+      fbaCoverUnits(
+        { fulfillable: 3501, reserved: 1953, researching: 9, unfulfillable: 818 },
+        { "FC transfer": "553", "FC Processing": "1324", "Customer Order": "74" },
+      ),
+      4054,
+    );
+    const plan = buildSeptemberPlan(
+      { DDPE0001Shop: 3248, DDPE0002Shop: 2079, DDPE0003Shop: 4054, DDPE0004Shop: 3603 },
+      { DDPE0001Shop: 0, DDPE0002Shop: 1080, DDPE0003Shop: 540, DDPE0004Shop: 270 },
+      { DDPE0001Shop: 1594, DDPE0002Shop: 6291, DDPE0003Shop: 6426, DDPE0004Shop: 9177 },
+      {},
+      {},
+      { DDPE0002Shop: 540 },
+    );
+    assert.equal(plan.gaps.DDPE0003Shop.fba, 4054);
+    assert.notEqual(plan.gaps.DDPE0003Shop.fba, 3501);
+    assert.equal(plan.firstAction.tplToFbaTotal, 16200);
   });
 
   test("AWD months allow 2 cards, not capped at 1", () => {

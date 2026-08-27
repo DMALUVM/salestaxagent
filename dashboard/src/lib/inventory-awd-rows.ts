@@ -1,18 +1,28 @@
 /**
  * Live AWD rows for the /inventory SKU table.
  *
- * A present row with awd_on_hand=0 must be kept (display 0).
- * Do not drop zero-qty rows. Do not invent a row (or a 0) when none exists.
+ * AWD column = on-hand + inbound to AWD (inventory_awd.awd_inbound).
+ * Not AWD→FBA in transit. A present 0-row is kept as 0. Missing row
+ * stays blank unless inbound exists — then show inbound (+ on-hand).
  * Do not substitute the AWD high-water planning card (76,211) as on-hand.
+ *
+ * Cell color (AWD cell only, no new column):
+ *   white  = inbound > 0 and on-hand = 0 (shipped, none checked in)
+ *   orange = inbound > 0 and on-hand > 0 (partial receive)
+ *   green  = on-hand > 0 and inbound = 0 (fully available)
+ *   none   = no AWD row, or a 0/0 row
  */
 
 export type AwdRowLike = {
   sku?: string | null;
   awd_on_hand?: number | null;
   awd_inbound?: number | null;
+  awd_to_fba_in_transit?: number | null;
   pulled_at?: string | null;
   synced_at?: string | null;
 };
+
+export type AwdCellTone = "white" | "orange" | "green" | null;
 
 const AWD_HIGH_WATER_FAMILY = 76_211;
 
@@ -35,6 +45,41 @@ export function keepAwdInventoryRows<T extends AwdRowLike>(
 export function awdRowOnHand(row: AwdRowLike | null | undefined): number | null {
   if (!row) return null;
   return Number(row.awd_on_hand ?? 0);
+}
+
+/** Inbound to AWD. Not AWD→FBA in transit. */
+export function awdRowInbound(row: AwdRowLike | null | undefined): number | null {
+  if (!row) return null;
+  return Number(row.awd_inbound ?? 0);
+}
+
+/** AWD column / Total Amazon AWD term. On-hand + inbound to AWD. */
+export function awdDisplayUnits(row: AwdRowLike | null | undefined): number | null {
+  if (!row) return null;
+  return Number(row.awd_on_hand ?? 0) + Number(row.awd_inbound ?? 0);
+}
+
+export function awdCellTone(row: AwdRowLike | null | undefined): AwdCellTone {
+  if (!row) return null;
+  const onHand = Number(row.awd_on_hand ?? 0);
+  const inbound = Number(row.awd_inbound ?? 0);
+  if (inbound > 0 && onHand === 0) return "white";
+  if (inbound > 0 && onHand > 0) return "orange";
+  if (onHand > 0 && inbound === 0) return "green";
+  return null;
+}
+
+export function awdCellToneClass(tone: AwdCellTone): string {
+  if (tone === "white") {
+    return "bg-white text-zinc-900 dark:bg-zinc-100 dark:text-zinc-900";
+  }
+  if (tone === "orange") {
+    return "bg-orange-200 text-orange-950 dark:bg-orange-500/30 dark:text-orange-100";
+  }
+  if (tone === "green") {
+    return "bg-emerald-200 text-emerald-950 dark:bg-emerald-500/30 dark:text-emerald-100";
+  }
+  return "";
 }
 
 export function isAwdHighWaterCard(value: number | null | undefined): boolean {

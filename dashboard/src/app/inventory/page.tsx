@@ -52,7 +52,8 @@ import {
   ownedAsOfLabel,
   ownedNetworkTotalForSku,
 } from "@/lib/inventory-owned-total";
-import { keepAwdInventoryRows } from "@/lib/inventory-awd-rows";
+import { awdCellTone, awdCellToneClass, keepAwdInventoryRows } from "@/lib/inventory-awd-rows";
+import type { AwdCellTone } from "@/lib/inventory-awd-rows";
 import {
   formatSkuQty,
   migrateSortColumn,
@@ -108,6 +109,7 @@ interface ComputedRow {
   tpl_available: number;
   tpl_display: number | null;
   awd_on_hand: number | null;
+  awd_tone: AwdCellTone;
   total_amazon: number | null;
   owned_total: number | null;
   owned_as_of: string | null;
@@ -486,6 +488,7 @@ export default function InventoryPage() {
         tpl_available,
         tpl_display: owned.tplOnHand,
         awd_on_hand: owned.awdOnHand,
+        awd_tone: awdCellTone(ownedSources.awd.get(sku) ?? null),
         total_amazon: owned.totalAmazon,
         owned_total: owned.total,
         owned_as_of: ownedAsOfLabel(owned),
@@ -722,6 +725,8 @@ export default function InventoryPage() {
         snapshots={snapshots}
         awdList={awdSnapshots}
         tplList={latestRowPerSku(tplSnapshots)}
+        restockList={restockList}
+        planningList={planningList}
         settings={s}
         leadtime={leadtime}
       />
@@ -918,7 +923,7 @@ export default function InventoryPage() {
                     </TableCell>
                     )}
                     {visibleKeys.has("awd_on_hand") && (
-                    <TableCell className="text-right tabular-nums">
+                    <TableCell className={`text-right tabular-nums ${awdCellToneClass(r.awd_tone)}`}>
                       {formatSkuQty(r.awd_on_hand)}
                     </TableCell>
                     )}

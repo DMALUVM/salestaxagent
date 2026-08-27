@@ -330,6 +330,17 @@ def test_no_sub_half_awd_card():
                 assert e["units"] == 17_550 or (e.get("full_pallets") or 0) >= 1
 
 
+def test_no_end_of_august_first_wave_copy():
+    from pathlib import Path
+    py = Path("src/inventory/pallet_planner.py").read_text()
+    ts = Path("dashboard/src/lib/pallet-planner-model.ts").read_text()
+    ship = Path("dashboard/src/components/inventory/HolidayShipPlan.tsx").read_text()
+    blob = py + ts + ship
+    assert "aim end of August if Marpac can" not in blob
+    assert "Aim end of August if Marpac can" not in blob
+    assert "end of September" in ship
+
+
 def test_august_hop_is_marpac_tulsa_not_3pl():
     plan, entries = _locked_month_view()
     assert plan["first_action"]["august_hop"] == "Marpac→Tulsa"
@@ -346,6 +357,57 @@ def test_august_hop_is_marpac_tulsa_not_3pl():
     assert "Marpac" in card["hop_label"]
     assert "Tulsa" in card["hop_label"]
     assert "3PL→Marpac" not in card["hop_label"]
+
+
+def test_august_card_is_marpac_tulsa_not_first_wave():
+    _plan, entries = _locked_month_view()
+    aug = [e for e in entries if e["month"].endswith("-08")]
+    assert aug, "August card missing"
+    assert all(e["destination"] != "awd" for e in aug)
+    assert all(e.get("hop_label") == "Marpac→Tulsa" for e in aug)
+    assert all(e.get("awaiting_august_totals") is True for e in aug)
+    assert all(e["units"] == 0 for e in aug)
+    first_wave_skus = {"DDPE0004Shop", "DDPE0003Shop"}
+    assert all(not first_wave_skus.intersection(e.get("mix") or {}) for e in aug)
+
+
+def test_sept_card_is_assorted_plus_orange():
+    _plan, entries = _locked_month_view()
+    sept_awd = [e for e in entries if e["month"] == "2026-09" and e["destination"] == "awd" and e["units"] > 0]
+    assert {next(iter(e["mix"])) for e in sept_awd} == {"DDPE0004Shop", "DDPE0003Shop"}
+    assert all(e.get("aim_end_of_september") or e.get("single_sku") for e in sept_awd)
+
+
+def test_orange_fba_in_cap_uses_4054_not_3501():
+    from src.inventory.pallet_planner import fba_cover_units
+    orange = {
+        "fulfillable": 3501,
+        "reserved": 1953,
+        "researching": 9,
+        "unfulfillable": 818,
+        "inbound_working": 0,
+        "inbound_shipped": 540,
+        "inbound_receiving": 0,
+    }
+    restock = {"raw": {"FC transfer": "553", "FC Processing": "1324", "Customer Order": "74"}}
+    fba = fba_cover_units(orange, restock)
+    assert fba == 4054
+    assert fba != 3501
+    assert fba != 3501 + 1953 + 9 + 818
+    gaps = sept_fba_gaps(
+        {"DDPE0003Shop": fba},
+        {"DDPE0003Shop": 540},
+        skus=["DDPE0003Shop"],
+    )
+    assert gaps["DDPE0003Shop"]["fba"] == 4054
+    assert gaps["DDPE0003Shop"]["fba_plus_inbound"] == 4594
+    old = sept_fba_gaps(
+        {"DDPE0003Shop": 3501},
+        {"DDPE0003Shop": 540},
+        skus=["DDPE0003Shop"],
+    )
+    assert old["DDPE0003Shop"]["fba"] == 3501
+    assert old["DDPE0003Shop"]["fba_plus_inbound"] != gaps["DDPE0003Shop"]["fba_plus_inbound"]
 
 
 def test_awd_allows_two_pallets_per_month_not_one():

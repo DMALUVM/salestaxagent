@@ -63,6 +63,10 @@ describe("pallet planner ship view", () => {
     assert.match(ship, /First-wave AWD/);
     assert.match(ship + "\n" + model, /61_425|61425|61,425/);
     assert.match(ship, /assorted \+ orange/);
+    assert.match(ship, /end of September/);
+    assert.doesNotMatch(ship, /aim end of August if Marpac can/);
+    assert.doesNotMatch(ship, /Aim end of August if Marpac can/);
+    assert.doesNotMatch(model, /aim end of August if Marpac can/);
     assert.match(model, /FIRST_WAVE_AWD_TARGET_CAP = 61_425/);
     assert.match(ship, /FBA cap vs on-hand/);
     assert.match(ship, /Marpac→Tulsa/);
@@ -124,6 +128,9 @@ describe("pallet planner ship view", () => {
     assert.match(page, /formatSkuQty\(r\.fba_fulfillable\)/);
     assert.match(page, /formatSkuQty\(r\.total_amazon\)/);
     assert.match(page, /formatSkuQty\(r\.awd_on_hand\)/);
+    assert.match(page, /awdCellToneClass\(r\.awd_tone\)/);
+    assert.doesNotMatch(page, /key: "awd_inbound"/);
+    assert.doesNotMatch(page, /label: "AWD inbound"/);
     assert.match(page, /owned\.fbaOnHand/);
     assert.doesNotMatch(page, /formatSkuQty\(r\.fba_reserved\)/);
     assert.doesNotMatch(page, /formatSkuQty\(r\.fba_unfulfillable\)/);
