@@ -1,26 +1,36 @@
 /**
- * Owned-network Total for the /inventory SKU table.
+ * Owned-network totals for the /inventory SKU table.
  *
  * Same formula on every SKU — no lip-family or named-SKU special case:
- *       FBA fulfillable
- *     + FBA reserved (inventory_snapshots.reserved; already includes
- *       customer orders + FC processing + staging)
- *     + inbound to FBA (working + shipped + receiving)
- *     + 3PL on-hand
- *     + AWD on-hand (only if a latest AWD row exists)
+ *   FBA column     = Seller Central on-hand (fulfillable + FC transfer)
+ *   Total Amazon   = AWD + FBA on-hand + inbound + SC reserved + researching
+ *   Total          = Total Amazon + 3PL
+ *
+ * SC reserved is API reserved minus FC transfer (or restock
+ * FC Processing + Customer Order). Do not add the full API reserved on
+ * top of SC on-hand — that double-counts FC transfer.
+ *
+ * Unfulfillable is never added. Reserved / unfulfillable / age are not
+ * table columns. AWD inbound is not FBA inbound.
  *
  * Latest-per-SKU only. A missing source is blank and omitted from the sum.
  * A known 0 on a present row counts as 0.
- * AWD inbound is not FBA inbound.
- * Reserved is in the sum only — not a table column.
- * researching / unfulfillable are never added to Total or to the FBA
- * column.
  */
 
+import {
+  parseReservedSplits,
+  scOnHandUnits,
+  scReservedUnits,
+  totalAmazonUnits,
+  type PlanningRawLike,
+  type RestockRawLike,
+} from "./inventory-sc-on-hand";
+
 export type OwnedSource =
-  | "fba_fulfillable"
+  | "fba_on_hand"
   | "fba_reserved"
   | "fba_inbound"
+  | "fba_researching"
   | "tpl_on_hand"
   | "awd_on_hand";
 
@@ -57,13 +67,19 @@ export type AwdSnapshotLike = {
 
 export type OwnedTotal = {
   sku: string;
+  /** API fulfillable only. Not the FBA column. */
   fbaFulfillable: number | null;
-  /** In the Total sum only. Not a table column. */
+  /** Seller Central on-hand (sellable/cover). The FBA column. */
+  fbaOnHand: number | null;
+  /** SC reserved (not FC transfer). In Total Amazon only — not a column. */
   fbaReserved: number | null;
+  fbaResearching: number | null;
   fbaInbound: number | null;
   tplOnHand: number | null;
   awdOnHand: number | null;
-  /** Null only when no source row exists. Missing sources are omitted, not zeroed. */
+  /** AWD + FBA on-hand + inbound + SC reserved + researching. Not unfulfillable. */
+  totalAmazon: number | null;
+  /** Total Amazon + 3PL. Null only when no source row exists. */
   total: number | null;
   complete: boolean;
   missing: OwnedSource[];
@@ -104,10 +120,14 @@ export function latestOwnedSources(input: {
   snapshots?: FbaSnapshotLike[] | null;
   tpl?: TplSnapshotLike[] | null;
   awd?: AwdSnapshotLike[] | null;
+  restock?: RestockRawLike[] | null;
+  planning?: PlanningRawLike[] | null;
 }): {
   fba: Map<string, FbaSnapshotLike>;
   tpl: Map<string, TplSnapshotLike>;
   awd: Map<string, AwdSnapshotLike>;
+  restock: Map<string, RestockRawLike>;
+  planning: Map<string, PlanningRawLike>;
 } {
   return {
     fba: latestRowPerSkuByStamp(input.snapshots, (r) =>
@@ -115,6 +135,8 @@ export function latestOwnedSources(input: {
     ),
     tpl: latestRowPerSkuByStamp(input.tpl, (r) => stampOf(r.pulled_at)),
     awd: latestRowPerSkuByStamp(input.awd, (r) => stampOf(r.pulled_at ?? r.synced_at)),
+    restock: latestRowPerSkuByStamp(input.restock, (r) => stampOf(r.pulled_at)),
+    planning: latestRowPerSkuByStamp(input.planning, (r) => stampOf(r.pulled_at)),
   };
 }
 
@@ -135,10 +157,31 @@ export function fbaFulfillableUnits(snap: FbaSnapshotLike | null | undefined): n
   return Number(snap.fulfillable ?? 0);
 }
 
-/** Same 0-vs-blank rule as AWD: present FBA row → number (0 allowed); no row → null. */
-export function fbaReservedUnits(snap: FbaSnapshotLike | null | undefined): number | null {
+export function fbaResearchingUnits(snap: FbaSnapshotLike | null | undefined): number | null {
   if (!snap) return null;
-  return Number(snap.reserved ?? 0);
+  return Number(snap.researching ?? 0);
+}
+
+/** SC reserved. Present FBA row → number (0 allowed); no row → null. */
+export function fbaReservedUnits(
+  snap: FbaSnapshotLike | null | undefined,
+  restock?: RestockRawLike | null,
+  planning?: PlanningRawLike | null,
+): number | null {
+  if (!snap) return null;
+  const splits = parseReservedSplits(restock?.raw, planning?.raw);
+  return scReservedUnits(Number(snap.reserved ?? 0), splits);
+}
+
+/** Seller Central on-hand. Present FBA row → number (0 allowed); no row → null. */
+export function fbaOnHandUnits(
+  snap: FbaSnapshotLike | null | undefined,
+  restock?: RestockRawLike | null,
+  planning?: PlanningRawLike | null,
+): number | null {
+  if (!snap) return null;
+  const splits = parseReservedSplits(restock?.raw, planning?.raw);
+  return scOnHandUnits(Number(snap.fulfillable ?? 0), splits);
 }
 
 export function tplOnHandUnits(row: TplSnapshotLike | null | undefined): number | null {
@@ -156,32 +199,45 @@ export function ownedNetworkTotal(input: {
   fba?: FbaSnapshotLike | null;
   tpl?: TplSnapshotLike | null;
   awd?: AwdSnapshotLike | null;
+  restock?: RestockRawLike | null;
+  planning?: PlanningRawLike | null;
 }): OwnedTotal {
   const fbaFulfillable = fbaFulfillableUnits(input.fba);
-  const fbaReserved = fbaReservedUnits(input.fba);
+  const fbaOnHand = fbaOnHandUnits(input.fba, input.restock, input.planning);
+  const fbaReserved = fbaReservedUnits(input.fba, input.restock, input.planning);
+  const fbaResearching = fbaResearchingUnits(input.fba);
   const fbaInbound = fbaInboundUnits(input.fba);
   const tplOnHand = tplOnHandUnits(input.tpl);
   const awdOnHand = awdOnHandUnits(input.awd);
 
   const missing: OwnedSource[] = [];
-  if (fbaFulfillable == null) missing.push("fba_fulfillable");
+  if (fbaOnHand == null) missing.push("fba_on_hand");
   if (fbaReserved == null) missing.push("fba_reserved");
   if (fbaInbound == null) missing.push("fba_inbound");
+  if (fbaResearching == null) missing.push("fba_researching");
   if (tplOnHand == null) missing.push("tpl_on_hand");
   if (awdOnHand == null) missing.push("awd_on_hand");
 
-  const present = [fbaFulfillable, fbaReserved, fbaInbound, tplOnHand, awdOnHand].filter(
-    (n): n is number => n != null,
-  );
+  const totalAmazon = totalAmazonUnits({
+    awdOnHand,
+    fbaOnHand,
+    inbound: fbaInbound,
+    reservedSc: fbaReserved,
+    researching: fbaResearching,
+  });
+  const totalParts = [totalAmazon, tplOnHand].filter((n): n is number => n != null);
   const complete = missing.length === 0;
   return {
     sku: input.sku,
     fbaFulfillable,
+    fbaOnHand,
     fbaReserved,
+    fbaResearching,
     fbaInbound,
     tplOnHand,
     awdOnHand,
-    total: present.length ? present.reduce((sum, n) => sum + n, 0) : null,
+    totalAmazon,
+    total: totalParts.length ? totalParts.reduce((sum, n) => sum + n, 0) : null,
     complete,
     missing,
     asOf: {
@@ -202,6 +258,8 @@ export function ownedNetworkTotalForSku(
     fba: sources.fba.get(key) ?? null,
     tpl: sources.tpl.get(key) ?? null,
     awd: sources.awd.get(key) ?? null,
+    restock: sources.restock.get(key) ?? null,
+    planning: sources.planning.get(key) ?? null,
   });
 }
 

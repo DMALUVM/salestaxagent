@@ -11,6 +11,7 @@ export type SkuTableColumnKey =
   | "awd_on_hand"
   | "tpl_available"
   | "inbound"
+  | "total_amazon"
   | "owned_total"
   | "total_u_7"
   | "total_u_30"
@@ -36,19 +37,24 @@ export const SKU_TABLE_COLUMNS: SkuTableColumn[] = [
   {
     key: "fba_fulfillable",
     label: "FBA",
-    tip: "FBA fulfillable units only (sellable). Reserved, researching, and unfulfillable are not included.",
+    tip: "Seller Central on-hand (sellable/cover): API fulfillable + FC transfer. Not API fulfillable alone, not SC FBA total. Unfulfillable is not included.",
   },
   {
     key: "awd_on_hand",
     label: "AWD",
     tip: "AWD on-hand from the latest AWD row. 0 means a row exists at 0. Em dash means no AWD row. Not the AWD high-water target.",
   },
-  { key: "tpl_available", label: "3PL", tip: "Third-party / own warehouse units. 0 means a row exists at 0. Em dash means no 3PL row." },
-  { key: "inbound", label: "Inbnd", tip: "Amazon inbound to FBA — not yet sellable. AWD inbound is not included." },
+  { key: "tpl_available", label: "3PL", tip: "Third-party / own warehouse (Tulsa). 0 means a row exists at 0. Em dash means no 3PL row." },
+  { key: "inbound", label: "Inbnd", tip: "Amazon inbound to FBA only — not yet sellable. AWD inbound is not included." },
+  {
+    key: "total_amazon",
+    label: "Total Amazon",
+    tip: "AWD on-hand + FBA on-hand + inbound + reserved + researching. Not unfulfillable. FC transfer is already inside FBA on-hand, so reserved is SC reserved only (API reserved minus FC transfer).",
+  },
   {
     key: "owned_total",
     label: "Total",
-    tip: "Same formula on every SKU: FBA fulfillable + reserved + inbound to FBA + 3PL on-hand + AWD on-hand. Reserved is in the sum, not a column. A missing source is blank and omitted. A known 0 counts as 0. Unfulfillable and researching are not included. AWD inbound is not included. As-of is the timestamps of the rows used.",
+    tip: "Total Amazon + 3PL. Same formula on every SKU. Reserved is in Total Amazon, not a column. Unfulfillable is not included. A missing source is blank and omitted. A known 0 counts as 0. AWD inbound is not included. As-of is the timestamps of the rows used.",
   },
   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },
@@ -64,13 +70,17 @@ export const SKU_TABLE_COLUMNS: SkuTableColumn[] = [
   { key: "flag", label: "Status", tip: "OK ≥ target cover; CRITICAL/LOW below; RESTOCK approaching" },
 ];
 
-/** Default visible set. Total sits after Inbnd and cannot be omitted. */
+/** Default visible set. Total Amazon sits after Inbnd; Total follows it. */
 export const DEFAULT_VISIBLE_COLUMN_KEYS: SkuTableColumnKey[] = SKU_TABLE_COLUMNS.map(
   (c) => c.key,
 );
 
 /** Cannot be turned off. Forced on even if saved prefs predate the column. */
-export const ALWAYS_VISIBLE_COLUMN_KEYS: SkuTableColumnKey[] = ["sku", "owned_total"];
+export const ALWAYS_VISIBLE_COLUMN_KEYS: SkuTableColumnKey[] = [
+  "sku",
+  "total_amazon",
+  "owned_total",
+];
 
 export type SkuTablePrefs = {
   columns?: string[] | null;
@@ -110,7 +120,7 @@ export function resolveVisibleColumns(saved?: SkuTablePrefs | null): SkuTableCol
   }
 
   for (const key of hidden) {
-    if (key === "owned_total" || key === "sku") continue;
+    if (key === "owned_total" || key === "total_amazon" || key === "sku") continue;
     picked.delete(key as SkuTableColumnKey);
   }
 

@@ -104,22 +104,27 @@ describe("pallet planner ship view", () => {
     assert.match(page, /visibleSkuTableColumns/);
     assert.match(cols, /ALWAYS_VISIBLE_COLUMN_KEYS/);
     assert.match(cols, /owned_total/);
+    assert.match(cols, /total_amazon/);
     assert.match(cols, /fba_fulfillable/);
     assert.doesNotMatch(cols, /fba_reserved/);
     assert.doesNotMatch(cols, /fba_unfulfillable/);
     assert.doesNotMatch(cols, /label: "Reserved"/);
     assert.doesNotMatch(cols, /label: "Unfulfillable"/);
     assert.doesNotMatch(pallets, /owned_total/);
+    assert.doesNotMatch(pallets, /total_amazon/);
     assert.doesNotMatch(pallets, /ownedNetworkTotal/);
     assert.doesNotMatch(pallets, /inventory-owned-total/);
+    assert.doesNotMatch(pallets, /inventory-sc-on-hand/);
     assert.match(api, /keepAwdInventoryRows/);
     assert.doesNotMatch(api, /awd_on_hand\s*>\s*0/);
   });
 
-  test("FBA column is fulfillable; AWD zero-row is not blanked", () => {
+  test("FBA column is SC on-hand; Total Amazon is the only new column", () => {
     const page = src("src/app/inventory/page.tsx");
     assert.match(page, /formatSkuQty\(r\.fba_fulfillable\)/);
+    assert.match(page, /formatSkuQty\(r\.total_amazon\)/);
     assert.match(page, /formatSkuQty\(r\.awd_on_hand\)/);
+    assert.match(page, /owned\.fbaOnHand/);
     assert.doesNotMatch(page, /formatSkuQty\(r\.fba_reserved\)/);
     assert.doesNotMatch(page, /formatSkuQty\(r\.fba_unfulfillable\)/);
     assert.doesNotMatch(page, /visibleKeys.has\("fba_reserved"\)/);
@@ -134,8 +139,11 @@ describe("pallet planner ship view", () => {
 
   test("owned Total helper has no lip-family or named-SKU special case", () => {
     const owned = src("src/lib/inventory-owned-total.ts");
+    const sc = src("src/lib/inventory-sc-on-hand.ts");
     assert.doesNotMatch(owned, /DDPE0003|LIP_BALM|lip family|lipOnly|lip_only/);
-    assert.match(owned, /fbaReserved/);
+    assert.doesNotMatch(sc, /DDPE0003|LIP_BALM|lip family|lipOnly|lip_only/);
+    assert.match(owned, /fbaOnHand/);
+    assert.match(owned, /totalAmazon/);
     assert.doesNotMatch(owned, /fbaUnfulfillable/);
   });
 });
