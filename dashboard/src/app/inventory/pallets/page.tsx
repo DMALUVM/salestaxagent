@@ -24,12 +24,12 @@ import {
   FBA_INBOUND_PREFERRED,
   FBA_INBOUND_MIN_FEE_FREE,
   applyAssortedCorrectionDisplay,
+  buildMonthViewEntries,
   buildSeptemberPlan,
   fbaManufactureGap,
   familyYoyMayJul,
   fbaCoverUnits,
   holidayDemandFromSales,
-  inAmazonDate,
   inboundInTransit,
   latestRowPerSku,
   monthlyAmazonUnits,
@@ -37,7 +37,6 @@ import {
   palletFill,
   plannerPolicy,
   productionHorizonMonths,
-  shipByForMonth,
   skuProductionBuild,
   stampDate,
   workbookWindowUnits,
@@ -108,6 +107,7 @@ interface MfgMonthEntry {
   awaitingAugustTotals: boolean; fillPct: number;
   units: number; mix: Record<string, number>; shipBy: string; inAmazon: string;
   destination?: string; singleSku?: boolean;
+  nextHop?: boolean; track?: string; remainingFbaThenAwd?: boolean;
 }
 interface MfgScenario { entries: MfgMonthEntry[]; totalUnits: number; totalPallets: number; }
 interface MfgSkuSummary {
@@ -522,62 +522,15 @@ export default function PalletPlanPage() {
         });
       }
 
-      const refillMonths = horizon
-        .filter((h) => !h.month.endsWith("-08") && (h.role === "refill" || h.month >= "2026-10"))
-        .map((h) => h.month);
-      const remainingRefill: Record<string, number> = {};
-      for (const s of summaries) remainingRefill[s.sku] = s.manufacture;
-      const entries: MfgMonthEntry[] = [];
-      for (const m of productionMonths) {
-        const h = horizonByMonth[m];
-        const role = h?.role ?? "gate";
-        const recv = h?.receiveDays ?? policy.gateReceiveDays;
-        const isAugust = m.endsWith("-08");
-        const mix: Record<string, number> = {};
-        const singleSku = !isAugust && refillMonths.includes(m);
-        if (isAugust) {
-          for (const sku of SKUS) {
-            const qty = parsedAugust[sku] ?? 0;
-            if (qty > 0) mix[sku] = qty;
-          }
-        } else if (refillMonths.includes(m)) {
-          const mi = refillMonths.indexOf(m);
-          const lastInRole = mi === refillMonths.length - 1;
-          const w = 1 / Math.max(refillMonths.length, 1);
-          const wSum = Math.max(refillMonths.length - mi, 1);
-          for (const sku of SKUS) {
-            if (remainingRefill[sku] <= 0) continue;
-            const alloc = lastInRole
-              ? remainingRefill[sku]
-              : Math.min(Math.round(remainingRefill[sku] * w / Math.max(wSum, 0.01)), remainingRefill[sku]);
-            if (alloc > 0) { mix[sku] = alloc; remainingRefill[sku] -= alloc; }
-          }
-        }
-        const total = Object.values(mix).reduce((a, b) => a + b, 0);
-        const fill = palletFill(total, PALLET_MAX);
-        const shipBy = shipByForMonth(m, TARGET, recv, {
-          role,
-          needInFba: role === "refill" ? policy.peakEndDate : undefined,
-        });
-        const latest = role === "gate" ? TARGET : policy.peakEndDate;
-        entries.push({
-          month: m, label: monthLabel(m), role,
-          status: committed.has(m) ? "FIRM" : "INDICATIVE",
-          pallets: fill.palletCards,
-          fullPallets: fill.fullPallets,
-          leftoverUnits: fill.leftoverUnits,
-          heldUnits: fill.heldUnits,
-          partialUnits: fill.partialUnits,
-          hasPartial: fill.hasPartial,
-          isPalletCard: fill.isPalletCard,
-          awaitingAugustTotals: isAugust && sept.augustTbd,
-          fillPct: fill.fillPct,
-          units: total, mix, shipBy,
-          destination: isAugust ? "mixed_tulsa_fba" : singleSku ? "awd" : "none",
-          singleSku,
-          inAmazon: inAmazonDate(shipBy, recv, latest, { clamp: role === "gate" }),
-        });
-      }
+      const entries: MfgMonthEntry[] = buildMonthViewEntries({
+        productionMonths,
+        horizonByMonth,
+        sept,
+        skuAugust: parsedAugust,
+        committed,
+        amazonInBy: TARGET,
+        peakEnd: policy.peakEndDate,
+      });
       return {
         sc: { entries, totalUnits: entries.reduce((a, e) => a + e.units, 0), totalPallets: entries.reduce((a, e) => a + e.pallets, 0) },
         summaries,
@@ -864,14 +817,35 @@ export default function PalletPlanPage() {
             {mfgPrimary.entries.map((entry, idx) => {
               const sensEntry = mfgSensitivity.entries[idx];
               const isFirm = entry.status === "FIRM";
+              const destLabel = entry.destination === "3pl_fba"
+                ? "3PL→FBA tonight"
+                : entry.destination === "awd"
+                  ? "Marpac → AWD"
+                  : entry.destination === "fba_then_awd"
+                    ? "Remaining FBA then AWD"
+                    : entry.awaitingAugustTotals
+                      ? "August mixed TBD"
+                      : null;
               return (
-                <div key={entry.month} className={`rounded-lg border p-4 ${isFirm ? "border-primary/40 bg-primary/5" : ""}`}>
+                <div
+                  key={`${entry.month}-${entry.destination}-${entry.track}-${idx}`}
+                  className={`rounded-lg border p-4 ${
+                    entry.nextHop
+                      ? "border-blue-500/50 bg-blue-500/5"
+                      : isFirm ? "border-primary/40 bg-primary/5" : ""
+                  }`}
+                >
                   <div className="flex items-center justify-between mb-2">
                     <div>
                       <p className="font-medium text-sm">{entry.label}</p>
-                      <Badge variant={isFirm ? "default" : "secondary"} className="text-[10px] mt-0.5">
-                        {entry.status}
-                      </Badge>
+                      <div className="flex flex-wrap gap-1 mt-0.5">
+                        <Badge variant={entry.nextHop ? "default" : isFirm ? "default" : "secondary"} className="text-[10px]">
+                          {entry.nextHop ? "NEXT HOP" : entry.status}
+                        </Badge>
+                        {destLabel && (
+                          <Badge variant="outline" className="text-[10px]">{destLabel}</Badge>
+                        )}
+                      </div>
                     </div>
                     <button onClick={() => toggleCommit(entry.month)}
                       className="p-1.5 rounded-md hover:bg-muted transition-colors"
@@ -888,6 +862,29 @@ export default function PalletPlanPage() {
                           ? "No single-SKU AWD this month"
                           : "No production this month — FBA fill is tonight’s 3PL + August mixed TBD"}
                     </p>
+                  ) : entry.destination === "3pl_fba" ? (
+                    <>
+                      <p className="text-xs font-medium text-blue-600 mb-1">First action — 3PL→FBA mixed send</p>
+                      <p className="text-2xl font-semibold tabular-nums mb-1">{fmt(entry.units)}</p>
+                      <p className="text-[10px] text-muted-foreground mb-2">
+                        Fee-free 540-box path · not a Marpac pallet · not a 40k FBA buy
+                      </p>
+                      <div className="space-y-1">
+                        {SKUS.map((sku) => {
+                          const qty = entry.mix[sku];
+                          if (!qty || qty <= 0) return null;
+                          return (
+                            <div key={sku} className="flex justify-between text-xs">
+                              <span className="text-muted-foreground">{SKU_SHORT[sku]}</span>
+                              <span className="tabular-nums font-medium">{fmt(qty)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-2">
+                        Ship by {entry.shipBy} · in Amazon by {entry.inAmazon}
+                      </p>
+                    </>
                   ) : (
                     <>
                       {entry.hasPartial ? (
@@ -945,6 +942,11 @@ export default function PalletPlanPage() {
                           August pallet is TBD — enter Dave&apos;s totals above. Do not bake a guessed August qty into Manufacture.
                         </p>
                       )}
+                      {entry.remainingFbaThenAwd && (
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          Remaining FBA waits August mixed (TBD). This Marpac card is single-SKU AWD after FBA-at-cap.
+                        </p>
+                      )}
                     </>
                   )}
 
@@ -991,7 +993,7 @@ export default function PalletPlanPage() {
             {mfgSept.awdLoaded
               ? " Family AWD ≥5k — leftover may hop to AWD."
               : " Live AWD below 5k — leftover stays Tulsa. Never plan 0 AWD and 0 Tulsa."}
-            {" "}August mixed is TBD. After August, Oct/Nov/Dec+ new Marpac is single-SKU AWD. Mix unlocked. Not a purchase order.
+            {" "}August mixed is TBD. September is 3PL→FBA then Marpac AWD — not empty, not FBA-only. Oct/Nov/Dec new Marpac is single-SKU AWD. Mix unlocked. Not a purchase order.
           </p>
         </CardContent>
       </Card>

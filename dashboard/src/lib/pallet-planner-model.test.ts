@@ -12,6 +12,7 @@ import {
   palletPartialMinUnits,
   PEAK_END_DEFAULT,
   applyAssortedCorrectionDisplay,
+  buildMonthViewEntries,
   earlyJanFbaShipBy,
   SEPT_FBA_ON_HAND_TARGETS,
   SEPT_FBA_TARGET_CAP,
@@ -349,6 +350,36 @@ describe("pallet planner model", () => {
     );
     assert.equal(withAug.augustTbd, false);
     assert.equal(withAug.skuManufacture.DDPE0004Shop, full.skuManufacture.DDPE0004Shop - 5000);
+
+    const horizon = productionHorizonMonths(new Date(2026, 7, 26), AMAZON_IN_BY, 35);
+    const entries = buildMonthViewEntries({
+      productionMonths: horizon.map((h) => h.month),
+      horizonByMonth: Object.fromEntries(horizon.map((h) => [h.month, h])),
+      sept: plan,
+    });
+    const sept = entries.filter((e) => e.month === "2026-09");
+    assert.ok(sept.length > 0, "September was skipped");
+    assert.ok(sept.some((e) => e.units > 0));
+    const dests = new Set(sept.filter((e) => e.units > 0).map((e) => e.destination));
+    assert.equal(dests.has("3pl_fba"), true);
+    assert.equal(dests.has("awd"), true);
+    const fbaCard = sept.find((e) => e.destination === "3pl_fba");
+    assert.equal(fbaCard?.mix.DDPE0004Shop, 8100);
+    assert.equal(fbaCard?.mix.DDPE0003Shop, 5400);
+    assert.equal(fbaCard?.mix.DDPE0002Shop, 2700);
+    assert.equal(fbaCard?.mix.DDPE0001Shop ?? 0, 0);
+    assert.equal(fbaCard?.nextHop, true);
+    for (const m of ["2026-10", "2026-11", "2026-12"]) {
+      const cards = entries.filter((e) => e.month === m && e.units > 0);
+      assert.ok(cards.length > 0, `${m} missing AWD card`);
+      assert.ok(cards.every((e) => e.destination === "awd" && e.singleSku && e.isPalletCard));
+    }
+    for (const e of entries) {
+      if (e.destination === "awd" && e.units > 0) {
+        assert.ok(e.units >= 9_500);
+        assert.equal(e.isPalletCard, true);
+      }
+    }
   });
 
   test("AWD loaded drops 5k Tulsa floor; never 0 AWD and 0 Tulsa", () => {

@@ -1,9 +1,13 @@
 """Two-pile Sept plan: 3PL→FBA fee-free send, August TBD, single-SKU AWD."""
 from __future__ import annotations
 
+from datetime import date
+
 from src.inventory.pallet_planner import (
+    AMAZON_IN_BY_DEFAULT,
     LIP_BALM_SKUS,
     PALLET_MAX_UNITS,
+    PEAK_END_DEFAULT,
     SEPT_FBA_ON_HAND_TARGETS,
     SEPT_FBA_TARGET_CAP,
     OPTIMISTIC_AWD_ON_HAND_TARGETS,
@@ -15,12 +19,14 @@ from src.inventory.pallet_planner import (
     allocate_single_sku_awd_pallets,
     allocate_3pl_fba_send,
     awd_covers_off_fba_reserve,
+    build_month_view_entries,
     build_september_plan,
     family_fba_cap_for_month,
     family_tulsa_floor,
     fee_free_inbound_qty,
     inbound_carton_min,
     is_legal_inbound_qty,
+    production_horizon_months,
     scale_fba_caps,
     sept_fba_gaps,
     sept_fba_ship_by,
@@ -222,3 +228,56 @@ def test_sept_ship_dates():
 def test_partial_threshold_still_9500():
     from src.inventory.pallet_planner import pallet_partial_min_units
     assert pallet_partial_min_units(PALLET_MAX_UNITS) == 9_500
+
+
+def _locked_month_view():
+    plan = build_september_plan(
+        CONTEXT_FBA, CONTEXT_INBOUND, CONTEXT_3PL,
+        sku_awd=CONTEXT_AWD,
+    )
+    horizon = production_horizon_months(
+        date(2026, 8, 26), AMAZON_IN_BY_DEFAULT, 35,
+        peak_end=PEAK_END_DEFAULT, refill_receive_days=35,
+    )
+    months = [h["month"] for h in horizon]
+    by_month = {h["month"]: h for h in horizon}
+    return plan, build_month_view_entries(months, by_month, plan)
+
+
+def test_month_view_sept_not_empty_and_not_fba_only():
+    _plan, entries = _locked_month_view()
+    sept = [e for e in entries if e["month"] == "2026-09"]
+    assert sept, "September was skipped"
+    assert any(e["units"] > 0 for e in sept)
+    dests = {e["destination"] for e in sept if e["units"] > 0}
+    assert "3pl_fba" in dests
+    assert "awd" in dests
+    assert dests != {"3pl_fba"}
+    fba = next(e for e in sept if e["destination"] == "3pl_fba")
+    assert fba["mix"]["DDPE0004Shop"] == 8_100
+    assert fba["mix"]["DDPE0003Shop"] == 5_400
+    assert fba["mix"]["DDPE0002Shop"] == 2_700
+    assert fba["mix"].get("DDPE0001Shop", 0) == 0
+    assert fba["units"] == 16_200
+    assert fba["next_hop"] is True
+    awd = [e for e in sept if e["destination"] == "awd" and e["units"] > 0]
+    assert awd
+    assert all(e["single_sku"] for e in awd)
+
+
+def test_month_view_oct_dec_awd_cards():
+    _plan, entries = _locked_month_view()
+    for month in ("2026-10", "2026-11", "2026-12"):
+        cards = [e for e in entries if e["month"] == month and e["units"] > 0]
+        assert cards, f"{month} missing AWD card"
+        assert all(e["destination"] == "awd" for e in cards)
+        assert all(e["single_sku"] for e in cards)
+        assert all(e["is_pallet_card"] for e in cards)
+
+
+def test_no_sub_half_awd_card():
+    _plan, entries = _locked_month_view()
+    for e in entries:
+        if e["destination"] == "awd" and e["units"] > 0:
+            assert e["units"] >= 9_500
+            assert e["is_pallet_card"] is True

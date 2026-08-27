@@ -1834,6 +1834,225 @@ def _month_label(m: str) -> str:
     return f"{calendar.month_name[int(mo)]} {y}"
 
 
+# Sept–Dec AWD schedule. `_month_entries` used to skip September
+# (gate month, < 2026-10) and dump manufacture into Oct–Dec only.
+AWD_SCHEDULE_MONTHS = ("2026-09", "2026-10", "2026-11", "2026-12")
+
+
+def assign_awd_cards_to_months(
+    cards: list[dict],
+    production_months: list[str],
+) -> dict[str, list[dict]]:
+    """One legal single-SKU AWD card per Sep–Dec month when possible.
+
+    Full pallets ship first (earlier months). Under-half leftovers are
+    never cards — ``allocate_single_sku_awd_pallets`` already held them.
+    """
+    months = [m for m in AWD_SCHEDULE_MONTHS if m in production_months]
+    if not months:
+        months = [
+            m for m in production_months
+            if not str(m).endswith("-08") and str(m)[5:7] >= "09"
+        ]
+    ordered = sorted(
+        cards,
+        key=lambda c: (bool(c.get("partial")), -int(c.get("total_units") or 0)),
+    )
+    out: dict[str, list[dict]] = {m: [] for m in months}
+    for month, card in zip(months, ordered):
+        out[month].append(card)
+    extras_month = months[0] if months else None
+    for card in ordered[len(months):]:
+        if extras_month:
+            out[extras_month].append(card)
+    return out
+
+
+def build_month_view_entries(
+    production_months: list[str],
+    horizon_by_month: dict[str, dict],
+    sept: dict,
+    *,
+    sku_august: dict[str, int] | None = None,
+    target_skus: list[str] | None = None,
+    pallet_max: int = PALLET_MAX_UNITS,
+    amazon_in_by: date | None = None,
+    peak_end: date | None = None,
+    committed: set[str] | None = None,
+    today: date | None = None,
+) -> list[dict]:
+    """Rebuild Aug–Dec cards. Do not skip September.
+
+    August = mixed TBD (never invent). September = 3PL→FBA first hop,
+    then Marpac remaining-FBA (if any) then single-SKU AWD. Oct–Dec =
+    remaining single-SKU AWD cards. Not a zero Sept. Not FBA-only.
+    """
+    wanted = target_skus or LIP_BALM_SKUS
+    amazon_in_by = amazon_in_by or AMAZON_IN_BY_DEFAULT
+    peak_end = peak_end or PEAK_END_DEFAULT
+    committed = committed or set()
+    today = today or date.today()
+    sku_august = sku_august or sept.get("sku_august") or {}
+    tpl_to_fba = {
+        sku: max(0, int((sept.get("tpl_to_fba") or {}).get(sku, 0) or 0))
+        for sku in wanted
+    }
+    mixed_need = {
+        sku: max(0, int((sept.get("mixed_need") or {}).get(sku, 0) or 0))
+        for sku in wanted
+    }
+    awd_cards = list(sept.get("awd_pallets") or [])
+    if not awd_cards:
+        mfg = {
+            sku: max(0, int((sept.get("sku_manufacture") or {}).get(sku, 0) or 0))
+            for sku in wanted
+        }
+        awd_cards = allocate_single_sku_awd_pallets(mfg, wanted, pallet_max)
+    awd_by_month = assign_awd_cards_to_months(awd_cards, production_months)
+
+    def _dates(month: str, destination: str) -> tuple[str, int, str, date, object]:
+        h = horizon_by_month.get(month) or {}
+        recv = int(h.get("receive_days") or 35)
+        if destination == "3pl_fba":
+            role = "gate"
+            ship_by = sept.get("ship_by") or sept_fba_ship_by(recv).isoformat()
+            arrive = in_amazon_date(
+                date.fromisoformat(str(ship_by)[:10]), recv,
+                SEPT_FBA_NEED_IN_BY, clamp=True,
+            )
+        elif destination == "awd":
+            role = "refill"
+            ship_by = ship_by_for_month(
+                month, amazon_in_by, recv, role="refill", need_in_fba=peak_end,
+            )
+            arrive = in_amazon_date(
+                date.fromisoformat(ship_by), recv, peak_end, clamp=False,
+            )
+        else:
+            role = str(h.get("role") or "gate")
+            ship_by = ship_by_for_month(
+                month, amazon_in_by, recv, role=role,
+                need_in_fba=peak_end if role == "refill" else None,
+            )
+            latest = amazon_in_by if role == "gate" else peak_end
+            arrive = in_amazon_date(
+                date.fromisoformat(ship_by), recv, latest,
+                clamp=(role == "gate"),
+            )
+        return role, recv, ship_by, arrive, h
+
+    def _entry(
+        month: str,
+        mix: dict[str, int],
+        destination: str,
+        *,
+        single_sku: bool,
+        track: str,
+        next_hop: bool = False,
+        awaiting_august: bool = False,
+    ) -> dict:
+        role, _recv, ship_by, arrive, h = _dates(month, destination)
+        cleaned = {sku: int(qty) for sku, qty in mix.items() if int(qty or 0) > 0}
+        total = sum(cleaned.values())
+        fill = pallet_fill(total, pallet_max)
+        if destination == "3pl_fba":
+            # Warehouse send, not a Marpac pallet card.
+            pallets = 1 if total > 0 else 0
+            is_card = total > 0
+            has_partial = False
+            full = 0
+            partial_units = 0
+            held = 0
+        else:
+            pallets = fill["pallet_cards"]
+            is_card = fill["is_pallet_card"]
+            has_partial = fill["has_partial"]
+            full = fill["full_pallets"]
+            partial_units = fill["partial_units"]
+            held = fill["held_units"]
+        return {
+            "month": month,
+            "month_label": _month_label(month),
+            "role": role,
+            "status": "FIRM" if month in committed else "INDICATIVE",
+            "pallets": pallets,
+            "full_pallets": full,
+            "leftover_units": fill["leftover_units"],
+            "held_units": held,
+            "partial_units": partial_units,
+            "has_partial": has_partial,
+            "fill_pct": fill["fill_pct"],
+            "is_pallet_card": is_card,
+            "awaiting_august_totals": awaiting_august,
+            "units": total,
+            "mix": cleaned,
+            "mix_locked": False,
+            "destination": destination,
+            "single_sku": single_sku,
+            "track": track,
+            "next_hop": next_hop,
+            "remaining_fba_then_awd": destination in {"awd", "fba_then_awd"}
+            and month.endswith("-09"),
+            "ship_by": ship_by,
+            "in_amazon": arrive.isoformat(),
+            "need_in_fba": h.get("need_in_fba"),
+            "late_inbound": False,
+        }
+
+    entries: list[dict] = []
+    for month in production_months:
+        if month.endswith("-08"):
+            mix = {sku: int(sku_august.get(sku, 0) or 0) for sku in wanted}
+            mix = {sku: qty for sku, qty in mix.items() if qty > 0}
+            entries.append(_entry(
+                month, mix, "mixed_tulsa_fba",
+                single_sku=False, track="mixed_august",
+                awaiting_august=bool(sept.get("august_tbd", True)) and not mix,
+            ))
+            continue
+
+        if month.endswith("-09"):
+            # 3PL→FBA first — tonight's next hop. Never a zero Sept.
+            if sum(tpl_to_fba.values()) > 0:
+                entries.append(_entry(
+                    month, tpl_to_fba, "3pl_fba",
+                    single_sku=False, track="3pl_fba", next_hop=True,
+                ))
+            # Remaining FBA manufacture (usually 0 — waits August). Then AWD.
+            mixed = {sku: qty for sku, qty in mixed_need.items() if qty > 0}
+            if mixed:
+                entries.append(_entry(
+                    month, mixed, "fba_then_awd",
+                    single_sku=False, track="remaining_fba",
+                ))
+            for card in awd_by_month.get(month, []):
+                entries.append(_entry(
+                    month, dict(card.get("mix") or {}), "awd",
+                    single_sku=True, track="single_sku_awd",
+                ))
+            if not any(e["month"] == month and e["units"] > 0 for e in entries):
+                entries.append(_entry(
+                    month, {}, "awd",
+                    single_sku=True, track="single_sku_awd",
+                ))
+            continue
+
+        # Oct / Nov / Dec — single-SKU AWD cards must appear.
+        month_cards = awd_by_month.get(month, [])
+        if month_cards:
+            for card in month_cards:
+                entries.append(_entry(
+                    month, dict(card.get("mix") or {}), "awd",
+                    single_sku=True, track="single_sku_awd",
+                ))
+        else:
+            entries.append(_entry(
+                month, {}, "awd",
+                single_sku=True, track="single_sku_awd",
+            ))
+    return entries
+
+
 def _month_list(start: date, n: int) -> list[str]:
     months: list[str] = []
     cursor = start.replace(day=1)
@@ -2011,94 +2230,20 @@ def build_manufacturer_headsup(
         return rows
 
     def _month_entries(sku_summaries: list[dict]) -> list[dict]:
-        refill_months = [
-            h["month"] for h in horizon
-            if not h["month"].endswith("-08")
-            and (h["role"] == "refill" or h["month"] >= "2026-10")
-        ]
-        if not refill_months:
-            refill_months = [
-                h["month"] for h in horizon if not h["month"].endswith("-08")
-            ]
-        remaining_refill = {s["sku"]: int(s.get("manufacture") or 0) for s in sku_summaries}
-        august_by_sku = {s["sku"]: int(s.get("august") or 0) for s in sku_summaries}
-
-        entries: list[dict] = []
-        for month in production_months:
-            h = horizon_by_month[month]
-            role = h["role"]
-            recv = int(h["receive_days"])
-            is_august = month.endswith("-08")
-            mix: dict[str, int] = {}
-            single_sku = False
-            destination = "tulsa_fba"
-            if is_august:
-                # Mixed August only when Dave enters totals — never invent a mix.
-                mix = {sku: qty for sku, qty in august_by_sku.items() if qty > 0}
-                destination = "mixed_tulsa_fba"
-                single_sku = False
-            elif month in refill_months:
-                # Oct/Nov/Dec+ new Marpac is single-SKU AWD, not mixed.
-                mi = refill_months.index(month)
-                last_in_role = mi == len(refill_months) - 1
-                w = 1 / max(len(refill_months), 1)
-                w_sum = max(len(refill_months) - mi, 1)
-                for sku in target_skus:
-                    if remaining_refill[sku] <= 0:
-                        continue
-                    if last_in_role:
-                        alloc = remaining_refill[sku]
-                    else:
-                        alloc = min(
-                            round(remaining_refill[sku] * w / max(w_sum, 0.01)),
-                            remaining_refill[sku],
-                        )
-                    if alloc > 0:
-                        mix[sku] = alloc
-                        remaining_refill[sku] -= alloc
-                destination = "awd"
-                single_sku = True
-
-            total = sum(mix.values())
-            fill = pallet_fill(total, pallet_max)
-            ship_by = ship_by_for_month(
-                month, amazon_in_by, recv, role=role,
-                need_in_fba=policy["peak_end_date"] if role == "refill" else None,
-            )
-            latest = (
-                amazon_in_by if role == "gate"
-                else policy["peak_end_date"]
-            )
-            arrive = in_amazon_date(
-                date.fromisoformat(ship_by), recv, latest,
-                clamp=(role == "gate"),
-            )
-            entries.append({
-                "month": month,
-                "month_label": _month_label(month),
-                "role": role,
-                "status": "FIRM" if month in committed else "INDICATIVE",
-                "pallets": fill["pallet_cards"],
-                "full_pallets": fill["full_pallets"],
-                "leftover_units": fill["leftover_units"],
-                "held_units": fill["held_units"],
-                "partial_units": fill["partial_units"],
-                "has_partial": fill["has_partial"],
-                "fill_pct": fill["fill_pct"],
-                "is_pallet_card": fill["is_pallet_card"],
-                "awaiting_august_totals": is_august and sept["august_tbd"],
-                "units": total,
-                "mix": mix,
-                "mix_locked": False,
-                "destination": destination,
-                "single_sku": single_sku,
-                "track": "mixed_august" if is_august else ("single_sku_awd" if single_sku else "none"),
-                "ship_by": ship_by,
-                "in_amazon": arrive.isoformat(),
-                "need_in_fba": h.get("need_in_fba"),
-                "late_inbound": False,
-            })
-        return entries
+        # sku_summaries manufacture is the AWD surge (same as sept).
+        _ = sku_summaries
+        return build_month_view_entries(
+            production_months,
+            horizon_by_month,
+            sept,
+            sku_august=sku_august,
+            target_skus=target_skus,
+            pallet_max=pallet_max,
+            amazon_in_by=amazon_in_by,
+            peak_end=policy["peak_end_date"],
+            committed=committed,
+            today=today,
+        )
 
     sales_by_sku_demand = {
         sku: int(d["holiday_demand"]) for sku, d in sales_demand.items()
@@ -2390,9 +2535,19 @@ def format_manufacturer_sheet(headsup: dict) -> str:
             "in FBA by gate" if role == "gate"
             else "post-Christmas ammo · early-Jan FBA leaves Tulsa in December"
         )
-        a(f"  {entry['month_label']}  —  {entry['status']}  ({role_note})")
+        dest = entry.get("destination") or ""
+        dest_note = {
+            "3pl_fba": "3PL→FBA tonight — first hop",
+            "awd": "single-SKU AWD",
+            "fba_then_awd": "remaining FBA then AWD",
+            "mixed_tulsa_fba": "August mixed TBD",
+        }.get(dest, role_note)
+        a(f"  {entry['month_label']}  —  {entry['status']}  ({dest_note})")
         if entry["units"] == 0:
-            a("    No production needed this month.")
+            if entry.get("awaiting_august_totals"):
+                a("    August mixed pallet is TBD — do not invent a mix.")
+            else:
+                a("    No production needed this month.")
         else:
             if entry.get("has_partial"):
                 a(f"    {entry.get('full_pallets', 0)} full + 1 partial "
