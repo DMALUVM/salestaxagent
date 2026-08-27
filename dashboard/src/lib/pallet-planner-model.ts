@@ -9,6 +9,14 @@ export const CARTONS_PER_BOX = 270;
 export const AMAZON_IN_BY = "2026-10-31";
 export const DEFAULT_RECEIVING_DAYS = 18;
 export const TULSA_LIP_FLOOR_UNITS = 5_000;
+export const SEPT_FBA_ON_HAND_TARGETS: Record<string, number> = {
+  DDPE0001Shop: 12_800,
+  DDPE0002Shop: 8_300,
+  DDPE0003Shop: 16_700,
+  DDPE0004Shop: 17_800,
+};
+export const SEPT_FBA_TARGET_CAP = 55_600;
+export const SEPT_FBA_NEED_IN_BY = "2026-10-07";
 export const ASSORTED_SKU = "DDPE0004Shop";
 export const PEAK_START_DEFAULT = "2026-10-01";
 export const PEAK_END_DEFAULT = "2027-01-15";
@@ -312,6 +320,9 @@ export function plannerPolicy(
     earlyJanFbaShipBy: toIso(lastShipDate(peakEnd, recvPeak)),
     tulsaFloorUnits: TULSA_LIP_FLOOR_UNITS,
     tulsaCoverThrough: EARLY_FEB_COVER_THROUGH,
+    septFbaNeedInBy: SEPT_FBA_NEED_IN_BY,
+    septFbaShipBy: toIso(lastShipDate(SEPT_FBA_NEED_IN_BY, recvPeak)),
+    holidayGateLast3plFba: toIso(lastShipDate(AMAZON_IN_BY, recvPeak)),
     fbaReceiveMedian: measuredFba,
     fbaReceiveN: Number(leadtime?.fba_receive_n ?? 0),
     awdReplenishMedian: measuredAwd,
@@ -320,13 +331,30 @@ export function plannerPolicy(
   };
 }
 
+export function fbaManufactureGap(
+  target: number,
+  fba: number,
+  inbound: number,
+  august = 0,
+): number {
+  return Math.max(0, (target || 0) - Math.max(0, fba || 0) - Math.max(0, inbound || 0) - Math.max(0, august || 0));
+}
+
+export function remainingWantedCover(
+  wantedCover: number,
+  fbaTarget: number,
+  awdOnHand = 0,
+): number {
+  return Math.max(0, (wantedCover || 0) - (fbaTarget || 0) - Math.max(0, awdOnHand || 0));
+}
+
 export function skuProductionBuild(
   demandRow: {
     novDecDemand?: number;
     janDemand?: number;
     months2026?: Record<number, number>;
   },
-  opts?: { coverDays?: number; receiveDays?: number; optimisticUnits?: number },
+  opts?: { coverDays?: number; receiveDays?: number; optimisticUnits?: number; fbaTarget?: number },
 ) {
   const coverDays = opts?.coverDays ?? 60;
   const receiveDays = opts?.receiveDays ?? 35;
@@ -343,10 +371,16 @@ export function skuProductionBuild(
   const displayDemand = novDec + janUnits;
   const coverFulfill = Math.max(displayDemand, optimisticUnits);
   const stockToCover = Math.max(0, coverFulfill - displayDemand);
+  const wantedCover = coverFulfill;
+  const fbaTarget = Math.max(0, Number(opts?.fbaTarget ?? 0));
+  const awdAmmo = remainingWantedCover(wantedCover, fbaTarget);
+  const stackedBuild = coverFulfill + endingCover + pipeline;
   return {
     demand: displayDemand,
     displayDemand,
+    sellthrough: displayDemand,
     coverFulfill,
+    wantedCover,
     optimisticUnits,
     stockToCover,
     novDecDemand: novDec,
@@ -358,23 +392,51 @@ export function skuProductionBuild(
     janCover,
     endingCover,
     pipeline,
-    gateUnits: novDec + peakCover + pipeline,
-    refillUnits: janUnits + Math.max(0, janCover - peakCover) + stockToCover,
-    skuBuild: coverFulfill + endingCover + pipeline,
+    gateUnits: novDec,
+    refillUnits: stockToCover + janUnits,
+    awdAmmo,
+    fbaTarget,
+    skuBuild: displayDemand,
+    stackedBuild,
+    unstacked: true,
   };
+}
+
+export function awdCoversOffFbaReserve(
+  skuAwd?: Record<string, number>,
+  awdPlanned?: Record<string, number>,
+): boolean {
+  const oh = Object.values(skuAwd ?? {}).reduce((a, v) => a + Math.max(Number(v) || 0, 0), 0);
+  const plan = Object.values(awdPlanned ?? {}).reduce((a, v) => a + Math.max(Number(v) || 0, 0), 0);
+  return oh + plan > 0;
+}
+
+export function effectiveTulsaFloor(
+  skuAwd?: Record<string, number>,
+  awdPlanned?: Record<string, number>,
+  floor = TULSA_LIP_FLOOR_UNITS,
+): number {
+  return awdCoversOffFbaReserve(skuAwd, awdPlanned) ? 0 : Math.max(0, floor);
 }
 
 export function familyTulsaFloor(
   sku3pl: Record<string, number>,
   floor = TULSA_LIP_FLOOR_UNITS,
+  skuAwd?: Record<string, number>,
+  awdPlanned?: Record<string, number>,
 ) {
+  const awdLoaded = awdCoversOffFbaReserve(skuAwd, awdPlanned);
+  const effective = effectiveTulsaFloor(skuAwd, awdPlanned, floor);
   const onHand = Object.values(sku3pl).reduce((a, v) => a + Math.max(Number(v) || 0, 0), 0);
   return {
-    floor,
+    floor: effective,
+    configuredFloor: Math.max(0, floor),
+    awdLoaded,
     onHand,
-    transferable: Math.max(0, onHand - floor),
-    topUp: Math.max(0, floor - onHand),
+    transferable: Math.max(0, onHand - effective),
+    topUp: awdLoaded ? 0 : Math.max(0, effective - onHand),
     splitPerSku: false,
+    neverZeroBoth: true,
   };
 }
 
@@ -383,8 +445,10 @@ export function tulsaAfterChristmasOutbound(
   earlyJanFbaFromTulsa: number,
   floor = TULSA_LIP_FLOOR_UNITS,
   coverThrough = EARLY_FEB_COVER_THROUGH,
+  skuAwd?: Record<string, number>,
+  awdPlanned?: Record<string, number>,
 ) {
-  const info = familyTulsaFloor(sku3pl, floor);
+  const info = familyTulsaFloor(sku3pl, floor, skuAwd, awdPlanned);
   const need = Math.max(Number(earlyJanFbaFromTulsa) || 0, 0);
   const outbound = Math.min(need, info.transferable);
   const after = info.onHand - outbound;
@@ -393,10 +457,10 @@ export function tulsaAfterChristmasOutbound(
     earlyJanFbaFromTulsa: need,
     outbound,
     afterOutbound: after,
-    neededBeforeOutbound: need + floor,
-    meetsFloorAfterOutbound: after >= floor,
+    neededBeforeOutbound: need + info.floor,
+    meetsFloorAfterOutbound: after >= info.floor,
     coverThrough,
-    doNotDrainToZero: true,
+    doNotDrainToZero: !info.awdLoaded,
   };
 }
 
@@ -626,4 +690,157 @@ export function stampDate(iso?: string | null): string | null {
   if (!iso) return null;
   const d = String(iso).slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+}
+
+export function septFbaShipBy(receivingDays = 35): string {
+  return toIso(lastShipDate(SEPT_FBA_NEED_IN_BY, receivingDays));
+}
+
+export function holidayGateLast3plFba(receivingDays = 35): string {
+  return toIso(lastShipDate(AMAZON_IN_BY, receivingDays));
+}
+
+export function septFbaGaps(
+  skuFba: Record<string, number>,
+  skuInbound: Record<string, number>,
+  targets: Record<string, number> = SEPT_FBA_ON_HAND_TARGETS,
+  skus: string[] = LIP_BALM_SKUS,
+) {
+  const out: Record<string, {
+    target: number; fba: number; inbound: number; fbaPlusInbound: number; gap: number;
+  }> = {};
+  for (const sku of skus) {
+    const fba = Math.max(Number(skuFba[sku] || 0), 0);
+    const inbound = Math.max(Number(skuInbound[sku] || 0), 0);
+    const target = Number(targets[sku] || 0);
+    out[sku] = {
+      target, fba, inbound, fbaPlusInbound: fba + inbound,
+      gap: Math.max(0, target - fba - inbound),
+    };
+  }
+  return out;
+}
+
+export function transferable3plBySku(
+  sku3pl: Record<string, number>,
+  floor = TULSA_LIP_FLOOR_UNITS,
+): Record<string, number> {
+  const info = familyTulsaFloor(sku3pl, floor);
+  let leftover = info.transferable;
+  if (leftover <= 0) return Object.fromEntries(Object.keys(sku3pl).map((s) => [s, 0]));
+  const total = info.onHand || 1;
+  const out: Record<string, number> = {};
+  for (const [sku, qty] of Object.entries(sku3pl)) {
+    const share = Math.max(Number(qty) || 0, 0) / total;
+    const alloc = Math.min(Math.round(leftover * share), leftover);
+    out[sku] = alloc;
+    leftover -= alloc;
+  }
+  if (leftover > 0) {
+    const richest = Object.keys(sku3pl).reduce((a, b) => (sku3pl[a] >= sku3pl[b] ? a : b));
+    out[richest] = (out[richest] ?? 0) + leftover;
+  }
+  return out;
+}
+
+export function sept3plToFba(
+  sku3pl: Record<string, number>,
+  gaps: Record<string, { gap?: number } | number>,
+  floor = TULSA_LIP_FLOOR_UNITS,
+): Record<string, number> {
+  const xfer = transferable3plBySku(sku3pl, floor);
+  const rec: Record<string, number> = {};
+  for (const sku of Object.keys(sku3pl)) {
+    const raw = gaps[sku];
+    const gap = typeof raw === "object" ? Number(raw?.gap ?? 0) : Number(raw || 0);
+    rec[sku] = Math.min(Math.max(Number(xfer[sku] || 0), 0), Math.max(gap, 0));
+  }
+  return rec;
+}
+
+export function allocateSingleSkuAwdPallets(
+  remainder: Record<string, number>,
+  skus: string[] = LIP_BALM_SKUS,
+  palletMax = PALLET_MAX_UNITS,
+) {
+  const cards: {
+    palletNum: number; sku: string; mix: Record<string, number>;
+    totalUnits: number; locked: boolean; partial: boolean;
+    destination: "awd"; singleSku: true;
+  }[] = [];
+  let n = 0;
+  for (const sku of skus) {
+    const qty = Math.max(Number(remainder[sku] || 0), 0);
+    const fill = palletFill(qty, palletMax);
+    for (const size of palletCardSizes(fill, palletMax)) {
+      n += 1;
+      cards.push({
+        palletNum: n, sku, mix: { [sku]: size }, totalUnits: size,
+        locked: false, partial: size < palletMax, destination: "awd", singleSku: true,
+      });
+    }
+  }
+  return cards;
+}
+
+export function buildSeptemberPlan(
+  skuFba: Record<string, number>,
+  skuInbound: Record<string, number>,
+  sku3pl: Record<string, number>,
+  skuWantedCover: Record<string, number> = {},
+  skuAugust: Record<string, number> = {},
+  skuAwd: Record<string, number> = {},
+  opts?: { receiveDays?: number; tulsaFloor?: number; palletMax?: number; skus?: string[] },
+) {
+  const skus = opts?.skus ?? LIP_BALM_SKUS;
+  const receiveDays = opts?.receiveDays ?? 35;
+  const tulsaFloor = opts?.tulsaFloor ?? TULSA_LIP_FLOOR_UNITS;
+  const palletMax = opts?.palletMax ?? PALLET_MAX_UNITS;
+  const tgt = SEPT_FBA_ON_HAND_TARGETS;
+  const gaps = septFbaGaps(skuFba, skuInbound, tgt, skus);
+  const skuAugustOut: Record<string, number> = {};
+  const skuManufacture: Record<string, number> = {};
+  for (const sku of skus) {
+    const august = Math.max(0, Number(skuAugust[sku] || 0));
+    skuAugustOut[sku] = august;
+    skuManufacture[sku] = fbaManufactureGap(tgt[sku] ?? 0, skuFba[sku] ?? 0, skuInbound[sku] ?? 0, august);
+  }
+  const awdNeed: Record<string, number> = {};
+  for (const sku of skus) {
+    awdNeed[sku] = remainingWantedCover(skuWantedCover[sku] ?? 0, tgt[sku] ?? 0, skuAwd[sku] ?? 0);
+  }
+  const floorNow = effectiveTulsaFloor(skuAwd, awdNeed, tulsaFloor);
+  const tplToFba = sept3plToFba(
+    Object.fromEntries(skus.map((s) => [s, sku3pl[s] ?? 0])),
+    Object.fromEntries(skus.map((s) => [s, { gap: skuManufacture[s] }])),
+    floorNow,
+  );
+  const mixedNeed: Record<string, number> = {};
+  for (const sku of skus) {
+    mixedNeed[sku] = Math.max(0, skuManufacture[sku] - (tplToFba[sku] ?? 0));
+  }
+  const tulsa = familyTulsaFloor(
+    Object.fromEntries(skus.map((s) => [s, sku3pl[s] ?? 0])),
+    tulsaFloor, skuAwd, awdNeed,
+  );
+  return {
+    targets: Object.fromEntries(skus.map((s) => [s, tgt[s] ?? 0])),
+    targetCap: SEPT_FBA_TARGET_CAP,
+    needInFba: SEPT_FBA_NEED_IN_BY,
+    shipBy: septFbaShipBy(receiveDays),
+    holidayGateLast3plFba: holidayGateLast3plFba(receiveDays),
+    tulsaFloorUnits: floorNow,
+    tulsa,
+    awdLoaded: tulsa.awdLoaded,
+    gaps,
+    skuAugust: skuAugustOut,
+    augustTbd: skus.every((s) => skuAugustOut[s] <= 0),
+    skuManufacture,
+    tplToFba,
+    mixedNeed,
+    awdNeed,
+    awdPallets: allocateSingleSkuAwdPallets(awdNeed, skus, palletMax),
+    mixLocked: false,
+    unstacked: true,
+  };
 }

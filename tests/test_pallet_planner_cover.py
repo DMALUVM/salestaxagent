@@ -7,7 +7,9 @@ from src.inventory.pallet_planner import (
     AMAZON_IN_BY_DEFAULT,
     PEAK_END_DEFAULT,
     TULSA_LIP_FLOOR_UNITS,
+    awd_covers_off_fba_reserve,
     cover_units_from_daily,
+    effective_tulsa_floor,
     early_jan_fba_ship_by,
     family_tulsa_floor,
     holiday_demand_from_sales,
@@ -96,9 +98,11 @@ def test_january_is_jan_2026_times_may_jul_yoy_not_a_second_2x():
         assert 1.30 < yoy < 1.54
 
 
-def test_production_target_is_demand_plus_cover_plus_pipeline_not_sellthrough():
+def test_production_is_unstacked_not_sales_plus_peak_60d():
     demand = _demand()
     policy = load_planner_policy(SETTINGS, LEADTIME)
+    family_stacked = 0
+    family_sell = 0
     for sku in LIP:
         build = sku_production_build(
             demand[sku],
@@ -106,25 +110,27 @@ def test_production_target_is_demand_plus_cover_plus_pipeline_not_sellthrough():
             receive_days=policy["gate_receive_days"],
         )
         sellthrough = demand[sku]["holiday_demand"]
-        assert build["sku_build"] == (
+        family_sell += sellthrough
+        family_stacked += build["stacked_build"]
+        assert build["sku_build"] == sellthrough
+        assert build["unstacked"] is True
+        assert build["stacked_build"] == (
             sellthrough + build["ending_cover"] + build["pipeline"]
         )
-        assert build["sku_build"] > sellthrough
-        assert build["gate_units"] == (
-            build["nov_dec_demand"] + build["peak_cover"] + build["pipeline"]
-        )
-        assert build["refill_units"] == (
-            build["jan_demand"] + max(0, build["jan_cover"] - build["peak_cover"])
-        )
+        assert build["stacked_build"] > sellthrough
+        assert build["gate_units"] == build["nov_dec_demand"]
+    assert 54_000 <= family_sell <= 58_000
+    assert family_stacked >= 120_000
 
 
-def test_tulsa_floor_is_family_5000_not_per_sku():
+def test_tulsa_floor_is_family_5000_only_when_awd_empty():
     assert TULSA_LIP_FLOOR_UNITS == 5000
     empty = family_tulsa_floor({s: 0 for s in LIP})
     assert empty["floor"] == 5000
     assert empty["top_up"] == 5000
     assert empty["transferable"] == 0
     assert empty["split_per_sku"] is False
+    assert empty["awd_loaded"] is False
 
     over = family_tulsa_floor({
         "DDPE0001Shop": 2000,
@@ -264,3 +270,33 @@ def test_tulsa_keeps_5000_after_christmas_outbound():
     assert empty["outbound"] == 0
     assert empty["after_outbound"] == 0
     assert empty["needed_before_outbound"] == 7000
+
+
+def test_drop_tulsa_floor_when_awd_loaded():
+    sku_3pl = {s: 2000 for s in LIP}
+    sku_awd = {"DDPE0001Shop": 4000, "DDPE0002Shop": 0, "DDPE0003Shop": 0, "DDPE0004Shop": 0}
+    assert awd_covers_off_fba_reserve(sku_awd) is True
+    assert effective_tulsa_floor(sku_awd) == 0
+    loaded = family_tulsa_floor(sku_3pl, sku_awd=sku_awd)
+    assert loaded["awd_loaded"] is True
+    assert loaded["floor"] == 0
+    assert loaded["top_up"] == 0
+    assert loaded["transferable"] == 8000
+    xmas = tulsa_after_christmas_outbound(sku_3pl, 8000, sku_awd=sku_awd)
+    assert xmas["outbound"] == 8000
+    assert xmas["after_outbound"] == 0
+    assert xmas["do_not_drain_to_zero"] is False
+
+
+def test_never_plan_zero_awd_and_zero_tulsa():
+    empty_awd = {s: 0 for s in LIP}
+    empty_3pl = {s: 0 for s in LIP}
+    assert awd_covers_off_fba_reserve(empty_awd) is False
+    both_empty = family_tulsa_floor(empty_3pl, sku_awd=empty_awd)
+    assert both_empty["awd_loaded"] is False
+    assert both_empty["floor"] == 5000
+    assert both_empty["top_up"] == 5000
+    planned = family_tulsa_floor(empty_3pl, sku_awd=empty_awd, awd_planned={"DDPE0004Shop": 2000})
+    assert planned["awd_loaded"] is True
+    assert planned["floor"] == 0
+    assert planned["top_up"] == 0

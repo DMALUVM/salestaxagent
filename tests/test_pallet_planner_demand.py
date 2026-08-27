@@ -392,9 +392,11 @@ def test_optimistic_is_stock_to_cover_not_displayed_forecast():
         assert build["display_demand"] == displayed[sku]["holiday_demand"]
         assert build["optimistic_units"] == opt
         assert build["cover_fulfill"] == max(build["display_demand"], opt)
-        assert build["sku_build"] == (
+        assert build["sku_build"] == build["display_demand"]
+        assert build["stacked_build"] == (
             build["cover_fulfill"] + build["ending_cover"] + build["pipeline"]
         )
+        assert build["unstacked"] is True
         # Peak-60d still from display December, not optimistic
         dec = displayed[sku]["months_2026"][12]
         assert build["peak_cover"] == round(dec / 31 * 60)
