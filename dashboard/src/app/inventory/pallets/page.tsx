@@ -26,6 +26,7 @@ import {
   inboundInTransit,
   latestRowPerSku,
   monthlyAmazonUnits,
+  palletCardSizes,
   palletFill,
   plannerPolicy,
   productionHorizonMonths,
@@ -83,7 +84,7 @@ interface SkuPlan {
   sku: string; label: string; novDecDemand: number; yoy: number;
   fba: number; inbound: number; awd: number; tpl: number; supply: number; gap: number;
 }
-interface Pallet { num: number; mix: Record<string, number>; total: number; }
+interface Pallet { num: number; mix: Record<string, number>; total: number; partial?: boolean; }
 interface CoverWeek {
   week: string; fba: number; demand: number; receipt: number;
   dailyRate: number; coverDays: number | null; flagged: boolean;
@@ -96,6 +97,7 @@ interface MfgMonthEntry {
   month: string; label: string; status: "FIRM" | "INDICATIVE";
   role?: "gate" | "refill";
   pallets: number; leftoverUnits: number; isPalletCard: boolean;
+  fullPallets?: number; hasPartial?: boolean; partialUnits?: number; heldUnits?: number;
   awaitingAugustTotals: boolean; fillPct: number;
   units: number; mix: Record<string, number>; shipBy: string; inAmazon: string;
 }
@@ -147,7 +149,7 @@ function buildMfgCsv(
   transfers: MfgTransfer[],
 ): string {
   const L: string[] = [];
-  L.push("Section,SKU,SKU_Label,Holiday_Demand,FBA,Inbound,AWD,TPL,Transfer,Manufacture,Scenario");
+  L.push("Section,SKU,SKU_Label,Cover_Target,FBA,Inbound,AWD,TPL,Transfer,Manufacture,Scenario");
   for (const [sc, rows] of [["sales_yoy", skuSummary], ["actual_2025", skuSummarySens]] as const) {
     for (const s of rows) L.push(`SKU_Summary,${s.sku},${s.label},${s.holidayDemand},${s.fba},${s.inbound},${s.awd},${s.tpl},${s.transfer},${s.manufacture},${sc}`);
   }
@@ -176,16 +178,17 @@ function buildMfgSheet(
   L.push("=================================================================");
   L.push(""); L.push("SKU REFERENCE:");
   for (const [sku, label] of Object.entries(SKU_LABELS)) L.push(`  ${sku}  =  ${label}`);
-  L.push(""); L.push(`Demand period: Nov + Dec + Jan (each SKU: 2025 same-month Amazon × that SKU's own May–Jul YoY)`);
+  L.push(""); L.push("Cover target = Nov–Jan sales + peak 60d FBA + Feb tail (not Nov–Jan sell-through alone).");
   L.push("Family YoY is context only — not applied as a blended multiplier.");
   L.push(`Pallet capacity: ${fmt(PALLET_MAX)} cartons (270 per 13×11×9 box)`);
+  L.push("Fill: two full + one ≥50% partial is fine. Under half is merge-or-hold, not a card.");
   L.push(`FBA cover: fulfillable only · inbound already in transit`);
   L.push(`All holiday units in Amazon FBA by: ${TARGET}`);
   L.push(`3PL policy: transfer only (does NOT reduce manufacture)`);
   L.push(""); L.push("-----------------------------------------------------------------");
   L.push("PER-SKU SUMMARY (sales_yoy)"); L.push("-----------------------------------------------------------------");
   for (const s of skuSummary) {
-    L.push(`  ${(SKU_SHORT[s.sku]??s.sku).padEnd(14)} Demand ${fmt(s.holidayDemand).padStart(7)}  FBA ${fmt(s.fba).padStart(6)}  Inb ${fmt(s.inbound).padStart(5)}  AWD ${fmt(s.awd).padStart(5)}  3PL ${fmt(s.tpl).padStart(6)}  Mfg ${fmt(s.manufacture).padStart(7)}`);
+    L.push(`  ${(SKU_SHORT[s.sku]??s.sku).padEnd(14)} Cover ${fmt(s.holidayDemand).padStart(7)}  FBA ${fmt(s.fba).padStart(6)}  Inb ${fmt(s.inbound).padStart(5)}  AWD ${fmt(s.awd).padStart(5)}  3PL ${fmt(s.tpl).padStart(6)}  Mfg ${fmt(s.manufacture).padStart(7)}`);
   }
   const totalMfg = skuSummary.reduce((a, s) => a + s.manufacture, 0);
   L.push(`  ${"TOTAL".padEnd(14)} ${"".padStart(7)}  ${"".padStart(10)}  ${"".padStart(9)}  ${"".padStart(9)}  ${"".padStart(10)}  Mfg ${fmt(totalMfg).padStart(7)}`);
@@ -194,8 +197,9 @@ function buildMfgSheet(
   for (const e of primary.entries) {
     L.push(""); L.push(`  ${e.label}  —  ${e.status}`);
     if (e.units === 0) { L.push("    No production needed."); continue; }
-    if (e.isPalletCard) L.push(`    Full pallets: ${e.pallets}  (${fmt(e.units)} units)`);
-    else L.push(`    Leftover (not a pallet): ${fmt(e.units)} units (${Math.round(e.fillPct * 100)}% of ${fmt(PALLET_MAX)})`);
+    if (e.hasPartial) L.push(`    ${e.fullPallets ?? 0} full + 1 partial (${fmt(e.partialUnits ?? 0)} ≥50%)  (${fmt(e.units)} units)`);
+    else if (e.isPalletCard) L.push(`    Full pallets: ${e.fullPallets ?? e.pallets}  (${fmt(e.units)} units)`);
+    else L.push(`    Held leftover (under half, not a pallet): ${fmt(e.units)} units (${Math.round(e.fillPct * 100)}% of ${fmt(PALLET_MAX)})`);
     for (const sku of SKUS) { const q = e.mix[sku]; if (q && q > 0) L.push(`      ${SKU_LABELS[sku]}: ${fmt(q)} [indicative]`); }
     L.push(`    Ship by: ${e.shipBy} · in Amazon by ${e.inAmazon}`);
     if (e.awaitingAugustTotals) L.push("    August mix unlocked — waiting on Dave's hard totals.");
@@ -208,7 +212,7 @@ function buildMfgSheet(
   }
   L.push(""); L.push("-----------------------------------------------------------------");
   L.push("SENSITIVITY: actual_2025 (forecast workbook weekly — not Amazon monthly sales)"); L.push("-----------------------------------------------------------------");
-  for (const s of skuSummarySens) L.push(`  ${(SKU_SHORT[s.sku]??s.sku).padEnd(14)} Demand ${fmt(s.holidayDemand).padStart(7)}  Mfg ${fmt(s.manufacture).padStart(7)}`);
+  for (const s of skuSummarySens) L.push(`  ${(SKU_SHORT[s.sku]??s.sku).padEnd(14)} Cover ${fmt(s.holidayDemand).padStart(7)}  Mfg ${fmt(s.manufacture).padStart(7)}`);
   const sensMfg = skuSummarySens.reduce((a, s) => a + s.manufacture, 0);
   L.push(`  TOTAL: ${fmt(sensMfg)} manufacture`);
   for (const e of sensitivity.entries) {
@@ -318,22 +322,25 @@ export default function PalletPlanPage() {
     const fill = palletFill(tGap, PALLET_MAX);
     const remaining = Object.fromEntries(plans.map((p) => [p.sku, p.gap]));
     const pals: Pallet[] = [];
-    for (let i = 0; i < fill.fullPallets; i++) {
+    for (const [i, size] of palletCardSizes(fill, PALLET_MAX).entries()) {
       const totalRem = Object.values(remaining).reduce((a, b) => a + b, 0);
-      if (totalRem < PALLET_MAX) break;
+      if (totalRem <= 0) break;
       const mix: Record<string, number> = {};
       for (const sku of SKUS) {
         if (remaining[sku] <= 0) continue;
         const share = remaining[sku] / totalRem;
-        const alloc = Math.min(Math.round(PALLET_MAX * share), remaining[sku]);
+        const alloc = Math.min(Math.round(size * share), remaining[sku]);
         if (alloc > 0) { mix[sku] = alloc; remaining[sku] -= alloc; }
       }
-      pals.push({ num: i + 1, mix, total: Object.values(mix).reduce((a, b) => a + b, 0) });
+      pals.push({
+        num: i + 1, mix, total: Object.values(mix).reduce((a, b) => a + b, 0),
+        partial: size < PALLET_MAX,
+      });
     }
     const leftover: Record<string, number> = {};
     for (const sku of SKUS) if (remaining[sku] > 0) leftover[sku] = remaining[sku];
     return {
-      skuPlans: plans, pallets: pals, leftoverUnits: fill.leftoverUnits, leftoverMix: leftover,
+      skuPlans: plans, pallets: pals, leftoverUnits: fill.heldUnits, leftoverMix: leftover,
       totalGap: tGap, totalDemand: tDemand, totalSupply: tSupply,
     };
   }, [snapshots, awdList, tplList, include3pl, includeAwd, salesDemand, skuBuilds, policy]);
@@ -512,8 +519,12 @@ export default function PalletPlanPage() {
         entries.push({
           month: m, label: monthLabel(m), role,
           status: committed.has(m) ? "FIRM" : "INDICATIVE",
-          pallets: fill.fullPallets,
+          pallets: fill.palletCards,
+          fullPallets: fill.fullPallets,
           leftoverUnits: fill.leftoverUnits,
+          heldUnits: fill.heldUnits,
+          partialUnits: fill.partialUnits,
+          hasPartial: fill.hasPartial,
           isPalletCard: fill.isPalletCard,
           awaitingAugustTotals: m === currentMonth && now.getMonth() === 7,
           fillPct: fill.fillPct,
@@ -643,9 +654,9 @@ export default function PalletPlanPage() {
           </div>
           <div className="flex items-center gap-4 mt-1">
             <p className="text-xs text-muted-foreground">
-              Nov+Dec+Jan = each SKU&apos;s 2025 same-month Amazon × that SKU&apos;s own May–Jul YoY. Mix unlocked. Family 1.42× is context only. actual_2025 is the forecast workbook weekly column — not monthly Amazon sales.
+              Cover target = Nov–Jan sales + peak 60d FBA + Feb tail — not Nov–Jan sell-through alone. Mix unlocked. Family 1.42× is context only. actual_2025 is the forecast workbook weekly column — not monthly Amazon sales.
             </p>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title="Unchecked: manufacture = cover-target − FBA − inbound − AWD (3PL ignored)">
               <input type="checkbox" checked={tplOffsetsProduction}
                 onChange={(e) => setTplOffsetsProduction(e.target.checked)} />
               3PL offsets production
@@ -660,7 +671,7 @@ export default function PalletPlanPage() {
                 <TableRow>
                   <TableHead>SKU</TableHead>
                   <TableHead className="text-right">Own YoY</TableHead>
-                  <TableHead className="text-right">Demand</TableHead>
+                  <TableHead className="text-right" title="Nov–Jan sales + peak 60d FBA + Feb tail">Cover target</TableHead>
                   <TableHead className="text-right">FBA fulfillable</TableHead>
                   <TableHead className="text-right">Inbound (in transit)</TableHead>
                   <TableHead className="text-right">AWD</TableHead>
@@ -720,24 +731,37 @@ export default function PalletPlanPage() {
                     <p className="text-xs text-muted-foreground py-2">No production needed</p>
                   ) : (
                     <>
-                      {entry.isPalletCard ? (
+                      {entry.hasPartial ? (
+                        <div className="mb-2">
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-2xl font-semibold tabular-nums">{entry.pallets}</span>
+                            <span className="text-xs text-muted-foreground">
+                              pallet{(entry.pallets ?? 0) !== 1 ? "s" : ""} · {entry.fullPallets ?? 0} full + 1 partial
+                            </span>
+                            <span className="text-xs text-muted-foreground ml-auto tabular-nums">{fmt(entry.units)} units</span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground">
+                            Partial {fmt(entry.partialUnits ?? 0)} (≥50% of {fmt(PALLET_MAX)})
+                          </p>
+                        </div>
+                      ) : entry.isPalletCard ? (
                         <div className="flex items-baseline gap-2 mb-2">
-                          <span className="text-2xl font-semibold tabular-nums">{entry.pallets}</span>
-                          <span className="text-xs text-muted-foreground">full pallet{entry.pallets !== 1 ? "s" : ""}</span>
+                          <span className="text-2xl font-semibold tabular-nums">{entry.fullPallets ?? entry.pallets}</span>
+                          <span className="text-xs text-muted-foreground">full pallet{(entry.fullPallets ?? entry.pallets) !== 1 ? "s" : ""}</span>
                           <span className="text-xs text-muted-foreground ml-auto tabular-nums">{fmt(entry.units)} units</span>
                         </div>
                       ) : (
                         <div className="mb-2">
-                          <p className="text-xs font-medium">Leftover — not a pallet</p>
+                          <p className="text-xs font-medium">Held leftover — under half a pallet</p>
                           <p className="text-2xl font-semibold tabular-nums">{fmt(entry.units)}</p>
                           <p className="text-[10px] text-muted-foreground">
-                            {Math.round(entry.fillPct * 100)}% of {fmt(PALLET_MAX)} cartons
+                            {Math.round(entry.fillPct * 100)}% of {fmt(PALLET_MAX)} · merge or hold, not a pallet
                           </p>
                         </div>
                       )}
-                      {entry.leftoverUnits > 0 && entry.isPalletCard && (
+                      {(entry.heldUnits ?? 0) > 0 && entry.isPalletCard && (
                         <p className="text-[10px] text-muted-foreground mb-2">
-                          + {fmt(entry.leftoverUnits)} leftover (not a pallet)
+                          + {fmt(entry.heldUnits ?? 0)} held leftover (under half, not a pallet)
                         </p>
                       )}
                       <div className="space-y-1">
@@ -771,7 +795,9 @@ export default function PalletPlanPage() {
                       {sensEntry.units > 0 ? (
                         <span className="tabular-nums">
                           {fmt(sensEntry.units)} units
-                          {sensEntry.isPalletCard ? ` (${sensEntry.pallets}p)` : " leftover"}
+                          {sensEntry.hasPartial
+                            ? ` (${sensEntry.fullPallets ?? 0} full + 1 partial)`
+                            : sensEntry.isPalletCard ? ` (${sensEntry.pallets}p)` : " held leftover"}
                         </span>
                       ) : (
                         <span>none</span>
@@ -801,9 +827,9 @@ export default function PalletPlanPage() {
           )}
 
           <p className="text-[10px] text-muted-foreground">
-            Manufacture = demand - FBA fulfillable - inbound already in transit - AWD{tplOffsetsProduction ? " - 3PL" : ""}.
-            {!tplOffsetsProduction && " 3PL is transfer only, does not reduce production."}
-            {" "}Mix is unlocked. Leftover &lt; 19,000 is not a pallet. FIRM = committed. INDICATIVE = may change. Not a purchase order.
+            Manufacture = cover-target − FBA fulfillable − inbound already in transit − AWD{tplOffsetsProduction ? " − 3PL" : ""}.
+            {!tplOffsetsProduction && " 3PL is transfer only (ignored in manufacture)."}
+            {" "}Mix is unlocked. Two full + one ≥50% partial is fine. Under half a pallet is merge-or-hold, not a card. FIRM = committed. INDICATIVE = may change. Not a purchase order.
           </p>
         </CardContent>
       </Card>
@@ -860,17 +886,17 @@ export default function PalletPlanPage() {
         </CardContent>
       </Card>
 
-      {/* Leftover remainder — never rendered as a 1-pallet card */}
+      {/* Under-half leftover — merge or hold, never a pallet card */}
       {leftoverUnits > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Leftover remainder — not a pallet</CardTitle>
+            <CardTitle className="text-sm font-medium">Held leftover — under half a pallet</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-semibold tabular-nums">{fmt(leftoverUnits)}</p>
             <p className="text-xs text-muted-foreground">
               {Math.round((leftoverUnits / PALLET_MAX) * 100)}% of a {fmt(PALLET_MAX)}-carton Marpac pallet.
-              Dave sends hard August totals — mix not locked.
+              Merge or hold — not a pallet. Dave sends hard August totals — mix not locked.
             </p>
             <div className="mt-2 space-y-1">
               {SKUS.map((sku) => {
@@ -910,7 +936,7 @@ export default function PalletPlanPage() {
                   <TableRow key={p.num}>
                     <TableCell className="font-medium">
                       <Package className="inline mr-1 h-3.5 w-3.5 text-muted-foreground" />
-                      Pallet {p.num}
+                      Pallet {p.num}{p.partial ? " · partial" : ""}
                     </TableCell>
                     {SKUS.map((s) => (
                       <TableCell key={s} className="text-right tabular-nums">

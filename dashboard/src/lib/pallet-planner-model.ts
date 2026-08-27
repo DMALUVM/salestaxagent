@@ -4,6 +4,7 @@
  */
 
 export const PALLET_MAX_UNITS = 19_000;
+export const PALLET_PARTIAL_MIN_RATIO = 0.5;
 export const CARTONS_PER_BOX = 270;
 export const AMAZON_IN_BY = "2026-10-31";
 export const DEFAULT_RECEIVING_DAYS = 18;
@@ -444,18 +445,44 @@ export function productionHorizonMonths(
   return out;
 }
 
+export function palletPartialMinUnits(palletMax = PALLET_MAX_UNITS): number {
+  return Math.ceil(Math.max(palletMax, 0) * PALLET_PARTIAL_MIN_RATIO);
+}
+
 export function palletFill(units: number, palletMax = PALLET_MAX_UNITS) {
   const u = Math.max(0, Math.floor(units));
   const max = Math.max(0, palletMax);
   const full = max > 0 ? Math.floor(u / max) : 0;
   const leftover = max > 0 ? u % max : u;
+  const leftoverPct = max > 0 ? leftover / max : 0;
+  const partialMin = max > 0 ? palletPartialMinUnits(max) : 0;
+  const hasPartial = leftover >= partialMin && partialMin > 0;
+  const partialUnits = hasPartial ? leftover : 0;
+  const heldUnits = hasPartial ? 0 : leftover;
+  const palletCards = full + (hasPartial ? 1 : 0);
   return {
     units: u,
     fullPallets: full,
     leftoverUnits: leftover,
-    fillPct: max > 0 ? u / max : 0,
-    isPalletCard: u >= max,
+    leftoverPct,
+    fillPct: leftoverPct,
+    partialMinUnits: partialMin,
+    hasPartial,
+    partialUnits,
+    heldUnits,
+    palletCards,
+    isPalletCard: palletCards > 0,
+    mergeOrHold: !hasPartial && leftover > 0,
   };
+}
+
+export function palletCardSizes(
+  fill: ReturnType<typeof palletFill>,
+  palletMax = PALLET_MAX_UNITS,
+): number[] {
+  const sizes = Array.from({ length: fill.fullPallets }, () => palletMax);
+  if (fill.hasPartial && fill.partialUnits > 0) sizes.push(fill.partialUnits);
+  return sizes;
 }
 
 function parseIso(iso: string): Date {
