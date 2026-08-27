@@ -374,7 +374,7 @@ describe("pallet planner model", () => {
     assert.equal(SEPT_FBA_TARGET_CAP, 55_600);
   });
 
-  test("Sept 3PL→FBA lock is 5400 + 4860, no peppermint", () => {
+  test("August 3PL→FBA lock is 5400 + 4860, no peppermint", () => {
     assert.equal(LOCKED_TONIGHT_3PL_FBA_SEND.DDPE0004Shop, 5_400);
     assert.equal(LOCKED_TONIGHT_3PL_FBA_SEND.DDPE0003Shop, 4_860);
     assert.equal(LOCKED_TONIGHT_3PL_FBA_SEND.DDPE0002Shop, 0);
@@ -451,15 +451,21 @@ describe("pallet planner model", () => {
     assert.ok(sept.length > 0, "September was skipped");
     assert.ok(sept.some((e) => e.units > 0));
     const dests = new Set(sept.filter((e) => e.units > 0).map((e) => e.destination));
-    assert.equal(dests.has("3pl_fba"), true);
+    assert.equal(dests.has("3pl_fba"), false);
     assert.equal(dests.has("awd"), true);
-    const fbaCard = sept.find((e) => e.destination === "3pl_fba");
+    const aug = entries.filter((e) => e.month.endsWith("-08"));
+    const fbaCard = aug.find((e) => e.destination === "3pl_fba");
     assert.equal(fbaCard?.mix.DDPE0004Shop, 5400);
     assert.equal(fbaCard?.mix.DDPE0003Shop, 4860);
     assert.equal(fbaCard?.mix.DDPE0002Shop, undefined);
     assert.equal(fbaCard?.mix.DDPE0001Shop ?? 0, 0);
     assert.equal(fbaCard?.units, 10260);
     assert.equal(fbaCard?.nextHop, true);
+    const marpac = aug.find((e) => e.destination === AUGUST_HOP_DESTINATION);
+    assert.ok(marpac, "August Marpac→Tulsa TBD missing");
+    assert.equal(marpac?.awaitingAugustTotals, true);
+    assert.equal(marpac?.units, 0);
+    assert.ok(sept.every((e) => e.destination !== "3pl_fba"));
     const septAwd = entries.filter((e) => e.month === "2026-09" && e.destination === "awd" && e.units > 0);
     const octAwd = entries.filter((e) => e.month === "2026-10" && e.destination === "awd" && e.units > 0);
     assert.deepEqual(new Set(septAwd.map((e) => Object.keys(e.mix)[0])), new Set(["DDPE0004Shop", "DDPE0003Shop"]));
@@ -530,16 +536,23 @@ describe("pallet planner model", () => {
       horizonByMonth: Object.fromEntries(horizon.map((h) => [h.month, h])),
       sept: plan,
     });
-    const aug = entries.find((e) => e.month.endsWith("-08"));
-    assert.ok(aug, "August card missing");
-    assert.equal(aug?.destination, AUGUST_HOP_DESTINATION);
-    assert.equal(aug?.hopLabel, AUGUST_HOP_LABEL);
-    assert.equal(aug?.awaitingAugustTotals, true);
-    assert.equal(aug?.units, 0);
-    assert.deepEqual(aug?.mix, {});
-    assert.notEqual(aug?.destination, "3pl_fba");
-    assert.notEqual(aug?.hopLabel, "3PL→FBA");
-    assert.match(aug?.hopLabel ?? "", /Marpac→Tulsa/);
+    const aug = entries.filter((e) => e.month.endsWith("-08"));
+    const marpac = aug.find((e) => e.destination === AUGUST_HOP_DESTINATION);
+    assert.ok(marpac, "August card missing");
+    assert.equal(marpac?.destination, AUGUST_HOP_DESTINATION);
+    assert.equal(marpac?.hopLabel, AUGUST_HOP_LABEL);
+    assert.equal(marpac?.awaitingAugustTotals, true);
+    assert.equal(marpac?.units, 0);
+    assert.deepEqual(marpac?.mix, {});
+    assert.notEqual(marpac?.destination, "3pl_fba");
+    assert.notEqual(marpac?.hopLabel, "3PL→FBA");
+    assert.match(marpac?.hopLabel ?? "", /Marpac→Tulsa/);
+    const send = aug.find((e) => e.destination === "3pl_fba");
+    assert.ok(send, "August 3PL→FBA card missing");
+    assert.equal(send?.units, 10260);
+    assert.equal(send?.mix.DDPE0004Shop, 5400);
+    assert.equal(send?.mix.DDPE0003Shop, 4860);
+    assert.equal(send?.mix.DDPE0002Shop ?? 0, 0);
   });
 
   test("first-wave AWD is 61,425 in ship order, not 76,211", () => {
@@ -570,9 +583,12 @@ describe("pallet planner model", () => {
       horizonByMonth: Object.fromEntries(horizon.map((h) => [h.month, h])),
       sept: plan,
     });
-    const aug = entries.find((e) => e.month.endsWith("-08"));
-    assert.equal(aug?.hopLabel, "Marpac→Tulsa");
-    assert.equal(aug?.awaitingAugustTotals, true);
+    const aug = entries.filter((e) => e.month.endsWith("-08"));
+    const marpac = aug.find((e) => e.destination === AUGUST_HOP_DESTINATION);
+    assert.equal(marpac?.hopLabel, "Marpac→Tulsa");
+    assert.equal(marpac?.awaitingAugustTotals, true);
+    const send = aug.find((e) => e.destination === "3pl_fba");
+    assert.equal(send?.units, 10260);
     const awd = entries.filter((e) => e.destination === "awd" && e.units > 0);
     assert.deepEqual(awd.map((e) => Object.keys(e.mix)[0]), [...FIRST_WAVE_AWD_SHIP_ORDER]);
   });
@@ -591,8 +607,10 @@ describe("pallet planner model", () => {
     const aug = entries.filter((e) => e.month.endsWith("-08"));
     assert.ok(aug.length > 0);
     assert.ok(aug.every((e) => e.destination !== "awd"));
-    assert.ok(aug.every((e) => e.hopLabel === "Marpac→Tulsa"));
-    assert.ok(aug.every((e) => e.awaitingAugustTotals === true));
+    const marpac = aug.filter((e) => e.destination === AUGUST_HOP_DESTINATION);
+    assert.ok(marpac.length > 0);
+    assert.ok(marpac.every((e) => e.hopLabel === "Marpac→Tulsa"));
+    assert.ok(marpac.every((e) => e.awaitingAugustTotals === true));
     const septAwd = entries.filter((e) => e.month === "2026-09" && e.destination === "awd" && e.units > 0);
     assert.deepEqual(new Set(septAwd.map((e) => Object.keys(e.mix)[0])), new Set(["DDPE0004Shop", "DDPE0003Shop"]));
   });
