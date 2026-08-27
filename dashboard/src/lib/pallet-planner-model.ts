@@ -402,7 +402,7 @@ export function firstWaveAwdNeed(target: number, augustToAwd = 0, tplToAwd = 0):
 
 export function firstWaveShipSkus(skus: string[] = LIP_BALM_SKUS): string[] {
   const wanted = new Set(skus);
-  const ordered = FIRST_WAVE_AWD_SHIP_ORDER.filter((sku) => wanted.has(sku));
+  const ordered: string[] = FIRST_WAVE_AWD_SHIP_ORDER.filter((sku) => wanted.has(sku));
   for (const sku of skus) {
     if (!ordered.includes(sku)) ordered.push(sku);
   }
@@ -995,11 +995,7 @@ export function buildSeptemberPlan(
   );
   const awdPallets = allocateSingleSkuAwdPallets(
     skuManufacture, firstWaveShipSkus(skus), palletMax,
-  ).map((card) => ({
-    ...card,
-    firstWave: useFirstWave,
-    aimEndOfAugust: useFirstWave && FIRST_WAVE_AWD_SHIP_ORDER.slice(0, 2).includes(card.sku as typeof FIRST_WAVE_AWD_SHIP_ORDER[number]),
-  }));
+  );
   return {
     targets: Object.fromEntries(skus.map((s) => [s, tgt[s] ?? 0])),
     targetCap: SEPT_FBA_TARGET_CAP,
