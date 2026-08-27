@@ -26,6 +26,7 @@ from src.inventory.holiday_surge import normalize_sku
 from src.rules import AMAZON_PULSE_SOURCE
 
 LIP_BALM_SKUS = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"]
+ASSORTED_SKU = "DDPE0004Shop"
 
 # Marpac pallet: 19,000 cartons / 270 per 13×11×9 box.
 PALLET_MAX_UNITS = 19_000
@@ -37,10 +38,17 @@ DEFAULT_RECEIVING_DAYS = 18
 # Uncapped — not the replen planning_daily 1.40 cap.
 YOY_WINDOW_MONTHS = (5, 6, 7)
 DEMAND_METHOD = "sku_2025_same_month_x_sku_may_jul_yoy"
+# Assorted holiday *display* uses workbook correction_factor (same Nov–Jan
+# window as the holiday sheet). Optimistic is stock-to-cover, not display.
+# Workbook January weeks may be dated onto 2026-01.
+WORKBOOK_WINDOW_MONTHS = frozenset({"2026-11", "2026-12", "2026-01", "2027-01"})
 # Production cards = demand + peak-60d + Tulsa floor + receive pipeline.
 # Not holidayDemand sell-through alone. Family 3PL floor — not a per-SKU mix.
 TULSA_LIP_FLOOR_UNITS = 5_000
+PEAK_START_DEFAULT = date(2026, 10, 1)
 PEAK_END_DEFAULT = date(2027, 1, 15)
+EARLY_FEB_COVER_THROUGH = date(2027, 2, 14)
+CHRISTMAS_2026 = date(2026, 12, 25)
 DEC_DAYS = 31
 JAN_DAYS = 31
 ACTUAL_2025_SOURCE = (
@@ -214,8 +222,74 @@ def holiday_demand_from_sales(
             "holiday_demand": nov_dec + jan,
             "yoy": yoy,
             "yoy_method": yoy_info["method"],
+            "display_method": DEMAND_METHOD,
             "months_2026": months_2026,
         }
+    return out
+
+
+def workbook_window_units(
+    fc_rows: list[dict],
+    sku: str,
+    scenario: str,
+    months: frozenset[str] | None = None,
+) -> int:
+    """Sum forecast_weekly for one SKU/scenario in the holiday-sheet window.
+
+    Window matches the holiday sheet: Nov + Dec + Jan (2026-01 and 2027-01
+    both accepted — workbook January weeks may be dated onto 2026).
+    Never use optimistic totals as displayed demand.
+    """
+    wanted = months or WORKBOOK_WINDOW_MONTHS
+    total = 0.0
+    for r in fc_rows:
+        if r.get("scenario") != scenario:
+            continue
+        if r.get("sku") != sku:
+            continue
+        ws = str(r.get("week_start", ""))[:7]
+        if ws in wanted:
+            total += float(r.get("units", 0) or 0)
+    return int(round(total))
+
+
+def apply_assorted_correction_display(
+    demand: dict[str, dict],
+    fc_rows: list[dict] | None,
+) -> dict[str, dict]:
+    """Assorted DDPE0004 only: scale Nov+Dec+Jan display to workbook CF.
+
+    Keeps that SKU's own 2025 MoM shape. Other SKUs stay 2025 × own YoY.
+    Missing CF → leave YoY (do not invent a number). Never land optimistic
+    as the displayed forecast.
+    """
+    if not fc_rows or ASSORTED_SKU not in demand:
+        return demand
+    cf = workbook_window_units(fc_rows, ASSORTED_SKU, "correction_factor")
+    row = demand[ASSORTED_SKU]
+    current = int(row.get("holiday_demand", 0) or 0)
+    if cf <= 0 or current <= 0:
+        return demand
+    scale = cf / current
+    months = dict(row.get("months_2026") or {})
+    nov = int(round(int(months.get(11, 0) or 0) * scale))
+    dec = int(round(int(months.get(12, 0) or 0) * scale))
+    jan = int(round(int(row.get("jan_demand", 0) or 0) * scale))
+    # Nudge December so the holiday window lands on CF (not optimistic).
+    dec += cf - (nov + dec + jan)
+    months[11] = nov
+    months[12] = dec
+    out = dict(demand)
+    out[ASSORTED_SKU] = {
+        **row,
+        "months_2026": months,
+        "nov_dec_demand": nov + dec,
+        "jan_demand": jan,
+        "holiday_demand": nov + dec + jan,
+        "display_method": "assorted_correction_factor_scaled",
+        "correction_factor_units": cf,
+        "yoy_holiday_before_cf": current,
+    }
     return out
 
 
@@ -267,30 +341,41 @@ def load_planner_policy(
     recv_normal = int(settings.get("receiving_days_normal") or 28)
     awd_cfg = int(settings.get("awd_to_fba_days") or 14)
     peak_end_raw = settings.get("peak_end_date") or PEAK_END_DEFAULT.isoformat()
+    peak_start_raw = settings.get("peak_start_date") or PEAK_START_DEFAULT.isoformat()
     try:
         peak_end = date.fromisoformat(str(peak_end_raw)[:10])
     except ValueError:
         peak_end = PEAK_END_DEFAULT
+    try:
+        peak_start = date.fromisoformat(str(peak_start_raw)[:10])
+    except ValueError:
+        peak_start = PEAK_START_DEFAULT
 
-    gate_recv = effective_fba_receive_days(
+    # Q4 / early January (peak_start→peak_end) MUST use receiving_days_peak.
+    # Measured FBA median (20, n=14) is context only — a Dec 26 3PL→FBA
+    # ship is not sellable until ~Jan 30, after early-January cover.
+    measured_fba = effective_fba_receive_days(
         None, settings, peak=True, account_summary=leadtime or None,
-    )
-    refill_recv = effective_fba_receive_days(
-        None, settings, peak=False, account_summary=leadtime or None,
     )
     awd_days = effective_awd_to_fba_days(
         None, settings, account_summary=leadtime or None,
     )
+    early_jan_ship = last_ship_date(peak_end, recv_peak)
     return {
         "target_cover_days": cover_days,
         "receiving_days_peak": recv_peak,
         "receiving_days_normal": recv_normal,
         "awd_to_fba_days": awd_cfg,
-        "gate_receive_days": int(gate_recv),
-        "refill_receive_days": int(refill_recv),
+        "gate_receive_days": recv_peak,
+        "refill_receive_days": recv_peak,
         "effective_awd_to_fba_days": int(awd_days),
+        "measured_fba_receive_days": int(measured_fba),
+        "peak_receive_overrides_measured": True,
+        "peak_start_date": peak_start,
         "peak_end_date": peak_end,
+        "early_jan_fba_ship_by": early_jan_ship,
         "tulsa_floor_units": TULSA_LIP_FLOOR_UNITS,
+        "tulsa_cover_through": EARLY_FEB_COVER_THROUGH,
         "fba_receive_median": leadtime.get("fba_receive_median") if leadtime else None,
         "fba_receive_n": leadtime.get("fba_receive_n") if leadtime else 0,
         "awd_replenish_median": leadtime.get("awd_replenish_median") if leadtime else None,
@@ -303,14 +388,16 @@ def sku_production_build(
     demand_row: dict,
     *,
     cover_days: int = 60,
-    receive_days: int = 20,
+    receive_days: int = 35,
+    optimistic_units: int = 0,
 ) -> dict:
     """Per-SKU production build: Nov+Dec+Jan + 60d cover + receive pipeline.
 
+    Display demand is the holiday forecast (YoY, or Assorted CF). Optimistic
+    is stock-to-cover — size the network to fulfill it if it hits. Peak-60d
+    still uses *display* December daily. Pipeline uses Q4 peak receive (35).
     January = Jan 2026 × that SKU's May–Jul YoY (already on demand_row).
     Do not apply leftover-holiday 2.1× on top of Jan 2026.
-    Ending cover is max(Dec-rate 60d, Jan-rate 60d) so FBA stays ≥60d
-    at the then-prevailing rate through January.
     """
     months = demand_row.get("months_2026") or {}
     dec_units = int(months.get(12, 0) or 0)
@@ -322,11 +409,17 @@ def sku_production_build(
     jan_cover = cover_units_from_daily(jan_daily, cover_days)
     ending_cover = max(peak_cover, jan_cover)
     pipeline = cover_units_from_daily(dec_daily, receive_days)
-    demand = nov_dec + jan_units
+    display_demand = nov_dec + jan_units
+    cover_fulfill = max(display_demand, int(optimistic_units or 0))
+    stock_to_cover = max(0, cover_fulfill - display_demand)
     gate_units = nov_dec + peak_cover + pipeline
-    refill_units = jan_units + max(0, jan_cover - peak_cover)
+    refill_units = jan_units + max(0, jan_cover - peak_cover) + stock_to_cover
     return {
-        "demand": demand,
+        "demand": display_demand,
+        "display_demand": display_demand,
+        "cover_fulfill": cover_fulfill,
+        "optimistic_units": int(optimistic_units or 0),
+        "stock_to_cover": stock_to_cover,
         "nov_dec_demand": nov_dec,
         "jan_demand": jan_units,
         "dec_units": dec_units,
@@ -338,7 +431,7 @@ def sku_production_build(
         "pipeline": pipeline,
         "gate_units": gate_units,
         "refill_units": refill_units,
-        "sku_build": demand + ending_cover + pipeline,
+        "sku_build": cover_fulfill + ending_cover + pipeline,
     }
 
 
@@ -356,6 +449,34 @@ def family_tulsa_floor(
         "transferable": transferable,
         "top_up": top_up,
         "split_per_sku": False,
+    }
+
+
+def tulsa_after_christmas_outbound(
+    sku_3pl: dict[str, int],
+    early_jan_fba_from_tulsa: int,
+    floor: int = TULSA_LIP_FLOOR_UNITS,
+    cover_through: date | None = None,
+) -> dict:
+    """Keep the 5k family floor AFTER Dec 3PL→FBA outbounds, through early Feb.
+
+    Do not plan a Dec 26 empty warehouse. Transfer only excess above the
+    floor. Nov/Dec pallets may sit at Tulsa as ammo; the early-Jan FBA
+    slice must leave in December (ship-by = peak_end − 35).
+    """
+    info = family_tulsa_floor(sku_3pl, floor)
+    need = max(int(early_jan_fba_from_tulsa or 0), 0)
+    outbound = min(need, info["transferable"])
+    after = info["on_hand"] - outbound
+    return {
+        **info,
+        "early_jan_fba_from_tulsa": need,
+        "outbound": outbound,
+        "after_outbound": after,
+        "needed_before_outbound": need + floor,
+        "meets_floor_after_outbound": after >= floor,
+        "cover_through": (cover_through or EARLY_FEB_COVER_THROUGH).isoformat(),
+        "do_not_drain_to_zero": True,
     }
 
 
@@ -389,7 +510,12 @@ def production_horizon_months(
     peak_end: date | None = None,
     refill_receive_days: int | None = None,
 ) -> list[dict]:
-    """Sep/Oct = gate (in FBA by 2026-10-31). Nov/Dec = January refill, not late inbound."""
+    """Aug/Sep = gate at 35d. Oct/Nov/Dec = post-Christmas ammo, not late inbound.
+
+    October cannot make the 10/31 gate once receive is 35 days
+    (last ship = 2026-09-26). Nov/Dec pallets may sit at Tulsa; the
+    early-Jan FBA slice must leave Tulsa in December.
+    """
     peak_end = peak_end or PEAK_END_DEFAULT
     refill_recv = int(refill_receive_days or gate_receive_days)
     out: list[dict] = []
@@ -398,10 +524,10 @@ def production_horizon_months(
     while cursor <= end:
         month = cursor.strftime("%Y-%m")
         is_gate = month_can_make_gate(month, amazon_in_by, gate_receive_days)
-        is_refill = (
+        is_ammo = (
             cursor.year == amazon_in_by.year
-            and cursor.month in (11, 12)
-            and cursor <= peak_end
+            and cursor.month in (10, 11, 12)
+            and not is_gate
         )
         if is_gate:
             out.append({
@@ -411,13 +537,13 @@ def production_horizon_months(
                 "need_in_fba": amazon_in_by.isoformat(),
                 "label": "in_fba_by_gate",
             })
-        elif is_refill:
+        elif is_ammo:
             out.append({
                 "month": month,
                 "role": "refill",
                 "receive_days": refill_recv,
                 "need_in_fba": peak_end.isoformat(),
-                "label": "january_cover_refill",
+                "label": "post_christmas_ammo",
             })
         if cursor.month == 12:
             cursor = cursor.replace(year=cursor.year + 1, month=1)
@@ -447,6 +573,31 @@ def last_ship_date(
     receiving_days: int = DEFAULT_RECEIVING_DAYS,
 ) -> date:
     return amazon_in_by - timedelta(days=max(int(receiving_days), 0))
+
+
+def sellable_date(ship_by: date, receiving_days: int) -> date:
+    """3PL→FBA / inbound becomes sellable this many days after ship."""
+    return ship_by + timedelta(days=max(int(receiving_days), 0))
+
+
+def early_jan_fba_ship_by(
+    peak_end: date | None = None,
+    receiving_days: int = 35,
+) -> date:
+    """Last day a 3PL→FBA ship can still be sellable by peak_end.
+
+    peak_end 2027-01-15 − 35 = 2026-12-11 (before Christmas).
+    A Dec 26 ship is sellable ~Jan 30 — too late for early January.
+    """
+    return last_ship_date(peak_end or PEAK_END_DEFAULT, receiving_days)
+
+
+def ship_too_late_for_early_jan(
+    ship_by: date,
+    receiving_days: int = 35,
+    peak_end: date | None = None,
+) -> bool:
+    return sellable_date(ship_by, receiving_days) > (peak_end or PEAK_END_DEFAULT)
 
 
 def in_amazon_date(
@@ -480,6 +631,7 @@ def ship_by_for_month(
     receiving_days: int = DEFAULT_RECEIVING_DAYS,
     *,
     role: str = "gate",
+    need_in_fba: date | None = None,
 ) -> str:
     y, mo = month.split("-")
     yi, mi = int(y), int(mo)
@@ -490,8 +642,12 @@ def ship_by_for_month(
     preferred = date(yi, mi, min(20, last_day.day))
     start = date(yi, mi, 1)
     if role == "refill":
-        # Nov/Dec refill: not gated to 2026-10-31. Not “late inbound · mid-Nov”.
-        return min(preferred, last_day).isoformat()
+        # Oct/Nov/Dec ammo may sit at Tulsa. December FBA slice must
+        # leave by peak_end − receive (before Christmas at 35d).
+        ship = min(preferred, last_day)
+        if need_in_fba and mi == 12:
+            ship = min(ship, last_ship_date(need_in_fba, receiving_days))
+        return ship.isoformat()
     last_ship = last_ship_date(amazon_in_by, receiving_days)
     ship = min(preferred, last_ship, last_day)
     if ship < start:
@@ -581,12 +737,22 @@ def build_pallet_plan(
     except Exception:
         pass
 
+    fc_rows: list[dict] = []
+    try:
+        fc_rows = fetch_all("forecast_weekly")
+    except Exception:
+        fc_rows = []
+
     monthly = monthly_amazon_units(_load_amazon_lip_sales(target_skus), target_skus)
     family_ctx = family_yoy_may_jul(monthly, target_skus)
-    sales_demand = holiday_demand_from_sales(
-        monthly, target_skus, include_jan=True,
+    sales_demand = apply_assorted_correction_display(
+        holiday_demand_from_sales(monthly, target_skus, include_jan=True),
+        fc_rows,
     )
     yoy_by_sku = {sku: sku_yoy_may_jul(monthly, sku) for sku in target_skus}
+    optimistic_by_sku = {
+        sku: workbook_window_units(fc_rows, sku, "optimistic") for sku in target_skus
+    }
 
     sku_3pl = {
         sku: int(tpls.get(normalize_sku(sku), {}).get("available", 0) or 0)
@@ -595,6 +761,10 @@ def build_pallet_plan(
     }
     tulsa = family_tulsa_floor(sku_3pl, policy["tulsa_floor_units"])
     tpl_xfer = transferable_3pl_by_sku(sku_3pl, policy["tulsa_floor_units"])
+    tulsa_xmas = tulsa_after_christmas_outbound(
+        sku_3pl, tulsa["transferable"], policy["tulsa_floor_units"],
+        cover_through=policy.get("tulsa_cover_through"),
+    )
 
     # Per-SKU analysis — production target, not sell-through alone
     sku_plans: list[dict] = []
@@ -615,6 +785,7 @@ def build_pallet_plan(
             d,
             cover_days=policy["target_cover_days"],
             receive_days=policy["gate_receive_days"],
+            optimistic_units=optimistic_by_sku.get(sku, 0),
         )
         nov_dec_demand = build["nov_dec_demand"]
         jan_demand = build["jan_demand"]
@@ -628,6 +799,9 @@ def build_pallet_plan(
             "nov_dec_demand": nov_dec_demand,
             "nov_dec_prior": int(d.get("nov_dec_prior", 0)),
             "jan_demand": jan_demand,
+            "display_demand": build["display_demand"],
+            "cover_fulfill": build["cover_fulfill"],
+            "stock_to_cover": build["stock_to_cover"],
             "peak_cover": build["peak_cover"],
             "jan_cover": build["jan_cover"],
             "ending_cover": build["ending_cover"],
@@ -635,6 +809,7 @@ def build_pallet_plan(
             "production_target": target_units,
             "yoy": float(d.get("yoy", 1.0)),
             "yoy_method": d.get("yoy_method"),
+            "display_method": d.get("display_method"),
             "months_2026": d.get("months_2026"),
             "fba": fba,
             "inbound": inbound,
@@ -717,6 +892,7 @@ def build_pallet_plan(
             "cover_target_days": policy["target_cover_days"],
             "tulsa_floor_units": tulsa["floor"],
             "tulsa_3pl": tulsa,
+            "tulsa_after_christmas_outbound": tulsa_xmas,
             "lead_times": {
                 "gate_receive_days": policy["gate_receive_days"],
                 "refill_receive_days": policy["refill_receive_days"],
@@ -727,6 +903,8 @@ def build_pallet_plan(
                 "fba_receive_n": policy["fba_receive_n"],
                 "awd_replenish_median": policy["awd_replenish_median"],
                 "awd_replenish_n": policy["awd_replenish_n"],
+                "peak_receive_overrides_measured": True,
+                "early_jan_fba_ship_by": policy["early_jan_fba_ship_by"].isoformat(),
             },
             "actual_2025_source": ACTUAL_2025_SOURCE,
         },
@@ -747,6 +925,8 @@ def build_pallet_plan(
         "yoy_by_sku": yoy_by_sku,
         "family_yoy_context_only": family_ctx,
         "tulsa_3pl": tulsa,
+        "tulsa_after_christmas_outbound": tulsa_xmas,
+        "optimistic_by_sku": optimistic_by_sku,
     }
 
 
@@ -1092,10 +1272,16 @@ def build_manufacturer_headsup(
 
     monthly = monthly_amazon_units(_load_amazon_lip_sales(target_skus), target_skus)
     family_ctx = family_yoy_may_jul(monthly, target_skus)
-    sales_demand = holiday_demand_from_sales(
-        monthly, target_skus, include_jan=include_jan,
+    sales_demand = apply_assorted_correction_display(
+        holiday_demand_from_sales(
+            monthly, target_skus, include_jan=include_jan,
+        ),
+        fc_rows,
     )
     yoy_by_sku = {sku: sku_yoy_may_jul(monthly, sku) for sku in target_skus}
+    optimistic_by_sku = {
+        sku: workbook_window_units(fc_rows, sku, "optimistic") for sku in target_skus
+    }
 
     inv: dict[str, dict[str, int]] = {}
     for sku in target_skus:
@@ -1110,11 +1296,16 @@ def build_manufacturer_headsup(
     sku_3pl = {sku: inv[sku]["tpl"] for sku in target_skus}
     tulsa = family_tulsa_floor(sku_3pl, policy["tulsa_floor_units"])
     tpl_xfer = transferable_3pl_by_sku(sku_3pl, policy["tulsa_floor_units"])
+    tulsa_xmas = tulsa_after_christmas_outbound(
+        sku_3pl, tulsa["transferable"], policy["tulsa_floor_units"],
+        cover_through=policy.get("tulsa_cover_through"),
+    )
     builds = {
         sku: sku_production_build(
             sales_demand.get(sku, {}),
             cover_days=policy["target_cover_days"],
             receive_days=policy["gate_receive_days"],
+            optimistic_units=optimistic_by_sku.get(sku, 0),
         )
         for sku in target_skus
     }
@@ -1198,6 +1389,7 @@ def build_manufacturer_headsup(
             fill = pallet_fill(total, pallet_max)
             ship_by = ship_by_for_month(
                 month, amazon_in_by, recv, role=role,
+                need_in_fba=policy["peak_end_date"] if role == "refill" else None,
             )
             latest = (
                 amazon_in_by if role == "gate"
@@ -1277,7 +1469,10 @@ def build_manufacturer_headsup(
                 "units": xfer,
                 "timing": (
                     f"Ship excess above Tulsa floor ({policy['tulsa_floor_units']:,} "
-                    "lip family) to FBA — do not drain 3PL to 0"
+                    "lip family) to FBA by "
+                    f"{policy['early_jan_fba_ship_by'].isoformat()} "
+                    "(peak-end − 35d) — keep 5k after outbound through early Feb; "
+                    "do not drain 3PL to 0"
                 ),
             })
 
@@ -1294,6 +1489,7 @@ def build_manufacturer_headsup(
         "gate_months": [h["month"] for h in horizon if h["role"] == "gate"],
         "refill_months": [h["month"] for h in horizon if h["role"] == "refill"],
         "tulsa_3pl": tulsa,
+        "tulsa_after_christmas_outbound": tulsa_xmas,
         "lead_times": {
             "gate_receive_days": policy["gate_receive_days"],
             "refill_receive_days": policy["refill_receive_days"],
@@ -1304,6 +1500,8 @@ def build_manufacturer_headsup(
             "fba_receive_n": policy["fba_receive_n"],
             "awd_replenish_median": policy["awd_replenish_median"],
             "awd_replenish_n": policy["awd_replenish_n"],
+            "peak_receive_overrides_measured": True,
+            "early_jan_fba_ship_by": policy["early_jan_fba_ship_by"].isoformat(),
         },
         "month_weights": list(month_weights),
         "yoy": family_ctx,
@@ -1311,10 +1509,14 @@ def build_manufacturer_headsup(
         "demand_source": "sales_by_sku amazon+amazon_spapi × sku_own_may_jul_yoy",
         "demand_note": (
             "Each SKU: 2026 month = that SKU’s 2025 same-month Amazon units × "
-            "that SKU’s own May–Jul YoY. January uses Jan 2026 × that YoY "
-            "(not leftover-holiday 2.1×). Production = demand + peak-60d + "
-            "Tulsa floor + receive pipeline. Sep/Oct in FBA by 2026-10-31; "
-            "Nov/Dec refill January cover. Family 1.42× is context only."
+            "that SKU’s own May–Jul YoY. Assorted holiday display scales to "
+            "workbook correction_factor (same Nov–Jan window); optimistic is "
+            "stock-to-cover, not the forecast. January uses Jan 2026 × that YoY "
+            "(not leftover-holiday 2.1×). Production = cover-fulfill + peak-60d + "
+            "Tulsa floor + 35d receive pipeline. Aug/Sep in FBA by 2026-10-31; "
+            "Oct/Nov/Dec sit at Tulsa as ammo — early-Jan FBA must leave in "
+            "December (peak-end − 35d). Keep 5k Tulsa after those outbounds. "
+            "Family 1.42× is context only."
         ),
         "yoy_by_sku": {k: round(v["yoy"], 4) for k, v in yoy_by_sku.items()},
         "family_yoy_context": family_ctx,
@@ -1410,8 +1612,9 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a(f"Pallet capacity: {headsup['pallet_max']:,} cartons "
       f"({CARTONS_PER_BOX} per 13×11×9 box)")
     a(f"FBA cover: fulfillable only · inbound already in transit (do not re-send)")
-    a(f"Sep/Oct waves in Amazon FBA by: {headsup['amazon_in_by']}")
-    a("Nov/Dec pallets refill January 60d FBA + Tulsa floor — not late inbound.")
+    a(f"Aug/Sep waves in Amazon FBA by: {headsup['amazon_in_by']}")
+    a("Oct/Nov/Dec pallets sit at Tulsa as post-Christmas ammo — not late inbound.")
+    a("Early-Jan FBA must leave Tulsa in December (peak-end − 35d); Dec 26 is too late.")
     tpl_note = "3PL OFFSETS production" if headsup.get("tpl_offsets_production") \
         else "3PL shown as transfer only (does NOT reduce manufacture)"
     tulsa = headsup.get("tulsa_3pl") or {}
@@ -1421,9 +1624,12 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a(f"3PL policy: {tpl_note}")
     lt = headsup.get("lead_times") or {}
     if lt:
-        a(f"Lead times: gate receive {lt.get('gate_receive_days')}d "
-          f"(peak cfg {lt.get('receiving_days_peak')}d; "
-          f"measured FBA {lt.get('fba_receive_median')}d n={lt.get('fba_receive_n')})")
+        a(f"Lead times: Q4/early-Jan receive {lt.get('gate_receive_days')}d "
+          f"(receiving_days_peak={lt.get('receiving_days_peak')}; "
+          f"measured FBA median {lt.get('fba_receive_median')}d "
+          f"n={lt.get('fba_receive_n')} is context only)")
+        if lt.get("early_jan_fba_ship_by"):
+            a(f"Early-Jan FBA ship-by: {lt.get('early_jan_fba_ship_by')}")
 
     # ── Per-SKU summary ──
     a("")
@@ -1457,7 +1663,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
         role = entry.get("role") or "gate"
         role_note = (
             "in FBA by gate" if role == "gate"
-            else "January cover refill"
+            else "post-Christmas ammo · early-Jan FBA leaves Tulsa in December"
         )
         a(f"  {entry['month_label']}  —  {entry['status']}  ({role_note})")
         if entry["units"] == 0:

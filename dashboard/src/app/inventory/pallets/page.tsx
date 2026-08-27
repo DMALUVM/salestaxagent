@@ -17,6 +17,7 @@ import {
   ACTUAL_2025_SOURCE,
   AMAZON_IN_BY,
   PALLET_MAX_UNITS,
+  applyAssortedCorrectionDisplay,
   familyTulsaFloor,
   familyYoyMayJul,
   fbaCoverUnits,
@@ -31,6 +32,7 @@ import {
   shipByForMonth,
   skuProductionBuild,
   stampDate,
+  workbookWindowUnits,
   type AmazonMonthlySale,
 } from "@/lib/pallet-planner-model";
 import type { InventoryLeadtimeSummary, InventorySettings } from "@/lib/types";
@@ -260,8 +262,11 @@ export default function PalletPlanPage() {
   );
   const familyYoyCtx = useMemo(() => familyYoyMayJul(salesMonthly, SKUS), [salesMonthly]);
   const salesDemand = useMemo(
-    () => holidayDemandFromSales(salesMonthly, SKUS, { includeJan: true }),
-    [salesMonthly],
+    () => applyAssortedCorrectionDisplay(
+      holidayDemandFromSales(salesMonthly, SKUS, { includeJan: true }),
+      forecasts,
+    ),
+    [salesMonthly, forecasts],
   );
   const skuBuilds = useMemo(() => {
     const out: Record<string, ReturnType<typeof skuProductionBuild>> = {};
@@ -269,10 +274,11 @@ export default function PalletPlanPage() {
       out[sku] = skuProductionBuild(salesDemand[sku] ?? {}, {
         coverDays: policy.targetCoverDays,
         receiveDays: policy.gateReceiveDays,
+        optimisticUnits: workbookWindowUnits(forecasts, sku, "optimistic"),
       });
     }
     return out;
-  }, [salesDemand, policy]);
+  }, [salesDemand, policy, forecasts]);
   const fbaAsOf = stampDate(snapshots.find((s) => s.snapshot_at)?.snapshot_at);
   const awdAsOf = stampDate(awdList.find((a) => a.pulled_at)?.pulled_at);
   const restockAsOf = stampDate(restockList.find((r) => r.pulled_at)?.pulled_at);
@@ -496,7 +502,10 @@ export default function PalletPlanPage() {
         }
         const total = Object.values(mix).reduce((a, b) => a + b, 0);
         const fill = palletFill(total, PALLET_MAX);
-        const shipBy = shipByForMonth(m, TARGET, recv, { role });
+        const shipBy = shipByForMonth(m, TARGET, recv, {
+          role,
+          needInFba: role === "refill" ? policy.peakEndDate : undefined,
+        });
         const now = new Date();
         const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
         const latest = role === "gate" ? TARGET : policy.peakEndDate;
@@ -530,7 +539,7 @@ export default function PalletPlanPage() {
       if (i.awd > 0) transfers.push({ sku, source: "AWD", units: i.awd, timing: "Transfer to FBA immediately (~2 weeks)" });
       const tulsa = familyTulsaFloor(Object.fromEntries(SKUS.map((s) => [s, inv[s].tpl])), policy.tulsaFloorUnits);
       const xfer = tulsa.onHand > 0 ? Math.round(i.tpl * (tulsa.transferable / tulsa.onHand)) : 0;
-      if (xfer > 0) transfers.push({ sku, source: "3PL", units: xfer, timing: `Excess above Tulsa floor (${policy.tulsaFloorUnits.toLocaleString()} lip family) — do not drain 3PL to 0` });
+              if (xfer > 0) transfers.push({ sku, source: "3PL", units: xfer, timing: `Excess above Tulsa floor (${policy.tulsaFloorUnits.toLocaleString()} lip family) by ${policy.earlyJanFbaShipBy} — keep 5k after outbound; do not drain 3PL to 0` });
     }
 
     return {
@@ -552,7 +561,7 @@ export default function PalletPlanPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Pallet Planner</h1>
           <p className="text-sm text-muted-foreground">
-            Lip Balm holiday build · each SKU: 2025 same-month Amazon × that SKU&apos;s own May–Jul YoY · In Amazon by {TARGET}
+            Lip Balm holiday build · each SKU: 2025 same-month Amazon × that SKU&apos;s own May–Jul YoY · Q4/early-Jan receive {policy.gateReceiveDays}d · In Amazon by {TARGET}
           </p>
           <p className="text-[11px] text-muted-foreground mt-1">
             Dated stamps (not “today”): FBA {fbaAsOf ?? "—"}
@@ -745,7 +754,7 @@ export default function PalletPlanPage() {
                       </div>
                       <p className="text-[10px] text-muted-foreground mt-2">
                         {entry.role === "refill"
-                          ? `January cover refill · ship by ${entry.shipBy} · in Amazon ${entry.inAmazon}`
+                          ? `Post-Christmas ammo · early-Jan FBA ship by ${policy.earlyJanFbaShipBy} · ${entry.shipBy}`
                           : `Ship by ${entry.shipBy} · in Amazon by ${entry.inAmazon}`}
                       </p>
                       {entry.awaitingAugustTotals && (

@@ -8,11 +8,15 @@ export const CARTONS_PER_BOX = 270;
 export const AMAZON_IN_BY = "2026-10-31";
 export const DEFAULT_RECEIVING_DAYS = 18;
 export const TULSA_LIP_FLOOR_UNITS = 5_000;
+export const ASSORTED_SKU = "DDPE0004Shop";
+export const PEAK_START_DEFAULT = "2026-10-01";
 export const PEAK_END_DEFAULT = "2027-01-15";
+export const EARLY_FEB_COVER_THROUGH = "2027-02-14";
 export const DEC_DAYS = 31;
 export const JAN_DAYS = 31;
 export const YOY_WINDOW_MONTHS = [5, 6, 7] as const;
 export const DEMAND_METHOD = "sku_2025_same_month_x_sku_may_jul_yoy";
+export const WORKBOOK_WINDOW_MONTHS = new Set(["2026-11", "2026-12", "2026-01", "2027-01"]);
 export const LIP_BALM_SKUS = [
   "DDPE0001Shop",
   "DDPE0002Shop",
@@ -143,31 +147,13 @@ export function holidayDemandFromSales(
   monthly: Map<MonthlyKey, number>,
   skus: string[],
   opts?: { holidayYear?: number; includeJan?: boolean; currentYear?: number; priorYear?: number },
-): Record<string, {
-  novDecPrior: number;
-  novDecDemand: number;
-  janPrior: number;
-  janDemand: number;
-  holidayDemand: number;
-  yoy: number;
-  yoyMethod: string;
-  months2026: Record<number, number>;
-}> {
+): Record<string, HolidayDemandRow> {
   const holidayYear = opts?.holidayYear ?? 2026;
   const includeJan = opts?.includeJan ?? true;
   const currentYear = opts?.currentYear ?? 2026;
   const priorYear = opts?.priorYear ?? 2025;
   const prior = holidayYear - 1;
-  const out: Record<string, {
-    novDecPrior: number;
-    novDecDemand: number;
-    janPrior: number;
-    janDemand: number;
-    holidayDemand: number;
-    yoy: number;
-    yoyMethod: string;
-    months2026: Record<number, number>;
-  }> = {};
+  const out: Record<string, HolidayDemandRow> = {};
   for (const sku of skus) {
     const key = normalizeSku(sku);
     const yoyInfo = skuYoyMayJul(monthly, sku, currentYear, priorYear);
@@ -192,10 +178,58 @@ export function holidayDemandFromSales(
       holidayDemand: novDecDemand + janDemand,
       yoy,
       yoyMethod: yoyInfo.method,
+      displayMethod: DEMAND_METHOD,
       months2026,
     };
   }
   return out;
+}
+
+export function workbookWindowUnits(
+  fcRows: ForecastWeeklyRow[] | null | undefined,
+  sku: string,
+  scenario: string,
+  months: Set<string> = WORKBOOK_WINDOW_MONTHS,
+): number {
+  let total = 0;
+  for (const r of fcRows ?? []) {
+    if (r.scenario !== scenario || r.sku !== sku) continue;
+    const ws = String(r.week_start ?? "").slice(0, 7);
+    if (months.has(ws)) total += Number(r.units ?? 0);
+  }
+  return Math.round(total);
+}
+
+export function applyAssortedCorrectionDisplay(
+  demand: Record<string, HolidayDemandRow>,
+  fcRows: ForecastWeeklyRow[] | null | undefined,
+): Record<string, HolidayDemandRow> {
+  const row = demand[ASSORTED_SKU];
+  if (!row || !fcRows?.length) return demand;
+  const cf = workbookWindowUnits(fcRows, ASSORTED_SKU, "correction_factor");
+  const current = Number(row.holidayDemand ?? 0);
+  if (cf <= 0 || current <= 0) return demand;
+  const scale = cf / current;
+  const months = { ...row.months2026 };
+  let nov = Math.round(Number(months[11] ?? 0) * scale);
+  let dec = Math.round(Number(months[12] ?? 0) * scale);
+  const jan = Math.round(Number(row.janDemand ?? 0) * scale);
+  dec += cf - (nov + dec + jan);
+  months[11] = nov;
+  months[12] = dec;
+  return {
+    ...demand,
+    [ASSORTED_SKU]: {
+      ...row,
+      months2026: months,
+      novDecDemand: nov + dec,
+      janDemand: jan,
+      holidayDemand: nov + dec + jan,
+      displayMethod: "assorted_correction_factor_scaled",
+      correctionFactorUnits: cf,
+      yoyHolidayBeforeCf: current,
+    },
+  };
 }
 
 export function coverUnitsFromDaily(daily: number, coverDays: number): number {
@@ -211,11 +245,33 @@ export function januaryDailyRate(janUnits: number): number {
   return Math.max(janUnits, 0) / JAN_DAYS;
 }
 
+export type ForecastWeeklyRow = {
+  sku: string;
+  week_start: string;
+  scenario: string;
+  units: number;
+};
+
+export type HolidayDemandRow = {
+  novDecPrior: number;
+  novDecDemand: number;
+  janPrior: number;
+  janDemand: number;
+  holidayDemand: number;
+  yoy: number;
+  yoyMethod: string;
+  displayMethod: string;
+  months2026: Record<number, number>;
+  correctionFactorUnits?: number;
+  yoyHolidayBeforeCf?: number;
+};
+
 export type PlannerSettings = {
   target_cover_days?: number;
   receiving_days_peak?: number;
   receiving_days_normal?: number;
   awd_to_fba_days?: number;
+  peak_start_date?: string | null;
   peak_end_date?: string | null;
 };
 
@@ -235,21 +291,26 @@ export function plannerPolicy(
   const recvNormal = Number(settings?.receiving_days_normal ?? 28);
   const awdCfg = Number(settings?.awd_to_fba_days ?? 14);
   const peakEnd = settings?.peak_end_date || PEAK_END_DEFAULT;
+  const peakStart = settings?.peak_start_date || PEAK_START_DEFAULT;
   const measuredFba = leadtime?.fba_receive_median ?? null;
   const measuredAwd = leadtime?.awd_replenish_median ?? null;
-  const gateReceive = measuredFba != null && measuredFba > 0 ? measuredFba : recvPeak;
-  const refillReceive = measuredFba != null && measuredFba > 0 ? measuredFba : recvNormal;
   const awdDays = measuredAwd != null && measuredAwd > 0 ? measuredAwd : awdCfg;
+  // Q4 / early January MUST use receiving_days_peak (35), not measured 20.
   return {
     targetCoverDays: coverDays,
     receivingDaysPeak: recvPeak,
     receivingDaysNormal: recvNormal,
     awdToFbaDays: awdCfg,
-    gateReceiveDays: gateReceive,
-    refillReceiveDays: refillReceive,
+    gateReceiveDays: recvPeak,
+    refillReceiveDays: recvPeak,
     effectiveAwdToFbaDays: awdDays,
+    measuredFbaReceiveDays: measuredFba,
+    peakReceiveOverridesMeasured: true,
+    peakStartDate: peakStart,
     peakEndDate: peakEnd,
+    earlyJanFbaShipBy: toIso(lastShipDate(peakEnd, recvPeak)),
     tulsaFloorUnits: TULSA_LIP_FLOOR_UNITS,
+    tulsaCoverThrough: EARLY_FEB_COVER_THROUGH,
     fbaReceiveMedian: measuredFba,
     fbaReceiveN: Number(leadtime?.fba_receive_n ?? 0),
     awdReplenishMedian: measuredAwd,
@@ -264,10 +325,11 @@ export function skuProductionBuild(
     janDemand?: number;
     months2026?: Record<number, number>;
   },
-  opts?: { coverDays?: number; receiveDays?: number },
+  opts?: { coverDays?: number; receiveDays?: number; optimisticUnits?: number },
 ) {
   const coverDays = opts?.coverDays ?? 60;
-  const receiveDays = opts?.receiveDays ?? 20;
+  const receiveDays = opts?.receiveDays ?? 35;
+  const optimisticUnits = Number(opts?.optimisticUnits ?? 0);
   const decUnits = Number(demandRow.months2026?.[12] ?? 0);
   const janUnits = Number(demandRow.janDemand ?? 0);
   const novDec = Number(demandRow.novDecDemand ?? 0);
@@ -277,9 +339,15 @@ export function skuProductionBuild(
   const janCover = coverUnitsFromDaily(janDaily, coverDays);
   const endingCover = Math.max(peakCover, janCover);
   const pipeline = coverUnitsFromDaily(decDaily, receiveDays);
-  const demand = novDec + janUnits;
+  const displayDemand = novDec + janUnits;
+  const coverFulfill = Math.max(displayDemand, optimisticUnits);
+  const stockToCover = Math.max(0, coverFulfill - displayDemand);
   return {
-    demand,
+    demand: displayDemand,
+    displayDemand,
+    coverFulfill,
+    optimisticUnits,
+    stockToCover,
     novDecDemand: novDec,
     janDemand: janUnits,
     decUnits,
@@ -290,8 +358,8 @@ export function skuProductionBuild(
     endingCover,
     pipeline,
     gateUnits: novDec + peakCover + pipeline,
-    refillUnits: janUnits + Math.max(0, janCover - peakCover),
-    skuBuild: demand + endingCover + pipeline,
+    refillUnits: janUnits + Math.max(0, janCover - peakCover) + stockToCover,
+    skuBuild: coverFulfill + endingCover + pipeline,
   };
 }
 
@@ -309,6 +377,28 @@ export function familyTulsaFloor(
   };
 }
 
+export function tulsaAfterChristmasOutbound(
+  sku3pl: Record<string, number>,
+  earlyJanFbaFromTulsa: number,
+  floor = TULSA_LIP_FLOOR_UNITS,
+  coverThrough = EARLY_FEB_COVER_THROUGH,
+) {
+  const info = familyTulsaFloor(sku3pl, floor);
+  const need = Math.max(Number(earlyJanFbaFromTulsa) || 0, 0);
+  const outbound = Math.min(need, info.transferable);
+  const after = info.onHand - outbound;
+  return {
+    ...info,
+    earlyJanFbaFromTulsa: need,
+    outbound,
+    afterOutbound: after,
+    neededBeforeOutbound: need + floor,
+    meetsFloorAfterOutbound: after >= floor,
+    coverThrough,
+    doNotDrainToZero: true,
+  };
+}
+
 export type HorizonMonth = {
   month: string;
   role: "gate" | "refill";
@@ -320,7 +410,7 @@ export type HorizonMonth = {
 export function productionHorizonMonths(
   today: Date,
   amazonInBy = AMAZON_IN_BY,
-  gateReceiveDays = 20,
+  gateReceiveDays = 35,
   peakEnd = PEAK_END_DEFAULT,
   refillReceiveDays?: number,
 ): HorizonMonth[] {
@@ -333,16 +423,16 @@ export function productionHorizonMonths(
     const month = `${y}-${String(m).padStart(2, "0")}`;
     const isGate = monthCanMakeGate(month, amazonInBy, gateReceiveDays);
     const gateYear = Number(amazonInBy.slice(0, 4));
-    const isRefill = y === gateYear && (m === 11 || m === 12);
+    const isAmmo = y === gateYear && (m === 10 || m === 11 || m === 12) && !isGate;
     if (isGate) {
       out.push({
         month, role: "gate", receiveDays: gateReceiveDays,
         needInFba: amazonInBy, label: "in_fba_by_gate",
       });
-    } else if (isRefill) {
+    } else if (isAmmo) {
       out.push({
         month, role: "refill", receiveDays: refillRecv,
-        needInFba: peakEnd, label: "january_cover_refill",
+        needInFba: peakEnd, label: "post_christmas_ammo",
       });
     }
     m += 1;
@@ -383,6 +473,24 @@ export function lastShipDate(amazonInBy: string, receivingDays = DEFAULT_RECEIVI
   return d;
 }
 
+export function sellableDate(shipBy: string, receivingDays: number): string {
+  const arrive = parseIso(shipBy);
+  arrive.setDate(arrive.getDate() + Math.max(receivingDays, 0));
+  return toIso(arrive);
+}
+
+export function earlyJanFbaShipBy(peakEnd = PEAK_END_DEFAULT, receivingDays = 35): string {
+  return toIso(lastShipDate(peakEnd, receivingDays));
+}
+
+export function shipTooLateForEarlyJan(
+  shipBy: string,
+  receivingDays = 35,
+  peakEnd = PEAK_END_DEFAULT,
+): boolean {
+  return sellableDate(shipBy, receivingDays) > peakEnd;
+}
+
 export function inAmazonDate(
   shipBy: string,
   receivingDays: number,
@@ -409,13 +517,18 @@ export function shipByForMonth(
   month: string,
   amazonInBy: string,
   receivingDays = DEFAULT_RECEIVING_DAYS,
-  opts?: { role?: "gate" | "refill" },
+  opts?: { role?: "gate" | "refill"; needInFba?: string },
 ): string {
   const [y, mo] = month.split("-").map(Number);
   const lastDay = new Date(y, mo, 0);
   const preferred = new Date(y, mo - 1, Math.min(20, lastDay.getDate()));
   if (opts?.role === "refill") {
-    return preferred.getTime() <= lastDay.getTime() ? toIso(preferred) : toIso(lastDay);
+    let ship = preferred.getTime() <= lastDay.getTime() ? preferred : lastDay;
+    if (opts.needInFba && mo === 12) {
+      const lastFba = lastShipDate(opts.needInFba, receivingDays);
+      if (lastFba.getTime() < ship.getTime()) ship = lastFba;
+    }
+    return toIso(ship);
   }
   const lastShip = lastShipDate(amazonInBy, receivingDays);
   const start = new Date(y, mo - 1, 1);
