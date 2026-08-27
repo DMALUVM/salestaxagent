@@ -45,6 +45,12 @@ import Link from "next/link";
 import { HolidayShipPlan } from "@/components/inventory/HolidayShipPlan";
 import { displayTitle, rawTitle } from "@/lib/display-title";
 import { latestRowPerSku } from "@/lib/pallet-planner-model";
+import {
+  formatOwnedAsOf,
+  latestOwnedSources,
+  ownedAsOfLabel,
+  ownedNetworkTotalForSku,
+} from "@/lib/inventory-owned-total";
 
 // ---------------------------------------------------------------------------
 
@@ -91,6 +97,9 @@ interface ComputedRow {
   reserved: number;
   tpl_available: number;
   awd_on_hand: number;
+  owned_total: number | null;
+  owned_as_of: string | null;
+  owned_as_of_detail: string;
   on_hand: number;
   amazon_u_7: number;
   amazon_u_30: number;
@@ -180,7 +189,13 @@ export default function InventoryPage() {
   }) as InventorySettings;
   const seasonality = (raw?.seasonality ?? []) as SeasonalityWeekly[];
   const forecasts = (raw?.forecast ?? []) as { sku: string; week_start: string; scenario: string; units: number }[];
-  const awdSnapshots = (raw?.awd ?? []) as { sku: string; awd_on_hand: number; awd_inbound: number }[];
+  const awdSnapshots = (raw?.awd ?? []) as {
+    sku: string;
+    awd_on_hand: number;
+    awd_inbound: number;
+    pulled_at?: string | null;
+    synced_at?: string | null;
+  }[];
   const signalRows = (raw?.signals ?? []) as InventorySkuSignals[];
   const leadtime = (raw?.leadtime ?? null) as InventoryLeadtimeSummary | null;
   const modelStateRows = (raw?.modelState ?? []) as Array<{ sku: string; weights: unknown; seasonal_factors: unknown; model_version: string }>;
@@ -224,6 +239,11 @@ export default function InventoryPage() {
     const signalMapU = new Map(signalRows.map((r) => [r.sku.toUpperCase(), r]));
     const tplMap = new Map(tplSnapshots.map((t) => [t.sku, t]));
     const awdMap = new Map(awdSnapshots.map((a) => [a.sku, a]));
+    const ownedSources = latestOwnedSources({
+      snapshots,
+      tpl: tplSnapshots,
+      awd: awdSnapshots,
+    });
 
     const allSkus = new Set([
       ...snapshots.map((s) => s.sku),
@@ -438,6 +458,7 @@ export default function InventoryPage() {
       }
 
       const shopify_share = total_vel_30 > 0 ? Math.round((shopify_vel_30 / total_vel_30) * 100) : 0;
+      const owned = ownedNetworkTotalForSku(sku, ownedSources);
 
       result.push({
         sku,
@@ -449,6 +470,9 @@ export default function InventoryPage() {
         reserved,
         tpl_available,
         awd_on_hand,
+        owned_total: owned.total,
+        owned_as_of: ownedAsOfLabel(owned),
+        owned_as_of_detail: formatOwnedAsOf(owned),
         on_hand,
         amazon_u_7: Number(vel?.amazon_u_7 ?? 0),
         amazon_u_30: amazon_vel_30,
@@ -526,10 +550,20 @@ export default function InventoryPage() {
     // Sort
     const col = sortCol as keyof ComputedRow;
     list.sort((a, b) => {
-      const av = a[col] ?? 0;
-      const bv = b[col] ?? 0;
-      if (typeof av === "number" && typeof bv === "number")
-        return sortAsc ? av - bv : bv - av;
+      const av = a[col];
+      const bv = b[col];
+      if (col === "owned_total") {
+        const an = a.owned_total;
+        const bn = b.owned_total;
+        if (an == null && bn == null) return 0;
+        if (an == null) return 1;
+        if (bn == null) return -1;
+        return sortAsc ? an - bn : bn - an;
+      }
+      const aVal = av ?? 0;
+      const bVal = bv ?? 0;
+      if (typeof aVal === "number" && typeof bVal === "number")
+        return sortAsc ? aVal - bVal : bVal - aVal;
       return sortAsc
         ? String(av).localeCompare(String(bv))
         : String(bv).localeCompare(String(av));
@@ -557,11 +591,11 @@ export default function InventoryPage() {
 
   function exportCSV() {
     const header =
-      "SKU,ASIN,Product,FBA_OnHand,AWD,3PL,Inbound,TotalV30,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
+      "SKU,ASIN,Product,FBA_OnHand,AWD,3PL,Inbound,Total,TotalAsOf,TotalV30,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
     const body = filtered
       .map(
         (r) =>
-          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_on_hand},${r.awd_on_hand},${r.tpl_available},${r.inbound},${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
+          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_on_hand},${r.awd_on_hand},${r.tpl_available},${r.inbound},${r.owned_total ?? ""},"${(r.owned_as_of_detail ?? "").replace(/"/g, '""')}",${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
       )
       .join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
@@ -810,6 +844,7 @@ export default function InventoryPage() {
                   { key: "awd_on_hand", label: "AWD", tip: "AWD on-hand (not FBA sellable until replenished)" },
                   { key: "tpl_available", label: "3PL", tip: "Third-party / own warehouse units" },
                   { key: "inbound", label: "Inbnd", tip: "Amazon inbound — not yet sellable" },
+                  { key: "owned_total", label: "Total", tip: "Physical units you own: FBA fulfillable + inbound to FBA + 3PL on-hand + AWD on-hand. Em dash if any source has no latest row (missing is not zero). AWD inbound is not included. As-of is the timestamps of the rows used." },
                   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
                   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },
                   { key: "inventory_u_30", label: "Inv V30", tip: "FBA units shipped/day from the inventory ledger (last 30 days). Compare to orders V30." },
@@ -845,7 +880,7 @@ export default function InventoryPage() {
               {filtered.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={15}
+                    colSpan={18}
                     className="text-center text-muted-foreground py-8"
                   >
                     No inventory data. Run:{" "}
@@ -888,6 +923,21 @@ export default function InventoryPage() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {fmt(r.inbound)}
+                    </TableCell>
+                    <TableCell
+                      className="text-right tabular-nums font-medium"
+                      title={r.owned_as_of_detail}
+                    >
+                      {r.owned_total != null ? fmt(r.owned_total) : "—"}
+                      {r.owned_as_of ? (
+                        <div className="text-[10px] font-normal text-muted-foreground">
+                          as of {r.owned_as_of}
+                        </div>
+                      ) : r.owned_total == null ? (
+                        <div className="text-[10px] font-normal text-muted-foreground">
+                          incomplete
+                        </div>
+                      ) : null}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {r.total_u_7.toFixed(1)}
@@ -1017,6 +1067,17 @@ export default function InventoryPage() {
                   </p>
                   <p className="text-lg font-semibold">
                     {fmt(selected.inbound)}
+                  </p>
+                </div>
+                <div className="rounded-lg border p-3 col-span-2">
+                  <p className="text-[10px] text-muted-foreground uppercase">
+                    Total (owned)
+                  </p>
+                  <p className="text-lg font-semibold" title={selected.owned_as_of_detail}>
+                    {selected.owned_total != null ? fmt(selected.owned_total) : "—"}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {selected.owned_as_of_detail}
                   </p>
                 </div>
               </div>
