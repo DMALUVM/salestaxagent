@@ -17,7 +17,6 @@ import {
   AUGUST_HOP_LABEL,
   FAMILY_FBA_CAP_OCT_DEC,
   FAMILY_FBA_CAP_PEAK,
-  FBA_INBOUND_PREFERRED,
   LIP_BALM_SKUS,
   FIRST_WAVE_AWD_TARGETS,
   FIRST_WAVE_AWD_TARGET_CAP,
@@ -162,12 +161,12 @@ export function HolidayShipPlan({
       </CardHeader>
       <CardContent className="space-y-2">
         <p className="text-sm font-semibold tabular-nums">
-          {FIRST_ACTION_SKUS.map((sku, i) => {
+          {FIRST_ACTION_SKUS.filter((sku) => (sept.tplToFba[sku] ?? 0) > 0).map((sku, i) => {
             const qty = sept.tplToFba[sku] ?? 0;
             return (
               <span key={sku}>
                 {i > 0 ? " / " : ""}
-                {qty > 0 ? `${fmt(qty)} ${SKU_SHORT[sku].toLowerCase()}` : `${SKU_SHORT[sku]} waits`}
+                {fmt(qty)} {SKU_SHORT[sku].toLowerCase()}
               </span>
             );
           })}
@@ -176,7 +175,7 @@ export function HolidayShipPlan({
           Tulsa hold {fmt(tulsaHold)}. Inbound already counted — do not re-send.
         </p>
         <p className="text-[11px] text-muted-foreground">
-          Fee-free {fmt(FBA_INBOUND_PREFERRED)} chunks. Not a 40k FBA manufacture buy.
+          Fee-safe on 270-unit / 13×11×9 boxes. Not a 40k FBA manufacture buy.
         </p>
       </CardContent>
     </Card>

@@ -24,6 +24,14 @@ export const FBA_INBOUND_PREFERRED = CARTON_20X16X14_UNITS * FBA_INBOUND_MIN_BOX
 export const FBA_INBOUND_MIN_FEE_FREE = CARTON_13X11X9_UNITS * FBA_INBOUND_MIN_BOXES;
 export const FBA_INBOUND_STEP_AFTER = CARTON_20X16X14_UNITS;
 export const DEFAULT_INBOUND_CARTON_UNITS = CARTON_20X16X14_UNITS;
+/** Dave's actual 3PL→FBA send today. Fee-safe on 270-unit / 13×11×9 boxes. */
+export const LOCKED_TONIGHT_3PL_FBA_SEND: Record<string, number> = {
+  DDPE0004Shop: 5_400, // assorted — 20 boxes of 270
+  DDPE0003Shop: 4_860, // orange — 18 boxes of 270
+  DDPE0002Shop: 0, // peppermint not in this send
+  DDPE0001Shop: 0, // unscented not in this send
+};
+export const LOCKED_TONIGHT_3PL_FBA_TOTAL = 10_260;
 export const FAMILY_FBA_CAP_PEAK = 55_600;
 export const FAMILY_FBA_CAP_OCT_DEC = 49_400;
 
@@ -498,6 +506,41 @@ export function allocate3plFbaSend(
     sendTotal: skus.reduce((a, s) => a + send[s], 0),
     holdTotal: skus.reduce((a, s) => a + hold[s], 0),
     hopTotal: skus.reduce((a, s) => a + hop[s], 0),
+    waitsOnAugust: Object.fromEntries(skus.map((s) => [s, send[s] === 0 && gap[s] > 0 && onHand[s] > 0])),
+  };
+}
+
+/** This month's 3PL→FBA card: Dave's actual send. Do not re-allocate. */
+export function applyLockedTonight3plFbaSend(
+  sku3pl: Record<string, number>,
+  gaps: Record<string, number> = {},
+  opts?: { floor?: number; awdLoaded?: boolean; skus?: string[] },
+) {
+  const skus = opts?.skus ?? LIP_BALM_SKUS;
+  const awdLoaded = !!opts?.awdLoaded;
+  const onHand: Record<string, number> = {};
+  const gap: Record<string, number> = {};
+  const send: Record<string, number> = {};
+  const hold: Record<string, number> = {};
+  const hop: Record<string, number> = {};
+  for (const sku of skus) {
+    onHand[sku] = Math.max(0, Number(sku3pl[sku] || 0));
+    gap[sku] = Math.max(0, Number(gaps[sku] || 0));
+    send[sku] = Number(LOCKED_TONIGHT_3PL_FBA_SEND[sku] || 0);
+    hold[sku] = Math.max(0, onHand[sku] - send[sku]);
+    hop[sku] = 0;
+  }
+  const floorNow = awdLoaded ? 0 : Math.max(0, opts?.floor ?? TULSA_LIP_FLOOR_UNITS);
+  return {
+    tplToFba: send,
+    tulsaHold: hold,
+    tplToAwd: hop,
+    floor: floorNow,
+    awdLoaded,
+    sendTotal: skus.reduce((a, s) => a + send[s], 0),
+    holdTotal: skus.reduce((a, s) => a + hold[s], 0),
+    hopTotal: 0,
+    locked: true,
     waitsOnAugust: Object.fromEntries(skus.map((s) => [s, send[s] === 0 && gap[s] > 0 && onHand[s] > 0])),
   };
 }
@@ -980,7 +1023,7 @@ export function buildSeptemberPlan(
       : awdSurgeNeed(awdTgt[sku] ?? 0, skuAwd[sku] ?? 0, augustToAwd[sku]);
   }
   const awdLoaded = awdCoversOffFbaReserve(skuAwd);
-  const sendPlan = allocate3plFbaSend(
+  const sendPlan = applyLockedTonight3plFbaSend(
     Object.fromEntries(skus.map((s) => [s, sku3pl[s] ?? 0])),
     gapAfterAug,
     { floor: tulsaFloor, awdLoaded, skus },
