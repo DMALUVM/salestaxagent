@@ -923,8 +923,10 @@ export default function InventoryPage() {
                     </TableCell>
                     )}
                     {visibleKeys.has("awd_on_hand") && (
-                    <TableCell className={`text-right tabular-nums ${awdCellToneClass(r.awd_tone)}`}>
-                      {formatSkuQty(r.awd_on_hand)}
+                    <TableCell className="text-right tabular-nums">
+                      <span className={awdCellToneClass(r.awd_tone)}>
+                        {formatSkuQty(r.awd_on_hand)}
+                      </span>
                     </TableCell>
                     )}
                     {visibleKeys.has("tpl_available") && (

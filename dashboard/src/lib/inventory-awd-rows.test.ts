@@ -69,7 +69,7 @@ describe("AWD column is on-hand + inbound to AWD", () => {
   });
 });
 
-describe("AWD cell color", () => {
+describe("AWD number color (text only, no cell fill)", () => {
   test("white = inbound only; orange = partial; green = available; blank = none", () => {
     assert.equal(
       awdCellTone({ sku: "DDPE0001Shop", awd_on_hand: 0, awd_inbound: 1_080 }),
@@ -85,9 +85,12 @@ describe("AWD cell color", () => {
     );
     assert.equal(awdCellTone(null), null);
     assert.equal(awdCellTone({ sku: "Z", awd_on_hand: 0, awd_inbound: 0 }), null);
-    assert.match(awdCellToneClass("white"), /bg-white/);
-    assert.match(awdCellToneClass("orange"), /bg-orange/);
-    assert.match(awdCellToneClass("green"), /bg-emerald/);
+    assert.match(awdCellToneClass("white"), /text-zinc-2/);
+    assert.match(awdCellToneClass("orange"), /text-orange/);
+    assert.match(awdCellToneClass("green"), /text-emerald/);
+    assert.doesNotMatch(awdCellToneClass("white"), /bg-/);
+    assert.doesNotMatch(awdCellToneClass("orange"), /bg-/);
+    assert.doesNotMatch(awdCellToneClass("green"), /bg-/);
     assert.equal(awdCellToneClass(null), "");
   });
 });
