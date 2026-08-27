@@ -75,34 +75,40 @@ describe("owned network Total", () => {
   });
 });
 
-describe("missing row is not zero", () => {
-  test("omits Total when 3PL has no latest row", () => {
+describe("missing row is omitted, not required", () => {
+  test("no-row AWD is blank and Total still sums the other three", () => {
+    const { fba, tpl } = completeRows();
+    const owned = ownedNetworkTotal({ sku: "DDPE0001Shop", fba, tpl });
+    assert.equal(owned.awdOnHand, null);
+    assert.equal(owned.fbaFulfillable, 100);
+    assert.equal(owned.fbaInbound, 30);
+    assert.equal(owned.tplOnHand, 40);
+    assert.equal(owned.total, 170);
+    assert.equal(owned.complete, false);
+    assert.deepEqual(owned.missing, ["awd_on_hand"]);
+    assert.equal(ownedAsOfLabel(owned), "2026-08-26");
+    assert.match(formatOwnedAsOf(owned), /omitted awd_on_hand/);
+  });
+
+  test("missing 3PL is omitted; Total still sums FBA + inbound + AWD", () => {
     const { fba, awd } = completeRows();
     const owned = ownedNetworkTotal({ sku: "DDPE0001Shop", fba, awd, tpl: null });
     assert.equal(owned.tplOnHand, null);
-    assert.equal(owned.total, null);
+    assert.equal(owned.total, 180);
     assert.equal(owned.complete, false);
     assert.deepEqual(owned.missing, ["tpl_on_hand"]);
     assert.equal(owned.fbaFulfillable, 100);
     assert.equal(owned.awdOnHand, 50);
-    assert.equal(ownedAsOfLabel(owned), null);
-    assert.match(formatOwnedAsOf(owned), /Incomplete \(tpl_on_hand missing\)/);
+    assert.equal(ownedAsOfLabel(owned), "2026-08-25");
+    assert.match(formatOwnedAsOf(owned), /omitted tpl_on_hand/);
   });
 
-  test("omits Total when AWD has no latest row", () => {
-    const { fba, tpl } = completeRows();
-    const owned = ownedNetworkTotal({ sku: "DDPE0001Shop", fba, tpl });
-    assert.equal(owned.awdOnHand, null);
-    assert.equal(owned.total, null);
-    assert.deepEqual(owned.missing, ["awd_on_hand"]);
-  });
-
-  test("omits Total when FBA snapshot is missing (fulfillable and inbound both unknown)", () => {
+  test("missing FBA snapshot omits fulfillable and inbound; Total still sums 3PL + AWD", () => {
     const { tpl, awd } = completeRows();
     const owned = ownedNetworkTotal({ sku: "DDPE0001Shop", tpl, awd });
     assert.equal(owned.fbaFulfillable, null);
     assert.equal(owned.fbaInbound, null);
-    assert.equal(owned.total, null);
+    assert.equal(owned.total, 90);
     assert.deepEqual(owned.missing, ["fba_fulfillable", "fba_inbound"]);
     assert.equal(fbaFulfillableUnits(null), null);
     assert.equal(fbaInboundUnits(undefined), null);
@@ -110,7 +116,18 @@ describe("missing row is not zero", () => {
     assert.equal(awdOnHandUnits(null), null);
   });
 
-  test("known zero on a present row is 0 and still completes Total", () => {
+  test("0-row AWD shows 0 and counts as 0 in Total", () => {
+    const rows = completeRows();
+    rows.awd.awd_on_hand = 0;
+    rows.awd.pulled_at = "2026-08-27T10:30:00.000Z";
+    const owned = ownedNetworkTotal({ sku: "DDPE0001Shop", ...rows });
+    assert.equal(owned.awdOnHand, 0);
+    assert.equal(owned.total, 100 + 30 + 40 + 0);
+    assert.equal(owned.complete, true);
+    assert.equal(ownedAsOfLabel(owned), "2026-08-26");
+  });
+
+  test("known zero on a present FBA/3PL row is 0 and still completes Total", () => {
     const rows = completeRows();
     rows.tpl.available = 0;
     rows.fba.fulfillable = 0;
@@ -119,6 +136,13 @@ describe("missing row is not zero", () => {
     assert.equal(owned.fbaFulfillable, 0);
     assert.equal(owned.total, 30 + 0 + 0 + 50);
     assert.equal(owned.complete, true);
+  });
+
+  test("FBA units are fulfillable only — reserved/researching/unfulfillable stay out", () => {
+    const owned = ownedNetworkTotal({ sku: "DDPE0001Shop", ...completeRows() });
+    assert.equal(owned.fbaFulfillable, 100);
+    assert.notEqual(owned.fbaFulfillable, 100 + 999 + 10 + 50);
+    assert.equal(owned.total, 220);
   });
 
   test("latest-per-SKU lookup does not invent a missing SKU as 0", () => {

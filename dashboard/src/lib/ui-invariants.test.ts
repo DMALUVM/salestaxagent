@@ -96,11 +96,31 @@ describe("pallet planner ship view", () => {
   test("owned Total column lives on /inventory, not /inventory/pallets", () => {
     const page = src("src/app/inventory/page.tsx");
     const pallets = src("src/app/inventory/pallets/page.tsx");
+    const cols = src("src/lib/inventory-sku-columns.ts");
+    const api = src("src/app/api/inventory/route.ts");
     assert.match(page, /owned_total/);
     assert.match(page, /ownedNetworkTotalForSku/);
-    assert.match(page, /label: "Total"/);
+    assert.match(page, /resolveVisibleColumns/);
+    assert.match(page, /visibleSkuTableColumns/);
+    assert.match(cols, /ALWAYS_VISIBLE_COLUMN_KEYS/);
+    assert.match(cols, /owned_total/);
+    assert.match(cols, /fba_fulfillable/);
     assert.doesNotMatch(pallets, /owned_total/);
     assert.doesNotMatch(pallets, /ownedNetworkTotal/);
     assert.doesNotMatch(pallets, /inventory-owned-total/);
+    assert.match(api, /keepAwdInventoryRows/);
+    assert.doesNotMatch(api, /awd_on_hand\s*>\s*0/);
+  });
+
+  test("FBA column is fulfillable; AWD zero-row is not blanked", () => {
+    const page = src("src/app/inventory/page.tsx");
+    assert.match(page, /formatSkuQty\(r\.fba_fulfillable\)/);
+    assert.match(page, /formatSkuQty\(r\.awd_on_hand\)/);
+    assert.doesNotMatch(page, /fmt\(r\.fba_on_hand\)/);
+    assert.doesNotMatch(page, /r\.awd_on_hand > 0 \? fmt/);
+    assert.doesNotMatch(
+      page,
+      /fba_on_hand = fulfillable \+ reserved \+ researching \+ unfulfillable_qty[\s\S]*formatSkuQty\(r\.fba_on_hand\)/,
+    );
   });
 });

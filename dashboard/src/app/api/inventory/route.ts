@@ -1,3 +1,4 @@
+import { keepAwdInventoryRows } from "@/lib/inventory-awd-rows";
 import { live3plSnapshots } from "@/lib/inventory-3pl";
 import { getServerSupabase } from "@/lib/supabase-server";
 
@@ -199,7 +200,7 @@ export async function GET() {
         settings,
         seasonality,
         tpl: live3plSnapshots(tpl),
-        awd,
+        awd: keepAwdInventoryRows(awd),
         capacity,
         forecast,
         amazonLipSales,
