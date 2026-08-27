@@ -13,8 +13,13 @@ import {
   PEAK_END_DEFAULT,
   applyAssortedCorrectionDisplay,
   earlyJanFbaShipBy,
+  SEPT_FBA_ON_HAND_TARGETS,
+  SEPT_FBA_TARGET_CAP,
+  buildSeptemberPlan,
+  effectiveTulsaFloor,
   familyTulsaFloor,
   familyYoyMayJul,
+  fbaManufactureGap,
   fbaCoverUnits,
   holidayDemandFromSales,
   plannerPolicy,
@@ -175,7 +180,9 @@ describe("pallet planner model", () => {
     for (const sku of LIP) {
       const build = skuProductionBuild(demand[sku], { coverDays: 60, receiveDays: policy.gateReceiveDays });
       familyPeak += build.peakCover;
-      assert.ok(build.skuBuild > demand[sku].holidayDemand);
+      assert.equal(build.skuBuild, demand[sku].holidayDemand);
+      assert.equal(build.unstacked, true);
+      assert.ok(build.stackedBuild > demand[sku].holidayDemand);
       assert.notEqual(demand[sku].janDemand, Math.round(demand[sku].janPrior * leftoverYoy));
     }
     assert.ok(familyPeak >= 51000 && familyPeak <= 53000);
@@ -306,6 +313,47 @@ describe("pallet planner model", () => {
   test("cover is fulfillable only; inbound is already in transit", () => {
     assert.equal(fbaCoverUnits({ fulfillable: 2978, reserved: 2466, researching: 28, unfulfillable: 5 }), 2978);
     assert.equal(inboundInTransit({ inbound_working: 0, inbound_shipped: 270, inbound_receiving: 0 }), 270);
+  });
+
+  test("manufacture is FBA target minus fulfillable minus inbound; August TBD", () => {
+    assert.equal(SEPT_FBA_TARGET_CAP, 55_600);
+    assert.equal(SEPT_FBA_ON_HAND_TARGETS.DDPE0004Shop, 17_800);
+    const fba = { DDPE0001Shop: 3248, DDPE0002Shop: 3159, DDPE0003Shop: 4603, DDPE0004Shop: 3873 };
+    const inbound = { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 };
+    const plan = buildSeptemberPlan(fba, inbound, { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 });
+    assert.equal(plan.augustTbd, true);
+    assert.equal(plan.mixLocked, false);
+    assert.equal(plan.gaps.DDPE0001Shop.gap, 9552);
+    assert.equal(plan.skuManufacture.DDPE0004Shop, fbaManufactureGap(17_800, 3873, 0));
+    const withAug = buildSeptemberPlan(fba, inbound, { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 }, {}, { DDPE0004Shop: 5000 });
+    assert.equal(withAug.augustTbd, false);
+    assert.equal(withAug.skuManufacture.DDPE0004Shop, plan.skuManufacture.DDPE0004Shop - 5000);
+  });
+
+  test("AWD loaded drops 5k Tulsa floor; never 0 AWD and 0 Tulsa", () => {
+    const tpl = { DDPE0001Shop: 2000, DDPE0002Shop: 2000, DDPE0003Shop: 2000, DDPE0004Shop: 2000 };
+    const awd = { DDPE0001Shop: 4000 };
+    assert.equal(effectiveTulsaFloor(awd), 0);
+    const loaded = familyTulsaFloor(tpl, 5000, awd);
+    assert.equal(loaded.awdLoaded, true);
+    assert.equal(loaded.floor, 0);
+    assert.equal(loaded.topUp, 0);
+    assert.equal(loaded.transferable, 8000);
+    const empty = familyTulsaFloor({ DDPE0001Shop: 0 }, 5000, { DDPE0001Shop: 0 });
+    assert.equal(empty.awdLoaded, false);
+    assert.equal(empty.floor, 5000);
+    assert.equal(empty.topUp, 5000);
+    const plan = buildSeptemberPlan(
+      { DDPE0001Shop: 3248, DDPE0002Shop: 3159, DDPE0003Shop: 4603, DDPE0004Shop: 3873 },
+      { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 },
+      tpl,
+      { DDPE0001Shop: 20000, DDPE0002Shop: 20000, DDPE0003Shop: 20000, DDPE0004Shop: 20000 },
+      {},
+      awd,
+    );
+    assert.equal(plan.awdLoaded, true);
+    assert.equal(plan.tulsaFloorUnits, 0);
+    assert.equal(plan.tulsa.topUp, 0);
   });
 
   test("3PL uses latest row per SKU, not latest pull batch", () => {
