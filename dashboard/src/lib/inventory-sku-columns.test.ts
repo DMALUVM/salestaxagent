@@ -12,7 +12,7 @@ import {
 } from "./inventory-sku-columns";
 
 describe("SKU table default column set", () => {
-  test("Total is always in the default visible set", () => {
+  test("Total is always in the default visible set; no Reserved or Unfulfillable column", () => {
     assert.equal(DEFAULT_VISIBLE_COLUMN_KEYS.includes("owned_total"), true);
     assert.equal(ALWAYS_VISIBLE_COLUMN_KEYS.includes("owned_total"), true);
     const labels = visibleSkuTableColumns(null).map((c) => c.label);
@@ -26,6 +26,15 @@ describe("SKU table default column set", () => {
       "V7",
       "V30",
     ]);
+    assert.equal(labels.includes("Reserved"), false);
+    assert.equal(labels.includes("Unfulfillable"), false);
+    const keys = SKU_TABLE_COLUMNS.map((c) => c.key as string);
+    assert.equal(keys.includes("fba_reserved"), false);
+    assert.equal(keys.includes("fba_unfulfillable"), false);
+    assert.equal(
+      SKU_TABLE_COLUMNS.some((c) => /expired|inventory.?age/i.test(c.key) || /expired|age/i.test(c.label)),
+      false,
+    );
   });
 
   test("forces Total on when saved prefs predate the column", () => {
@@ -35,6 +44,8 @@ describe("SKU table default column set", () => {
     assert.equal(predating.includes("owned_total"), true);
     assert.equal(predating.includes("fba_fulfillable"), true);
     assert.equal(predating.includes("fba_on_hand" as never), false);
+    assert.equal(predating.includes("fba_reserved" as never), false);
+    assert.equal(predating.includes("fba_unfulfillable" as never), false);
     assert.equal(
       predating.indexOf("owned_total"),
       predating.indexOf("inbound") + 1,
@@ -60,6 +71,16 @@ describe("SKU table default column set", () => {
     assert.match(fba.tip, /fulfillable/i);
     assert.match(fba.tip, /Reserved/);
     assert.doesNotMatch(fba.tip, /checked in at Amazon FBA$/);
+  });
+
+  test("Total tip says reserved is in the sum, not a column", () => {
+    const total = SKU_TABLE_COLUMNS.find((c) => c.key === "owned_total");
+    assert.ok(total);
+    assert.match(total.tip, /every SKU/i);
+    assert.match(total.tip, /reserved/i);
+    assert.match(total.tip, /not a column/i);
+    assert.match(total.tip, /Unfulfillable/i);
+    assert.doesNotMatch(total.tip, /DDPE0003|lip family|lip-only/i);
   });
 });
 

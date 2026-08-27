@@ -105,6 +105,10 @@ describe("pallet planner ship view", () => {
     assert.match(cols, /ALWAYS_VISIBLE_COLUMN_KEYS/);
     assert.match(cols, /owned_total/);
     assert.match(cols, /fba_fulfillable/);
+    assert.doesNotMatch(cols, /fba_reserved/);
+    assert.doesNotMatch(cols, /fba_unfulfillable/);
+    assert.doesNotMatch(cols, /label: "Reserved"/);
+    assert.doesNotMatch(cols, /label: "Unfulfillable"/);
     assert.doesNotMatch(pallets, /owned_total/);
     assert.doesNotMatch(pallets, /ownedNetworkTotal/);
     assert.doesNotMatch(pallets, /inventory-owned-total/);
@@ -116,11 +120,22 @@ describe("pallet planner ship view", () => {
     const page = src("src/app/inventory/page.tsx");
     assert.match(page, /formatSkuQty\(r\.fba_fulfillable\)/);
     assert.match(page, /formatSkuQty\(r\.awd_on_hand\)/);
+    assert.doesNotMatch(page, /formatSkuQty\(r\.fba_reserved\)/);
+    assert.doesNotMatch(page, /formatSkuQty\(r\.fba_unfulfillable\)/);
+    assert.doesNotMatch(page, /visibleKeys.has\("fba_reserved"\)/);
+    assert.doesNotMatch(page, /visibleKeys.has\("fba_unfulfillable"\)/);
     assert.doesNotMatch(page, /fmt\(r\.fba_on_hand\)/);
     assert.doesNotMatch(page, /r\.awd_on_hand > 0 \? fmt/);
     assert.doesNotMatch(
       page,
       /fba_on_hand = fulfillable \+ reserved \+ researching \+ unfulfillable_qty[\s\S]*formatSkuQty\(r\.fba_on_hand\)/,
     );
+  });
+
+  test("owned Total helper has no lip-family or named-SKU special case", () => {
+    const owned = src("src/lib/inventory-owned-total.ts");
+    assert.doesNotMatch(owned, /DDPE0003|LIP_BALM|lip family|lipOnly|lip_only/);
+    assert.match(owned, /fbaReserved/);
+    assert.doesNotMatch(owned, /fbaUnfulfillable/);
   });
 });

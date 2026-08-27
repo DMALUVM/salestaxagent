@@ -36,7 +36,7 @@ export const SKU_TABLE_COLUMNS: SkuTableColumn[] = [
   {
     key: "fba_fulfillable",
     label: "FBA",
-    tip: "FBA fulfillable units only. Reserved, researching, and unfulfillable are not included.",
+    tip: "FBA fulfillable units only (sellable). Reserved, researching, and unfulfillable are not included.",
   },
   {
     key: "awd_on_hand",
@@ -48,7 +48,7 @@ export const SKU_TABLE_COLUMNS: SkuTableColumn[] = [
   {
     key: "owned_total",
     label: "Total",
-    tip: "Sum of sources that exist: FBA fulfillable + inbound to FBA + 3PL on-hand + AWD on-hand. A missing source is blank and omitted. A known 0 counts as 0. AWD inbound is not included. As-of is the timestamps of the rows used.",
+    tip: "Same formula on every SKU: FBA fulfillable + reserved + inbound to FBA + 3PL on-hand + AWD on-hand. Reserved is in the sum, not a column. A missing source is blank and omitted. A known 0 counts as 0. Unfulfillable and researching are not included. AWD inbound is not included. As-of is the timestamps of the rows used.",
   },
   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },

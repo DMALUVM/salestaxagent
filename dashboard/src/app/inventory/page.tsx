@@ -406,11 +406,12 @@ export default function InventoryPage() {
 
       const owned = ownedNetworkTotalForSku(sku, ownedSources);
       const fulfillable = owned.fbaFulfillable ?? 0;
-      const reserved = Number(snap?.reserved ?? 0);
+      const reserved = owned.fbaReserved ?? 0;
       const researching = Number(snap?.researching ?? 0);
       const unfulfillable_qty = Number(snap?.unfulfillable ?? 0);
       // Planning math still sees reserved+researching+unfulfillable.
       // The FBA *column* is fulfillable only — see fba_fulfillable.
+      // Reserved is in owned Total (sum only), not a table column.
       const fba_on_hand = fulfillable + reserved + researching + unfulfillable_qty;
       const inbound = owned.fbaInbound ?? 0;
       const tpl_available = owned.tplOnHand ?? 0;
@@ -1067,7 +1068,7 @@ export default function InventoryPage() {
                     {formatSkuQty(selected.fba_fulfillable)}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
-                    reserved {fmt(selected.reserved)} · not in FBA or Total
+                    reserved {fmt(selected.reserved)} · in Total, not in FBA
                   </p>
                 </div>
                 <div className="rounded-lg border p-3">

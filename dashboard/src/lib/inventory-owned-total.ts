@@ -1,19 +1,28 @@
 /**
  * Owned-network Total for the /inventory SKU table.
  *
- * Total = sum of sources that EXIST:
+ * Same formula on every SKU — no lip-family or named-SKU special case:
  *       FBA fulfillable
+ *     + FBA reserved (inventory_snapshots.reserved; already includes
+ *       customer orders + FC processing + staging)
  *     + inbound to FBA (working + shipped + receiving)
  *     + 3PL on-hand
  *     + AWD on-hand (only if a latest AWD row exists)
  *
  * Latest-per-SKU only. A missing source is blank and omitted from the sum.
- * A known 0 on a present row counts as 0. Do not require all four sources.
- * AWD inbound is not FBA inbound. reserved / unfulfillable / researching
- * are not added (they are not inside fulfillable).
+ * A known 0 on a present row counts as 0.
+ * AWD inbound is not FBA inbound.
+ * Reserved is in the sum only — not a table column.
+ * researching / unfulfillable are never added to Total or to the FBA
+ * column.
  */
 
-export type OwnedSource = "fba_fulfillable" | "fba_inbound" | "tpl_on_hand" | "awd_on_hand";
+export type OwnedSource =
+  | "fba_fulfillable"
+  | "fba_reserved"
+  | "fba_inbound"
+  | "tpl_on_hand"
+  | "awd_on_hand";
 
 export type FbaSnapshotLike = {
   sku?: string | null;
@@ -49,6 +58,8 @@ export type AwdSnapshotLike = {
 export type OwnedTotal = {
   sku: string;
   fbaFulfillable: number | null;
+  /** In the Total sum only. Not a table column. */
+  fbaReserved: number | null;
   fbaInbound: number | null;
   tplOnHand: number | null;
   awdOnHand: number | null;
@@ -124,6 +135,12 @@ export function fbaFulfillableUnits(snap: FbaSnapshotLike | null | undefined): n
   return Number(snap.fulfillable ?? 0);
 }
 
+/** Same 0-vs-blank rule as AWD: present FBA row → number (0 allowed); no row → null. */
+export function fbaReservedUnits(snap: FbaSnapshotLike | null | undefined): number | null {
+  if (!snap) return null;
+  return Number(snap.reserved ?? 0);
+}
+
 export function tplOnHandUnits(row: TplSnapshotLike | null | undefined): number | null {
   if (!row) return null;
   return Number(row.available ?? 0);
@@ -141,23 +158,26 @@ export function ownedNetworkTotal(input: {
   awd?: AwdSnapshotLike | null;
 }): OwnedTotal {
   const fbaFulfillable = fbaFulfillableUnits(input.fba);
+  const fbaReserved = fbaReservedUnits(input.fba);
   const fbaInbound = fbaInboundUnits(input.fba);
   const tplOnHand = tplOnHandUnits(input.tpl);
   const awdOnHand = awdOnHandUnits(input.awd);
 
   const missing: OwnedSource[] = [];
   if (fbaFulfillable == null) missing.push("fba_fulfillable");
+  if (fbaReserved == null) missing.push("fba_reserved");
   if (fbaInbound == null) missing.push("fba_inbound");
   if (tplOnHand == null) missing.push("tpl_on_hand");
   if (awdOnHand == null) missing.push("awd_on_hand");
 
-  const present = [fbaFulfillable, fbaInbound, tplOnHand, awdOnHand].filter(
+  const present = [fbaFulfillable, fbaReserved, fbaInbound, tplOnHand, awdOnHand].filter(
     (n): n is number => n != null,
   );
   const complete = missing.length === 0;
   return {
     sku: input.sku,
     fbaFulfillable,
+    fbaReserved,
     fbaInbound,
     tplOnHand,
     awdOnHand,
