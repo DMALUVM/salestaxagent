@@ -49,8 +49,21 @@ WORKBOOK_WINDOW_MONTHS = frozenset({"2026-11", "2026-12", "2026-01", "2027-01"})
 # 5k Tulsa floor only when AWD is empty — off-FBA reserve can sit in AWD.
 # Hard rule: never plan 0 AWD and 0 Tulsa at the same time.
 TULSA_LIP_FLOOR_UNITS = 5_000
+# FBA inbound placement fees if under 5 boxes. Two carton paths:
+#   13×11×9 = 270 units → 5 boxes = 1,350 min, then +270
+#   20×16×14 = 540 units (two 270s) → 5 boxes = 2,700 min, then +540
+# Never recommend a 3PL→FBA SKU under the min for the carton in use.
+# Tonight uses the 540-box path (peppermint = five 540-boxes = 2,700).
+CARTON_13X11X9_UNITS = 270
+CARTON_20X16X14_UNITS = 540
+FBA_INBOUND_MIN_BOXES = 5
+FBA_INBOUND_PREFERRED = CARTON_20X16X14_UNITS * FBA_INBOUND_MIN_BOXES  # 2,700
+FBA_INBOUND_MIN_FEE_FREE = CARTON_13X11X9_UNITS * FBA_INBOUND_MIN_BOXES  # 1,350
+FBA_INBOUND_STEP_AFTER = CARTON_20X16X14_UNITS
+DEFAULT_INBOUND_CARTON_UNITS = CARTON_20X16X14_UNITS
 # Late-Sept / early-Oct FBA on-hand targets (Amazon's Sept mix). Not a
-# locked production recipe. Cap is the family sum.
+# locked production recipe. Cap is the family sum. Oct–Dec family cap
+# falls with Amazon cubic; scale this mix — never recommend over cap.
 SEPT_FBA_ON_HAND_TARGETS = {
     "DDPE0001Shop": 12_800,  # unscented
     "DDPE0002Shop": 8_300,   # peppermint
@@ -58,6 +71,17 @@ SEPT_FBA_ON_HAND_TARGETS = {
     "DDPE0004Shop": 17_800,  # assorted
 }
 SEPT_FBA_TARGET_CAP = 55_600
+FAMILY_FBA_CAP_PEAK = 55_600  # Sep + Jan
+FAMILY_FBA_CAP_OCT_DEC = 49_400
+# Amazon optimistic high water — AWD is the holiday surge warehouse.
+# Not leftover-after-FBA (~20k). Family 76,211 mid-Nov–late Jan.
+OPTIMISTIC_AWD_ON_HAND_TARGETS = {
+    "DDPE0001Shop": 17_803,  # unscented
+    "DDPE0002Shop": 10_590,  # peppermint
+    "DDPE0003Shop": 22_827,  # orange
+    "DDPE0004Shop": 24_991,  # assorted
+}
+OPTIMISTIC_AWD_TARGET_CAP = 76_211
 SEPT_FBA_NEED_IN_BY = date(2026, 10, 7)  # early Oct; late-Sept/early-Oct window
 PEAK_START_DEFAULT = date(2026, 10, 1)
 PEAK_END_DEFAULT = date(2027, 1, 15)
@@ -401,25 +425,230 @@ def load_planner_policy(
     }
 
 
+def family_fba_cap_for_month(month: str | None = None) -> int:
+    """Sep/Jan 55,600. Oct–Dec ~49,400. Never recommend FBA over the month cap."""
+    if not month:
+        return FAMILY_FBA_CAP_PEAK
+    try:
+        mo = int(str(month)[5:7])
+    except (TypeError, ValueError):
+        return FAMILY_FBA_CAP_PEAK
+    if mo in (10, 11, 12):
+        return FAMILY_FBA_CAP_OCT_DEC
+    return FAMILY_FBA_CAP_PEAK
+
+
+def scale_fba_caps(
+    family_cap: int,
+    mix: dict[str, int] | None = None,
+    skus: list[str] | None = None,
+) -> dict[str, int]:
+    """Scale the Sept mix to a family FBA cap. Largest remainder; exact sum."""
+    wanted = skus or LIP_BALM_SKUS
+    weights = mix or SEPT_FBA_ON_HAND_TARGETS
+    raw_w = [max(0, int(weights.get(sku, 0) or 0)) for sku in wanted]
+    total_w = sum(raw_w)
+    cap = max(0, int(family_cap))
+    if total_w <= 0 or cap <= 0:
+        return {sku: 0 for sku in wanted}
+    exact = [cap * w / total_w for w in raw_w]
+    rounded = [int(v) for v in exact]
+    rem = cap - sum(rounded)
+    order = sorted(
+        range(len(wanted)),
+        key=lambda i: (exact[i] - rounded[i], raw_w[i]),
+        reverse=True,
+    )
+    i = 0
+    while rem > 0 and order:
+        rounded[order[i % len(order)]] += 1
+        rem -= 1
+        i += 1
+    while rem < 0:
+        richest = max(range(len(wanted)), key=lambda j: rounded[j])
+        if rounded[richest] <= 0:
+            break
+        rounded[richest] -= 1
+        rem += 1
+    return {wanted[i]: rounded[i] for i in range(len(wanted))}
+
+
+def fba_fill_gap(
+    target: int,
+    fba: int,
+    inbound: int,
+    august_to_fba: int = 0,
+) -> int:
+    """FBA hole vs the month cap. Not Manufacture — 3PL/August fill this first."""
+    return max(
+        0,
+        int(target or 0)
+        - max(0, int(fba or 0))
+        - max(0, int(inbound or 0))
+        - max(0, int(august_to_fba or 0)),
+    )
+
+
 def fba_manufacture_gap(
     target: int,
     fba: int,
     inbound: int,
     august: int = 0,
 ) -> int:
-    """Manufacture toward the late-Sep FBA target.
+    """FBA-cap hole after fulfillable + inbound + August-to-FBA.
 
-    Supply = FBA fulfillable + inbound already in transit + August when
-    Dave enters it. Inbound is not re-sent. 3PL is Transfer, not a
-    manufacture deduction. Do not add peak-60d onto this gap.
+    Display / mixed-track input only. Manufacture column is AWD surge,
+    not this number. Inbound is not re-sent.
+    """
+    return fba_fill_gap(target, fba, inbound, august)
+
+
+def split_august_to_piles(august: int, fba_gap: int) -> tuple[int, int]:
+    """August offsets FBA fill first; leftover goes to AWD (reduces surge buy)."""
+    aug = max(0, int(august or 0))
+    gap = max(0, int(fba_gap or 0))
+    to_fba = min(aug, gap)
+    return to_fba, aug - to_fba
+
+
+def awd_surge_need(
+    target: int,
+    awd_on_hand: int = 0,
+    august_to_awd: int = 0,
+) -> int:
+    """Units still needed in AWD to hit optimistic high water.
+
+    AWD target is the full optimistic on-hand (76,211 family), not
+    optimistic minus the FBA cap.
     """
     return max(
         0,
         int(target or 0)
-        - max(0, int(fba or 0))
-        - max(0, int(inbound or 0))
-        - max(0, int(august or 0)),
+        - max(0, int(awd_on_hand or 0))
+        - max(0, int(august_to_awd or 0)),
     )
+
+
+def leftover_3pl_to_awd(
+    transferable: dict[str, int],
+    tpl_to_fba: dict[str, int],
+    awd_need: dict[str, int],
+) -> dict[str, int]:
+    """Leftover hops to AWD only when live family AWD is already loaded (≥5k)."""
+    out: dict[str, int] = {}
+    for sku in transferable:
+        leftover = max(
+            0,
+            int(transferable.get(sku, 0) or 0) - int(tpl_to_fba.get(sku, 0) or 0),
+        )
+        out[sku] = min(leftover, max(0, int(awd_need.get(sku, 0) or 0)))
+    return out
+
+
+def inbound_carton_min(carton_units: int = DEFAULT_INBOUND_CARTON_UNITS) -> int:
+    """Placement-fee floor: 5 boxes of this carton."""
+    return max(1, int(carton_units or DEFAULT_INBOUND_CARTON_UNITS)) * FBA_INBOUND_MIN_BOXES
+
+
+def is_legal_inbound_qty(
+    qty: int,
+    carton_units: int = DEFAULT_INBOUND_CARTON_UNITS,
+) -> bool:
+    """Legal 3PL→FBA qty for the carton in use. 0, or ≥5 boxes, step = carton.
+
+    540-box path: 2,700, 3,240, 3,780, … (tonight’s 8,100 / 5,400 / 2,700).
+    270-box path: 1,350, 1,620, 1,890, …
+    Never recommend under the 5-box min for that carton.
+    """
+    q = int(qty or 0)
+    if q == 0:
+        return True
+    step = max(1, int(carton_units or DEFAULT_INBOUND_CARTON_UNITS))
+    return q >= inbound_carton_min(step) and q % step == 0
+
+
+def fee_free_inbound_qty(
+    available: int,
+    gap: int,
+    preferred: int = FBA_INBOUND_PREFERRED,
+    min_send: int = FBA_INBOUND_MIN_FEE_FREE,
+    step_after: int = FBA_INBOUND_STEP_AFTER,
+    allow_partial: bool = False,
+) -> int:
+    """Usual send = largest 2,700 multiple ≤ min(available, gap).
+
+    Hard rules: never send under 1,350; after 2,700 only 2,700+540n.
+    If there is no 2,700 multiple, the SKU waits (August) unless
+    allow_partial and cap ≥ 1,350. Tonight unscented waits.
+    """
+    cap = min(max(0, int(available or 0)), max(0, int(gap or 0)))
+    preferred = max(1, int(preferred or FBA_INBOUND_PREFERRED))
+    min_send = max(0, int(min_send or 0))
+    qty = (cap // preferred) * preferred
+    if qty >= preferred and is_legal_inbound_qty(qty, step_after):
+        return qty
+    if allow_partial and cap >= min_send > 0:
+        return min_send if cap >= min_send else 0
+    return 0
+
+
+def allocate_3pl_fba_send(
+    sku_3pl: dict[str, int],
+    gaps: dict[str, int],
+    *,
+    floor: int = TULSA_LIP_FLOOR_UNITS,
+    awd_loaded: bool = False,
+    skus: list[str] | None = None,
+    preferred: int = FBA_INBOUND_PREFERRED,
+    min_send: int = FBA_INBOUND_MIN_FEE_FREE,
+) -> dict:
+    """Tonight's 3PL→FBA: 2,700 multiples only. Do not empty Tulsa.
+
+    Live AWD 540 is not loaded — keep ≥5k in Tulsa, leftover stays Tulsa
+    (no peppermint→AWD). Drop 2,700 chunks if a send would breach the
+    floor. Never send a SKU under 1,350.
+    """
+    wanted = skus or list(sku_3pl.keys())
+    on_hand = {sku: max(0, int(sku_3pl.get(sku, 0) or 0)) for sku in wanted}
+    gap = {sku: max(0, int(gaps.get(sku, 0) or 0)) for sku in wanted}
+    preferred = max(1, int(preferred or FBA_INBOUND_PREFERRED))
+    send = {
+        sku: fee_free_inbound_qty(on_hand[sku], gap[sku], preferred, min_send)
+        for sku in wanted
+    }
+    floor_now = 0 if awd_loaded else max(0, int(floor or 0))
+    hold = {sku: on_hand[sku] - send[sku] for sku in wanted}
+    while not awd_loaded and sum(hold.values()) < floor_now:
+        candidates = [sku for sku in wanted if send[sku] >= preferred]
+        if not candidates:
+            break
+        victim = min(candidates, key=lambda s: (send[s], gap[s]))
+        send[victim] -= preferred
+        hold[victim] += preferred
+    for sku in wanted:
+        if 0 < send[sku] < min_send:
+            hold[sku] += send[sku]
+            send[sku] = 0
+    hop = {sku: 0 for sku in wanted}
+    if awd_loaded:
+        hop = leftover_3pl_to_awd(on_hand, send, {sku: 10**9 for sku in wanted})
+        hold = {sku: on_hand[sku] - send[sku] - hop[sku] for sku in wanted}
+    return {
+        "tpl_to_fba": send,
+        "tulsa_hold": hold,
+        "tpl_to_awd": hop,
+        "floor": floor_now,
+        "awd_loaded": awd_loaded,
+        "send_total": sum(send.values()),
+        "hold_total": sum(hold.values()),
+        "hop_total": sum(hop.values()),
+        "preferred": preferred,
+        "min_send": min_send,
+        "waits_on_august": {
+            sku: send[sku] == 0 and gap[sku] > 0 and on_hand[sku] > 0
+            for sku in wanted
+        },
+    }
 
 
 def remaining_wanted_cover(
@@ -427,10 +656,10 @@ def remaining_wanted_cover(
     fba_target: int,
     awd_on_hand: int = 0,
 ) -> int:
-    """After FBA is close to the Sept target, leftover wanted cover → AWD.
+    """Legacy leftover-after-FBA. Do not use as the AWD surge target.
 
-    wanted_cover = max(Nov–Jan sell-through, optimistic). Do not add
-    peak-60d or pipeline onto sales.
+    AWD high water is OPTIMISTIC_AWD_ON_HAND_TARGETS (76,211), not
+    wanted_cover minus the FBA cap.
     """
     return max(
         0,
@@ -451,8 +680,8 @@ def sku_production_build(
     Display / sku_build = Nov–Jan sell-through (YoY, or Assorted CF).
     wanted_cover = max(sell-through, optimistic) — stock-to-cover if it hits.
     Peak-60d and 35d pipeline are labeled context only; they overlap Nov–Jan
-    and must not be summed into Manufacture. After FBA is close to the
-    late-Sep target, leftover wanted cover is single-SKU AWD ammo.
+    and must not be summed into Manufacture. AWD surge uses the optimistic
+    high-water targets (76,211), not leftover-after-FBA.
     """
     months = demand_row.get("months_2026") or {}
     dec_units = int(months.get(12, 0) or 0)
@@ -504,14 +733,15 @@ def awd_covers_off_fba_reserve(
     awd_planned: dict[str, int] | None = None,
     min_units: int = TULSA_LIP_FLOOR_UNITS,
 ) -> bool:
-    """True when family AWD can actually replace the Tulsa reserve.
+    """True when live family AWD can replace the Tulsa reserve.
 
-    Loaded = on-hand + planned overflow ≥ 5,000 lip units. A token
-    balance (e.g. 540 peppermint) is not loaded — keep the Tulsa floor.
+    Loaded = on-hand ≥ 5,000 lip units. Planned manufacture does not
+    empty Tulsa tonight. A token balance (e.g. 540 peppermint) is not
+    loaded — keep the 5k floor. awd_planned is ignored (compat only).
     """
     awd_oh = sum(max(int(v or 0), 0) for v in (sku_awd or {}).values())
-    awd_plan = sum(max(int(v or 0), 0) for v in (awd_planned or {}).values())
-    return (awd_oh + awd_plan) >= max(int(min_units or 0), 0)
+    _ = awd_planned
+    return awd_oh >= max(int(min_units or 0), 0)
 
 
 def effective_tulsa_floor(
@@ -537,8 +767,8 @@ def family_tulsa_floor(
 ) -> dict:
     """Family Tulsa reserve. 5k unless AWD ≥5k family can replace it.
 
-    Loaded AWD (on-hand + planned overflow ≥ reserve) drops floor and
-    top_up. Token AWD does not. Never plan 0 AWD and 0 Tulsa.
+    Loaded AWD (on-hand ≥ reserve) drops floor and top_up. Token AWD
+    and planned surge do not. Never plan 0 AWD and 0 Tulsa.
     """
     awd_loaded = awd_covers_off_fba_reserve(sku_awd, awd_planned)
     effective = effective_tulsa_floor(sku_awd, awd_planned, floor)
@@ -839,72 +1069,107 @@ def build_september_plan(
     receive_days: int = 35,
     tulsa_floor: int = TULSA_LIP_FLOOR_UNITS,
     targets: dict[str, int] | None = None,
+    sku_awd_targets: dict[str, int] | None = None,
+    family_fba_cap: int | None = None,
+    month: str | None = None,
     skus: list[str] | None = None,
     pallet_max: int = PALLET_MAX_UNITS,
 ) -> dict:
-    """Sept FBA-target path: mixed Marpac → Tulsa → FBA, then single-SKU AWD.
+    """Two piles: mixed Marpac → Tulsa → FBA to the month cap, then AWD surge.
 
-    Manufacture = FBA target − FBA − inbound − August (when entered).
-    3PL is Transfer — it does not shrink Manufacture. Drop the 5k Tulsa
-    floor when AWD is loaded; never plan 0 AWD and 0 Tulsa. After FBA is
-    close, leftover wanted cover is single-SKU AWD. Mix unlocked. August TBD.
+    Track 1 — Mixed pallets fill the month FBA cap after fulfillable +
+    inbound + Tulsa + August. That remainder is not the Manufacture column.
+    Track 2 — All remaining new Marpac is single-SKU AWD up to optimistic
+    76,211. AWD is the holiday warehouse. Tulsa is a hop: after FBA is
+    full, leftover transferable 3PL goes to AWD. Never plan 0 AWD and 0
+    Tulsa. Mix unlocked. August TBD until Dave's totals.
     """
     wanted = skus or LIP_BALM_SKUS
-    tgt = targets or SEPT_FBA_ON_HAND_TARGETS
+    cap = int(family_fba_cap if family_fba_cap is not None else family_fba_cap_for_month(month))
+    tgt = targets or scale_fba_caps(cap, SEPT_FBA_ON_HAND_TARGETS, wanted)
+    if sku_awd_targets is not None:
+        awd_tgt = {sku: max(0, int(sku_awd_targets.get(sku, 0) or 0)) for sku in wanted}
+    else:
+        awd_tgt = {
+            sku: max(0, int(OPTIMISTIC_AWD_ON_HAND_TARGETS.get(sku, 0) or 0))
+            for sku in wanted
+        }
     sku_wanted_cover = sku_wanted_cover or {}
     sku_august = sku_august or {}
     sku_awd = sku_awd or {}
     gaps = sept_fba_gaps(sku_fba, sku_inbound, tgt, wanted)
     sku_august_out: dict[str, int] = {}
-    sku_manufacture: dict[str, int] = {}
+    august_to_fba: dict[str, int] = {}
+    august_to_awd: dict[str, int] = {}
     sku_gap_after_aug: dict[str, int] = {}
     for sku in wanted:
         august = max(0, int(sku_august.get(sku, 0) or 0))
         sku_august_out[sku] = august
-        sku_manufacture[sku] = fba_manufacture_gap(
-            int(tgt.get(sku, 0) or 0),
-            int(sku_fba.get(sku, 0) or 0),
-            int(sku_inbound.get(sku, 0) or 0),
-            august,
-        )
-        sku_gap_after_aug[sku] = sku_manufacture[sku]
-    awd_need = {
-        sku: remaining_wanted_cover(
-            int(sku_wanted_cover.get(sku, 0) or 0),
-            int(tgt.get(sku, 0) or 0),
+        to_fba, to_awd = split_august_to_piles(august, int(gaps[sku]["gap"]))
+        august_to_fba[sku] = to_fba
+        august_to_awd[sku] = to_awd
+        sku_gap_after_aug[sku] = max(0, int(gaps[sku]["gap"]) - to_fba)
+    awd_need_before_tpl = {
+        sku: awd_surge_need(
+            int(awd_tgt.get(sku, 0) or 0),
             int(sku_awd.get(sku, 0) or 0),
+            august_to_awd[sku],
         )
         for sku in wanted
     }
-    floor_now = effective_tulsa_floor(sku_awd, awd_need, tulsa_floor)
-    tpl_rec = sept_3pl_to_fba(
-        {sku: sku_3pl.get(sku, 0) for sku in wanted},
-        {sku: {"gap": sku_gap_after_aug[sku]} for sku in wanted},
-        floor_now,
+    sku_3pl_wanted = {sku: sku_3pl.get(sku, 0) for sku in wanted}
+    awd_loaded_now = awd_covers_off_fba_reserve(sku_awd)
+    send_plan = allocate_3pl_fba_send(
+        sku_3pl_wanted,
+        sku_gap_after_aug,
+        floor=tulsa_floor,
+        awd_loaded=awd_loaded_now,
+        skus=wanted,
     )
-    mixed_need = {
+    floor_now = int(send_plan["floor"])
+    tpl_rec = send_plan["tpl_to_fba"]
+    tpl_awd = send_plan["tpl_to_awd"]
+    tulsa_hold = send_plan["tulsa_hold"]
+    fba_still_short = {
         sku: max(0, sku_gap_after_aug[sku] - int(tpl_rec.get(sku, 0) or 0))
+        for sku in wanted
+    }
+    # Remaining FBA hole waits on Dave's August mixed pallet — do not bake
+    # a mixed Marpac mix. After August, new Marpac is single-SKU AWD only.
+    mixed_need = {sku: 0 for sku in wanted}
+    sku_manufacture = {
+        sku: max(0, awd_need_before_tpl[sku] - int(tpl_awd.get(sku, 0) or 0))
         for sku in wanted
     }
     mixed_cards, mixed_held, mixed_fill = allocate_pallet_cards(
         mixed_need, wanted, pallet_max,
     )
-    for card in mixed_cards:
-        card["destination"] = "tulsa_fba"
-        card["single_sku"] = False
-        card["locked"] = False
-    awd_cards = allocate_single_sku_awd_pallets(awd_need, wanted, pallet_max)
+    awd_cards = allocate_single_sku_awd_pallets(sku_manufacture, wanted, pallet_max)
+    for card in awd_cards:
+        card["track"] = "single_sku_awd"
+        card["destination"] = "awd"
+        card["single_sku"] = True
+    fba_after_send = {
+        sku: int(gaps[sku]["fba_plus_inbound"])
+        + int(tpl_rec.get(sku, 0) or 0)
+        + august_to_fba[sku]
+        for sku in wanted
+    }
     tulsa = family_tulsa_floor(
-        {sku: sku_3pl.get(sku, 0) for sku in wanted},
+        sku_3pl_wanted,
         tulsa_floor,
         sku_awd=sku_awd,
-        awd_planned=awd_need,
     )
+    tulsa["hold"] = tulsa_hold
+    tulsa["hold_total"] = sum(tulsa_hold.values())
+    tulsa["after_send"] = sum(tulsa_hold.values())
     ship_by = sept_fba_ship_by(receive_days)
     gate_last = holiday_gate_last_3pl_fba(receive_days)
     return {
         "targets": {sku: int(tgt.get(sku, 0) or 0) for sku in wanted},
-        "target_cap": SEPT_FBA_TARGET_CAP,
+        "target_cap": cap,
+        "awd_targets": awd_tgt,
+        "awd_target_cap": sum(awd_tgt.values()),
         "need_in_fba": SEPT_FBA_NEED_IN_BY.isoformat(),
         "ship_by": ship_by.isoformat(),
         "receive_days": receive_days,
@@ -912,20 +1177,47 @@ def build_september_plan(
         "tulsa_floor_units": floor_now,
         "tulsa_floor_configured": tulsa_floor,
         "tulsa": tulsa,
-        "awd_loaded": tulsa["awd_loaded"],
+        "awd_loaded": awd_loaded_now,
+        "tulsa_hold": tulsa_hold,
         "gaps": gaps,
         "sku_august": sku_august_out,
+        "august_to_fba": august_to_fba,
+        "august_to_awd": august_to_awd,
         "august_tbd": all(qty <= 0 for qty in sku_august_out.values()),
         "sku_manufacture": sku_manufacture,
         "sku_gap_after_aug": sku_gap_after_aug,
+        "fba_still_short": fba_still_short,
+        "manufacture_into_fba": mixed_need,
         "tpl_to_fba": tpl_rec,
+        "tpl_to_awd": tpl_awd,
+        "fba_after_send": fba_after_send,
         "mixed_need": mixed_need,
         "mixed_pallets": mixed_cards,
         "mixed_held": mixed_held,
         "mixed_fill": mixed_fill,
-        "awd_need": awd_need,
+        "awd_need": sku_manufacture,
+        "awd_need_before_tpl": awd_need_before_tpl,
         "awd_pallets": awd_cards,
-        "path": "mixed_marpac_tulsa_fba_then_single_sku_awd",
+        "first_action": {
+            "tpl_to_fba": tpl_rec,
+            "tpl_to_fba_total": sum(tpl_rec.values()),
+            "tpl_to_awd": tpl_awd,
+            "tpl_to_awd_total": sum(tpl_awd.values()),
+            "tulsa_hold": tulsa_hold,
+            "tulsa_hold_total": sum(tulsa_hold.values()),
+            "fba_after_send": fba_after_send,
+            "fba_after_send_total": sum(fba_after_send.values()),
+            "fba_still_short": fba_still_short,
+            "fba_still_short_total": sum(fba_still_short.values()),
+            "inbound_preferred": FBA_INBOUND_PREFERRED,
+            "inbound_min": FBA_INBOUND_MIN_FEE_FREE,
+            "sku_waits_on_august": send_plan["waits_on_august"],
+            "waits_on_august": all(qty <= 0 for qty in sku_august_out.values()),
+            "august_is_mixed": True,
+            "after_august_single_sku_awd": True,
+        },
+        "path": "mixed_fba_cap_then_single_sku_awd_surge",
+        "two_tracks": True,
         "mix_locked": False,
         "unstacked": True,
     }
@@ -1595,11 +1887,9 @@ def build_manufacturer_headsup(
 ) -> dict:
     """Build rolling production schedule that can still make the Amazon gate.
 
-    Nov–Jan sell-through and late-Sep FBA targets are separate lines.
-    Manufacture = FBA target − FBA fulfillable − inbound − August (when
-    entered). Do not add peak-60d or Feb tail onto sales. 3PL is Transfer
-    above the 5k floor. After FBA is close, leftover wanted cover is
-    single-SKU AWD. Mix stays unlocked. August is TBD until Dave's totals.
+    Two tracks: mixed Marpac → Tulsa → FBA only to the month cap, then
+    single-SKU AWD to optimistic 76,211. Manufacture column is the AWD
+    surge buy, not the FBA hole. Tulsa is a hop. Mix unlocked. August TBD.
     """
     target_skus = skus or LIP_BALM_SKUS
     today = date.today()
@@ -1690,9 +1980,7 @@ def build_manufacturer_headsup(
             sellthrough = int(demand_by_sku.get(sku, 0))
             fba_tgt = int(SEPT_FBA_ON_HAND_TARGETS.get(sku, 0) or 0) if use_fba_target else sellthrough
             august = int(sku_august.get(sku, 0) or 0)
-            manufacture = fba_manufacture_gap(fba_tgt, i["fba"], i["inbound"], august)
-            if tpl_offsets_production:
-                manufacture = max(0, manufacture - int(sept["tpl_to_fba"].get(sku, 0) or 0))
+            manufacture = int(sept["sku_manufacture"].get(sku, 0) or 0)
             rows.append({
                 "sku": sku,
                 "label": SKU_LABEL_MAP.get(sku, sku),
@@ -1700,33 +1988,39 @@ def build_manufacturer_headsup(
                 "sellthrough": sellthrough,
                 "fba_target": fba_tgt,
                 "production_target": fba_tgt,
+                "awd_target": int(sept["awd_targets"].get(sku, 0) or 0),
                 "august": august,
                 "august_tbd": august <= 0,
                 "peak_cover": builds[sku]["peak_cover"],
                 "jan_cover": builds[sku]["jan_cover"],
                 "pipeline": builds[sku]["pipeline"],
                 "wanted_cover": builds[sku]["wanted_cover"],
-                "awd_overflow": int(sept["awd_need"].get(sku, 0) or 0),
-                "mixed_tulsa": int(sept["mixed_need"].get(sku, 0) or 0),
-                "gate_units": int(sept["mixed_need"].get(sku, 0) or 0),
-                "refill_units": int(sept["awd_need"].get(sku, 0) or 0),
+                "awd_overflow": manufacture,
+                "mixed_tulsa": 0,
+                "gate_units": 0,
+                "refill_units": manufacture,
                 "fba": i["fba"],
                 "inbound": i["inbound"],
                 "awd": i["awd"],
                 "tpl": i["tpl"],
                 "transfer": int(sept["tpl_to_fba"].get(sku, 0) or 0),
+                "transfer_awd": int(sept["tpl_to_awd"].get(sku, 0) or 0),
+                "fba_still_short": int(sept["fba_still_short"].get(sku, 0) or 0),
                 "manufacture": manufacture,
             })
         return rows
 
     def _month_entries(sku_summaries: list[dict]) -> list[dict]:
-        gate_months = [
+        refill_months = [
             h["month"] for h in horizon
-            if h["role"] == "gate" and not h["month"].endswith("-08")
+            if not h["month"].endswith("-08")
+            and (h["role"] == "refill" or h["month"] >= "2026-10")
         ]
-        refill_months = [h["month"] for h in horizon if h["role"] == "refill"]
-        remaining_gate = {s["sku"]: int(s.get("mixed_tulsa") or 0) for s in sku_summaries}
-        remaining_refill = {s["sku"]: int(s.get("awd_overflow") or 0) for s in sku_summaries}
+        if not refill_months:
+            refill_months = [
+                h["month"] for h in horizon if not h["month"].endswith("-08")
+            ]
+        remaining_refill = {s["sku"]: int(s.get("manufacture") or 0) for s in sku_summaries}
         august_by_sku = {s["sku"]: int(s.get("august") or 0) for s in sku_summaries}
 
         entries: list[dict] = []
@@ -1736,28 +2030,34 @@ def build_manufacturer_headsup(
             recv = int(h["receive_days"])
             is_august = month.endswith("-08")
             mix: dict[str, int] = {}
+            single_sku = False
+            destination = "tulsa_fba"
             if is_august:
+                # Mixed August only when Dave enters totals — never invent a mix.
                 mix = {sku: qty for sku, qty in august_by_sku.items() if qty > 0}
-            else:
-                pool = remaining_gate if role == "gate" else remaining_refill
-                role_months = gate_months if role == "gate" else refill_months
-                mi = role_months.index(month) if month in role_months else 0
-                last_in_role = mi == len(role_months) - 1
-                w = month_weights[mi] if mi < len(month_weights) else (1 / max(len(role_months), 1))
-                w_sum = (
-                    sum(month_weights[mi:len(role_months)]) if role == "gate"
-                    else max(len(role_months) - mi, 1)
-                )
+                destination = "mixed_tulsa_fba"
+                single_sku = False
+            elif month in refill_months:
+                # Oct/Nov/Dec+ new Marpac is single-SKU AWD, not mixed.
+                mi = refill_months.index(month)
+                last_in_role = mi == len(refill_months) - 1
+                w = 1 / max(len(refill_months), 1)
+                w_sum = max(len(refill_months) - mi, 1)
                 for sku in target_skus:
-                    if pool[sku] <= 0:
+                    if remaining_refill[sku] <= 0:
                         continue
                     if last_in_role:
-                        alloc = pool[sku]
+                        alloc = remaining_refill[sku]
                     else:
-                        alloc = min(round(pool[sku] * w / max(w_sum, 0.01)), pool[sku])
+                        alloc = min(
+                            round(remaining_refill[sku] * w / max(w_sum, 0.01)),
+                            remaining_refill[sku],
+                        )
                     if alloc > 0:
                         mix[sku] = alloc
-                        pool[sku] -= alloc
+                        remaining_refill[sku] -= alloc
+                destination = "awd"
+                single_sku = True
 
             total = sum(mix.values())
             fill = pallet_fill(total, pallet_max)
@@ -1790,6 +2090,9 @@ def build_manufacturer_headsup(
                 "units": total,
                 "mix": mix,
                 "mix_locked": False,
+                "destination": destination,
+                "single_sku": single_sku,
+                "track": "mixed_august" if is_august else ("single_sku_awd" if single_sku else "none"),
                 "ship_by": ship_by,
                 "in_amazon": arrive.isoformat(),
                 "need_in_fba": h.get("need_in_fba"),
@@ -1845,15 +2148,27 @@ def build_manufacturer_headsup(
                 "source": "3PL",
                 "units": xfer,
                 "timing": (
-                    f"3PL→FBA toward Sept FBA target by {sept['ship_by']} "
+                    f"FIRST ACTION: 3PL→FBA mixed toward month cap by {sept['ship_by']} "
                     f"(inbound already in transit not sent again). "
                     + (
-                        "Family AWD ≥5k — no Tulsa floor; reserve sits in AWD. "
+                        "Family AWD ≥5k — no Tulsa floor. "
                         if sept.get("awd_loaded")
                         else f"AWD below 5k reserve — keep Tulsa floor {policy['tulsa_floor_units']:,} "
                         "(do not plan 0 AWD and 0 Tulsa). "
                     )
-                    + f"Holiday-gate last 3PL→FBA {sept['holiday_gate_last_3pl_fba']}."
+                    + "Remaining FBA hole waits on August mixed (TBD)."
+                ),
+            })
+        hop = sept["tpl_to_awd"].get(sku, 0)
+        if hop > 0:
+            transfers.append({
+                "sku": sku,
+                "label": SKU_LABEL_MAP.get(sku, sku),
+                "source": "3PL→AWD",
+                "units": hop,
+                "timing": (
+                    "Leftover Tulsa hops to single-SKU AWD after FBA is full "
+                    "(Tulsa is a hop, not the holiday pile)."
                 ),
             })
 
@@ -1897,12 +2212,15 @@ def build_manufacturer_headsup(
             "stock-to-cover, not the forecast. January uses Jan 2026 × that YoY "
             "(not leftover-holiday 2.1×). Nov–Jan sell-through and late-Sep FBA "
             "targets are separate — do not add peak-60d or Feb onto sales. "
-            "Manufacture = FBA target − FBA fulfillable − inbound − August "
-            "(when entered). After FBA is close, leftover wanted cover is "
-            "single-SKU AWD. Drop the 5k Tulsa floor when family AWD "
-            "(on-hand + planned overflow) is ≥5,000 — a token balance "
-            "does not count. Never plan 0 AWD and 0 Tulsa. Family 1.42× "
-            "is context only. August is TBD until Dave’s totals."
+            "Two piles: FBA at month cap + AWD high water 76,211. "
+            "Tonight’s first action is 3PL→FBA mixed (not a 40k Manufacture). "
+            "Leftover Tulsa hops to single-SKU AWD. Remaining FBA gap waits "
+            "on August mixed (TBD — do not invent a mix). After August, "
+            "Oct/Nov/Dec+ new Marpac is single-SKU AWD. Manufacture is the "
+            "AWD surge buy, not the FBA hole. Drop the 5k Tulsa floor when "
+            "family AWD (on-hand + planned surge) is ≥5,000. Token AWD "
+            "(e.g. 540) is not loaded. Never plan 0 AWD and 0 Tulsa. "
+            "Family 1.42× is context only."
         ),
         "yoy_by_sku": {k: round(v["yoy"], 4) for k, v in yoy_by_sku.items()},
         "family_yoy_context": family_ctx,
@@ -1991,8 +2309,11 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     yoy = headsup.get("yoy") or {}
     a("Nov–Jan sell-through and late-Sep FBA targets are separate lines.")
     a("Do not add peak-60d or Feb tail onto sales — they overlap Nov–Jan.")
-    a("Manufacture = FBA target − FBA fulfillable − inbound − August (when entered).")
-    a("After FBA is close, leftover wanted cover is single-SKU AWD.")
+    a("Holiday pile = FBA-at-cap + AWD. Tulsa is a hop, not the holiday pile.")
+    a("FIRST ACTION: tonight’s 3PL→FBA mixed send (inbound already counted).")
+    a("Leftover Tulsa → single-SKU AWD. Remaining FBA gap waits on August mixed (TBD).")
+    a("After August, Oct/Nov/Dec+ new Marpac is single-SKU AWD to 76,211.")
+    a("Manufacture = AWD surge buy, not the FBA hole. Do not invent an August mix.")
     yoy_by_sku = headsup.get("yoy_by_sku") or {}
     if yoy_by_sku:
         parts = ", ".join(
@@ -2007,10 +2328,11 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("Fill: two full + one ≥50% partial is fine. Under half is merge-or-hold, not a card.")
     a(f"FBA cover: fulfillable only · inbound already in transit (do not re-send)")
     a(f"Aug/Sep waves in Amazon FBA by: {headsup['amazon_in_by']}")
-    a("Oct/Nov/Dec pallets sit at Tulsa as post-Christmas ammo — not late inbound.")
-    a("Early-Jan FBA must leave Tulsa in December (peak-end − 35d); Dec 26 is too late.")
-    tpl_note = "3PL OFFSETS production" if headsup.get("tpl_offsets_production") \
-        else "3PL shown as transfer only (does NOT reduce manufacture)"
+    a("Oct/Nov/Dec new Marpac is single-SKU AWD — not mixed, not a Tulsa holiday pile.")
+    a("Early-Jan FBA refill leaves AWD (or Tulsa hop) in December (peak-end − 35d).")
+    tpl_note = (
+        "3PL fills FBA first, leftover hops to AWD; Manufacture is AWD surge"
+    )
     tulsa = headsup.get("tulsa_3pl") or {}
     if tulsa:
         if tulsa.get("awd_loaded"):

@@ -9,6 +9,22 @@ export const CARTONS_PER_BOX = 270;
 export const AMAZON_IN_BY = "2026-10-31";
 export const DEFAULT_RECEIVING_DAYS = 18;
 export const TULSA_LIP_FLOOR_UNITS = 5_000;
+export const CARTON_13X11X9_UNITS = 270;
+export const CARTON_20X16X14_UNITS = 540;
+export const FBA_INBOUND_MIN_BOXES = 5;
+export const FBA_INBOUND_PREFERRED = CARTON_20X16X14_UNITS * FBA_INBOUND_MIN_BOXES;
+export const FBA_INBOUND_MIN_FEE_FREE = CARTON_13X11X9_UNITS * FBA_INBOUND_MIN_BOXES;
+export const FBA_INBOUND_STEP_AFTER = CARTON_20X16X14_UNITS;
+export const DEFAULT_INBOUND_CARTON_UNITS = CARTON_20X16X14_UNITS;
+export const FAMILY_FBA_CAP_PEAK = 55_600;
+export const FAMILY_FBA_CAP_OCT_DEC = 49_400;
+export const OPTIMISTIC_AWD_ON_HAND_TARGETS: Record<string, number> = {
+  DDPE0001Shop: 17_803,
+  DDPE0002Shop: 10_590,
+  DDPE0003Shop: 22_827,
+  DDPE0004Shop: 24_991,
+};
+export const OPTIMISTIC_AWD_TARGET_CAP = 76_211;
 export const SEPT_FBA_ON_HAND_TARGETS: Record<string, number> = {
   DDPE0001Shop: 12_800,
   DDPE0002Shop: 8_300,
@@ -348,6 +364,101 @@ export function remainingWantedCover(
   return Math.max(0, (wantedCover || 0) - (fbaTarget || 0) - Math.max(0, awdOnHand || 0));
 }
 
+export function awdSurgeNeed(target: number, awdOnHand = 0, augustToAwd = 0): number {
+  return Math.max(0, (target || 0) - Math.max(0, awdOnHand || 0) - Math.max(0, augustToAwd || 0));
+}
+
+export function splitAugustToPiles(august: number, fbaGap: number): { toFba: number; toAwd: number } {
+  const aug = Math.max(0, august || 0);
+  const gap = Math.max(0, fbaGap || 0);
+  const toFba = Math.min(aug, gap);
+  return { toFba, toAwd: aug - toFba };
+}
+
+export function inboundCartonMin(cartonUnits = DEFAULT_INBOUND_CARTON_UNITS): number {
+  return Math.max(1, cartonUnits || DEFAULT_INBOUND_CARTON_UNITS) * FBA_INBOUND_MIN_BOXES;
+}
+
+export function isLegalInboundQty(
+  qty: number,
+  cartonUnits = DEFAULT_INBOUND_CARTON_UNITS,
+): boolean {
+  const q = Number(qty || 0);
+  if (q === 0) return true;
+  const step = Math.max(1, cartonUnits || DEFAULT_INBOUND_CARTON_UNITS);
+  return q >= inboundCartonMin(step) && q % step === 0;
+}
+
+export function feeFreeInboundQty(
+  available: number,
+  gap: number,
+  preferred = FBA_INBOUND_PREFERRED,
+  minSend = FBA_INBOUND_MIN_FEE_FREE,
+  allowPartial = false,
+): number {
+  const cap = Math.min(Math.max(0, available || 0), Math.max(0, gap || 0));
+  const step = Math.max(1, preferred || FBA_INBOUND_PREFERRED);
+  const qty = Math.floor(cap / step) * step;
+  if (qty >= preferred && isLegalInboundQty(qty, FBA_INBOUND_STEP_AFTER)) return qty;
+  if (allowPartial && cap >= minSend && minSend > 0) return minSend;
+  return 0;
+}
+
+export function allocate3plFbaSend(
+  sku3pl: Record<string, number>,
+  gaps: Record<string, number>,
+  opts?: { floor?: number; awdLoaded?: boolean; skus?: string[]; preferred?: number; minSend?: number },
+) {
+  const skus = opts?.skus ?? Object.keys(sku3pl);
+  const preferred = opts?.preferred ?? FBA_INBOUND_PREFERRED;
+  const minSend = opts?.minSend ?? FBA_INBOUND_MIN_FEE_FREE;
+  const awdLoaded = !!opts?.awdLoaded;
+  const onHand: Record<string, number> = {};
+  const gap: Record<string, number> = {};
+  const send: Record<string, number> = {};
+  for (const sku of skus) {
+    onHand[sku] = Math.max(0, Number(sku3pl[sku] || 0));
+    gap[sku] = Math.max(0, Number(gaps[sku] || 0));
+    send[sku] = feeFreeInboundQty(onHand[sku], gap[sku], preferred, minSend);
+  }
+  const floorNow = awdLoaded ? 0 : Math.max(0, opts?.floor ?? TULSA_LIP_FLOOR_UNITS);
+  const hold: Record<string, number> = {};
+  for (const sku of skus) hold[sku] = onHand[sku] - send[sku];
+  const holdTotal = () => skus.reduce((a, s) => a + hold[s], 0);
+  while (!awdLoaded && holdTotal() < floorNow) {
+    const candidates = skus.filter((s) => send[s] >= preferred);
+    if (!candidates.length) break;
+    const victim = candidates.reduce((a, b) => (send[a] < send[b] || (send[a] === send[b] && gap[a] < gap[b]) ? a : b));
+    send[victim] -= preferred;
+    hold[victim] += preferred;
+  }
+  for (const sku of skus) {
+    if (send[sku] > 0 && send[sku] < minSend) {
+      hold[sku] += send[sku];
+      send[sku] = 0;
+    }
+  }
+  const hop: Record<string, number> = {};
+  for (const sku of skus) hop[sku] = 0;
+  if (awdLoaded) {
+    for (const sku of skus) {
+      hop[sku] = Math.max(0, onHand[sku] - send[sku]);
+      hold[sku] = 0;
+    }
+  }
+  return {
+    tplToFba: send,
+    tulsaHold: hold,
+    tplToAwd: hop,
+    floor: floorNow,
+    awdLoaded,
+    sendTotal: skus.reduce((a, s) => a + send[s], 0),
+    holdTotal: skus.reduce((a, s) => a + hold[s], 0),
+    hopTotal: skus.reduce((a, s) => a + hop[s], 0),
+    waitsOnAugust: Object.fromEntries(skus.map((s) => [s, send[s] === 0 && gap[s] > 0 && onHand[s] > 0])),
+  };
+}
+
 export function skuProductionBuild(
   demandRow: {
     novDecDemand?: number;
@@ -404,12 +515,11 @@ export function skuProductionBuild(
 
 export function awdCoversOffFbaReserve(
   skuAwd?: Record<string, number>,
-  awdPlanned?: Record<string, number>,
+  _awdPlanned?: Record<string, number>,
   minUnits = TULSA_LIP_FLOOR_UNITS,
 ): boolean {
   const oh = Object.values(skuAwd ?? {}).reduce((a, v) => a + Math.max(Number(v) || 0, 0), 0);
-  const plan = Object.values(awdPlanned ?? {}).reduce((a, v) => a + Math.max(Number(v) || 0, 0), 0);
-  return oh + plan >= Math.max(minUnits || 0, 0);
+  return oh >= Math.max(minUnits || 0, 0);
 }
 
 export function effectiveTulsaFloor(
@@ -788,59 +898,104 @@ export function buildSeptemberPlan(
   skuFba: Record<string, number>,
   skuInbound: Record<string, number>,
   sku3pl: Record<string, number>,
-  skuWantedCover: Record<string, number> = {},
+  _skuWantedCover: Record<string, number> = {},
   skuAugust: Record<string, number> = {},
   skuAwd: Record<string, number> = {},
-  opts?: { receiveDays?: number; tulsaFloor?: number; palletMax?: number; skus?: string[] },
+  opts?: { receiveDays?: number; tulsaFloor?: number; palletMax?: number; skus?: string[]; skuAwdTargets?: Record<string, number> },
 ) {
   const skus = opts?.skus ?? LIP_BALM_SKUS;
   const receiveDays = opts?.receiveDays ?? 35;
   const tulsaFloor = opts?.tulsaFloor ?? TULSA_LIP_FLOOR_UNITS;
   const palletMax = opts?.palletMax ?? PALLET_MAX_UNITS;
   const tgt = SEPT_FBA_ON_HAND_TARGETS;
+  const awdTgt = opts?.skuAwdTargets ?? OPTIMISTIC_AWD_ON_HAND_TARGETS;
   const gaps = septFbaGaps(skuFba, skuInbound, tgt, skus);
   const skuAugustOut: Record<string, number> = {};
-  const skuManufacture: Record<string, number> = {};
+  const augustToFba: Record<string, number> = {};
+  const augustToAwd: Record<string, number> = {};
+  const gapAfterAug: Record<string, number> = {};
   for (const sku of skus) {
     const august = Math.max(0, Number(skuAugust[sku] || 0));
     skuAugustOut[sku] = august;
-    skuManufacture[sku] = fbaManufactureGap(tgt[sku] ?? 0, skuFba[sku] ?? 0, skuInbound[sku] ?? 0, august);
+    const split = splitAugustToPiles(august, gaps[sku]?.gap ?? 0);
+    augustToFba[sku] = split.toFba;
+    augustToAwd[sku] = split.toAwd;
+    gapAfterAug[sku] = Math.max(0, (gaps[sku]?.gap ?? 0) - split.toFba);
   }
-  const awdNeed: Record<string, number> = {};
+  const awdNeedBefore: Record<string, number> = {};
   for (const sku of skus) {
-    awdNeed[sku] = remainingWantedCover(skuWantedCover[sku] ?? 0, tgt[sku] ?? 0, skuAwd[sku] ?? 0);
+    awdNeedBefore[sku] = awdSurgeNeed(awdTgt[sku] ?? 0, skuAwd[sku] ?? 0, augustToAwd[sku]);
   }
-  const floorNow = effectiveTulsaFloor(skuAwd, awdNeed, tulsaFloor);
-  const tplToFba = sept3plToFba(
+  const awdLoaded = awdCoversOffFbaReserve(skuAwd);
+  const sendPlan = allocate3plFbaSend(
     Object.fromEntries(skus.map((s) => [s, sku3pl[s] ?? 0])),
-    Object.fromEntries(skus.map((s) => [s, { gap: skuManufacture[s] }])),
-    floorNow,
+    gapAfterAug,
+    { floor: tulsaFloor, awdLoaded, skus },
   );
+  const tplToFba = sendPlan.tplToFba;
+  const tplToAwd = sendPlan.tplToAwd;
+  const tulsaHold = sendPlan.tulsaHold;
+  const fbaStillShort: Record<string, number> = {};
+  const skuManufacture: Record<string, number> = {};
   const mixedNeed: Record<string, number> = {};
+  const fbaAfterSend: Record<string, number> = {};
   for (const sku of skus) {
-    mixedNeed[sku] = Math.max(0, skuManufacture[sku] - (tplToFba[sku] ?? 0));
+    fbaStillShort[sku] = Math.max(0, gapAfterAug[sku] - (tplToFba[sku] ?? 0));
+    mixedNeed[sku] = 0;
+    skuManufacture[sku] = Math.max(0, awdNeedBefore[sku] - (tplToAwd[sku] ?? 0));
+    fbaAfterSend[sku] = (gaps[sku]?.fbaPlusInbound ?? 0) + (tplToFba[sku] ?? 0) + augustToFba[sku];
   }
   const tulsa = familyTulsaFloor(
     Object.fromEntries(skus.map((s) => [s, sku3pl[s] ?? 0])),
-    tulsaFloor, skuAwd, awdNeed,
+    tulsaFloor, skuAwd,
   );
+  const awdPallets = allocateSingleSkuAwdPallets(skuManufacture, skus, palletMax);
   return {
     targets: Object.fromEntries(skus.map((s) => [s, tgt[s] ?? 0])),
     targetCap: SEPT_FBA_TARGET_CAP,
+    awdTargets: Object.fromEntries(skus.map((s) => [s, awdTgt[s] ?? 0])),
+    awdTargetCap: skus.reduce((a, s) => a + (awdTgt[s] ?? 0), 0),
     needInFba: SEPT_FBA_NEED_IN_BY,
     shipBy: septFbaShipBy(receiveDays),
     holidayGateLast3plFba: holidayGateLast3plFba(receiveDays),
-    tulsaFloorUnits: floorNow,
-    tulsa,
-    awdLoaded: tulsa.awdLoaded,
+    tulsaFloorUnits: sendPlan.floor,
+    tulsa: { ...tulsa, hold: tulsaHold, holdTotal: sendPlan.holdTotal, afterSend: sendPlan.holdTotal },
+    awdLoaded,
     gaps,
     skuAugust: skuAugustOut,
+    augustToFba,
+    augustToAwd,
     augustTbd: skus.every((s) => skuAugustOut[s] <= 0),
     skuManufacture,
+    fbaStillShort,
+    manufactureIntoFba: mixedNeed,
     tplToFba,
+    tplToAwd,
+    tulsaHold,
+    fbaAfterSend,
     mixedNeed,
-    awdNeed,
-    awdPallets: allocateSingleSkuAwdPallets(awdNeed, skus, palletMax),
+    awdNeed: skuManufacture,
+    awdNeedBeforeTpl: awdNeedBefore,
+    awdPallets,
+    firstAction: {
+      tplToFba,
+      tplToFbaTotal: sendPlan.sendTotal,
+      tplToAwd,
+      tplToAwdTotal: sendPlan.hopTotal,
+      tulsaHold,
+      tulsaHoldTotal: sendPlan.holdTotal,
+      fbaAfterSend,
+      fbaAfterSendTotal: skus.reduce((a, s) => a + fbaAfterSend[s], 0),
+      fbaStillShort,
+      fbaStillShortTotal: skus.reduce((a, s) => a + fbaStillShort[s], 0),
+      inboundPreferred: FBA_INBOUND_PREFERRED,
+      inboundMin: FBA_INBOUND_MIN_FEE_FREE,
+      skuWaitsOnAugust: sendPlan.waitsOnAugust,
+      waitsOnAugust: skus.every((s) => skuAugustOut[s] <= 0),
+      augustIsMixed: true,
+      afterAugustSingleSkuAwd: true,
+    },
+    twoTracks: true,
     mixLocked: false,
     unstacked: true,
   };
