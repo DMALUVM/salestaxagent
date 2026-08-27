@@ -45,7 +45,7 @@ export default function PalletPlanPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Pallet Planner</h1>
-          <p className="text-sm text-muted-foreground">What we use to ship. Next hop is tonight’s 3PL→FBA.</p>
+          <p className="text-sm text-muted-foreground">What we use to ship. First action is August 3PL→FBA 10,260.</p>
         </div>
         <Link href="/inventory"><Button variant="outline" size="sm">← Inventory</Button></Link>
       </div>

@@ -72,6 +72,8 @@ describe("pallet planner ship view", () => {
     assert.match(ship, /Marpac→Tulsa/);
     assert.match(model, /Marpac→Tulsa/);
     assert.match(ship, /mix TBD/);
+    assert.match(page + "\n" + ship, /August 3PL→FBA 10,260/);
+    assert.match(ship, /August · 3PL→FBA/);
     assert.doesNotMatch(ship, /3PL→Marpac/);
     assert.doesNotMatch(model, /3PL→Marpac/);
     assert.doesNotMatch(both, /FBA Cover Alerts/);

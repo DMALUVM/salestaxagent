@@ -61,7 +61,7 @@ TULSA_LIP_FLOOR_UNITS = 5_000
 #   20×16×14 = 540 units (two 270s) → 5 boxes = 2,700 min, then +540
 # Never recommend a 3PL→FBA SKU under the min for the carton in use.
 # The usual allocator uses the 540-box path (2,700 min, then +540).
-# Tonight's actual 3PL→FBA is a locked 270-box send — see
+# August 3PL→FBA today is a locked 270-box send — see
 # LOCKED_TONIGHT_3PL_FBA_SEND. Do not "correct" 4,860 up to a 540 multiple.
 CARTON_13X11X9_UNITS = 270
 CARTON_20X16X14_UNITS = 540
@@ -70,10 +70,10 @@ FBA_INBOUND_PREFERRED = CARTON_20X16X14_UNITS * FBA_INBOUND_MIN_BOXES  # 2,700
 FBA_INBOUND_MIN_FEE_FREE = CARTON_13X11X9_UNITS * FBA_INBOUND_MIN_BOXES  # 1,350
 FBA_INBOUND_STEP_AFTER = CARTON_20X16X14_UNITS
 DEFAULT_INBOUND_CARTON_UNITS = CARTON_20X16X14_UNITS
-# Dave's actual 3PL→FBA send today. Fee-safe on 270-unit / 13×11×9 boxes
-# (20×270 assorted + 18×270 orange). Peppermint and unscented are not in
-# this send. This month's 3PL→FBA card uses this lock — do not re-run
-# allocate_3pl_fba_send and round 4,860 up to 5,400.
+# Dave's actual August 3PL→FBA send today. Fee-safe on 270-unit / 13×11×9
+# boxes (20×270 assorted + 18×270 orange). Peppermint and unscented are
+# not in this send. The August 3PL→FBA card uses this lock — do not
+# re-run allocate_3pl_fba_send and round 4,860 up to 5,400.
 LOCKED_TONIGHT_3PL_FBA_SEND = {
     "DDPE0004Shop": 5_400,  # assorted — 20 boxes of 270
     "DDPE0003Shop": 4_860,  # orange — 18 boxes of 270
@@ -113,7 +113,8 @@ FIRST_WAVE_AWD_TARGETS = {
 }
 FIRST_WAVE_AWD_TARGET_CAP = 61_425
 # Ship: assorted + orange first — target end of September, 2/month max —
-# then unscented + peppermint. August stays Marpac→Tulsa, mix TBD.
+# then unscented + peppermint. August may have two hops: Marpac→Tulsa
+# TBD (do not invent a mix) and 3PL→FBA today.
 FIRST_WAVE_AWD_SHIP_ORDER = (
     "DDPE0004Shop",  # assorted
     "DDPE0003Shop",  # orange
@@ -626,7 +627,7 @@ def is_legal_inbound_qty(
 ) -> bool:
     """Legal 3PL→FBA qty for the carton in use. 0, or ≥5 boxes, step = carton.
 
-    540-box path: 2,700, 3,240, 3,780, … (allocator; not tonight's lock).
+    540-box path: 2,700, 3,240, 3,780, … (allocator; not August 3PL→FBA today).
     270-box path: 1,350, 1,620, 1,890, … (4,860 = 18 × 270 is legal).
     Never recommend under the 5-box min for that carton.
     """
@@ -676,8 +677,8 @@ def allocate_3pl_fba_send(
 
     Live AWD 540 is not loaded — keep ≥5k in Tulsa, leftover stays Tulsa
     (no peppermint→AWD). Drop 2,700 chunks if a send would breach the
-    floor. Never send a SKU under 1,350. This month's card does not use
-    this — see apply_locked_tonight_3pl_fba_send.
+    floor.     Never send a SKU under 1,350. The August 3PL→FBA card does not
+    use this — see apply_locked_tonight_3pl_fba_send.
     """
     wanted = skus or list(sku_3pl.keys())
     on_hand = {sku: max(0, int(sku_3pl.get(sku, 0) or 0)) for sku in wanted}
@@ -730,7 +731,7 @@ def apply_locked_tonight_3pl_fba_send(
     awd_loaded: bool = False,
     floor: int = TULSA_LIP_FLOOR_UNITS,
 ) -> dict:
-    """This month's 3PL→FBA card: Dave's actual send. Do not re-allocate.
+    """August 3PL→FBA today: Dave's actual send. Do not re-allocate.
 
     4,860 orange is legal (18 × 270). Do not round it to a 540 / 2,700
     multiple. Leftover Tulsa is display only — do not invent extra SKUs
@@ -2010,7 +2011,7 @@ AWD_SCHEDULE_MONTHS = ("2026-09", "2026-10", "2026-11", "2026-12")
 
 
 def hop_label(destination: str, *, awaiting_august: bool = False) -> str:
-    """Visible hop on a month card. August is Marpac→Tulsa, mix TBD."""
+    """Visible hop on a month card. August: Marpac→Tulsa TBD and/or 3PL→FBA."""
     if destination == "3pl_fba":
         return "3PL→FBA"
     if destination == "awd":
@@ -2042,7 +2043,7 @@ def assign_awd_cards_to_months(
 
     Pack in first-wave ship order: assorted + orange first (target end
     of September), then unscented + peppermint. About 2/month is the
-    max. August stays Marpac→Tulsa TBD — AWD starts in September.
+    max. August stays Marpac→Tulsa TBD + 3PL→FBA today — AWD starts in September.
     Under-half leftovers are never cards.
     """
     months = [m for m in AWD_SCHEDULE_MONTHS if m in production_months]
@@ -2079,10 +2080,10 @@ def build_month_view_entries(
 ) -> list[dict]:
     """Rebuild Aug–Dec cards. Do not skip September.
 
-    August = Marpac→Tulsa, mix TBD (never invent). September = 3PL→FBA
-    first hop, then Marpac remaining-FBA (if any) then single-SKU AWD.
-    Oct–Dec = remaining single-SKU AWD cards (up to 2/month). Not a
-    zero Sept. Not FBA-only.
+    August = Marpac→Tulsa TBD (never invent) AND 3PL→FBA today
+    (locked 10,260). September = first-wave AWD (assorted + orange);
+    no leftover invented 3PL→FBA send. Oct–Dec = remaining
+    single-SKU AWD cards (up to 2/month). Not a zero Sept. Not FBA-only.
     """
     wanted = target_skus or LIP_BALM_SKUS
     amazon_in_by = amazon_in_by or AMAZON_IN_BY_DEFAULT
@@ -2209,16 +2210,16 @@ def build_month_view_entries(
                 single_sku=False, track="mixed_august",
                 awaiting_august=bool(sept.get("august_tbd", True)) and not mix,
             ))
-            continue
-
-        if month.endswith("-09"):
-            # 3PL→FBA first — tonight's next hop. Never a zero Sept.
+            # August 3PL→FBA today — locked 10,260. Do not invent a Marpac mix.
             if sum(tpl_to_fba.values()) > 0:
                 entries.append(_entry(
                     month, tpl_to_fba, "3pl_fba",
                     single_sku=False, track="3pl_fba", next_hop=True,
                 ))
-            # Remaining FBA manufacture (usually 0 — waits August). Then AWD.
+            continue
+
+        if month.endswith("-09"):
+            # First-wave AWD. No September 3PL→FBA card — that send is August.
             mixed = {sku: qty for sku, qty in mixed_need.items() if qty > 0}
             if mixed:
                 entries.append(_entry(
@@ -2496,7 +2497,7 @@ def build_manufacturer_headsup(
                 "source": "3PL",
                 "units": xfer,
                 "timing": (
-                    f"FIRST ACTION: 3PL→FBA mixed toward month cap by {sept['ship_by']} "
+                    f"FIRST ACTION: August 3PL→FBA 10,260 by {sept['ship_by']} "
                     f"(inbound already in transit not sent again). "
                     + (
                         "Family AWD ≥5k — no Tulsa floor. "
@@ -2504,7 +2505,7 @@ def build_manufacturer_headsup(
                         else f"AWD below 5k reserve — keep Tulsa floor {policy['tulsa_floor_units']:,} "
                         "(do not plan 0 AWD and 0 Tulsa). "
                     )
-                    + "Remaining FBA hole waits on August mixed (TBD)."
+                    + "Remaining FBA hole waits on August Marpac→Tulsa (TBD)."
                 ),
             })
         hop = sept["tpl_to_awd"].get(sku, 0)
@@ -2563,9 +2564,10 @@ def build_manufacturer_headsup(
             "Two piles: FBA at month cap + first-wave AWD 61,425 "
             "(assorted + orange, then unscented + peppermint). "
             "Optimistic 76,211 is context, not the near-term buy. "
-            "Tonight’s first action is 3PL→FBA mixed (not a 40k Manufacture). "
-            "Do not empty Tulsa after tonight. Remaining FBA gap waits "
-            "on August Marpac→Tulsa (TBD — do not invent a mix). After "
+            "First action is August 3PL→FBA 10,260 (not a September card, "
+            "not a 40k Manufacture). Do not empty Tulsa after this send. "
+            "Remaining FBA gap waits on August Marpac→Tulsa "
+            "(TBD — do not invent a mix). After "
             "August, new Marpac is single-SKU AWD. Manufacture is the "
             "first-wave AWD buy, not the FBA hole. Drop the 5k Tulsa floor "
             "when family AWD on-hand is ≥5,000. Token AWD (e.g. 540) is "
@@ -2660,8 +2662,8 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("Nov–Jan sell-through and late-Sep FBA targets are separate lines.")
     a("Do not add peak-60d or Feb tail onto sales — they overlap Nov–Jan.")
     a("Holiday pile = FBA-at-cap + AWD. Tulsa is a hop, not the holiday pile.")
-    a("FIRST ACTION: tonight’s 3PL→FBA mixed send (inbound already counted).")
-    a("Do not empty Tulsa after tonight. Remaining FBA gap waits on August Marpac→Tulsa (TBD).")
+    a("FIRST ACTION: August 3PL→FBA 10,260 (inbound already counted).")
+    a("Do not empty Tulsa after this send. Remaining FBA gap waits on August Marpac→Tulsa (TBD).")
     a("First-wave AWD buy is 61,425 (assorted + orange, then unscented + peppermint).")
     a("Optimistic 76,211 is context — not the near-term manufacture/buy.")
     a("Manufacture = first-wave AWD, not the FBA hole. Do not invent an August mix.")
@@ -2743,7 +2745,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
         )
         dest = entry.get("destination") or ""
         dest_note = {
-            "3pl_fba": "3PL→FBA tonight — first hop",
+            "3pl_fba": "August 3PL→FBA today — first hop",
             "awd": "single-SKU AWD",
             "fba_then_awd": "remaining FBA then AWD",
             "mixed_tulsa_fba": AUGUST_HOP_LABEL,

@@ -24,7 +24,7 @@ export const FBA_INBOUND_PREFERRED = CARTON_20X16X14_UNITS * FBA_INBOUND_MIN_BOX
 export const FBA_INBOUND_MIN_FEE_FREE = CARTON_13X11X9_UNITS * FBA_INBOUND_MIN_BOXES;
 export const FBA_INBOUND_STEP_AFTER = CARTON_20X16X14_UNITS;
 export const DEFAULT_INBOUND_CARTON_UNITS = CARTON_20X16X14_UNITS;
-/** Dave's actual 3PL→FBA send today. Fee-safe on 270-unit / 13×11×9 boxes. */
+/** Dave's actual August 3PL→FBA send today. Fee-safe on 270-unit / 13×11×9 boxes. */
 export const LOCKED_TONIGHT_3PL_FBA_SEND: Record<string, number> = {
   DDPE0004Shop: 5_400, // assorted — 20 boxes of 270
   DDPE0003Shop: 4_860, // orange — 18 boxes of 270
@@ -56,7 +56,8 @@ export const FIRST_WAVE_AWD_TARGETS: Record<string, number> = {
   DDPE0002Shop: 8_775,
 };
 export const FIRST_WAVE_AWD_TARGET_CAP = 61_425;
-/** Assorted + orange first — target end of September, then unscented + peppermint. */
+/** Assorted + orange first — target end of September, then unscented + peppermint.
+ *  August may have two hops: Marpac→Tulsa TBD and 3PL→FBA today. */
 export const FIRST_WAVE_AWD_SHIP_ORDER = [
   "DDPE0004Shop",
   "DDPE0003Shop",
@@ -510,7 +511,7 @@ export function allocate3plFbaSend(
   };
 }
 
-/** This month's 3PL→FBA card: Dave's actual send. Do not re-allocate. */
+/** August 3PL→FBA today: Dave's actual send. Do not re-allocate. */
 export function applyLockedTonight3plFbaSend(
   sku3pl: Record<string, number>,
   gaps: Record<string, number> = {},
@@ -1304,15 +1305,15 @@ export function buildMonthViewEntries(opts: {
         singleSku: false, track: "mixed_august",
         awaitingAugust: !!sept.augustTbd && Object.keys(mix).length === 0,
       }));
-      continue;
-    }
-    if (month.endsWith("-09")) {
       const sendTotal = Object.values(tplToFba).reduce((a, b) => a + b, 0);
       if (sendTotal > 0) {
         entries.push(entry(month, tplToFba, "3pl_fba", {
           singleSku: false, track: "3pl_fba", nextHop: true,
         }));
       }
+      continue;
+    }
+    if (month.endsWith("-09")) {
       const mixed: Record<string, number> = {};
       for (const sku of skus) if (mixedNeed[sku] > 0) mixed[sku] = mixedNeed[sku];
       if (Object.keys(mixed).length > 0) {

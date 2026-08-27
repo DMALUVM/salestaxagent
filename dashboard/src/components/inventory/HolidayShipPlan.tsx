@@ -156,7 +156,7 @@ export function HolidayShipPlan({
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
           <Badge>NEXT HOP</Badge>
-          <CardTitle className="text-sm font-medium">Tonight · 3PL→FBA {fmt(sendTotal)}</CardTitle>
+          <CardTitle className="text-sm font-medium">August · 3PL→FBA {fmt(sendTotal)}</CardTitle>
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -273,7 +273,7 @@ export function HolidayShipPlan({
           First wave: assorted + orange end of September, then unscented + peppermint (2 AWD cards/month max).
           Not the {fmt(OPTIMISTIC_AWD_TARGET_CAP)} high water.
           Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
-          {" "}August hop is Marpac→Tulsa, mix TBD.
+          {" "}August: Marpac→Tulsa TBD and 3PL→FBA 10,260.
         </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {entries
@@ -313,8 +313,7 @@ function MonthCard({
         : entry.destination === AUGUST_HOP_DESTINATION || entry.awaitingAugustTotals
           ? AUGUST_HOP_LABEL
           : null);
-  const isAug = entry.month.endsWith("-08")
-    || entry.destination === AUGUST_HOP_DESTINATION
+  const isMarpacTulsa = entry.destination === AUGUST_HOP_DESTINATION
     || entry.awaitingAugustTotals;
   const partialMin = palletPartialMinUnits();
 
@@ -332,7 +331,7 @@ function MonthCard({
         </div>
       </div>
 
-      {isAug && entry.units === 0 ? (
+      {isMarpacTulsa && entry.units === 0 ? (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
             Marpac→Tulsa · mix TBD — do not invent a mix.
