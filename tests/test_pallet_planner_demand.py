@@ -310,7 +310,7 @@ def test_actual_2025_label_is_workbook_not_monthly_sales():
     assert workbook["DDPE0001Shop"] != 6259
 
 
-def test_cover_is_fulfillable_only_inbound_is_transit():
+def test_cover_is_sc_on_hand_inbound_is_transit():
     snap = {
         "fulfillable": 2978,
         "reserved": 2466,
@@ -323,6 +323,17 @@ def test_cover_is_fulfillable_only_inbound_is_transit():
     assert fba_cover_units(snap) == 2978
     assert inbound_in_transit(snap) == 270
     assert fba_cover_units(snap) + inbound_in_transit(snap) == 3248
+    orange = {
+        "fulfillable": 3501,
+        "reserved": 1953,
+        "unfulfillable": 818,
+        "inbound_working": 0,
+        "inbound_shipped": 540,
+        "inbound_receiving": 0,
+    }
+    assert fba_cover_units(orange, {"raw": {"FC transfer": 553}}) == 4054
+    assert fba_cover_units(orange, {"raw": {"FC transfer": 553}}) != 3501
+    assert inbound_in_transit(orange) == 540
 
 
 # Workbook window fixtures — derived totals, not a hardcoded recipe.

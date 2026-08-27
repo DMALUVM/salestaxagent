@@ -3,7 +3,8 @@
  *
  * Same formula on every SKU — no lip-family or named-SKU special case:
  *   FBA column     = Seller Central on-hand (fulfillable + FC transfer)
- *   Total Amazon   = AWD + FBA on-hand + inbound + SC reserved + researching
+ *   AWD column     = AWD on-hand + inbound to AWD (not AWD→FBA transit)
+ *   Total Amazon   = AWD + FBA on-hand + FBA inbound + SC reserved + researching
  *   Total          = Total Amazon + 3PL
  *
  * SC reserved is API reserved minus FC transfer (or restock
@@ -11,7 +12,8 @@
  * top of SC on-hand — that double-counts FC transfer.
  *
  * Unfulfillable is never added. Reserved / unfulfillable / age are not
- * table columns. AWD inbound is not FBA inbound.
+ * table columns. AWD inbound is in the AWD column (and Total Amazon once).
+ * AWD inbound is not FBA inbound.
  *
  * Latest-per-SKU only. A missing source is blank and omitted from the sum.
  * A known 0 on a present row counts as 0.
@@ -60,6 +62,7 @@ export type AwdSnapshotLike = {
   sku?: string | null;
   awd_on_hand?: number | null;
   awd_inbound?: number | null;
+  /** Must never be folded into the AWD column or Total Amazon. */
   awd_to_fba_in_transit?: number | null;
   pulled_at?: string | null;
   synced_at?: string | null;
@@ -76,8 +79,9 @@ export type OwnedTotal = {
   fbaResearching: number | null;
   fbaInbound: number | null;
   tplOnHand: number | null;
+  /** AWD on-hand + inbound to AWD. Not AWD→FBA in transit. */
   awdOnHand: number | null;
-  /** AWD + FBA on-hand + inbound + SC reserved + researching. Not unfulfillable. */
+  /** AWD + FBA on-hand + FBA inbound + SC reserved + researching. Not unfulfillable. */
   totalAmazon: number | null;
   /** Total Amazon + 3PL. Null only when no source row exists. */
   total: number | null;
@@ -189,9 +193,12 @@ export function tplOnHandUnits(row: TplSnapshotLike | null | undefined): number 
   return Number(row.available ?? 0);
 }
 
+/** AWD column: on-hand + inbound to AWD. Missing row → null (blank). */
 export function awdOnHandUnits(row: AwdSnapshotLike | null | undefined): number | null {
   if (!row) return null;
-  return Number(row.awd_on_hand ?? 0);
+  const { awd_to_fba_in_transit: _transit, ...awd } = row;
+  void _transit;
+  return Number(awd.awd_on_hand ?? 0) + Number(awd.awd_inbound ?? 0);
 }
 
 export function ownedNetworkTotal(input: {

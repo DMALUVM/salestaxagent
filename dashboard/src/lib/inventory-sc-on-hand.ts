@@ -8,8 +8,9 @@
  *   FBA (column)     = fulfillable + FC transfer
  *   SC reserved      = FC Processing + Customer Order
  *                    = API reserved − FC transfer
- *   Total Amazon     = AWD + FBA + inbound + SC reserved + researching
- *                    (not unfulfillable)
+ *   AWD (column)     = on-hand + inbound to AWD (not AWD→FBA transit)
+ *   Total Amazon     = AWD + FBA + FBA inbound + SC reserved + researching
+ *                    (not unfulfillable; AWD inbound counted once via AWD)
  *   Total            = Total Amazon + 3PL
  *
  * Same formula on every SKU. No new table columns for reserved / age.

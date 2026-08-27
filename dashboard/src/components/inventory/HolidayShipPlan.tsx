@@ -5,7 +5,13 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { InventoryLeadtimeSummary, InventorySettings, InventorySnapshot } from "@/lib/types";
+import type {
+  InventoryLeadtimeSummary,
+  InventoryPlanning,
+  InventoryRestock,
+  InventorySettings,
+  InventorySnapshot,
+} from "@/lib/types";
 import {
   AUGUST_HOP_DESTINATION,
   AUGUST_HOP_LABEL,
@@ -48,6 +54,8 @@ export function HolidayShipPlan({
   snapshots,
   awdList,
   tplList,
+  restockList,
+  planningList,
   settings,
   leadtime,
 }: {
@@ -55,6 +63,8 @@ export function HolidayShipPlan({
   snapshots: InventorySnapshot[];
   awdList: { sku: string; awd_on_hand: number; pulled_at?: string | null }[];
   tplList: { sku: string; available: number; pulled_at?: string | null }[];
+  restockList?: InventoryRestock[];
+  planningList?: InventoryPlanning[];
   settings?: InventorySettings | null;
   leadtime?: InventoryLeadtimeSummary | null;
 }) {
@@ -92,10 +102,15 @@ export function HolidayShipPlan({
     return out;
   }, [augustQty]);
 
+  const latestRestock = useMemo(() => latestRowPerSku(restockList ?? []), [restockList]);
+  const latestPlanning = useMemo(() => latestRowPerSku(planningList ?? []), [planningList]);
+
   const { sept, entries, fbaPlusInbound } = useMemo(() => {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
     const awdMap = new Map(awdList.map((a) => [a.sku, a]));
     const tplMap = new Map(latestTpl.map((t) => [t.sku, t]));
+    const restockMap = new Map(latestRestock.map((r) => [r.sku, r]));
+    const planningMap = new Map(latestPlanning.map((p) => [p.sku, p]));
     const skuFba: Record<string, number> = {};
     const skuInbound: Record<string, number> = {};
     const sku3pl: Record<string, number> = {};
@@ -103,7 +118,7 @@ export function HolidayShipPlan({
     let ohInb = 0;
     for (const sku of LIP_BALM_SKUS) {
       const snap = snapMap.get(sku) ?? {};
-      skuFba[sku] = fbaCoverUnits(snap);
+      skuFba[sku] = fbaCoverUnits(snap, restockMap.get(sku)?.raw, planningMap.get(sku)?.raw);
       skuInbound[sku] = inboundInTransit(snap);
       sku3pl[sku] = Number(tplMap.get(sku)?.available ?? 0);
       skuAwd[sku] = Number(awdMap.get(sku)?.awd_on_hand ?? 0);
@@ -127,7 +142,7 @@ export function HolidayShipPlan({
       }),
       fbaPlusInbound: ohInb,
     };
-  }, [snapshots, awdList, latestTpl, parsedAugust, policy, committed]);
+  }, [snapshots, awdList, latestTpl, latestRestock, latestPlanning, parsedAugust, policy, committed]);
 
   const fbaAsOf = stampDate(snapshots.find((s) => s.snapshot_at)?.snapshot_at);
   const awdAsOf = stampDate(awdList.find((a) => a.pulled_at)?.pulled_at);
@@ -201,7 +216,7 @@ export function HolidayShipPlan({
           {" · "}Peppermint {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0002Shop)}
         </p>
         <p className="text-[11px] text-muted-foreground">
-          Ship assorted + orange first (aim end of August if Marpac can, 2 pallets/month max), then unscented + peppermint.
+          Assorted + orange target end of September (2 pallets/month max), then unscented + peppermint.
         </p>
       </CardContent>
     </Card>
@@ -256,8 +271,8 @@ export function HolidayShipPlan({
       <div>
         <p className="text-sm font-medium mb-2">Month cards</p>
         <p className="text-[11px] text-muted-foreground mb-3">
-          First wave: assorted + orange, then unscented + peppermint (2 AWD cards/month max).
-          Aim end of August if Marpac can. Not the {fmt(OPTIMISTIC_AWD_TARGET_CAP)} high water.
+          First wave: assorted + orange end of September, then unscented + peppermint (2 AWD cards/month max).
+          Not the {fmt(OPTIMISTIC_AWD_TARGET_CAP)} high water.
           Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
           {" "}August hop is Marpac→Tulsa, mix TBD.
         </p>

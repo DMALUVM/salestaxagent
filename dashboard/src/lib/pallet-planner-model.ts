@@ -3,6 +3,8 @@
  * Mirrors src/inventory/pallet_planner.py. Mix stays unlocked.
  */
 
+import { parseReservedSplits, scOnHandUnits } from "./inventory-sc-on-hand";
+
 /** Amazon pallet: 65 cases of 13×11×9 (270 units) = 17,550. Not 19,000. */
 export const AMAZON_CASES_PER_PALLET = 65;
 export const CARTONS_PER_BOX = 270;
@@ -46,7 +48,7 @@ export const FIRST_WAVE_AWD_TARGETS: Record<string, number> = {
   DDPE0002Shop: 8_775,
 };
 export const FIRST_WAVE_AWD_TARGET_CAP = 61_425;
-/** Assorted + orange first (aim end of August if Marpac can), then unscented + peppermint. */
+/** Assorted + orange first — target end of September, then unscented + peppermint. */
 export const FIRST_WAVE_AWD_SHIP_ORDER = [
   "DDPE0004Shop",
   "DDPE0003Shop",
@@ -802,13 +804,20 @@ export function productionMonthsBeforeGate(
   return months.slice(0, n);
 }
 
-export function fbaCoverUnits(snap: {
-  fulfillable?: number;
-  reserved?: number;
-  researching?: number;
-  unfulfillable?: number;
-}): number {
-  return Number(snap.fulfillable ?? 0);
+export function fbaCoverUnits(
+  snap: {
+    fulfillable?: number;
+    reserved?: number;
+    researching?: number;
+    unfulfillable?: number;
+  },
+  restockRaw?: unknown,
+  planningRaw?: unknown,
+): number {
+  return scOnHandUnits(
+    Number(snap.fulfillable ?? 0),
+    parseReservedSplits(restockRaw, planningRaw),
+  );
 }
 
 export function inboundInTransit(snap: {

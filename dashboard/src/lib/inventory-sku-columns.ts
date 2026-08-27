@@ -42,19 +42,19 @@ export const SKU_TABLE_COLUMNS: SkuTableColumn[] = [
   {
     key: "awd_on_hand",
     label: "AWD",
-    tip: "AWD on-hand from the latest AWD row. 0 means a row exists at 0. Em dash means no AWD row. Not the AWD high-water target.",
+    tip: "AWD on-hand + inbound to AWD. Not AWD→FBA in transit. 0 means a row exists at 0. Em dash means no AWD row. Cell color: white = inbound only, orange = partial receive, green = fully available. Not the AWD high-water target.",
   },
   { key: "tpl_available", label: "3PL", tip: "Third-party / own warehouse (Tulsa). 0 means a row exists at 0. Em dash means no 3PL row." },
   { key: "inbound", label: "Inbnd", tip: "Amazon inbound to FBA only — not yet sellable. AWD inbound is not included." },
   {
     key: "total_amazon",
     label: "Total Amazon",
-    tip: "AWD on-hand + FBA on-hand + inbound + reserved + researching. Not unfulfillable. FC transfer is already inside FBA on-hand, so reserved is SC reserved only (API reserved minus FC transfer).",
+    tip: "AWD (on-hand + inbound to AWD) + FBA on-hand + FBA inbound + reserved + researching. Not unfulfillable. AWD inbound is counted once here, never as FBA inbound. FC transfer is already inside FBA on-hand, so reserved is SC reserved only (API reserved minus FC transfer).",
   },
   {
     key: "owned_total",
     label: "Total",
-    tip: "Total Amazon + 3PL. Same formula on every SKU. Reserved is in Total Amazon, not a column. Unfulfillable is not included. A missing source is blank and omitted. A known 0 counts as 0. AWD inbound is not included. As-of is the timestamps of the rows used.",
+    tip: "Total Amazon + 3PL. Same formula on every SKU. Reserved is in Total Amazon, not a column. Unfulfillable is not included. A missing source is blank and omitted. A known 0 counts as 0. AWD inbound is inside the AWD term, once. As-of is the timestamps of the rows used.",
   },
   { key: "total_u_7", label: "V7", tip: "Average daily units sold over last 7 days" },
   { key: "total_u_30", label: "V30", tip: "Average daily units sold over last 30 days (orders report)" },

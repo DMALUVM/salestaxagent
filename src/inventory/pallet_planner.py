@@ -23,6 +23,7 @@ from collections import defaultdict
 from src.channels import AMAZON, is_quarantined_source
 from src.db import fetch_all
 from src.inventory.holiday_surge import normalize_sku
+from src.inventory.sc_on_hand import parse_reserved_splits, raw_from_row, sc_on_hand_units
 from src.rules import AMAZON_PULSE_SOURCE
 
 LIP_BALM_SKUS = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"]
@@ -98,8 +99,8 @@ FIRST_WAVE_AWD_TARGETS = {
     "DDPE0002Shop": 8_775,   # peppermint — half pallet at ≥50% / 8,775 floor
 }
 FIRST_WAVE_AWD_TARGET_CAP = 61_425
-# Ship: assorted + orange first (aim end of August if Marpac can, 2/month max),
-# then unscented + peppermint.
+# Ship: assorted + orange first — target end of September, 2/month max —
+# then unscented + peppermint. August stays Marpac→Tulsa, mix TBD.
 FIRST_WAVE_AWD_SHIP_ORDER = (
     "DDPE0004Shop",  # assorted
     "DDPE0003Shop",  # orange
@@ -519,7 +520,7 @@ def fba_manufacture_gap(
     inbound: int,
     august: int = 0,
 ) -> int:
-    """FBA-cap hole after fulfillable + inbound + August-to-FBA.
+    """FBA-cap hole after SC on-hand + inbound + August-to-FBA.
 
     Display / mixed-track input only. Manufacture column is AWD surge,
     not this number. Inbound is not re-sent.
@@ -1045,8 +1046,9 @@ def sept_fba_gaps(
 ) -> dict[str, dict]:
     """Per-SKU FBA on-hand gap vs Sept targets.
 
-    Supply = FBA fulfillable + inbound already in transit. Inbound is not
-    sent again. Targets are on-hand goals, not a locked mix recipe.
+    Supply = Seller Central on-hand (fulfillable + FC transfer) + inbound
+    already in transit. Unfulfillable is out. Inbound is not sent again.
+    Targets are on-hand goals, not a locked mix recipe.
     """
     wanted = skus or LIP_BALM_SKUS
     tgt = targets or SEPT_FBA_ON_HAND_TARGETS
@@ -1133,7 +1135,7 @@ def build_september_plan(
 ) -> dict:
     """Two piles: mixed Marpac → Tulsa → FBA to the month cap, then AWD.
 
-    Track 1 — Mixed pallets fill the month FBA cap after fulfillable +
+    Track 1 — Mixed pallets fill the month FBA cap after SC on-hand +
     inbound + Tulsa + August. That remainder is not the Manufacture column.
     Track 2 — Near-term new Marpac is the locked first-wave single-SKU
     AWD buy (61,425), not optimistic 76,211. Optimistic high water stays
@@ -1218,7 +1220,7 @@ def build_september_plan(
         card["destination"] = "awd"
         card["single_sku"] = True
         card["first_wave"] = bool(use_first_wave)
-        card["aim_end_of_august"] = bool(
+        card["aim_end_of_september"] = bool(
             use_first_wave and card.get("sku") in FIRST_WAVE_AWD_SHIP_ORDER[:2]
         )
     fba_after_send = {
@@ -1405,9 +1407,32 @@ def production_months_before_gate(
     return feasible[:n]
 
 
-def fba_cover_units(snap: dict) -> int:
-    """Cover uses FBA fulfillable only."""
-    return int(snap.get("fulfillable", 0) or 0)
+def fba_cover_units(
+    snap: dict,
+    restock: dict | None = None,
+    planning: dict | None = None,
+) -> int:
+    """Cover / cap uses Seller Central on-hand, not API fulfillable.
+
+    FBA = fulfillable + restock FC transfer. Unfulfillable stays out.
+    Shares src.inventory.sc_on_hand with the inventory table.
+    """
+    splits = parse_reserved_splits(raw_from_row(restock), raw_from_row(planning))
+    return sc_on_hand_units(int(snap.get("fulfillable", 0) or 0), splits)
+
+
+def _latest_restock_planning() -> tuple[dict[str, dict], dict[str, dict]]:
+    restock: dict[str, dict] = {}
+    planning: dict[str, dict] = {}
+    try:
+        restock = latest_row_per_sku(fetch_all("inventory_restock"))
+    except Exception:
+        pass
+    try:
+        planning = latest_row_per_sku(fetch_all("inventory_planning"))
+    except Exception:
+        pass
+    return restock, planning
 
 
 def inbound_in_transit(snap: dict) -> int:
@@ -1469,6 +1494,7 @@ def build_pallet_plan(
     # Load data
     snaps = {normalize_sku(r.get("sku")): r for r in fetch_all("inventory_snapshots")}
     awds = {normalize_sku(r.get("sku")): r for r in fetch_all("inventory_awd")}
+    restock_rows, planning_rows = _latest_restock_planning()
     tpls: dict[str, dict] = {}
     try:
         tpls = latest_row_per_sku(fetch_all("inventory_3pl_snapshots"))
@@ -1508,8 +1534,9 @@ def build_pallet_plan(
     total_gap = 0
 
     for sku in target_skus:
-        s = snaps.get(normalize_sku(sku), {})
-        fba = fba_cover_units(s)
+        key = normalize_sku(sku)
+        s = snaps.get(key, {})
+        fba = fba_cover_units(s, restock_rows.get(key), planning_rows.get(key))
         inbound = inbound_in_transit(s)
         awd_oh = sku_awd_oh[sku]
         tpl_oh = sku_3pl[sku]
@@ -1621,7 +1648,7 @@ def build_pallet_plan(
             "family_yoy_context_only": round(family_ctx["yoy"], 4),
             "include_3pl_transfer": include_3pl,
             "include_awd": include_awd,
-            "cover": "fba_fulfillable_only",
+            "cover": "fba_sc_on_hand",
             "cover_target_days": policy["target_cover_days"],
             "tulsa_floor_units": tulsa["floor"],
             "tulsa_3pl": tulsa,
@@ -1777,6 +1804,7 @@ def build_fba_cover_projection(
     # Load data
     snaps = {r["sku"]: r for r in fetch_all("inventory_snapshots")}
     awds = {r["sku"]: r for r in fetch_all("inventory_awd")}
+    restock_rows, planning_rows = _latest_restock_planning()
     tpls: dict[str, dict] = {}
     try:
         tpls = latest_row_per_sku(fetch_all("inventory_3pl_snapshots"))
@@ -1810,7 +1838,9 @@ def build_fba_cover_projection(
 
     for sku in target_skus:
         s = snaps.get(sku, {})
-        fba_now = fba_cover_units(s)
+        fba_now = fba_cover_units(
+            s, restock_rows.get(normalize_sku(sku)), planning_rows.get(normalize_sku(sku)),
+        )
         inbound_now = inbound_in_transit(s)
         awd_now = int(awds.get(sku, {}).get("awd_on_hand", 0) or 0) if include_awd else 0
         tpl_now = int(tpls.get(sku, {}).get("available", 0) or 0) if include_3pl else 0
@@ -1953,9 +1983,9 @@ def assign_awd_cards_to_months(
 ) -> dict[str, list[dict]]:
     """Up to two legal single-SKU AWD cards per Sep–Dec month.
 
-    Pack in first-wave ship order: assorted + orange first (aim end of
-    August if Marpac can), then unscented + peppermint. About 2/month
-    is the max. August stays Marpac→Tulsa TBD — AWD starts in September.
+    Pack in first-wave ship order: assorted + orange first (target end
+    of September), then unscented + peppermint. About 2/month is the
+    max. August stays Marpac→Tulsa TBD — AWD starts in September.
     Under-half leftovers are never cards.
     """
     months = [m for m in AWD_SCHEDULE_MONTHS if m in production_months]
@@ -2244,6 +2274,7 @@ def build_manufacturer_headsup(
     awds_data = {
         normalize_sku(r.get("sku")): r for r in fetch_all("inventory_awd")
     }
+    restock_rows, planning_rows = _latest_restock_planning()
     tpls_data: dict[str, dict] = {}
     try:
         tpls_data = latest_row_per_sku(fetch_all("inventory_3pl_snapshots"))
@@ -2266,9 +2297,10 @@ def build_manufacturer_headsup(
 
     inv: dict[str, dict[str, int]] = {}
     for sku in target_skus:
-        s = snaps.get(normalize_sku(sku), {})
+        key = normalize_sku(sku)
+        s = snaps.get(key, {})
         inv[sku] = {
-            "fba": fba_cover_units(s),
+            "fba": fba_cover_units(s, restock_rows.get(key), planning_rows.get(key)),
             "inbound": inbound_in_transit(s),
             "awd": int(awds_data.get(normalize_sku(sku), {}).get("awd_on_hand", 0) or 0),
             "tpl": int(tpls_data.get(normalize_sku(sku), {}).get("available", 0) or 0),
@@ -2436,7 +2468,7 @@ def build_manufacturer_headsup(
         "amazon_in_by": amazon_in_by.isoformat(),
         "pallet_max": pallet_max,
         "cover_target_days": policy["target_cover_days"],
-        "cover": "fba_fulfillable_only",
+        "cover": "fba_sc_on_hand",
         "include_jan": include_jan,
         "tpl_offsets_production": tpl_offsets_production,
         "months": production_months,
@@ -2588,7 +2620,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a(f"Pallet capacity: {headsup['pallet_max']:,} cartons "
       f"({CARTONS_PER_BOX} per 13×11×9 box)")
     a("Fill: two full + one ≥50% partial is fine. Under half is merge-or-hold, not a card.")
-    a(f"FBA cover: fulfillable only · inbound already in transit (do not re-send)")
+    a("FBA cover: Seller Central on-hand (fulfillable + FC transfer) · inbound already in transit (do not re-send)")
     a(f"Aug/Sep waves in Amazon FBA by: {headsup['amazon_in_by']}")
     a("Oct/Nov/Dec new Marpac is single-SKU AWD — not mixed, not a Tulsa holiday pile.")
     a("Early-Jan FBA refill leaves AWD (or Tulsa hop) in December (peak-end − 35d).")

@@ -1,7 +1,13 @@
 "use client";
 
 import { useInventory } from "@/lib/hooks";
-import type { InventoryLeadtimeSummary, InventorySettings, InventorySnapshot } from "@/lib/types";
+import type {
+  InventoryLeadtimeSummary,
+  InventoryPlanning,
+  InventoryRestock,
+  InventorySettings,
+  InventorySnapshot,
+} from "@/lib/types";
 import { LoadingState } from "@/components/loading";
 import { Button } from "@/components/ui/button";
 import { isConfigured } from "@/lib/supabase";
@@ -29,6 +35,8 @@ export default function PalletPlanPage() {
   const snapshots = (raw?.snapshots ?? []) as InventorySnapshot[];
   const awdList = (raw?.awd ?? []) as { sku: string; awd_on_hand: number; pulled_at?: string | null }[];
   const tplList = latestRowPerSku((raw?.tpl ?? []) as { sku: string; available: number; pulled_at?: string | null }[]);
+  const restockList = (raw?.restock ?? []) as InventoryRestock[];
+  const planningList = (raw?.planning ?? []) as InventoryPlanning[];
   const settings = (raw as { settings?: InventorySettings | null } | undefined)?.settings;
   const leadtime = (raw as { leadtime?: InventoryLeadtimeSummary | null } | undefined)?.leadtime;
 
@@ -45,6 +53,8 @@ export default function PalletPlanPage() {
         snapshots={snapshots}
         awdList={awdList}
         tplList={tplList}
+        restockList={restockList}
+        planningList={planningList}
         settings={settings}
         leadtime={leadtime}
       />
