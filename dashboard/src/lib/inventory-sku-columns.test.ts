@@ -16,16 +16,19 @@ describe("SKU table default column set", () => {
     assert.equal(DEFAULT_VISIBLE_COLUMN_KEYS.includes("owned_total"), true);
     assert.equal(ALWAYS_VISIBLE_COLUMN_KEYS.includes("owned_total"), true);
     const labels = visibleSkuTableColumns(null).map((c) => c.label);
-    assert.deepEqual(labels.slice(0, 8), [
+    assert.deepEqual(labels.slice(0, 9), [
       "SKU",
       "FBA",
       "AWD",
       "3PL",
       "Inbnd",
+      "Total Amazon",
       "Total",
       "V7",
       "V30",
     ]);
+    assert.equal(DEFAULT_VISIBLE_COLUMN_KEYS.includes("total_amazon"), true);
+    assert.equal(ALWAYS_VISIBLE_COLUMN_KEYS.includes("total_amazon"), true);
     assert.equal(labels.includes("Reserved"), false);
     assert.equal(labels.includes("Unfulfillable"), false);
     const keys = SKU_TABLE_COLUMNS.map((c) => c.key as string);
@@ -46,15 +49,28 @@ describe("SKU table default column set", () => {
     assert.equal(predating.includes("fba_on_hand" as never), false);
     assert.equal(predating.includes("fba_reserved" as never), false);
     assert.equal(predating.includes("fba_unfulfillable" as never), false);
+    assert.equal(predating.includes("total_amazon"), true);
+    assert.equal(
+      predating.indexOf("total_amazon"),
+      predating.indexOf("inbound") + 1,
+    );
     assert.equal(
       predating.indexOf("owned_total"),
-      predating.indexOf("inbound") + 1,
+      predating.indexOf("total_amazon") + 1,
     );
   });
 
-  test("forces Total on even if hiddenColumns / omitted visibleColumns try to hide it", () => {
+  test("forces Total Amazon and Total on even if hidden / omitted", () => {
     assert.equal(
-      resolveVisibleColumns({ hiddenColumns: ["owned_total", "dos"] }).includes("owned_total"),
+      resolveVisibleColumns({ hiddenColumns: ["owned_total", "total_amazon", "dos"] }).includes(
+        "owned_total",
+      ),
+      true,
+    );
+    assert.equal(
+      resolveVisibleColumns({ hiddenColumns: ["owned_total", "total_amazon"] }).includes(
+        "total_amazon",
+      ),
       true,
     );
     assert.equal(
@@ -63,23 +79,34 @@ describe("SKU table default column set", () => {
       }).includes("owned_total"),
       true,
     );
+    assert.equal(
+      resolveVisibleColumns({
+        visibleColumns: ["sku", "fba_fulfillable", "awd_on_hand"],
+      }).includes("total_amazon"),
+      true,
+    );
   });
 
-  test("FBA column copy is fulfillable only", () => {
+  test("FBA column copy is Seller Central on-hand, not API fulfillable alone", () => {
     const fba = SKU_TABLE_COLUMNS.find((c) => c.key === "fba_fulfillable");
     assert.ok(fba);
-    assert.match(fba.tip, /fulfillable/i);
-    assert.match(fba.tip, /Reserved/);
+    assert.match(fba.tip, /Seller Central on-hand/i);
+    assert.match(fba.tip, /FC transfer/i);
+    assert.doesNotMatch(fba.tip, /fulfillable units only/i);
     assert.doesNotMatch(fba.tip, /checked in at Amazon FBA$/);
   });
 
-  test("Total tip says reserved is in the sum, not a column", () => {
+  test("Total Amazon and Total tips lock the formula; no extra columns", () => {
+    const amz = SKU_TABLE_COLUMNS.find((c) => c.key === "total_amazon");
     const total = SKU_TABLE_COLUMNS.find((c) => c.key === "owned_total");
+    assert.ok(amz);
     assert.ok(total);
+    assert.match(amz.tip, /researching/i);
+    assert.match(amz.tip, /Not unfulfillable/i);
+    assert.match(amz.tip, /FC transfer/i);
+    assert.match(total.tip, /Total Amazon \+ 3PL/i);
     assert.match(total.tip, /every SKU/i);
-    assert.match(total.tip, /reserved/i);
     assert.match(total.tip, /not a column/i);
-    assert.match(total.tip, /Unfulfillable/i);
     assert.doesNotMatch(total.tip, /DDPE0003|lip family|lip-only/i);
   });
 });

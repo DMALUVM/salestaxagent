@@ -268,6 +268,16 @@ export interface InventoryRestock {
   available: number;
   inbound: number;
   alert: string | null;
+  raw?: unknown;
+  pulled_at?: string | null;
+}
+
+export interface InventoryPlanning {
+  sku: string;
+  asin?: string | null;
+  product_name?: string | null;
+  available?: number;
+  raw?: unknown;
   pulled_at?: string | null;
 }
 

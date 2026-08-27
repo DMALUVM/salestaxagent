@@ -7,6 +7,7 @@ import type {
   InventorySnapshot,
   SkuVelocity,
   InventoryRestock,
+  InventoryPlanning,
   InventorySettings,
   SeasonalityWeekly,
   Inventory3plSnapshot,
@@ -107,6 +108,7 @@ interface ComputedRow {
   tpl_available: number;
   tpl_display: number | null;
   awd_on_hand: number | null;
+  total_amazon: number | null;
   owned_total: number | null;
   owned_as_of: string | null;
   owned_as_of_detail: string;
@@ -185,6 +187,7 @@ export default function InventoryPage() {
   const snapshots = (raw?.snapshots ?? []) as InventorySnapshot[];
   const velocities = (raw?.velocity ?? []) as SkuVelocity[];
   const restockList = (raw?.restock ?? []) as InventoryRestock[];
+  const planningList = (raw?.planning ?? []) as InventoryPlanning[];
   const tplSnapshots = live3plSnapshots((raw?.tpl ?? []) as Inventory3plSnapshot[]);
   const settings = (raw?.settings ?? {
     target_cover_days: 60,
@@ -255,6 +258,8 @@ export default function InventoryPage() {
       snapshots,
       tpl: tplSnapshots,
       awd: awdSnapshots,
+      restock: restockList,
+      planning: planningList,
     });
 
     const allSkus = new Set([
@@ -407,12 +412,10 @@ export default function InventoryPage() {
       const owned = ownedNetworkTotalForSku(sku, ownedSources);
       const fulfillable = owned.fbaFulfillable ?? 0;
       const reserved = owned.fbaReserved ?? 0;
-      const researching = Number(snap?.researching ?? 0);
-      const unfulfillable_qty = Number(snap?.unfulfillable ?? 0);
-      // Planning math still sees reserved+researching+unfulfillable.
-      // The FBA *column* is fulfillable only — see fba_fulfillable.
-      // Reserved is in owned Total (sum only), not a table column.
-      const fba_on_hand = fulfillable + reserved + researching + unfulfillable_qty;
+      // FBA column = Seller Central on-hand (sellable/cover).
+      // Planning cover uses the same SC on-hand, not API fulfillable
+      // and not SC FBA total (which includes unfulfillable).
+      const fba_on_hand = owned.fbaOnHand ?? 0;
       const inbound = owned.fbaInbound ?? 0;
       const tpl_available = owned.tplOnHand ?? 0;
       const awd_qty = owned.awdOnHand ?? 0;
@@ -475,7 +478,7 @@ export default function InventoryPage() {
         asin: vel?.asin ?? rec?.asin ?? snap?.asin ?? "",
         product_name: vel?.product_name ?? rec?.product_name ?? snap?.product_name ?? tpl?.product_name ?? "",
         fulfillable,
-        fba_fulfillable: owned.fbaFulfillable,
+        fba_fulfillable: owned.fbaOnHand,
         fba_on_hand,
         inbound,
         inbound_display: owned.fbaInbound,
@@ -483,6 +486,7 @@ export default function InventoryPage() {
         tpl_available,
         tpl_display: owned.tplOnHand,
         awd_on_hand: owned.awdOnHand,
+        total_amazon: owned.totalAmazon,
         owned_total: owned.total,
         owned_as_of: ownedAsOfLabel(owned),
         owned_as_of_detail: formatOwnedAsOf(owned),
@@ -526,7 +530,7 @@ export default function InventoryPage() {
     }
 
     return result;
-  }, [snapshots, velocities, restockList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, signalRows, leadtime, s]);
+  }, [snapshots, velocities, restockList, planningList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, signalRows, leadtime, s]);
 
   // Filter + sort
   const filtered = useMemo(() => {
@@ -565,7 +569,7 @@ export default function InventoryPage() {
     list.sort((a, b) => {
       const av = a[col];
       const bv = b[col];
-      if (col === "owned_total" || col === "fba_fulfillable" || col === "awd_on_hand" || col === "tpl_display" || col === "inbound_display") {
+      if (col === "owned_total" || col === "total_amazon" || col === "fba_fulfillable" || col === "awd_on_hand" || col === "tpl_display" || col === "inbound_display") {
         const an = a[col] as number | null;
         const bn = b[col] as number | null;
         if (an == null && bn == null) return 0;
@@ -604,11 +608,11 @@ export default function InventoryPage() {
 
   function exportCSV() {
     const header =
-      "SKU,ASIN,Product,FBA_Fulfillable,AWD,3PL,Inbound,Total,TotalAsOf,TotalV30,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
+      "SKU,ASIN,Product,FBA,AWD,3PL,Inbound,TotalAmazon,Total,TotalAsOf,TotalV30,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
     const body = filtered
       .map(
         (r) =>
-          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_fulfillable ?? ""},${r.awd_on_hand ?? ""},${r.tpl_display ?? ""},${r.inbound_display ?? ""},${r.owned_total ?? ""},"${(r.owned_as_of_detail ?? "").replace(/"/g, '""')}",${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
+          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_fulfillable ?? ""},${r.awd_on_hand ?? ""},${r.tpl_display ?? ""},${r.inbound_display ?? ""},${r.total_amazon ?? ""},${r.owned_total ?? ""},"${(r.owned_as_of_detail ?? "").replace(/"/g, '""')}",${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
       )
       .join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
@@ -928,6 +932,11 @@ export default function InventoryPage() {
                       {formatSkuQty(r.inbound_display)}
                     </TableCell>
                     )}
+                    {visibleKeys.has("total_amazon") && (
+                    <TableCell className="text-right tabular-nums font-medium">
+                      {formatSkuQty(r.total_amazon)}
+                    </TableCell>
+                    )}
                     {visibleKeys.has("owned_total") && (
                     <TableCell
                       className="text-right tabular-nums font-medium"
@@ -1062,13 +1071,13 @@ export default function InventoryPage() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded-lg border p-3">
                   <p className="text-[10px] text-muted-foreground uppercase">
-                    FBA fulfillable
+                    FBA on-hand
                   </p>
                   <p className="text-lg font-semibold">
                     {formatSkuQty(selected.fba_fulfillable)}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
-                    reserved {fmt(selected.reserved)} · in Total, not in FBA
+                    Seller Central sellable/cover
                   </p>
                 </div>
                 <div className="rounded-lg border p-3">
@@ -1095,9 +1104,17 @@ export default function InventoryPage() {
                     {formatSkuQty(selected.inbound_display)}
                   </p>
                 </div>
-                <div className="rounded-lg border p-3 col-span-2">
+                <div className="rounded-lg border p-3">
                   <p className="text-[10px] text-muted-foreground uppercase">
-                    Total (owned)
+                    Total Amazon
+                  </p>
+                  <p className="text-lg font-semibold">
+                    {formatSkuQty(selected.total_amazon)}
+                  </p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-[10px] text-muted-foreground uppercase">
+                    Total
                   </p>
                   <p className="text-lg font-semibold" title={selected.owned_as_of_detail}>
                     {selected.owned_total != null ? fmt(selected.owned_total) : "—"}
