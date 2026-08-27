@@ -34,7 +34,6 @@ import {
 import { isConfigured } from "@/lib/supabase";
 import {
   Shield,
-  AlertTriangle,
   Download,
   Package,
   ShoppingBag,
@@ -43,10 +42,9 @@ import {
   RefreshCw,
 } from "lucide-react";
 import Link from "next/link";
-import { FourNumbersSummary } from "@/components/inventory/FourNumbersSummary";
-import { useFourNumbersPlan } from "@/lib/use-four-numbers-plan";
-import { inventoryActionSummary } from "@/lib/inventory-actions";
+import { HolidayShipPlan } from "@/components/inventory/HolidayShipPlan";
 import { displayTitle, rawTitle } from "@/lib/display-title";
+import { latestRowPerSku } from "@/lib/pallet-planner-model";
 
 // ---------------------------------------------------------------------------
 
@@ -192,8 +190,6 @@ export default function InventoryPage() {
     null,
   );
   const s = localSettings ?? settings;
-  const { plan: fourNumbersPlan } = useFourNumbersPlan({ raw });
-  const logisticsSummary = inventoryActionSummary(raw);
 
   function effectiveLeadDays(
     sig: InventorySkuSignals | undefined,
@@ -541,29 +537,6 @@ export default function InventoryPage() {
     return list;
   }, [rows, search, sortCol, sortAsc, showZeroStock, filterChip]);
 
-  // Summary
-  const summary = useMemo(() => {
-    const active = rows.filter(
-      (r) => r.fulfillable > 0 || r.total_u_30 > 0,
-    );
-    const atRisk = active.filter((r) => r.dos < 60);
-    const totalReorder = rows.reduce((s, r) => s + r.our_reorder_qty, 0);
-    const totalAmzRec = rows.reduce((s, r) => s + r.amz_rec_qty, 0);
-    const totalOnHand = rows.reduce((s, r) => s + r.on_hand, 0);
-    const totalVel = rows.reduce((s, r) => s + r.total_u_30, 0);
-    const weeksOfCover =
-      totalVel > 0
-        ? Math.round((totalOnHand / (totalVel * 7)) * 10) / 10
-        : 0;
-    return {
-      active: active.length,
-      atRisk: atRisk.length,
-      totalReorder,
-      totalAmzRec,
-      weeksOfCover,
-    };
-  }, [rows]);
-
   async function saveSettings() {
     if (!localSettings) return;
     setSaving(true);
@@ -603,23 +576,12 @@ export default function InventoryPage() {
   if (!isConfigured()) return <SetupPrompt />;
   if (loading) return <LoadingState />;
 
-  const target = s.holiday_mode ? 90 : s.target_cover_days;
-
   // Seasonality chart data (weeks 1-52)
   const seasonChart = seasonality
     .filter((s) => Number(s.week) >= 1 && Number(s.week) <= 52)
     .map((s) => ({ ...s, week: Number(s.week), multiplier: Number(s.multiplier) }))
     .sort((a, b) => a.week - b.week);
   const maxMult = Math.max(...seasonChart.map((s) => s.multiplier), 1.5);
-
-  const calSignals = signalRows.filter((x) => x.measured_receive_days != null);
-  const accountReceive = calSignals.length
-    ? Math.round(
-        calSignals.reduce((sum, x) => sum + Number(x.measured_receive_days), 0)
-        / calSignals.length,
-      )
-    : null;
-  const divergent = rows.filter((r) => r.rate_agreement === "investigate").length;
 
   return (
     <div className="space-y-6">
@@ -634,10 +596,7 @@ export default function InventoryPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Inventory</h1>
           <p className="text-sm text-muted-foreground">
-            Target {target}d FBA cover &middot; {Number(s.receiving_days_normal)}–{Number(s.receiving_days_peak)}d check-in buffer
-            {s.holiday_mode && (
-              <Badge variant="outline" className="ml-2 text-amber-600 border-amber-300">Holiday Mode</Badge>
-            )}
+            Live positions · ship plan is FBA cap + AWD, not 90d cover
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -707,148 +666,14 @@ export default function InventoryPage() {
         <p className="text-xs text-muted-foreground">{syncMsg}</p>
       )}
 
-      {(fourNumbersPlan || logisticsSummary.critical > 0 || logisticsSummary.restock > 0) && (
-        <Card className={logisticsSummary.critical > 0 ? "border-red-500/40" : "border-orange-500/30"}>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Today&apos;s logistics</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              {logisticsSummary.critical > 0 && `${logisticsSummary.critical} critical · `}
-              {logisticsSummary.restock > 0 && `${logisticsSummary.restock} reorder · `}
-              {logisticsSummary.investigate > 0 && `${logisticsSummary.investigate} rate check`}
-              {logisticsSummary.critical === 0 && logisticsSummary.restock === 0 && "Cover OK"}
-            </p>
-          </CardHeader>
-          <CardContent>
-            <FourNumbersSummary plan={fourNumbersPlan} compact planningHref="/planning?tab=inbound" />
-          </CardContent>
-        </Card>
-      )}
-
-      {(signalRows.length > 0 || divergent > 0 || leadtime) && (
-        <Card className="border-blue-200 bg-blue-50/40 dark:border-blue-900 dark:bg-blue-950/20">
-          <CardContent className="py-3 text-xs leading-relaxed text-blue-900 dark:text-blue-100">
-            <p className="font-medium">Rate & lead-time calibration</p>
-            <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
-              <strong>V30</strong> = orders report (SP-API). <strong>Inv V30</strong> = total FBA quantity
-              day-over-day (ledger receipts counted). When they diverge &gt;25%, investigate before reordering.
-              <strong> Recv</strong> = median <strong>shipped → received</strong> days from closed FBA inbound
-              {accountReceive != null ? ` (~${accountReceive}d measured)` : ""}.
-              Reorder qty uses measured lead time per SKU (falls back to {s.receiving_days_normal}d configured).
-              <strong> AWD→FBA</strong> = outbound <strong>shipped → Prime-eligible</strong> (ledger sellable receipt when available).
-              {divergent > 0 ? ` ${divergent} SKU(s) flagged.` : ""}
-              Daily history builds after each <code className="rounded bg-blue-100/60 px-1 dark:bg-blue-900/40">inventory-sync</code> — needs ~7 days for Inv V30.
-            </p>
-            {leadtime && (
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-md border border-blue-200/60 bg-white/50 px-2.5 py-2 dark:border-blue-800 dark:bg-blue-950/30">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700/80 dark:text-blue-300/80">
-                    FBA direct inbound
-                  </p>
-                  <p className="mt-0.5 text-sm font-medium tabular-nums">
-                    {leadtime.fba_receive_median != null ? `${leadtime.fba_receive_median}d` : "—"}
-                    {leadtime.fba_receive_n ? ` (n=${leadtime.fba_receive_n})` : ""}
-                  </p>
-                </div>
-                <div className="rounded-md border border-blue-200/60 bg-white/50 px-2.5 py-2 dark:border-blue-800 dark:bg-blue-950/30">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700/80 dark:text-blue-300/80">
-                    FBA optimized (multi-FC)
-                  </p>
-                  <p className="mt-0.5 text-sm font-medium tabular-nums">
-                    {leadtime.fba_optimized_receive_median != null
-                      ? `${leadtime.fba_optimized_receive_median}d`
-                      : "—"}
-                    {leadtime.fba_optimized_receive_n
-                      ? ` (n=${leadtime.fba_optimized_receive_n} boxes)`
-                      : ""}
-                  </p>
-                  <p className="text-[10px] text-blue-700/70 dark:text-blue-300/70">
-                    Same-day shipments to 2+ FCs (your 5-box optimized splits)
-                  </p>
-                </div>
-                <div className="rounded-md border border-blue-200/60 bg-white/50 px-2.5 py-2 dark:border-blue-800 dark:bg-blue-950/30">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700/80 dark:text-blue-300/80">
-                    AWD → Prime eligible
-                  </p>
-                  <p className="mt-0.5 text-sm font-medium tabular-nums">
-                    {leadtime.awd_replenish_median != null
-                      ? `${leadtime.awd_replenish_median}d`
-                      : "—"}
-                    {leadtime.awd_replenish_n ? ` (n=${leadtime.awd_replenish_n})` : ""}
-                    {leadtime.configured_awd_to_fba_days != null
-                      ? ` · ${leadtime.configured_awd_to_fba_days}d configured`
-                      : ""}
-                  </p>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Summary cards */}
-      <div className="grid gap-3 grid-cols-2 sm:grid-cols-5">
-        <Card className={summary.atRisk > 0 ? "border-amber-500/40" : ""}>
-          <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              FBA &lt;60d
-            </p>
-            <p
-              className={`mt-1 text-2xl font-semibold tabular-nums ${
-                summary.atRisk > 0 ? "text-amber-500" : ""
-              }`}
-            >
-              {summary.atRisk}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              of {summary.active} active SKUs
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Our Reorder
-            </p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">
-              {fmt(summary.totalReorder)}
-            </p>
-            <p className="text-xs text-muted-foreground">units to order</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Amazon Rec
-            </p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">
-              {fmt(summary.totalAmzRec)}
-            </p>
-            <p className="text-xs text-muted-foreground">units recommended</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Portfolio Cover
-            </p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">
-              {summary.weeksOfCover}
-            </p>
-            <p className="text-xs text-muted-foreground">weeks of cover</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Active SKUs
-            </p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">
-              {summary.active}
-            </p>
-            <p className="text-xs text-muted-foreground">with stock or sales</p>
-          </CardContent>
-        </Card>
-      </div>
+      <HolidayShipPlan
+        compact
+        snapshots={snapshots}
+        awdList={awdSnapshots}
+        tplList={latestRowPerSku(tplSnapshots)}
+        settings={s}
+        leadtime={leadtime}
+      />
 
       {/* Capacity strip */}
       {capacityLimits.length > 0 && (
@@ -1387,7 +1212,7 @@ export default function InventoryPage() {
                     })
                   }
                 />
-                Holiday Mode (target 90d cover)
+                Holiday Mode
               </label>
               <label className="flex items-center gap-2 text-sm">
                 <input
