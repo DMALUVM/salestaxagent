@@ -329,9 +329,10 @@ def test_never_plan_zero_awd_and_zero_tulsa():
     )
     assert token_plan["awd_loaded"] is False
     assert token_plan["floor"] == 5000
+    # Planned manufacture does not empty Tulsa — only live family AWD ≥5k.
     planned = family_tulsa_floor(
         empty_3pl, sku_awd=empty_awd, awd_planned={"DDPE0004Shop": 5_000},
     )
-    assert planned["awd_loaded"] is True
-    assert planned["floor"] == 0
-    assert planned["top_up"] == 0
+    assert planned["awd_loaded"] is False
+    assert planned["floor"] == 5000
+    assert planned["top_up"] == 5000

@@ -315,19 +315,40 @@ describe("pallet planner model", () => {
     assert.equal(inboundInTransit({ inbound_working: 0, inbound_shipped: 270, inbound_receiving: 0 }), 270);
   });
 
-  test("manufacture is FBA target minus fulfillable minus inbound; August TBD", () => {
+  test("two piles: 3PL→FBA is 2700 chunks; manufacture is AWD surge", () => {
     assert.equal(SEPT_FBA_TARGET_CAP, 55_600);
     assert.equal(SEPT_FBA_ON_HAND_TARGETS.DDPE0004Shop, 17_800);
-    const fba = { DDPE0001Shop: 3248, DDPE0002Shop: 3159, DDPE0003Shop: 4603, DDPE0004Shop: 3873 };
-    const inbound = { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 };
-    const plan = buildSeptemberPlan(fba, inbound, { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 });
+    const fba = { DDPE0001Shop: 3248, DDPE0002Shop: 2079, DDPE0003Shop: 3966, DDPE0004Shop: 3603 };
+    const inbound = { DDPE0001Shop: 0, DDPE0002Shop: 1080, DDPE0003Shop: 637, DDPE0004Shop: 270 };
+    const tpl = { DDPE0001Shop: 1594, DDPE0002Shop: 6291, DDPE0003Shop: 6426, DDPE0004Shop: 9177 };
+    const plan = buildSeptemberPlan(fba, inbound, tpl, {}, {}, { DDPE0002Shop: 540 });
     assert.equal(plan.augustTbd, true);
     assert.equal(plan.mixLocked, false);
-    assert.equal(plan.gaps.DDPE0001Shop.gap, 9552);
-    assert.equal(plan.skuManufacture.DDPE0004Shop, fbaManufactureGap(17_800, 3873, 0));
-    const withAug = buildSeptemberPlan(fba, inbound, { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 }, {}, { DDPE0004Shop: 5000 });
+    assert.equal(plan.twoTracks, true);
+    assert.equal(plan.tplToFba.DDPE0004Shop, 8100);
+    assert.equal(plan.tplToFba.DDPE0003Shop, 5400);
+    assert.equal(plan.tplToFba.DDPE0002Shop, 2700);
+    assert.equal(plan.tplToFba.DDPE0001Shop, 0);
+    assert.equal(plan.firstAction.tplToFbaTotal, 16200);
+    assert.equal(plan.tplToAwd.DDPE0002Shop, 0);
+    assert.equal(plan.awdLoaded, false);
+    assert.ok(plan.awdPallets.length > 0);
+    assert.ok(plan.awdPallets.every((c) => c.singleSku && c.destination === "awd"));
+    assert.notEqual(plan.skuManufacture.DDPE0004Shop, fbaManufactureGap(17_800, 3603, 270));
+    const full = buildSeptemberPlan(
+      { DDPE0001Shop: 12800, DDPE0002Shop: 8300, DDPE0003Shop: 16700, DDPE0004Shop: 17800 },
+      { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 },
+      { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 },
+    );
+    const withAug = buildSeptemberPlan(
+      { DDPE0001Shop: 12800, DDPE0002Shop: 8300, DDPE0003Shop: 16700, DDPE0004Shop: 17800 },
+      { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 },
+      { DDPE0001Shop: 0, DDPE0002Shop: 0, DDPE0003Shop: 0, DDPE0004Shop: 0 },
+      {},
+      { DDPE0004Shop: 5000 },
+    );
     assert.equal(withAug.augustTbd, false);
-    assert.equal(withAug.skuManufacture.DDPE0004Shop, plan.skuManufacture.DDPE0004Shop - 5000);
+    assert.equal(withAug.skuManufacture.DDPE0004Shop, full.skuManufacture.DDPE0004Shop - 5000);
   });
 
   test("AWD loaded drops 5k Tulsa floor; never 0 AWD and 0 Tulsa", () => {

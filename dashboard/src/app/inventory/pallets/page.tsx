@@ -19,6 +19,10 @@ import {
   PALLET_MAX_UNITS,
   SEPT_FBA_ON_HAND_TARGETS,
   SEPT_FBA_TARGET_CAP,
+  OPTIMISTIC_AWD_ON_HAND_TARGETS,
+  OPTIMISTIC_AWD_TARGET_CAP,
+  FBA_INBOUND_PREFERRED,
+  FBA_INBOUND_MIN_FEE_FREE,
   applyAssortedCorrectionDisplay,
   buildSeptemberPlan,
   fbaManufactureGap,
@@ -103,6 +107,7 @@ interface MfgMonthEntry {
   fullPallets?: number; hasPartial?: boolean; partialUnits?: number; heldUnits?: number;
   awaitingAugustTotals: boolean; fillPct: number;
   units: number; mix: Record<string, number>; shipBy: string; inAmazon: string;
+  destination?: string; singleSku?: boolean;
 }
 interface MfgScenario { entries: MfgMonthEntry[]; totalUnits: number; totalPallets: number; }
 interface MfgSkuSummary {
@@ -110,7 +115,8 @@ interface MfgSkuSummary {
   fbaTarget: number; yoy: number;
   fba: number; inbound: number; awd: number; tpl: number;
   august: number; augustTbd: boolean;
-  transfer: number; mixedTulsa: number; awdOverflow: number; manufacture: number;
+  transfer: number; transferAwd: number; mixedTulsa: number;
+  awdOverflow: number; awdTarget: number; fbaStillShort: number; manufacture: number;
 }
 interface MfgTransfer { sku: string; source: string; units: number; timing: string; }
 
@@ -154,9 +160,9 @@ function buildMfgCsv(
   transfers: MfgTransfer[],
 ): string {
   const L: string[] = [];
-  L.push("Section,SKU,SKU_Label,NovJan_Sellthrough,FBA_Target,FBA,Inbound,AWD,TPL,August,Transfer,Mixed_Tulsa,AWD_Overflow,Manufacture,Scenario");
+  L.push("Section,SKU,SKU_Label,NovJan_Sellthrough,FBA_Target,FBA,Inbound,AWD,TPL,August,Transfer_FBA,Transfer_AWD,FBA_Still_Short,AWD_Target,Manufacture,Scenario");
   for (const [sc, rows] of [["sales_yoy", skuSummary], ["actual_2025", skuSummarySens]] as const) {
-    for (const s of rows) L.push(`SKU_Summary,${s.sku},${s.label},${s.sellthrough},${s.fbaTarget},${s.fba},${s.inbound},${s.awd},${s.tpl},${s.august},${s.transfer},${s.mixedTulsa},${s.awdOverflow},${s.manufacture},${sc}`);
+    for (const s of rows) L.push(`SKU_Summary,${s.sku},${s.label},${s.sellthrough},${s.fbaTarget},${s.fba},${s.inbound},${s.awd},${s.tpl},${s.august},${s.transfer},${s.transferAwd},${s.fbaStillShort},${s.awdTarget},${s.manufacture},${sc}`);
   }
   L.push(""); L.push("Section,Month,Month_Label,Status,SKU,SKU_Label,Units,Pallets,Ship_By,In_Amazon,Scenario");
   for (const [sc, label] of [[primary, "sales_yoy"], [sensitivity, "actual_2025"]] as const) {
@@ -183,15 +189,16 @@ function buildMfgSheet(
   L.push("=================================================================");
   L.push(""); L.push("SKU REFERENCE:");
   for (const [sku, label] of Object.entries(SKU_LABELS)) L.push(`  ${sku}  =  ${label}`);
-  L.push(""); L.push("Nov–Jan sell-through and late-Sep FBA targets are separate. Do not add peak-60d onto sales.");
-  L.push("Manufacture = FBA target − FBA fulfillable − inbound − August (when entered). Overflow = single-SKU AWD.");
-  L.push("Drop 5k Tulsa floor when family AWD (on-hand + planned overflow) is ≥5,000. Token AWD (e.g. 540) is not loaded. Never plan 0 AWD and 0 Tulsa. August is TBD until Dave's totals.");
+  L.push("");   L.push("Holiday pile = FBA-at-cap + AWD. Tulsa is a hop, not the holiday pile.");
+  L.push("FIRST ACTION: 3PL→FBA in 2,700 fee-free chunks (min 1,350). Do not empty Tulsa.");
+  L.push("Leftover stays Tulsa tonight when live AWD < 5k. Remaining FBA gap waits on August mixed (TBD).");
+  L.push("After August, Oct/Nov/Dec+ new Marpac is single-SKU AWD to 76,211. Manufacture is the AWD surge, not the FBA hole.");
   L.push("Family YoY is context only — not applied as a blended multiplier.");
   L.push(`Pallet capacity: ${fmt(PALLET_MAX)} cartons (270 per 13×11×9 box)`);
   L.push("Fill: two full + one ≥50% partial is fine. Under half is merge-or-hold, not a card.");
   L.push(`FBA cover: fulfillable only · inbound already in transit`);
-  L.push(`All holiday units in Amazon FBA by: ${TARGET}`);
-  L.push(`3PL policy: transfer only (does NOT reduce manufacture)`);
+  L.push(`FBA inbound: ${fmt(FBA_INBOUND_PREFERRED)} preferred · ${fmt(FBA_INBOUND_MIN_FEE_FREE)} minimum`);
+  L.push(`3PL fills FBA first in 2,700 chunks; leftover stays Tulsa until AWD ≥5k`);
   L.push(""); L.push("-----------------------------------------------------------------");
   L.push("PER-SKU SUMMARY (sales_yoy)"); L.push("-----------------------------------------------------------------");
   for (const s of skuSummary) {
@@ -454,9 +461,7 @@ export default function PalletPlanPage() {
     return { coverProjections: projections, coverAlerts: alerts };
   }, [snapshots, forecasts, awdList, tplList, velocityList, include3pl, includeAwd]);
 
-  // ── Manufacturer Heads-Up (FBA-target gap; 3PL = transfer; AWD overflow) ──
-  const [tplOffsetsProduction, setTplOffsetsProduction] = useState(false);
-
+  // ── Manufacturer Heads-Up (two piles: FBA cap + AWD surge) ──
   const { mfgPrimary, mfgSensitivity, mfgSkuSummary, mfgSkuSummarySens, mfgTransfers, mfgSept } = useMemo(() => {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
     const awdMap = new Map(awdList.map((a) => [a.sku, a]));
@@ -501,28 +506,27 @@ export default function PalletPlanPage() {
         const sellthrough = demand[sku] ?? 0;
         const fbaTarget = useFbaTarget ? (SEPT_FBA_ON_HAND_TARGETS[sku] ?? 0) : sellthrough;
         const august = parsedAugust[sku] ?? 0;
-        let manufacture = fbaManufactureGap(fbaTarget, i.fba, i.inbound, august);
-        if (tplOffsetsProduction) manufacture = Math.max(0, manufacture - (sept.tplToFba[sku] ?? 0));
+        const manufacture = sept.skuManufacture[sku] ?? 0;
         summaries.push({
           sku, label: SKU_LABELS[sku] ?? sku, holidayDemand: sellthrough, sellthrough,
           fbaTarget, yoy: salesDemand[sku]?.yoy ?? 1,
           fba: i.fba, inbound: i.inbound, awd: i.awd, tpl: i.tpl,
           august, augustTbd: august <= 0,
           transfer: sept.tplToFba[sku] ?? 0,
-          mixedTulsa: sept.mixedNeed[sku] ?? 0,
-          awdOverflow: sept.awdNeed[sku] ?? 0,
+          transferAwd: sept.tplToAwd[sku] ?? 0,
+          mixedTulsa: 0,
+          awdOverflow: manufacture,
+          awdTarget: sept.awdTargets[sku] ?? OPTIMISTIC_AWD_ON_HAND_TARGETS[sku] ?? 0,
+          fbaStillShort: sept.fbaStillShort[sku] ?? 0,
           manufacture,
         });
       }
 
-      const gateMonths = horizon.filter((h) => h.role === "gate" && !h.month.endsWith("-08")).map((h) => h.month);
-      const refillMonths = horizon.filter((h) => h.role === "refill").map((h) => h.month);
-      const remainingGate: Record<string, number> = {};
+      const refillMonths = horizon
+        .filter((h) => !h.month.endsWith("-08") && (h.role === "refill" || h.month >= "2026-10"))
+        .map((h) => h.month);
       const remainingRefill: Record<string, number> = {};
-      for (const s of summaries) {
-        remainingGate[s.sku] = s.mixedTulsa;
-        remainingRefill[s.sku] = s.awdOverflow;
-      }
+      for (const s of summaries) remainingRefill[s.sku] = s.manufacture;
       const entries: MfgMonthEntry[] = [];
       for (const m of productionMonths) {
         const h = horizonByMonth[m];
@@ -530,26 +534,23 @@ export default function PalletPlanPage() {
         const recv = h?.receiveDays ?? policy.gateReceiveDays;
         const isAugust = m.endsWith("-08");
         const mix: Record<string, number> = {};
+        const singleSku = !isAugust && refillMonths.includes(m);
         if (isAugust) {
           for (const sku of SKUS) {
             const qty = parsedAugust[sku] ?? 0;
             if (qty > 0) mix[sku] = qty;
           }
-        } else {
-          const pool = role === "gate" ? remainingGate : remainingRefill;
-          const roleMonths = role === "gate" ? gateMonths : refillMonths;
-          const mi = roleMonths.indexOf(m);
-          const lastInRole = mi === roleMonths.length - 1;
-          const w = role === "gate" ? (MFG_WEIGHTS[mi] ?? 0) : 1 / Math.max(roleMonths.length, 1);
-          const wSum = role === "gate"
-            ? MFG_WEIGHTS.slice(mi, roleMonths.length).reduce((a, b) => a + b, 0)
-            : Math.max(roleMonths.length - mi, 1);
+        } else if (refillMonths.includes(m)) {
+          const mi = refillMonths.indexOf(m);
+          const lastInRole = mi === refillMonths.length - 1;
+          const w = 1 / Math.max(refillMonths.length, 1);
+          const wSum = Math.max(refillMonths.length - mi, 1);
           for (const sku of SKUS) {
-            if (pool[sku] <= 0) continue;
+            if (remainingRefill[sku] <= 0) continue;
             const alloc = lastInRole
-              ? pool[sku]
-              : Math.min(Math.round(pool[sku] * w / Math.max(wSum, 0.01)), pool[sku]);
-            if (alloc > 0) { mix[sku] = alloc; pool[sku] -= alloc; }
+              ? remainingRefill[sku]
+              : Math.min(Math.round(remainingRefill[sku] * w / Math.max(wSum, 0.01)), remainingRefill[sku]);
+            if (alloc > 0) { mix[sku] = alloc; remainingRefill[sku] -= alloc; }
           }
         }
         const total = Object.values(mix).reduce((a, b) => a + b, 0);
@@ -572,6 +573,8 @@ export default function PalletPlanPage() {
           awaitingAugustTotals: isAugust && sept.augustTbd,
           fillPct: fill.fillPct,
           units: total, mix, shipBy,
+          destination: isAugust ? "mixed_tulsa_fba" : singleSku ? "awd" : "none",
+          singleSku,
           inAmazon: inAmazonDate(shipBy, recv, latest, { clamp: role === "gate" }),
         });
       }
@@ -591,10 +594,15 @@ export default function PalletPlanPage() {
       const xfer = sept.tplToFba[sku] ?? 0;
       if (xfer > 0) {
         transfers.push({
-          sku, source: "3PL", units: xfer,
-          timing: sept.awdLoaded
-            ? `3PL→FBA toward Sept target by ${sept.shipBy} — family AWD ≥5k, no Tulsa floor`
-            : `3PL→FBA toward Sept target by ${sept.shipBy} — AWD below 5k reserve, keep Tulsa floor (do not plan 0 AWD and 0 Tulsa)`,
+          sku, source: "3PL→FBA", units: xfer,
+          timing: `${xfer / FBA_INBOUND_PREFERRED}×${fmt(FBA_INBOUND_PREFERRED)} fee-free inbound by ${sept.shipBy}. Live AWD ${sept.awdLoaded ? "≥5k" : "<5k — keep Tulsa floor, leftover stays Tulsa"}.`,
+        });
+      }
+      const hop = sept.tplToAwd[sku] ?? 0;
+      if (hop > 0) {
+        transfers.push({
+          sku, source: "3PL→AWD", units: hop,
+          timing: "Leftover Tulsa hops to AWD only because live family AWD is already ≥5k.",
         });
       }
     }
@@ -604,7 +612,7 @@ export default function PalletPlanPage() {
       mfgSkuSummary: prim.summaries, mfgSkuSummarySens: sens.summaries,
       mfgTransfers: transfers, mfgSept: sept,
     };
-  }, [snapshots, forecasts, awdList, tplList, committed, tplOffsetsProduction, salesDemand, skuBuilds, policy, parsedAugust]);
+  }, [snapshots, forecasts, awdList, tplList, committed, salesDemand, skuBuilds, policy, parsedAugust]);
 
   if (!configured) return <SetupPrompt />;
   if (loading) return <LoadingState />;
@@ -699,18 +707,90 @@ export default function PalletPlanPage() {
               </Button>
             </div>
           </div>
-          <div className="flex items-center gap-4 mt-1">
-            <p className="text-xs text-muted-foreground">
-              Nov–Jan sell-through and late-Sep FBA targets are separate — not a 125k stacked Cover. Manufacture = FBA target − fulfillable − inbound. August is TBD until Dave&apos;s totals. Mix unlocked.
-            </p>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground" title="Unchecked: 3PL is Transfer only and does not shrink Manufacture">
-              <input type="checkbox" checked={tplOffsetsProduction}
-                onChange={(e) => setTplOffsetsProduction(e.target.checked)} />
-              3PL offsets manufacture
-            </label>
-          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Holiday pile = FBA-at-cap + AWD. Tulsa is a hop. Manufacture is the AWD surge buy, not the FBA hole. August mixed is TBD — do not invent a mix. After August, Oct/Nov/Dec+ is single-SKU AWD. Mix unlocked.
+          </p>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide">Tonight — four lines (live warehouse)</p>
+            <p className="text-[11px] text-muted-foreground">
+              Dated stamps: FBA {fbaAsOf ?? "—"}{awdAsOf ? ` · AWD ${awdAsOf}` : ""}{restockAsOf ? ` · 3PL ${restockAsOf}` : ""}.
+              Inbound already counted — do not re-send. Placement fees under 5 boxes.
+              13×11×9 (270) → min {fmt(FBA_INBOUND_MIN_FEE_FREE)}. 20×16×14 (540) → min {fmt(FBA_INBOUND_PREFERRED)}.
+              Tonight uses 540-boxes (peppermint = five × 540 = {fmt(FBA_INBOUND_PREFERRED)}).
+            </p>
+            <ol className="space-y-2 text-sm">
+              <li className="rounded-md border bg-background p-2">
+                <p className="text-[11px] font-medium text-blue-600">1 · 3PL→FBA mixed send (first action)</p>
+                <p className="tabular-nums text-sm font-semibold">
+                  {(["DDPE0004Shop", "DDPE0003Shop", "DDPE0002Shop", "DDPE0001Shop"] as const).map((sku, i) => {
+                    const qty = mfgSept.tplToFba[sku] ?? 0;
+                    return (
+                      <span key={sku}>
+                        {i > 0 ? " · " : ""}
+                        {SKU_SHORT[sku]} {qty > 0 ? `${fmt(qty)}${qty % FBA_INBOUND_PREFERRED === 0 && qty > 0 ? ` (${qty / FBA_INBOUND_PREFERRED}×${fmt(FBA_INBOUND_PREFERRED)})` : ""}` : "waits August"}
+                      </span>
+                    );
+                  })}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Total {fmt(mfgSept.firstAction.tplToFbaTotal)} · not a 40k Manufacture · not an 18,488 empty-out
+                </p>
+              </li>
+              <li className="rounded-md border bg-background p-2">
+                <p className="text-[11px] font-medium">2 · Leftover → single-SKU AWD</p>
+                {mfgSept.firstAction.tplToAwdTotal > 0 ? (
+                  <p className="tabular-nums text-sm">
+                    {SKUS.filter((s) => (mfgSept.tplToAwd[s] ?? 0) > 0).map((s) => `${SKU_SHORT[s]} ${fmt(mfgSept.tplToAwd[s] ?? 0)}`).join(" · ")}
+                  </p>
+                ) : (
+                  <p className="text-sm">None tonight. Live AWD {fmt(mfgSkuSummary.reduce((a, s) => a + s.awd, 0))} is under 5k — leftover stays Tulsa (no peppermint → AWD).</p>
+                )}
+              </li>
+              <li className="rounded-md border bg-background p-2">
+                <p className="text-[11px] font-medium">3 · Remaining FBA gap waits on August (mixed, TBD)</p>
+                <p className="tabular-nums text-sm">
+                  {(["DDPE0001Shop", "DDPE0003Shop", "DDPE0004Shop", "DDPE0002Shop"] as const).map((sku, i) => (
+                    <span key={sku}>
+                      {i > 0 ? " · " : ""}
+                      {SKU_SHORT[sku]} {fmt(mfgSept.fbaStillShort[sku] ?? 0)}
+                    </span>
+                  ))}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  After tonight: FBA+inbound {fmt(mfgSept.firstAction.fbaAfterSendTotal)} of {fmt(SEPT_FBA_TARGET_CAP)}.
+                  Tulsa holds {fmt(mfgSept.firstAction.tulsaHoldTotal)} (floor {fmt(mfgSept.tulsaFloorUnits)}).
+                  Do not bake an August mix.
+                </p>
+              </li>
+              <li className="rounded-md border bg-background p-2">
+                <p className="text-[11px] font-medium text-primary">4 · AWD high water — after FBA is at cap, ALL new Marpac is single-SKU AWD</p>
+                <p className="tabular-nums text-sm">
+                  Orange {fmt(OPTIMISTIC_AWD_ON_HAND_TARGETS.DDPE0003Shop)} · Unscented {fmt(OPTIMISTIC_AWD_ON_HAND_TARGETS.DDPE0001Shop)} · Assorted {fmt(OPTIMISTIC_AWD_ON_HAND_TARGETS.DDPE0004Shop)} · Peppermint {fmt(OPTIMISTIC_AWD_ON_HAND_TARGETS.DDPE0002Shop)}
+                  {" "}(family {fmt(OPTIMISTIC_AWD_TARGET_CAP)})
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Manufacture = AWD surge buy {fmt(mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0))} · {mfgSept.awdPallets.length} single-SKU pallet card{mfgSept.awdPallets.length === 1 ? "" : "s"} · Oct/Nov/Dec+, not mixed
+                </p>
+              </li>
+            </ol>
+          </div>
+
+          {mfgSept.awdPallets.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium mb-1">Single-SKU AWD pallet cards (new Marpac after August)</p>
+              <div className="flex flex-wrap gap-2">
+                {mfgSept.awdPallets.map((card) => (
+                  <div key={`${card.sku}-${card.palletNum}`} className="rounded-md border px-2 py-1.5 text-xs">
+                    <p className="font-medium">{SKU_SHORT[card.sku] ?? card.sku} → AWD</p>
+                    <p className="tabular-nums">{fmt(card.totalUnits)}{card.partial ? " partial" : " full"}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <p className="text-[11px] font-medium mb-1">Dated on-hand · FBA {fbaAsOf ?? "—"}{awdAsOf ? ` · AWD ${awdAsOf}` : ""}</p>
             <Table>
@@ -725,10 +805,10 @@ export default function PalletPlanPage() {
                   <TableHead className="text-right" title="Late-Sep / early-Oct FBA on-hand. Cap 55,600.">Late-Sep FBA target</TableHead>
                   <TableHead className="text-right">FBA gap</TableHead>
                   <TableHead className="text-right" title="Dave’s August totals — TBD until entered">August</TableHead>
-                  <TableHead className="text-right">Transfer</TableHead>
-                  <TableHead className="text-right">Mixed Tulsa→FBA</TableHead>
-                  <TableHead className="text-right">AWD overflow</TableHead>
-                  <TableHead className="text-right font-semibold">Manufacture</TableHead>
+                  <TableHead className="text-right">3PL→FBA</TableHead>
+                  <TableHead className="text-right">FBA still short</TableHead>
+                  <TableHead className="text-right">AWD target</TableHead>
+                  <TableHead className="text-right font-semibold">Manufacture (AWD)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -755,8 +835,8 @@ export default function PalletPlanPage() {
                       />
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-blue-500">{s.transfer > 0 ? fmt(s.transfer) : "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums">{s.mixedTulsa > 0 ? fmt(s.mixedTulsa) : "—"}</TableCell>
-                    <TableCell className="text-right tabular-nums">{s.awdOverflow > 0 ? fmt(s.awdOverflow) : "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{s.fbaStillShort > 0 ? fmt(s.fbaStillShort) : "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(s.awdTarget)}</TableCell>
                     <TableCell className="text-right tabular-nums font-semibold text-primary">{fmt(s.manufacture)}</TableCell>
                   </TableRow>
                 ))}
@@ -771,8 +851,8 @@ export default function PalletPlanPage() {
                   <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + Math.max(0, s.fbaTarget - s.fba - s.inbound), 0))}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">{mfgSept.augustTbd ? "TBD" : fmt(mfgSkuSummary.reduce((a, s) => a + s.august, 0))}</TableCell>
                   <TableCell className="text-right tabular-nums text-blue-500">{fmt(mfgSkuSummary.reduce((a, s) => a + s.transfer, 0))}</TableCell>
-                  <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.mixedTulsa, 0))}</TableCell>
-                  <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.awdOverflow, 0))}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(mfgSkuSummary.reduce((a, s) => a + s.fbaStillShort, 0))}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(OPTIMISTIC_AWD_TARGET_CAP)}</TableCell>
                   <TableCell className="text-right tabular-nums text-primary">{fmt(mfgSkuSummary.reduce((a, s) => a + s.manufacture, 0))}</TableCell>
                 </TableRow>
               </TableBody>
@@ -801,7 +881,13 @@ export default function PalletPlanPage() {
                   </div>
 
                   {entry.units === 0 ? (
-                    <p className="text-xs text-muted-foreground py-2">No production needed</p>
+                    <p className="text-xs text-muted-foreground py-2">
+                      {entry.awaitingAugustTotals
+                        ? "August mixed pallet is TBD — Dave sends the mix tomorrow. Do not invent a mix."
+                        : entry.destination === "awd"
+                          ? "No single-SKU AWD this month"
+                          : "No production this month — FBA fill is tonight’s 3PL + August mixed TBD"}
+                    </p>
                   ) : (
                     <>
                       {entry.hasPartial ? (
@@ -900,12 +986,12 @@ export default function PalletPlanPage() {
           )}
 
           <p className="text-[10px] text-muted-foreground">
-            Manufacture = late-Sep FBA target − FBA fulfillable − inbound (do not re-send) − August when entered.
-            {!tplOffsetsProduction && " 3PL is Transfer only (does not shrink Manufacture)."}
+            Manufacture = AWD surge to optimistic 76,211, not the FBA hole.
+            3PL→FBA first in 2,700 chunks (min 1,350; after 2,700 step +540). Do not empty Tulsa when live AWD &lt; 5k.
             {mfgSept.awdLoaded
-              ? " Family AWD ≥5k — no 5k Tulsa floor; off-FBA reserve sits in AWD."
-              : " AWD below 5k reserve — keep Tulsa floor so we do not plan 0 AWD and 0 Tulsa."}
-            {" "}Overflow after FBA is close = single-SKU AWD (not another add of 60d onto sales). Mix unlocked. Two full + one ≥50% partial is fine. August is TBD until Dave&apos;s totals. Not a purchase order.
+              ? " Family AWD ≥5k — leftover may hop to AWD."
+              : " Live AWD below 5k — leftover stays Tulsa. Never plan 0 AWD and 0 Tulsa."}
+            {" "}August mixed is TBD. After August, Oct/Nov/Dec+ new Marpac is single-SKU AWD. Mix unlocked. Not a purchase order.
           </p>
         </CardContent>
       </Card>
