@@ -7,6 +7,10 @@ export const PALLET_MAX_UNITS = 19_000;
 export const CARTONS_PER_BOX = 270;
 export const AMAZON_IN_BY = "2026-10-31";
 export const DEFAULT_RECEIVING_DAYS = 18;
+export const TULSA_LIP_FLOOR_UNITS = 5_000;
+export const PEAK_END_DEFAULT = "2027-01-15";
+export const DEC_DAYS = 31;
+export const JAN_DAYS = 31;
 export const YOY_WINDOW_MONTHS = [5, 6, 7] as const;
 export const DEMAND_METHOD = "sku_2025_same_month_x_sku_may_jul_yoy";
 export const LIP_BALM_SKUS = [
@@ -194,6 +198,162 @@ export function holidayDemandFromSales(
   return out;
 }
 
+export function coverUnitsFromDaily(daily: number, coverDays: number): number {
+  if (daily <= 0 || coverDays <= 0) return 0;
+  return Math.round(daily * coverDays);
+}
+
+export function decemberDailyRate(decUnits: number): number {
+  return Math.max(decUnits, 0) / DEC_DAYS;
+}
+
+export function januaryDailyRate(janUnits: number): number {
+  return Math.max(janUnits, 0) / JAN_DAYS;
+}
+
+export type PlannerSettings = {
+  target_cover_days?: number;
+  receiving_days_peak?: number;
+  receiving_days_normal?: number;
+  awd_to_fba_days?: number;
+  peak_end_date?: string | null;
+};
+
+export type PlannerLeadtime = {
+  fba_receive_median?: number | null;
+  fba_receive_n?: number | null;
+  awd_replenish_median?: number | null;
+  awd_replenish_n?: number | null;
+};
+
+export function plannerPolicy(
+  settings?: PlannerSettings | null,
+  leadtime?: PlannerLeadtime | null,
+) {
+  const coverDays = Number(settings?.target_cover_days ?? 60);
+  const recvPeak = Number(settings?.receiving_days_peak ?? 35);
+  const recvNormal = Number(settings?.receiving_days_normal ?? 28);
+  const awdCfg = Number(settings?.awd_to_fba_days ?? 14);
+  const peakEnd = settings?.peak_end_date || PEAK_END_DEFAULT;
+  const measuredFba = leadtime?.fba_receive_median ?? null;
+  const measuredAwd = leadtime?.awd_replenish_median ?? null;
+  const gateReceive = measuredFba != null && measuredFba > 0 ? measuredFba : recvPeak;
+  const refillReceive = measuredFba != null && measuredFba > 0 ? measuredFba : recvNormal;
+  const awdDays = measuredAwd != null && measuredAwd > 0 ? measuredAwd : awdCfg;
+  return {
+    targetCoverDays: coverDays,
+    receivingDaysPeak: recvPeak,
+    receivingDaysNormal: recvNormal,
+    awdToFbaDays: awdCfg,
+    gateReceiveDays: gateReceive,
+    refillReceiveDays: refillReceive,
+    effectiveAwdToFbaDays: awdDays,
+    peakEndDate: peakEnd,
+    tulsaFloorUnits: TULSA_LIP_FLOOR_UNITS,
+    fbaReceiveMedian: measuredFba,
+    fbaReceiveN: Number(leadtime?.fba_receive_n ?? 0),
+    awdReplenishMedian: measuredAwd,
+    awdReplenishN: Number(leadtime?.awd_replenish_n ?? 0),
+    amazonInBy: AMAZON_IN_BY,
+  };
+}
+
+export function skuProductionBuild(
+  demandRow: {
+    novDecDemand?: number;
+    janDemand?: number;
+    months2026?: Record<number, number>;
+  },
+  opts?: { coverDays?: number; receiveDays?: number },
+) {
+  const coverDays = opts?.coverDays ?? 60;
+  const receiveDays = opts?.receiveDays ?? 20;
+  const decUnits = Number(demandRow.months2026?.[12] ?? 0);
+  const janUnits = Number(demandRow.janDemand ?? 0);
+  const novDec = Number(demandRow.novDecDemand ?? 0);
+  const decDaily = decemberDailyRate(decUnits);
+  const janDaily = januaryDailyRate(janUnits);
+  const peakCover = coverUnitsFromDaily(decDaily, coverDays);
+  const janCover = coverUnitsFromDaily(janDaily, coverDays);
+  const endingCover = Math.max(peakCover, janCover);
+  const pipeline = coverUnitsFromDaily(decDaily, receiveDays);
+  const demand = novDec + janUnits;
+  return {
+    demand,
+    novDecDemand: novDec,
+    janDemand: janUnits,
+    decUnits,
+    decDaily,
+    janDaily,
+    peakCover,
+    janCover,
+    endingCover,
+    pipeline,
+    gateUnits: novDec + peakCover + pipeline,
+    refillUnits: janUnits + Math.max(0, janCover - peakCover),
+    skuBuild: demand + endingCover + pipeline,
+  };
+}
+
+export function familyTulsaFloor(
+  sku3pl: Record<string, number>,
+  floor = TULSA_LIP_FLOOR_UNITS,
+) {
+  const onHand = Object.values(sku3pl).reduce((a, v) => a + Math.max(Number(v) || 0, 0), 0);
+  return {
+    floor,
+    onHand,
+    transferable: Math.max(0, onHand - floor),
+    topUp: Math.max(0, floor - onHand),
+    splitPerSku: false,
+  };
+}
+
+export type HorizonMonth = {
+  month: string;
+  role: "gate" | "refill";
+  receiveDays: number;
+  needInFba: string;
+  label: string;
+};
+
+export function productionHorizonMonths(
+  today: Date,
+  amazonInBy = AMAZON_IN_BY,
+  gateReceiveDays = 20,
+  peakEnd = PEAK_END_DEFAULT,
+  refillReceiveDays?: number,
+): HorizonMonth[] {
+  const refillRecv = refillReceiveDays ?? gateReceiveDays;
+  const out: HorizonMonth[] = [];
+  let y = today.getFullYear();
+  let m = today.getMonth() + 1;
+  const [peY, peM] = peakEnd.split("-").map(Number);
+  while (y < peY || (y === peY && m <= peM)) {
+    const month = `${y}-${String(m).padStart(2, "0")}`;
+    const isGate = monthCanMakeGate(month, amazonInBy, gateReceiveDays);
+    const gateYear = Number(amazonInBy.slice(0, 4));
+    const isRefill = y === gateYear && (m === 11 || m === 12);
+    if (isGate) {
+      out.push({
+        month, role: "gate", receiveDays: gateReceiveDays,
+        needInFba: amazonInBy, label: "in_fba_by_gate",
+      });
+    } else if (isRefill) {
+      out.push({
+        month, role: "refill", receiveDays: refillRecv,
+        needInFba: peakEnd, label: "january_cover_refill",
+      });
+    }
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return out;
+}
+
 export function palletFill(units: number, palletMax = PALLET_MAX_UNITS) {
   const u = Math.max(0, Math.floor(units));
   const max = Math.max(0, palletMax);
@@ -227,9 +387,11 @@ export function inAmazonDate(
   shipBy: string,
   receivingDays: number,
   amazonInBy: string,
+  opts?: { clamp?: boolean },
 ): string {
   const arrive = parseIso(shipBy);
   arrive.setDate(arrive.getDate() + Math.max(receivingDays, 0));
+  if (opts?.clamp === false) return toIso(arrive);
   const gate = parseIso(amazonInBy);
   return arrive.getTime() <= gate.getTime() ? toIso(arrive) : amazonInBy;
 }
@@ -247,10 +409,14 @@ export function shipByForMonth(
   month: string,
   amazonInBy: string,
   receivingDays = DEFAULT_RECEIVING_DAYS,
+  opts?: { role?: "gate" | "refill" },
 ): string {
   const [y, mo] = month.split("-").map(Number);
   const lastDay = new Date(y, mo, 0);
   const preferred = new Date(y, mo - 1, Math.min(20, lastDay.getDate()));
+  if (opts?.role === "refill") {
+    return preferred.getTime() <= lastDay.getTime() ? toIso(preferred) : toIso(lastDay);
+  }
   const lastShip = lastShipDate(amazonInBy, receivingDays);
   const start = new Date(y, mo - 1, 1);
   let ship = preferred.getTime() <= lastShip.getTime() ? preferred : lastShip;

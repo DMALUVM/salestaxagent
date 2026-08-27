@@ -16,8 +16,8 @@ import Link from "next/link";
 import {
   ACTUAL_2025_SOURCE,
   AMAZON_IN_BY,
-  DEFAULT_RECEIVING_DAYS,
   PALLET_MAX_UNITS,
+  familyTulsaFloor,
   familyYoyMayJul,
   fbaCoverUnits,
   holidayDemandFromSales,
@@ -26,11 +26,14 @@ import {
   latestRowPerSku,
   monthlyAmazonUnits,
   palletFill,
-  productionMonthsBeforeGate,
+  plannerPolicy,
+  productionHorizonMonths,
   shipByForMonth,
+  skuProductionBuild,
   stampDate,
   type AmazonMonthlySale,
 } from "@/lib/pallet-planner-model";
+import type { InventoryLeadtimeSummary, InventorySettings } from "@/lib/types";
 
 const SKUS = ["DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop"];
 const SKU_LABELS: Record<string, string> = {
@@ -89,6 +92,7 @@ interface SkuProjection {
 }
 interface MfgMonthEntry {
   month: string; label: string; status: "FIRM" | "INDICATIVE";
+  role?: "gate" | "refill";
   pallets: number; leftoverUnits: number; isPalletCard: boolean;
   awaitingAugustTotals: boolean; fillPct: number;
   units: number; mix: Record<string, number>; shipBy: string; inAmazon: string;
@@ -247,6 +251,9 @@ export default function PalletPlanPage() {
   const velocityList = (raw?.velocity ?? []) as SkuVelocity[];
   const restockList = (raw?.restock ?? []) as { sku: string; pulled_at?: string | null }[];
   const amazonLipSales = (raw?.amazonLipSales ?? []) as AmazonMonthlySale[];
+  const settings = (raw as { settings?: InventorySettings | null } | undefined)?.settings;
+  const leadtime = (raw as { leadtime?: InventoryLeadtimeSummary | null } | undefined)?.leadtime;
+  const policy = useMemo(() => plannerPolicy(settings, leadtime), [settings, leadtime]);
   const salesMonthly = useMemo(
     () => monthlyAmazonUnits(amazonLipSales, SKUS),
     [amazonLipSales],
@@ -256,6 +263,16 @@ export default function PalletPlanPage() {
     () => holidayDemandFromSales(salesMonthly, SKUS, { includeJan: true }),
     [salesMonthly],
   );
+  const skuBuilds = useMemo(() => {
+    const out: Record<string, ReturnType<typeof skuProductionBuild>> = {};
+    for (const sku of SKUS) {
+      out[sku] = skuProductionBuild(salesDemand[sku] ?? {}, {
+        coverDays: policy.targetCoverDays,
+        receiveDays: policy.gateReceiveDays,
+      });
+    }
+    return out;
+  }, [salesDemand, policy]);
   const fbaAsOf = stampDate(snapshots.find((s) => s.snapshot_at)?.snapshot_at);
   const awdAsOf = stampDate(awdList.find((a) => a.pulled_at)?.pulled_at);
   const restockAsOf = stampDate(restockList.find((r) => r.pulled_at)?.pulled_at);
@@ -265,6 +282,12 @@ export default function PalletPlanPage() {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
     const awdMap = new Map(awdList.map((a) => [a.sku, a]));
     const tplMap = new Map(tplList.map((t) => [t.sku, t]));
+    const sku3pl: Record<string, number> = {};
+    for (const sku of SKUS) {
+      sku3pl[sku] = include3pl ? Number(tplMap.get(sku)?.available ?? 0) : 0;
+    }
+    const tulsa = familyTulsaFloor(sku3pl, policy.tulsaFloorUnits);
+    const xferShare = tulsa.onHand > 0 ? tulsa.transferable / tulsa.onHand : 0;
     const plans: SkuPlan[] = [];
     let tGap = 0, tDemand = 0, tSupply = 0;
     for (const sku of SKUS) {
@@ -272,17 +295,20 @@ export default function PalletPlanPage() {
       const fba = fbaCoverUnits(snap ?? {});
       const inbound = inboundInTransit(snap ?? {});
       const awd = includeAwd ? Number(awdMap.get(sku)?.awd_on_hand ?? 0) : 0;
-      const tpl = include3pl ? Number(tplMap.get(sku)?.available ?? 0) : 0;
-      const supply = fba + inbound + awd + tpl;
+      const tpl = sku3pl[sku];
+      const xfer = Math.round(tpl * xferShare);
+      const supply = fba + inbound + awd + xfer;
       const novDecDemand = salesDemand[sku]?.novDecDemand ?? 0;
-      const gap = Math.max(novDecDemand - supply, 0);
-      tGap += gap; tDemand += novDecDemand; tSupply += supply;
+      const target = skuBuilds[sku]?.skuBuild ?? novDecDemand;
+      const gap = Math.max(target - supply, 0);
+      tGap += gap; tDemand += target; tSupply += supply;
       plans.push({
         sku, label: SKU_LABELS[sku] ?? sku, novDecDemand,
         yoy: salesDemand[sku]?.yoy ?? 1,
         fba, inbound, awd, tpl, supply, gap,
       });
     }
+    tGap += tulsa.topUp;
     const fill = palletFill(tGap, PALLET_MAX);
     const remaining = Object.fromEntries(plans.map((p) => [p.sku, p.gap]));
     const pals: Pallet[] = [];
@@ -304,7 +330,7 @@ export default function PalletPlanPage() {
       skuPlans: plans, pallets: pals, leftoverUnits: fill.leftoverUnits, leftoverMix: leftover,
       totalGap: tGap, totalDemand: tDemand, totalSupply: tSupply,
     };
-  }, [snapshots, awdList, tplList, include3pl, includeAwd, salesDemand]);
+  }, [snapshots, awdList, tplList, include3pl, includeAwd, salesDemand, skuBuilds, policy]);
 
   // ── FBA Cover Projection ──
   const { coverProjections, coverAlerts } = useMemo(() => {
@@ -395,7 +421,11 @@ export default function PalletPlanPage() {
     const snapMap = new Map(snapshots.map((s) => [s.sku, s]));
     const awdMap = new Map(awdList.map((a) => [a.sku, a]));
     const tplMap = new Map(tplList.map((t) => [t.sku, t]));
-    const productionMonths = productionMonthsBeforeGate(new Date(), TARGET, DEFAULT_RECEIVING_DAYS, 3);
+    const horizon = productionHorizonMonths(
+      new Date(), TARGET, policy.gateReceiveDays, policy.peakEndDate, policy.refillReceiveDays,
+    );
+    const productionMonths = horizon.map((h) => h.month);
+    const horizonByMonth = Object.fromEntries(horizon.map((h) => [h.month, h]));
 
     // Per-SKU inventory (scenario-independent)
     const inv: Record<string, { fba: number; inbound: number; awd: number; tpl: number }> = {};
@@ -413,7 +443,8 @@ export default function PalletPlanPage() {
       const summaries: MfgSkuSummary[] = [];
       for (const sku of SKUS) {
         const i = inv[sku];
-        const d = demand[sku] ?? 0;
+        const sellthrough = demand[sku] ?? 0;
+        const d = skuBuilds[sku]?.skuBuild ?? sellthrough;
         let deductions = i.fba + i.inbound + i.awd;
         if (tplOffsetsProduction) deductions += i.tpl;
         const manufacture = Math.max(0, d - deductions);
@@ -425,36 +456,60 @@ export default function PalletPlanPage() {
         });
       }
 
-      // Distribute manufacture across months using weights
-      const remaining: Record<string, number> = {};
-      for (const s of summaries) remaining[s.sku] = s.manufacture;
+      const gateMonths = horizon.filter((h) => h.role === "gate").map((h) => h.month);
+      const refillMonths = horizon.filter((h) => h.role === "refill").map((h) => h.month);
+      const remainingGate: Record<string, number> = {};
+      const remainingRefill: Record<string, number> = {};
+      for (const s of summaries) {
+        const b = skuBuilds[s.sku];
+        const g = b?.gateUnits ?? 0;
+        const r = (b?.refillUnits ?? 0);
+        const tot = g + r;
+        if (tot <= 0) {
+          remainingGate[s.sku] = 0;
+          remainingRefill[s.sku] = s.manufacture;
+        } else {
+          remainingGate[s.sku] = Math.min(Math.round(s.manufacture * g / tot), s.manufacture);
+          remainingRefill[s.sku] = s.manufacture - remainingGate[s.sku];
+        }
+      }
       const entries: MfgMonthEntry[] = [];
-      for (let mi = 0; mi < productionMonths.length; mi++) {
-        const m = productionMonths[mi];
-        const w = MFG_WEIGHTS[mi] ?? 0;
-        const wSum = MFG_WEIGHTS.slice(mi).reduce((a, b) => a + b, 0);
+      for (const m of productionMonths) {
+        const h = horizonByMonth[m];
+        const role = h?.role ?? "gate";
+        const recv = h?.receiveDays ?? policy.gateReceiveDays;
+        const pool = role === "gate" ? remainingGate : remainingRefill;
+        const roleMonths = role === "gate" ? gateMonths : refillMonths;
+        const mi = roleMonths.indexOf(m);
+        const lastInRole = mi === roleMonths.length - 1;
+        const w = role === "gate" ? (MFG_WEIGHTS[mi] ?? 0) : 1 / Math.max(roleMonths.length, 1);
+        const wSum = role === "gate"
+          ? MFG_WEIGHTS.slice(mi, roleMonths.length).reduce((a, b) => a + b, 0)
+          : Math.max(roleMonths.length - mi, 1);
         const mix: Record<string, number> = {};
         for (const sku of SKUS) {
-          if (remaining[sku] <= 0) continue;
-          const alloc = mi === productionMonths.length - 1
-            ? remaining[sku]
-            : Math.min(Math.round(remaining[sku] * w / Math.max(wSum, 0.01)), remaining[sku]);
-          if (alloc > 0) { mix[sku] = alloc; remaining[sku] -= alloc; }
+          if (pool[sku] <= 0) continue;
+          const alloc = lastInRole
+            ? pool[sku]
+            : Math.min(Math.round(pool[sku] * w / Math.max(wSum, 0.01)), pool[sku]);
+          if (alloc > 0) { mix[sku] = alloc; pool[sku] -= alloc; }
         }
         const total = Object.values(mix).reduce((a, b) => a + b, 0);
         const fill = palletFill(total, PALLET_MAX);
-        const shipBy = shipByForMonth(m, TARGET, DEFAULT_RECEIVING_DAYS);
+        const shipBy = shipByForMonth(m, TARGET, recv, { role });
         const now = new Date();
         const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+        const latest = role === "gate" ? TARGET : policy.peakEndDate;
         entries.push({
-          month: m, label: monthLabel(m),
+          month: m, label: monthLabel(m), role,
           status: committed.has(m) ? "FIRM" : "INDICATIVE",
           pallets: fill.fullPallets,
           leftoverUnits: fill.leftoverUnits,
           isPalletCard: fill.isPalletCard,
           awaitingAugustTotals: m === currentMonth && now.getMonth() === 7,
           fillPct: fill.fillPct,
-          units: total, mix, shipBy, inAmazon: inAmazonDate(shipBy, DEFAULT_RECEIVING_DAYS, TARGET),
+          units: total, mix, shipBy,
+          inAmazon: inAmazonDate(shipBy, recv, latest, { clamp: role === "gate" }),
         });
       }
       return {
@@ -473,7 +528,9 @@ export default function PalletPlanPage() {
     for (const sku of SKUS) {
       const i = inv[sku];
       if (i.awd > 0) transfers.push({ sku, source: "AWD", units: i.awd, timing: "Transfer to FBA immediately (~2 weeks)" });
-      if (i.tpl > 0) transfers.push({ sku, source: "3PL", units: i.tpl, timing: "Ship to FBA by Sep 30 for pre-holiday receiving" });
+      const tulsa = familyTulsaFloor(Object.fromEntries(SKUS.map((s) => [s, inv[s].tpl])), policy.tulsaFloorUnits);
+      const xfer = tulsa.onHand > 0 ? Math.round(i.tpl * (tulsa.transferable / tulsa.onHand)) : 0;
+      if (xfer > 0) transfers.push({ sku, source: "3PL", units: xfer, timing: `Excess above Tulsa floor (${policy.tulsaFloorUnits.toLocaleString()} lip family) — do not drain 3PL to 0` });
     }
 
     return {
@@ -481,7 +538,7 @@ export default function PalletPlanPage() {
       mfgSkuSummary: prim.summaries, mfgSkuSummarySens: sens.summaries,
       mfgTransfers: transfers,
     };
-  }, [snapshots, forecasts, awdList, tplList, committed, tplOffsetsProduction, salesDemand]);
+  }, [snapshots, forecasts, awdList, tplList, committed, tplOffsetsProduction, salesDemand, skuBuilds, policy]);
 
   if (!configured) return <SetupPrompt />;
   if (loading) return <LoadingState />;
@@ -687,7 +744,9 @@ export default function PalletPlanPage() {
                         })}
                       </div>
                       <p className="text-[10px] text-muted-foreground mt-2">
-                        Ship by {entry.shipBy} · in Amazon by {entry.inAmazon}
+                        {entry.role === "refill"
+                          ? `January cover refill · ship by ${entry.shipBy} · in Amazon ${entry.inAmazon}`
+                          : `Ship by ${entry.shipBy} · in Amazon by ${entry.inAmazon}`}
                       </p>
                       {entry.awaitingAugustTotals && (
                         <p className="text-[10px] text-amber-600 mt-1">

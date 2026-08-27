@@ -6,9 +6,13 @@ import {
   AMAZON_IN_BY,
   DEMAND_METHOD,
   PALLET_MAX_UNITS,
+  familyTulsaFloor,
   familyYoyMayJul,
   fbaCoverUnits,
   holidayDemandFromSales,
+  plannerPolicy,
+  productionHorizonMonths,
+  skuProductionBuild,
   inAmazonDate,
   inboundInTransit,
   latestRowPerSku,
@@ -30,6 +34,8 @@ const ROWS = [
   { sku: "DDPE0001Shop", period_start: "2025-10-01", units: 1670, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0001Shop", period_start: "2025-11-01", units: 2155, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0001Shop", period_start: "2025-12-01", units: 4104, channel: "amazon", source: "amazon_spapi" },
+  { sku: "DDPE0001Shop", period_start: "2025-01-01", units: 1386, channel: "amazon", source: "amazon_spapi" },
+  { sku: "DDPE0001Shop", period_start: "2026-01-01", units: 2904, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0001Shop", period_start: "2026-05-01", units: 1848, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0001Shop", period_start: "2026-06-01", units: 2002, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0001Shop", period_start: "2026-07-01", units: 1775, channel: "amazon", source: "amazon_spapi" },
@@ -39,6 +45,8 @@ const ROWS = [
   { sku: "DDPE0002Shop", period_start: "2025-10-01", units: 1056, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0002Shop", period_start: "2025-11-01", units: 1454, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0002Shop", period_start: "2025-12-01", units: 2850, channel: "amazon", source: "amazon_spapi" },
+  { sku: "DDPE0002Shop", period_start: "2025-01-01", units: 804, channel: "amazon", source: "amazon_spapi" },
+  { sku: "DDPE0002Shop", period_start: "2026-01-01", units: 1685, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0002Shop", period_start: "2026-05-01", units: 1219, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0002Shop", period_start: "2026-06-01", units: 1224, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0002Shop", period_start: "2026-07-01", units: 996, channel: "amazon", source: "amazon_spapi" },
@@ -48,6 +56,8 @@ const ROWS = [
   { sku: "DDPE0003Shop", period_start: "2025-10-01", units: 2439, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0003Shop", period_start: "2025-11-01", units: 2791, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0003Shop", period_start: "2025-12-01", units: 5009, channel: "amazon", source: "amazon_spapi" },
+  { sku: "DDPE0003Shop", period_start: "2025-01-01", units: 1585, channel: "amazon", source: "amazon_spapi" },
+  { sku: "DDPE0003Shop", period_start: "2026-01-01", units: 3321, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0003Shop", period_start: "2026-05-01", units: 2633, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0003Shop", period_start: "2026-06-01", units: 2712, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0003Shop", period_start: "2026-07-01", units: 2083, channel: "amazon", source: "amazon_spapi" },
@@ -57,6 +67,8 @@ const ROWS = [
   { sku: "DDPE0004Shop", period_start: "2025-10-01", units: 1452, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0004Shop", period_start: "2025-11-01", units: 2627, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0004Shop", period_start: "2025-12-01", units: 6861, channel: "amazon", source: "amazon_spapi" },
+  { sku: "DDPE0004Shop", period_start: "2025-01-01", units: 1641, channel: "amazon", source: "amazon_spapi" },
+  { sku: "DDPE0004Shop", period_start: "2026-01-01", units: 3435, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0004Shop", period_start: "2026-05-01", units: 1955, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0004Shop", period_start: "2026-06-01", units: 1698, channel: "amazon", source: "amazon_spapi" },
   { sku: "DDPE0004Shop", period_start: "2026-07-01", units: 1406, channel: "amazon", source: "amazon_spapi" },
@@ -133,6 +145,44 @@ describe("pallet planner model", () => {
     assert.equal(skuYoyMayJul(monthly, TALLOW).yoy, 1);
     assert.equal(demand[TALLOW].novDecDemand, 380);
     assert.equal(demand[TALLOW].months2026[12], 200);
+  });
+
+  test("peak 60d FBA uses December daily; Jan is 2026 × May–Jul YoY not 2.1×", () => {
+    const monthly = monthlyAmazonUnits(ROWS, LIP);
+    const demand = holidayDemandFromSales(monthly, LIP, { includeJan: true });
+    const policy = plannerPolicy(
+      { target_cover_days: 60, receiving_days_peak: 35, receiving_days_normal: 28, awd_to_fba_days: 14, peak_end_date: "2027-01-15" },
+      { fba_receive_median: 20, fba_receive_n: 14, awd_replenish_median: 12, awd_replenish_n: 51 },
+    );
+    assert.equal(policy.gateReceiveDays, 20);
+    assert.equal(policy.tulsaFloorUnits, 5000);
+    let familyPeak = 0;
+    const leftoverYoy = 11345 / 5416;
+    for (const sku of LIP) {
+      const build = skuProductionBuild(demand[sku], { coverDays: 60, receiveDays: policy.gateReceiveDays });
+      familyPeak += build.peakCover;
+      assert.ok(build.skuBuild > demand[sku].holidayDemand);
+      assert.notEqual(demand[sku].janDemand, Math.round(demand[sku].janPrior * leftoverYoy));
+    }
+    assert.ok(familyPeak >= 51000 && familyPeak <= 53000);
+    const uns = skuProductionBuild(demand.DDPE0001Shop, { coverDays: 60, receiveDays: 20 });
+    assert.ok(Math.abs(uns.peakCover - 10700) <= 200);
+    const floor = familyTulsaFloor({ a: 2000, b: 2000, c: 3000, d: 1000 });
+    assert.equal(floor.transferable, 3000);
+    assert.equal(floor.splitPerSku, false);
+  });
+
+  test("horizon includes Nov and Dec refill — not late inbound", () => {
+    const horizon = productionHorizonMonths(new Date(2026, 7, 26), AMAZON_IN_BY, 20);
+    const months = horizon.map((h) => h.month);
+    assert.equal(months.includes("2026-10"), true);
+    assert.equal(months.includes("2026-11"), true);
+    assert.equal(months.includes("2026-12"), true);
+    assert.equal(horizon.find((h) => h.month === "2026-11")?.role, "refill");
+    assert.equal(horizon.find((h) => h.month === "2026-12")?.role, "refill");
+    assert.equal(horizon.find((h) => h.month === "2026-10")?.role, "gate");
+    assert.equal(monthCanMakeGate("2026-11", AMAZON_IN_BY, 20), false);
+    assert.equal(inAmazonDate("2026-11-20", 20, AMAZON_IN_BY, { clamp: false }) > AMAZON_IN_BY, true);
   });
 
   test("leftover 4276 is not a 1-pallet card", () => {
