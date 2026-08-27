@@ -14,6 +14,9 @@ import {
   applyAssortedCorrectionDisplay,
   buildMonthViewEntries,
   earlyJanFbaShipBy,
+  FAMILY_FBA_CAP_OCT_DEC,
+  FAMILY_FBA_CAP_PEAK,
+  familyFbaCapForMonth,
   SEPT_FBA_ON_HAND_TARGETS,
   SEPT_FBA_TARGET_CAP,
   buildSeptemberPlan,
@@ -314,6 +317,15 @@ describe("pallet planner model", () => {
   test("cover is fulfillable only; inbound is already in transit", () => {
     assert.equal(fbaCoverUnits({ fulfillable: 2978, reserved: 2466, researching: 28, unfulfillable: 5 }), 2978);
     assert.equal(inboundInTransit({ inbound_working: 0, inbound_shipped: 270, inbound_receiving: 0 }), 270);
+  });
+
+  test("FBA cap is 55,600 in Sep/Jan and ~49,400 in Oct–Dec", () => {
+    assert.equal(familyFbaCapForMonth("2026-09"), FAMILY_FBA_CAP_PEAK);
+    assert.equal(familyFbaCapForMonth("2026-01"), FAMILY_FBA_CAP_PEAK);
+    assert.equal(familyFbaCapForMonth("2026-10"), FAMILY_FBA_CAP_OCT_DEC);
+    assert.equal(familyFbaCapForMonth("2026-11"), 49_400);
+    assert.equal(familyFbaCapForMonth("2026-12"), 49_400);
+    assert.equal(SEPT_FBA_TARGET_CAP, 55_600);
   });
 
   test("two piles: 3PL→FBA is 2700 chunks; manufacture is AWD surge", () => {

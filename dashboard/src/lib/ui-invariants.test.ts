@@ -47,3 +47,39 @@ describe("3pl sign color", () => {
     assert.doesNotMatch(page, /amount < 0 \? "text-emerald/);
   });
 });
+
+describe("pallet planner ship view", () => {
+  test("pallets page keeps only the ship plan, not cover-chrome", () => {
+    const page = src("src/app/inventory/pallets/page.tsx");
+    const ship = src("src/components/inventory/HolidayShipPlan.tsx");
+    const both = page + "\n" + ship;
+    assert.match(page, /HolidayShipPlan/);
+    assert.match(ship, /NEXT HOP/);
+    assert.match(ship, /3PL→FBA/);
+    assert.match(ship, /Tulsa hold/);
+    assert.match(ship, /AWD high water/);
+    assert.match(ship, /FBA cap vs on-hand/);
+    assert.match(ship, /August mixed TBD/);
+    assert.doesNotMatch(both, /FBA Cover Alerts/);
+    assert.doesNotMatch(both, /FBA Cover Projection/);
+    assert.doesNotMatch(both, /Cover Shortfall/);
+    assert.doesNotMatch(both, /Pallet Breakdown/);
+    assert.doesNotMatch(both, /Next Pallet to Order/);
+    assert.doesNotMatch(both, /Nov–Jan sell-through/);
+    assert.doesNotMatch(both, /Manufacture \(AWD\)/);
+    assert.doesNotMatch(both, /Transfers to FBA/);
+    assert.doesNotMatch(both, /Gap to Produce/);
+  });
+
+  test("inventory holiday view drops logistics / 90d / reorder chrome", () => {
+    const page = src("src/app/inventory/page.tsx");
+    assert.match(page, /HolidayShipPlan/);
+    assert.doesNotMatch(page, /Today&apos;s logistics/);
+    assert.doesNotMatch(page, /Rate & lead-time calibration/);
+    assert.doesNotMatch(page, /FBA &lt;60d/);
+    assert.doesNotMatch(page, /Portfolio Cover/);
+    assert.doesNotMatch(page, /units to order/);
+    assert.doesNotMatch(page, /weeks of cover/);
+    assert.doesNotMatch(page, /target 90d cover/);
+  });
+});

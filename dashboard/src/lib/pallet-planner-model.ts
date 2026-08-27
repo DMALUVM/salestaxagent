@@ -18,6 +18,13 @@ export const FBA_INBOUND_STEP_AFTER = CARTON_20X16X14_UNITS;
 export const DEFAULT_INBOUND_CARTON_UNITS = CARTON_20X16X14_UNITS;
 export const FAMILY_FBA_CAP_PEAK = 55_600;
 export const FAMILY_FBA_CAP_OCT_DEC = 49_400;
+
+export function familyFbaCapForMonth(month?: string | null): number {
+  if (!month) return FAMILY_FBA_CAP_PEAK;
+  const mo = Number(String(month).slice(5, 7));
+  if (mo === 10 || mo === 11 || mo === 12) return FAMILY_FBA_CAP_OCT_DEC;
+  return FAMILY_FBA_CAP_PEAK;
+}
 export const OPTIMISTIC_AWD_ON_HAND_TARGETS: Record<string, number> = {
   DDPE0001Shop: 17_803,
   DDPE0002Shop: 10_590,
