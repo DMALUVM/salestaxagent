@@ -332,7 +332,12 @@ describe("pallet planner model", () => {
 
   test("AWD loaded drops 5k Tulsa floor; never 0 AWD and 0 Tulsa", () => {
     const tpl = { DDPE0001Shop: 2000, DDPE0002Shop: 2000, DDPE0003Shop: 2000, DDPE0004Shop: 2000 };
-    const awd = { DDPE0001Shop: 4000 };
+    assert.equal(effectiveTulsaFloor({ DDPE0002Shop: 540 }), 5000);
+    const token = familyTulsaFloor(tpl, 5000, { DDPE0002Shop: 540 });
+    assert.equal(token.awdLoaded, false);
+    assert.equal(token.floor, 5000);
+    assert.equal(token.transferable, 3000);
+    const awd = { DDPE0001Shop: 5000 };
     assert.equal(effectiveTulsaFloor(awd), 0);
     const loaded = familyTulsaFloor(tpl, 5000, awd);
     assert.equal(loaded.awdLoaded, true);

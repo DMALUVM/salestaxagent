@@ -185,7 +185,7 @@ function buildMfgSheet(
   for (const [sku, label] of Object.entries(SKU_LABELS)) L.push(`  ${sku}  =  ${label}`);
   L.push(""); L.push("Nov–Jan sell-through and late-Sep FBA targets are separate. Do not add peak-60d onto sales.");
   L.push("Manufacture = FBA target − FBA fulfillable − inbound − August (when entered). Overflow = single-SKU AWD.");
-  L.push("Drop 5k Tulsa floor when AWD is loaded. Never plan 0 AWD and 0 Tulsa. August is TBD until Dave's totals.");
+  L.push("Drop 5k Tulsa floor when family AWD (on-hand + planned overflow) is ≥5,000. Token AWD (e.g. 540) is not loaded. Never plan 0 AWD and 0 Tulsa. August is TBD until Dave's totals.");
   L.push("Family YoY is context only — not applied as a blended multiplier.");
   L.push(`Pallet capacity: ${fmt(PALLET_MAX)} cartons (270 per 13×11×9 box)`);
   L.push("Fill: two full + one ≥50% partial is fine. Under half is merge-or-hold, not a card.");
@@ -593,8 +593,8 @@ export default function PalletPlanPage() {
         transfers.push({
           sku, source: "3PL", units: xfer,
           timing: sept.awdLoaded
-            ? `3PL→FBA toward Sept target by ${sept.shipBy} — AWD is loaded, no 5k Tulsa floor`
-            : `3PL→FBA toward Sept target by ${sept.shipBy} — AWD empty, keep Tulsa floor (do not plan 0 AWD and 0 Tulsa)`,
+            ? `3PL→FBA toward Sept target by ${sept.shipBy} — family AWD ≥5k, no Tulsa floor`
+            : `3PL→FBA toward Sept target by ${sept.shipBy} — AWD below 5k reserve, keep Tulsa floor (do not plan 0 AWD and 0 Tulsa)`,
         });
       }
     }
@@ -903,8 +903,8 @@ export default function PalletPlanPage() {
             Manufacture = late-Sep FBA target − FBA fulfillable − inbound (do not re-send) − August when entered.
             {!tplOffsetsProduction && " 3PL is Transfer only (does not shrink Manufacture)."}
             {mfgSept.awdLoaded
-              ? " AWD is loaded — no 5k Tulsa floor; off-FBA reserve sits in AWD."
-              : " AWD empty — keep Tulsa floor so we do not plan 0 AWD and 0 Tulsa."}
+              ? " Family AWD ≥5k — no 5k Tulsa floor; off-FBA reserve sits in AWD."
+              : " AWD below 5k reserve — keep Tulsa floor so we do not plan 0 AWD and 0 Tulsa."}
             {" "}Overflow after FBA is close = single-SKU AWD (not another add of 60d onto sales). Mix unlocked. Two full + one ≥50% partial is fine. August is TBD until Dave&apos;s totals. Not a purchase order.
           </p>
         </CardContent>
@@ -1151,7 +1151,7 @@ export default function PalletPlanPage() {
         Nov–Jan sell-through = each SKU&apos;s 2025 same-month Amazon × that SKU&apos;s own May–Jul YoY (Assorted may use correction_factor).
         Late-Sep FBA targets are separate (cap {fmt(SEPT_FBA_TARGET_CAP)}). Do not add peak-60d onto sales.
         Cover starts from FBA fulfillable only. Inbound is already in transit — do not send it again.
-        {mfgSept.awdLoaded ? " AWD is loaded — Tulsa floor dropped." : " AWD empty — keep Tulsa so we never plan 0 AWD and 0 Tulsa."}
+        {mfgSept.awdLoaded ? " Family AWD ≥5k — Tulsa floor dropped." : " AWD below 5k reserve — keep Tulsa so we never plan 0 AWD and 0 Tulsa."}
         {" "}Planning aid — not a purchase order. Mix unlocked. August is Dave&apos;s totals.
       </p>
     </div>

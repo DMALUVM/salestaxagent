@@ -274,7 +274,7 @@ def test_tulsa_keeps_5000_after_christmas_outbound():
 
 def test_drop_tulsa_floor_when_awd_loaded():
     sku_3pl = {s: 2000 for s in LIP}
-    sku_awd = {"DDPE0001Shop": 4000, "DDPE0002Shop": 0, "DDPE0003Shop": 0, "DDPE0004Shop": 0}
+    sku_awd = {"DDPE0001Shop": 5_000, "DDPE0002Shop": 0, "DDPE0003Shop": 0, "DDPE0004Shop": 0}
     assert awd_covers_off_fba_reserve(sku_awd) is True
     assert effective_tulsa_floor(sku_awd) == 0
     loaded = family_tulsa_floor(sku_3pl, sku_awd=sku_awd)
@@ -288,6 +288,34 @@ def test_drop_tulsa_floor_when_awd_loaded():
     assert xmas["do_not_drain_to_zero"] is False
 
 
+def test_token_awd_540_keeps_tulsa_floor():
+    """Live peppermint 540 is not a replacement reserve — floor stays 5k."""
+    sku_3pl = {s: 2000 for s in LIP}
+    sku_awd = {"DDPE0002Shop": 540}
+    assert awd_covers_off_fba_reserve(sku_awd) is False
+    assert effective_tulsa_floor(sku_awd) == 5000
+    info = family_tulsa_floor(sku_3pl, sku_awd=sku_awd)
+    assert info["awd_loaded"] is False
+    assert info["floor"] == 5000
+    assert info["transferable"] == 3000
+    assert info["top_up"] == 0
+    under = family_tulsa_floor(sku_3pl, sku_awd={"DDPE0001Shop": 4_999})
+    assert under["awd_loaded"] is False
+    assert under["floor"] == 5000
+
+
+def test_family_awd_5000_drops_tulsa_floor():
+    sku_3pl = {s: 2000 for s in LIP}
+    at_floor = {"DDPE0001Shop": 2_500, "DDPE0002Shop": 2_500}
+    assert awd_covers_off_fba_reserve(at_floor) is True
+    assert effective_tulsa_floor(at_floor) == 0
+    info = family_tulsa_floor(sku_3pl, sku_awd=at_floor)
+    assert info["awd_loaded"] is True
+    assert info["floor"] == 0
+    assert info["top_up"] == 0
+    assert info["transferable"] == 8000
+
+
 def test_never_plan_zero_awd_and_zero_tulsa():
     empty_awd = {s: 0 for s in LIP}
     empty_3pl = {s: 0 for s in LIP}
@@ -296,7 +324,14 @@ def test_never_plan_zero_awd_and_zero_tulsa():
     assert both_empty["awd_loaded"] is False
     assert both_empty["floor"] == 5000
     assert both_empty["top_up"] == 5000
-    planned = family_tulsa_floor(empty_3pl, sku_awd=empty_awd, awd_planned={"DDPE0004Shop": 2000})
+    token_plan = family_tulsa_floor(
+        empty_3pl, sku_awd=empty_awd, awd_planned={"DDPE0004Shop": 2_000},
+    )
+    assert token_plan["awd_loaded"] is False
+    assert token_plan["floor"] == 5000
+    planned = family_tulsa_floor(
+        empty_3pl, sku_awd=empty_awd, awd_planned={"DDPE0004Shop": 5_000},
+    )
     assert planned["awd_loaded"] is True
     assert planned["floor"] == 0
     assert planned["top_up"] == 0
