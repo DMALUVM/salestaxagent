@@ -60,8 +60,6 @@ const SKU_SHORT: Record<string, string> = {
 const PALLET_MAX = PALLET_MAX_UNITS;
 const TARGET = AMAZON_IN_BY;
 const COVER_TARGET = 60;
-const MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"];
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -70,11 +68,6 @@ function fmt(n: number) {
 function fmtWeek(iso: string) {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function monthLabel(m: string) {
-  const [y, mo] = m.split("-");
-  return `${MONTH_NAMES[parseInt(mo)]} ${y}`;
 }
 
 function SetupPrompt() {
@@ -209,14 +202,26 @@ function buildMfgSheet(
   L.push(""); L.push("-----------------------------------------------------------------");
   L.push("PRODUCTION SCHEDULE — sales_yoy (25%/35%/40%, mix unlocked)"); L.push("-----------------------------------------------------------------");
   for (const e of primary.entries) {
-    L.push(""); L.push(`  ${e.label}  —  ${e.status}`);
-    if (e.units === 0) { L.push("    No production needed."); continue; }
-    if (e.hasPartial) L.push(`    ${e.fullPallets ?? 0} full + 1 partial (${fmt(e.partialUnits ?? 0)} ≥50%)  (${fmt(e.units)} units)`);
+    const dest = e.destination === "3pl_fba" ? "3PL→FBA tonight"
+      : e.destination === "awd" ? "single-SKU AWD"
+      : e.destination === "fba_then_awd" ? "remaining FBA then AWD"
+      : e.awaitingAugustTotals ? "August mixed TBD"
+      : e.status;
+    L.push(""); L.push(`  ${e.label}  —  ${dest}`);
+    if (e.units === 0) {
+      L.push(e.awaitingAugustTotals
+        ? "    August mixed pallet is TBD — do not invent a mix."
+        : "    No production needed.");
+      continue;
+    }
+    if (e.destination === "3pl_fba") L.push(`    3PL→FBA first hop  (${fmt(e.units)} units)`);
+    else if (e.hasPartial) L.push(`    ${e.fullPallets ?? 0} full + 1 partial (${fmt(e.partialUnits ?? 0)} ≥50%)  (${fmt(e.units)} units)`);
     else if (e.isPalletCard) L.push(`    Full pallets: ${e.fullPallets ?? e.pallets}  (${fmt(e.units)} units)`);
     else L.push(`    Held leftover (under half, not a pallet): ${fmt(e.units)} units (${Math.round(e.fillPct * 100)}% of ${fmt(PALLET_MAX)})`);
     for (const sku of SKUS) { const q = e.mix[sku]; if (q && q > 0) L.push(`      ${SKU_LABELS[sku]}: ${fmt(q)} [indicative]`); }
     L.push(`    Ship by: ${e.shipBy} · in Amazon by ${e.inAmazon}`);
     if (e.awaitingAugustTotals) L.push("    August mix unlocked — waiting on Dave's hard totals.");
+    if (e.remainingFbaThenAwd) L.push("    Remaining FBA waits August. This Marpac card is single-SKU AWD.");
   }
   L.push(""); L.push(`  TOTAL: ${fmt(primary.totalUnits)} units across ${primary.totalPallets} pallet(s)`);
   if (transfers.length) {
