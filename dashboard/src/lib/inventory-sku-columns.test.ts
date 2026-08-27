@@ -12,26 +12,28 @@ import {
 } from "./inventory-sku-columns";
 
 describe("SKU table default column set", () => {
-  test("Total is always in the default visible set", () => {
+  test("Total is always in the default visible set; no Reserved or Unfulfillable column", () => {
     assert.equal(DEFAULT_VISIBLE_COLUMN_KEYS.includes("owned_total"), true);
     assert.equal(ALWAYS_VISIBLE_COLUMN_KEYS.includes("owned_total"), true);
     const labels = visibleSkuTableColumns(null).map((c) => c.label);
-    assert.deepEqual(labels.slice(0, 10), [
+    assert.deepEqual(labels.slice(0, 8), [
       "SKU",
       "FBA",
-      "Reserved",
       "AWD",
       "3PL",
       "Inbnd",
-      "Unfulfillable",
       "Total",
       "V7",
       "V30",
     ]);
-    assert.equal(DEFAULT_VISIBLE_COLUMN_KEYS.includes("fba_reserved"), true);
-    assert.equal(DEFAULT_VISIBLE_COLUMN_KEYS.includes("fba_unfulfillable"), true);
-    assert.equal(ALWAYS_VISIBLE_COLUMN_KEYS.includes("fba_reserved"), false);
-    assert.equal(ALWAYS_VISIBLE_COLUMN_KEYS.includes("fba_unfulfillable"), false);
+    assert.equal(labels.includes("Reserved"), false);
+    assert.equal(labels.includes("Unfulfillable"), false);
+    assert.equal(SKU_TABLE_COLUMNS.some((c) => c.key === "fba_reserved"), false);
+    assert.equal(SKU_TABLE_COLUMNS.some((c) => c.key === "fba_unfulfillable"), false);
+    assert.equal(
+      SKU_TABLE_COLUMNS.some((c) => /expired|inventory.?age/i.test(c.key) || /expired|age/i.test(c.label)),
+      false,
+    );
   });
 
   test("forces Total on when saved prefs predate the column", () => {
@@ -40,14 +42,12 @@ describe("SKU table default column set", () => {
     });
     assert.equal(predating.includes("owned_total"), true);
     assert.equal(predating.includes("fba_fulfillable"), true);
-    assert.equal(predating.includes("fba_reserved"), true);
-    assert.equal(predating.includes("fba_unfulfillable"), true);
     assert.equal(predating.includes("fba_on_hand" as never), false);
-    assert.equal(predating.indexOf("fba_reserved"), predating.indexOf("fba_fulfillable") + 1);
-    assert.equal(predating.indexOf("fba_unfulfillable"), predating.indexOf("inbound") + 1);
+    assert.equal(predating.includes("fba_reserved" as never), false);
+    assert.equal(predating.includes("fba_unfulfillable" as never), false);
     assert.equal(
       predating.indexOf("owned_total"),
-      predating.indexOf("fba_unfulfillable") + 1,
+      predating.indexOf("inbound") + 1,
     );
   });
 
@@ -72,29 +72,14 @@ describe("SKU table default column set", () => {
     assert.doesNotMatch(fba.tip, /checked in at Amazon FBA$/);
   });
 
-  test("Reserved and Unfulfillable tips lock Total vs cover", () => {
-    const reserved = SKU_TABLE_COLUMNS.find((c) => c.key === "fba_reserved");
-    const unfulfillable = SKU_TABLE_COLUMNS.find((c) => c.key === "fba_unfulfillable");
+  test("Total tip says reserved is in the sum, not a column", () => {
     const total = SKU_TABLE_COLUMNS.find((c) => c.key === "owned_total");
-    assert.ok(reserved && unfulfillable && total);
-    assert.match(reserved.tip, /in Total/i);
-    assert.match(reserved.tip, /not in the FBA cover/i);
-    assert.match(unfulfillable.tip, /Not in the FBA cover/i);
-    assert.match(unfulfillable.tip, /Not in Total/i);
+    assert.ok(total);
     assert.match(total.tip, /every SKU/i);
     assert.match(total.tip, /reserved/i);
+    assert.match(total.tip, /not a column/i);
     assert.match(total.tip, /Unfulfillable/i);
     assert.doesNotMatch(total.tip, /DDPE0003|lip family|lip-only/i);
-  });
-
-  test("explicitly hidden Reserved / Unfulfillable stay hidden", () => {
-    const hidden = resolveVisibleColumns({
-      columns: ["sku", "fba_fulfillable", "inbound"],
-      hiddenColumns: ["fba_reserved", "fba_unfulfillable"],
-    });
-    assert.equal(hidden.includes("fba_reserved"), false);
-    assert.equal(hidden.includes("fba_unfulfillable"), false);
-    assert.equal(hidden.includes("owned_total"), true);
   });
 });
 

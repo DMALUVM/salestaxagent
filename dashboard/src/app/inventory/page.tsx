@@ -104,8 +104,6 @@ interface ComputedRow {
   inbound: number;
   inbound_display: number | null;
   reserved: number;
-  fba_reserved: number | null;
-  fba_unfulfillable: number | null;
   tpl_available: number;
   tpl_display: number | null;
   awd_on_hand: number | null;
@@ -410,11 +408,10 @@ export default function InventoryPage() {
       const fulfillable = owned.fbaFulfillable ?? 0;
       const reserved = owned.fbaReserved ?? 0;
       const researching = Number(snap?.researching ?? 0);
-      const unfulfillable_qty = owned.fbaUnfulfillable ?? 0;
+      const unfulfillable_qty = Number(snap?.unfulfillable ?? 0);
       // Planning math still sees reserved+researching+unfulfillable.
       // The FBA *column* is fulfillable only — see fba_fulfillable.
-      // Reserved is its own column and is in Total. Unfulfillable is
-      // its own column and is not in FBA cover or Total.
+      // Reserved is in owned Total (sum only), not a table column.
       const fba_on_hand = fulfillable + reserved + researching + unfulfillable_qty;
       const inbound = owned.fbaInbound ?? 0;
       const tpl_available = owned.tplOnHand ?? 0;
@@ -483,8 +480,6 @@ export default function InventoryPage() {
         inbound,
         inbound_display: owned.fbaInbound,
         reserved,
-        fba_reserved: owned.fbaReserved,
-        fba_unfulfillable: owned.fbaUnfulfillable,
         tpl_available,
         tpl_display: owned.tplOnHand,
         awd_on_hand: owned.awdOnHand,
@@ -570,15 +565,7 @@ export default function InventoryPage() {
     list.sort((a, b) => {
       const av = a[col];
       const bv = b[col];
-      if (
-        col === "owned_total" ||
-        col === "fba_fulfillable" ||
-        col === "fba_reserved" ||
-        col === "fba_unfulfillable" ||
-        col === "awd_on_hand" ||
-        col === "tpl_display" ||
-        col === "inbound_display"
-      ) {
+      if (col === "owned_total" || col === "fba_fulfillable" || col === "awd_on_hand" || col === "tpl_display" || col === "inbound_display") {
         const an = a[col] as number | null;
         const bn = b[col] as number | null;
         if (an == null && bn == null) return 0;
@@ -617,11 +604,11 @@ export default function InventoryPage() {
 
   function exportCSV() {
     const header =
-      "SKU,ASIN,Product,FBA_Fulfillable,Reserved,AWD,3PL,Inbound,Unfulfillable,Total,TotalAsOf,TotalV30,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
+      "SKU,ASIN,Product,FBA_Fulfillable,AWD,3PL,Inbound,Total,TotalAsOf,TotalV30,DOS,Pipeline_DOS,Reorder,FBA_Out,Network_OOS,Flag\n";
     const body = filtered
       .map(
         (r) =>
-          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_fulfillable ?? ""},${r.fba_reserved ?? ""},${r.awd_on_hand ?? ""},${r.tpl_display ?? ""},${r.inbound_display ?? ""},${r.fba_unfulfillable ?? ""},${r.owned_total ?? ""},"${(r.owned_as_of_detail ?? "").replace(/"/g, '""')}",${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
+          `"${r.sku}","${r.asin}","${displayTitle(r.product_name).replace(/"/g, '""')}",${r.fba_fulfillable ?? ""},${r.awd_on_hand ?? ""},${r.tpl_display ?? ""},${r.inbound_display ?? ""},${r.owned_total ?? ""},"${(r.owned_as_of_detail ?? "").replace(/"/g, '""')}",${r.total_u_30},${r.dos},${r.pipeline_dos},${r.our_reorder_qty},${r.stockout_date ?? ""},${r.network_oos_date ?? ""},${r.flag}`,
       )
       .join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
@@ -926,11 +913,6 @@ export default function InventoryPage() {
                       {r.channel === "shopify_only" ? "—" : formatSkuQty(r.fba_fulfillable)}
                     </TableCell>
                     )}
-                    {visibleKeys.has("fba_reserved") && (
-                    <TableCell className={`text-right tabular-nums ${r.channel === "shopify_only" ? "text-muted-foreground/30" : ""}`}>
-                      {r.channel === "shopify_only" ? "—" : formatSkuQty(r.fba_reserved)}
-                    </TableCell>
-                    )}
                     {visibleKeys.has("awd_on_hand") && (
                     <TableCell className="text-right tabular-nums">
                       {formatSkuQty(r.awd_on_hand)}
@@ -944,11 +926,6 @@ export default function InventoryPage() {
                     {visibleKeys.has("inbound") && (
                     <TableCell className="text-right tabular-nums">
                       {formatSkuQty(r.inbound_display)}
-                    </TableCell>
-                    )}
-                    {visibleKeys.has("fba_unfulfillable") && (
-                    <TableCell className={`text-right tabular-nums ${r.channel === "shopify_only" ? "text-muted-foreground/30" : ""}`}>
-                      {r.channel === "shopify_only" ? "—" : formatSkuQty(r.fba_unfulfillable)}
                     </TableCell>
                     )}
                     {visibleKeys.has("owned_total") && (
@@ -1091,18 +1068,7 @@ export default function InventoryPage() {
                     {formatSkuQty(selected.fba_fulfillable)}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
-                    cover only — reserved is its own column
-                  </p>
-                </div>
-                <div className="rounded-lg border p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase">
-                    Reserved
-                  </p>
-                  <p className="text-lg font-semibold">
-                    {formatSkuQty(selected.fba_reserved)}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    in Total · not in FBA cover
+                    reserved {fmt(selected.reserved)} · in Total, not in FBA
                   </p>
                 </div>
                 <div className="rounded-lg border p-3">
@@ -1127,17 +1093,6 @@ export default function InventoryPage() {
                   </p>
                   <p className="text-lg font-semibold">
                     {formatSkuQty(selected.inbound_display)}
-                  </p>
-                </div>
-                <div className="rounded-lg border p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase">
-                    Unfulfillable
-                  </p>
-                  <p className="text-lg font-semibold">
-                    {formatSkuQty(selected.fba_unfulfillable)}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">
-                    not in FBA cover · not in Total
                   </p>
                 </div>
                 <div className="rounded-lg border p-3 col-span-2">

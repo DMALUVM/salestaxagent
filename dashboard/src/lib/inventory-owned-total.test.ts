@@ -6,7 +6,6 @@ import {
   fbaFulfillableUnits,
   fbaInboundUnits,
   fbaReservedUnits,
-  fbaUnfulfillableUnits,
   formatOwnedAsOf,
   latestOwnedSources,
   ownedAsOfLabel,
@@ -55,7 +54,6 @@ describe("owned network Total", () => {
     assert.equal(owned.fbaFulfillable, 100);
     assert.equal(owned.fbaReserved, 999);
     assert.equal(owned.fbaInbound, 30);
-    assert.equal(owned.fbaUnfulfillable, 50);
     assert.equal(owned.tplOnHand, 40);
     assert.equal(owned.awdOnHand, 50);
     assert.equal(owned.total, 100 + 999 + 30 + 40 + 50);
@@ -77,7 +75,6 @@ describe("owned network Total", () => {
     assert.notEqual(owned.total, 100 + 999 + 30 + 40 + 50 + 10 + 50);
     assert.notEqual(owned.total, 100 + 999 + 30 + 40 + 50 + 200);
     assert.notEqual(owned.total, 100 + 999 + 30 + 40 + 50 + 300);
-    assert.equal(owned.fbaUnfulfillable, 50);
   });
 });
 
@@ -98,7 +95,7 @@ describe("Seller Central lock numbers — same math, any SKU", () => {
   };
   const orangeTpl = { sku: "DDPE0003Shop", available: 6_426, pulled_at: TPL_AT };
 
-  test("DDPE0003-style: FBA=fulfillable, reserved in Total, unfulfillable visible not in Total", () => {
+  test("DDPE0003-style: FBA=fulfillable, reserved in Total math, unfulfillable not in Total", () => {
     const owned = ownedNetworkTotal({ sku: "DDPE0003Shop", fba: orangeFba, tpl: orangeTpl });
     assert.equal(owned.fbaFulfillable, 4_054);
     assert.notEqual(owned.fbaFulfillable, 4_054 + 1_398 + 9 + 818);
@@ -107,7 +104,7 @@ describe("Seller Central lock numbers — same math, any SKU", () => {
     assert.equal(owned.fbaInbound, 540);
     assert.equal(owned.tplOnHand, 6_426);
     assert.equal(owned.awdOnHand, null);
-    assert.equal(owned.fbaUnfulfillable, 818);
+    assert.equal("fbaUnfulfillable" in owned, false);
     assert.equal(owned.total, 4_054 + 1_398 + 540 + 6_426);
     assert.equal(owned.total, 12_418);
     assert.notEqual(owned.total, 4_054 + 540 + 6_426);
@@ -139,7 +136,6 @@ describe("Seller Central lock numbers — same math, any SKU", () => {
     assert.equal(deo.fbaInbound, 10);
     assert.equal(deo.tplOnHand, 100);
     assert.equal(deo.awdOnHand, 0);
-    assert.equal(deo.fbaUnfulfillable, 25);
     assert.equal(deo.total, 200 + 50 + 10 + 100 + 0);
     assert.notEqual(deo.total, 200 + 50 + 10 + 100 + 25);
     assert.notEqual(deo.total, 200 + 10 + 100);
@@ -182,12 +178,10 @@ describe("missing row is omitted, not required", () => {
     assert.equal(owned.fbaFulfillable, null);
     assert.equal(owned.fbaReserved, null);
     assert.equal(owned.fbaInbound, null);
-    assert.equal(owned.fbaUnfulfillable, null);
     assert.equal(owned.total, 90);
     assert.deepEqual(owned.missing, ["fba_fulfillable", "fba_reserved", "fba_inbound"]);
     assert.equal(fbaFulfillableUnits(null), null);
     assert.equal(fbaReservedUnits(null), null);
-    assert.equal(fbaUnfulfillableUnits(undefined), null);
     assert.equal(fbaInboundUnits(undefined), null);
     assert.equal(tplOnHandUnits(null), null);
     assert.equal(awdOnHandUnits(null), null);
@@ -221,21 +215,17 @@ describe("missing row is omitted, not required", () => {
     assert.equal(owned.fbaFulfillable, 100);
     assert.notEqual(owned.fbaFulfillable, 100 + 999 + 10 + 50);
     assert.equal(owned.fbaReserved, 999);
-    assert.equal(owned.fbaUnfulfillable, 50);
     assert.equal(owned.total, 100 + 999 + 30 + 40 + 50);
   });
 
-  test("reserved 0 on a present FBA row is 0, not blank; no FBA row is blank", () => {
+  test("reserved 0 on a present FBA row is 0 in Total; no FBA row omits reserved", () => {
     const rows = completeRows();
     rows.fba.reserved = 0;
-    rows.fba.unfulfillable = 0;
     const zero = ownedNetworkTotal({ sku: "DDPE0001Shop", ...rows });
     assert.equal(zero.fbaReserved, 0);
-    assert.equal(zero.fbaUnfulfillable, 0);
     assert.equal(zero.total, 100 + 0 + 30 + 40 + 50);
     const missing = ownedNetworkTotal({ sku: "NO-FBA", tpl: rows.tpl, awd: rows.awd });
     assert.equal(missing.fbaReserved, null);
-    assert.equal(missing.fbaUnfulfillable, null);
   });
 
   test("latest-per-SKU lookup does not invent a missing SKU as 0", () => {
@@ -249,7 +239,6 @@ describe("missing row is omitted, not required", () => {
     assert.equal(other.fbaFulfillable, null);
     assert.equal(other.fbaReserved, null);
     assert.equal(other.fbaInbound, null);
-    assert.equal(other.fbaUnfulfillable, null);
     assert.equal(other.tplOnHand, null);
     assert.equal(other.awdOnHand, null);
   });
@@ -323,7 +312,6 @@ describe("latest-per-SKU", () => {
     const owned = ownedNetworkTotalForSku("DDPE0001Shop", sources);
     assert.equal(owned.fbaFulfillable, 100);
     assert.equal(owned.fbaReserved, 999);
-    assert.equal(owned.fbaUnfulfillable, 50);
     assert.equal(owned.fbaInbound, 30);
     assert.equal(owned.tplOnHand, 40);
     assert.equal(owned.awdOnHand, 50);

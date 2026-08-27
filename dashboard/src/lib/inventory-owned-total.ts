@@ -12,9 +12,9 @@
  * Latest-per-SKU only. A missing source is blank and omitted from the sum.
  * A known 0 on a present row counts as 0.
  * AWD inbound is not FBA inbound.
+ * Reserved is in the sum only — not a table column.
  * researching / unfulfillable are never added to Total or to the FBA
- * cover column. Unfulfillable is a display-only field from the same
- * FBA snapshot row (0 vs blank like AWD).
+ * column.
  */
 
 export type OwnedSource =
@@ -58,10 +58,9 @@ export type AwdSnapshotLike = {
 export type OwnedTotal = {
   sku: string;
   fbaFulfillable: number | null;
+  /** In the Total sum only. Not a table column. */
   fbaReserved: number | null;
   fbaInbound: number | null;
-  /** Display only — never folded into FBA cover or Total. */
-  fbaUnfulfillable: number | null;
   tplOnHand: number | null;
   awdOnHand: number | null;
   /** Null only when no source row exists. Missing sources are omitted, not zeroed. */
@@ -142,12 +141,6 @@ export function fbaReservedUnits(snap: FbaSnapshotLike | null | undefined): numb
   return Number(snap.reserved ?? 0);
 }
 
-/** Display only. Present FBA row → number (0 allowed); no row → null. */
-export function fbaUnfulfillableUnits(snap: FbaSnapshotLike | null | undefined): number | null {
-  if (!snap) return null;
-  return Number(snap.unfulfillable ?? 0);
-}
-
 export function tplOnHandUnits(row: TplSnapshotLike | null | undefined): number | null {
   if (!row) return null;
   return Number(row.available ?? 0);
@@ -167,7 +160,6 @@ export function ownedNetworkTotal(input: {
   const fbaFulfillable = fbaFulfillableUnits(input.fba);
   const fbaReserved = fbaReservedUnits(input.fba);
   const fbaInbound = fbaInboundUnits(input.fba);
-  const fbaUnfulfillable = fbaUnfulfillableUnits(input.fba);
   const tplOnHand = tplOnHandUnits(input.tpl);
   const awdOnHand = awdOnHandUnits(input.awd);
 
@@ -187,7 +179,6 @@ export function ownedNetworkTotal(input: {
     fbaFulfillable,
     fbaReserved,
     fbaInbound,
-    fbaUnfulfillable,
     tplOnHand,
     awdOnHand,
     total: present.length ? present.reduce((sum, n) => sum + n, 0) : null,
