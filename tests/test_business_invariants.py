@@ -415,14 +415,29 @@ class TestAdsEnqueuePayload:
         assert kw["days"] == 7
         assert kw["campaigns_only"] is True
 
-    def test_days_only_does_not_pull_search_terms(self):
+    def test_days_only_does_not_pull_search_terms(self, monkeypatch):
         """Kickstart `{days: 7}` must stay a short campaigns refresh."""
+        import src.amazon_ads.reports as reports
         from src.main import _ads_enqueue_kwargs
         kw = _ads_enqueue_kwargs({"days": 7})
         assert kw["days"] == 7
         assert kw["campaigns_only"] is True
         assert kw["search_terms_only"] is False
         assert kw["placements_only"] is False
+
+        called = []
+        monkeypatch.setattr(reports, "fetch_campaigns_daily",
+                            lambda s, e, **kw: called.append("campaigns") or {"rows": 1})
+        monkeypatch.setattr(reports, "fetch_search_terms",
+                            lambda s, e, chunk_days=None: called.append("search_terms") or {"rows": 1})
+        monkeypatch.setattr(reports, "fetch_placements",
+                            lambda s, e, **kw: called.append("placements") or {"rows": 1})
+        result = reports.sync_ads(
+            days=kw["days"], campaigns_only=kw["campaigns_only"],
+            search_terms_only=kw["search_terms_only"],
+            placements_only=kw["placements_only"])
+        assert called == ["campaigns"]
+        assert result["ran"] == ["campaigns"]
 
     def test_explicit_days_honored(self):
         from src.main import _ads_enqueue_kwargs
