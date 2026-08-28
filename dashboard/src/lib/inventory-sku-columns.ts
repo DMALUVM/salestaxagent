@@ -134,6 +134,41 @@ export function visibleSkuTableColumns(saved?: SkuTablePrefs | null): SkuTableCo
   return SKU_TABLE_COLUMNS.filter((c) => visible.has(c.key));
 }
 
+/**
+ * Viewport-only hide for the /inventory SKU table. Does not change
+ * resolveVisibleColumns, ALWAYS_VISIBLE, or saved localStorage prefs.
+ */
+export const PHONE_HIDDEN_SKU_COLUMN_KEYS: readonly SkuTableColumnKey[] = [
+  "total_u_7",
+  "total_u_30",
+  "inventory_u_30",
+  "measured_receive_days",
+  "measured_replenish_days",
+  "pipeline_dos",
+  "amz_rec_qty",
+  "our_reorder_qty",
+  "stockout_date",
+  "network_oos_date",
+];
+
+export const PHONE_KEEP_SKU_COLUMN_KEYS: readonly SkuTableColumnKey[] = [
+  "sku",
+  "fba_fulfillable",
+  "awd_on_hand",
+  "tpl_available",
+  "inbound",
+  "total_amazon",
+  "owned_total",
+  "dos",
+  "flag",
+];
+
+export const PHONE_SKU_COLUMN_HIDE_CLASS = "hidden md:table-cell";
+
+export function skuColumnPhoneClass(key: SkuTableColumnKey): string {
+  return PHONE_HIDDEN_SKU_COLUMN_KEYS.includes(key) ? PHONE_SKU_COLUMN_HIDE_CLASS : "";
+}
+
 /** Blank (—) when the source has no row. A known 0 renders as 0. */
 export function formatSkuQty(qty: number | null | undefined): string {
   if (qty == null || Number.isNaN(Number(qty))) return "—";
