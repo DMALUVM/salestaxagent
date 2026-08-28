@@ -42,7 +42,7 @@ export const SKU_TABLE_COLUMNS: SkuTableColumn[] = [
   {
     key: "awd_on_hand",
     label: "AWD",
-    tip: "AWD on-hand + inbound to AWD. Not AWD→FBA in transit. 0 means a row exists at 0. Em dash means no AWD row. Number color (text only, no cell fill): white = inbound only, orange = partial receive, green = fully available. Not the AWD high-water target.",
+    tip: "AWD on-hand + inbound to AWD. Not AWD→FBA in transit. 0 means a row exists at 0. Em dash means no AWD row. Number color (text only, no cell fill): sky / in-transit = inbound only, orange = partial receive, green = fully available. Not the AWD high-water target.",
   },
   { key: "tpl_available", label: "3PL", tip: "Third-party / own warehouse (Tulsa). 0 means a row exists at 0. Em dash means no 3PL row." },
   { key: "inbound", label: "Inbnd", tip: "Amazon inbound to FBA only — not yet sellable. AWD inbound is not included." },

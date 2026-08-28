@@ -181,6 +181,9 @@ describe("pallet planner ship view", () => {
     assert.match(page, /formatSkuQty\(r\.awd_on_hand\)/);
     assert.match(page, /<span className=\{awdCellToneClass\(r\.awd_tone\)\}>/);
     assert.doesNotMatch(page, /TableCell className=\{`text-right tabular-nums \$\{awdCellToneClass/);
+    const awd = src("src/lib/inventory-awd-rows.ts");
+    assert.match(awd, /text-sky-300/);
+    assert.doesNotMatch(awd, /text-zinc-200/);
     assert.doesNotMatch(page, /key: "awd_inbound"/);
     assert.doesNotMatch(page, /label: "AWD inbound"/);
     assert.match(page, /owned\.fbaOnHand/);

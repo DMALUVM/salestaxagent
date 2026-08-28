@@ -117,7 +117,7 @@ describe("SKU table default column set", () => {
     assert.ok(awd);
     assert.match(awd.tip, /inbound to AWD/i);
     assert.match(awd.tip, /Not AWD→FBA/i);
-    assert.match(awd.tip, /white/i);
+    assert.match(awd.tip, /in-transit|sky/i);
   });
 });
 
