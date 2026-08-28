@@ -22,6 +22,7 @@ import {
   Warehouse,
   RotateCcw,
   Megaphone,
+  Factory,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -57,6 +58,7 @@ const primaryLinks: NavItem[] = [
   },
   // Demand Forecast + Inbound Planner merged into one destination with tabs.
   { href: "/planning", label: "Planning", icon: TrendingUp },
+  { href: "/production-planner", label: "Production Planner", icon: Factory },
 ];
 
 const monitorLinks: NavItem[] = [
