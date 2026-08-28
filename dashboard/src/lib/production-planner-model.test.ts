@@ -386,6 +386,8 @@ describe("production planner source lock", () => {
     assert.match(planPage, /Recommend-only/);
     assert.match(planPage, /Plan through/);
     assert.match(planPage, /seedProduction/);
+    assert.match(planPage, /showProductionStrip/);
+    assert.match(planPage, /plan-production-strip/);
     assert.match(planPage, /Buffer days/);
     assert.match(planPage, /AWD in FBA supply/);
     assert.match(planPage, /3PL in FBA supply/);

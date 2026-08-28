@@ -24,6 +24,13 @@ import Link from "next/link";
 import type { InventoryLeadtimeSummary, InventorySettings } from "@/lib/types";
 import type { AmazonMonthlySale } from "@/lib/pallet-planner-model";
 import { autoPlanThrough, planProduction } from "@/lib/production-planner-model";
+import {
+  findBySku,
+  planRunError,
+  showProductionStrip,
+  skusMatch,
+  velocityDaily,
+} from "@/lib/plan-sku-run";
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -102,20 +109,20 @@ export default function PlanSkuPage() {
   const plan = useMemo((): PlanResult | null => {
     if (!ran || !selectedSku) return null;
 
-    const snap = snapshots.find((s) => s.sku === selectedSku);
-    const vel = velocities.find((v) => v.sku === selectedSku);
-    const awdItem = awdList.find((a) => a.sku === selectedSku);
-    const tplItem = tplList.find((t) => t.sku === selectedSku);
+    const snap = findBySku(snapshots, selectedSku);
+    const vel = findBySku(velocities, selectedSku);
+    const awdItem = findBySku(awdList, selectedSku);
+    const tplItem = findBySku(tplList, selectedSku);
 
-    const baseDaily = Number(vel?.total_u_30 ?? 0);
-    if (baseDaily <= 0) return null;
+    const baseDaily = velocityDaily(vel);
+    if (baseDaily == null || baseDaily <= 0) return null;
 
     const seasonMap = new Map<number, number>();
     for (const s of seasonality)
       seasonMap.set(Number(s.week), Number(s.multiplier));
 
     // Holiday forecast: prefer imported weekly series when available
-    const skuForecast = forecastRows.filter((f) => f.sku === selectedSku);
+    const skuForecast = forecastRows.filter((f) => skusMatch(f.sku, selectedSku));
     // Build sorted array of forecast weeks for range lookup
     const scenarioKey = "correction_factor";
     const forecastWeeks: { start: number; units: number }[] = [];
@@ -272,10 +279,11 @@ export default function PlanSkuPage() {
     stress,
   ]);
 
-  const vel = velocities.find((v) => v.sku === selectedSku);
-  const snap = snapshots.find((s) => s.sku === selectedSku);
-  const awdItem = awdList.find((a) => a.sku === selectedSku);
-  const tplItem = tplList.find((t) => t.sku === selectedSku);
+  const vel = findBySku(velocities, selectedSku);
+  const snap = findBySku(snapshots, selectedSku);
+  const awdItem = findBySku(awdList, selectedSku);
+  const tplItem = findBySku(tplList, selectedSku);
+  const dailyV30 = velocityDaily(vel);
   const settings = (raw as { settings?: InventorySettings | null } | null)?.settings ?? null;
   const leadtime = (raw as { leadtime?: InventoryLeadtimeSummary | null } | null)?.leadtime ?? null;
   const amazonLipSales = ((raw as { amazonLipSales?: AmazonMonthlySale[] } | null)?.amazonLipSales ?? []) as AmazonMonthlySale[];
@@ -299,10 +307,7 @@ export default function PlanSkuPage() {
         Number(snap.inbound_shipped ?? 0) +
         Number(snap.inbound_receiving ?? 0)
       : null;
-    const daily =
-      vel && vel.total_u_30 != null && !Number.isNaN(Number(vel.total_u_30))
-        ? Number(vel.total_u_30)
-        : null;
+    const daily = dailyV30;
     return {
       sku: selectedSku,
       productName: vel?.product_name ?? undefined,
@@ -326,6 +331,7 @@ export default function PlanSkuPage() {
     landingDate,
     snap,
     vel,
+    dailyV30,
     awdItem,
     tplItem,
     amazonLipSales,
@@ -354,8 +360,29 @@ export default function PlanSkuPage() {
       newOosDate: seedProduction?.newOosDate ?? null,
       currentUntil: untilDate,
     });
+    // Must not setRan(false) — auto-extend is not a user Plan-through edit.
     if (next && next !== untilDate) setUntilDate(next);
   }, [landingQtySafe, landingDate, seedProduction?.newOosDate, untilDate]);
+
+  const showLanding = showProductionStrip({
+    plannedQty: landingQtySafe,
+    availableDate: landingDate,
+  });
+  const runError = ran
+    ? planRunError({ selectedSku, velocityDaily: dailyV30 })
+    : null;
+
+  function onRunPlan() {
+    setRan(true);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el =
+          document.getElementById("plan-production-strip") ??
+          document.getElementById("plan-run-status");
+        el?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+  }
 
   // Auto-run when SKU comes from URL param
   useEffect(() => {
@@ -496,8 +523,7 @@ export default function PlanSkuPage() {
           <div className="flex gap-2">
           </div>
           <Button
-            onClick={() => setRan(true)}
-            disabled={!selectedSku}
+            onClick={onRunPlan}
             className="w-full sm:w-auto"
           >
             <Play className="mr-1.5 h-3.5 w-3.5" />
@@ -515,7 +541,7 @@ export default function PlanSkuPage() {
                 Velocity
               </p>
               <p className="text-lg font-semibold tabular-nums">
-                {Number(vel.total_u_30).toFixed(1)}{" "}
+                {(dailyV30 ?? Number(vel.total_u_30) ?? 0).toFixed(1)}{" "}
                 <span className="text-xs text-muted-foreground">u/day</span>
               </p>
               <p className="text-[10px] text-muted-foreground">
@@ -567,6 +593,57 @@ export default function PlanSkuPage() {
               </p>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      <div id="plan-run-status">
+        {runError && (
+          <p className="text-sm text-red-600" role="alert">
+            {runError}
+          </p>
+        )}
+      </div>
+
+      {showLanding && (
+        <div id="plan-production-strip" className="space-y-2">
+          <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
+            <Card>
+              <CardContent className="p-3">
+                <p className="text-[10px] text-muted-foreground uppercase">
+                  New OOS after qty lands
+                </p>
+                <p className="text-lg font-semibold tabular-nums">
+                  {production?.newOosDate ?? "—"}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3">
+                <p className="text-[10px] text-muted-foreground uppercase">
+                  Recommended next PO date
+                </p>
+                <p className="text-lg font-semibold tabular-nums">
+                  {production?.recommendedPoDate ?? "—"}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3">
+                <p className="text-[10px] text-muted-foreground uppercase">
+                  Recommended next PO qty
+                </p>
+                <p className="text-lg font-semibold tabular-nums">
+                  {production?.recommendedPoQty != null ? fmt(production.recommendedPoQty) : "—"}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+          {production?.omittedLine && (
+            <p className="text-xs text-muted-foreground">{production.omittedLine}</p>
+          )}
+          {production?.leadNote && (
+            <p className="text-xs text-muted-foreground">{production.leadNote}</p>
+          )}
         </div>
       )}
 
@@ -644,45 +721,6 @@ export default function PlanSkuPage() {
               </CardContent>
             </Card>
           </div>
-
-          <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
-            <Card>
-              <CardContent className="p-3">
-                <p className="text-[10px] text-muted-foreground uppercase">
-                  New OOS after qty lands
-                </p>
-                <p className="text-lg font-semibold tabular-nums">
-                  {production?.newOosDate ?? "—"}
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-3">
-                <p className="text-[10px] text-muted-foreground uppercase">
-                  Recommended next PO date
-                </p>
-                <p className="text-lg font-semibold tabular-nums">
-                  {production?.recommendedPoDate ?? "—"}
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-3">
-                <p className="text-[10px] text-muted-foreground uppercase">
-                  Recommended next PO qty
-                </p>
-                <p className="text-lg font-semibold tabular-nums">
-                  {production?.recommendedPoQty != null ? fmt(production.recommendedPoQty) : "—"}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-          {production?.omittedLine && (
-            <p className="text-xs text-muted-foreground">{production.omittedLine}</p>
-          )}
-          {production?.leadNote && (
-            <p className="text-xs text-muted-foreground">{production.leadNote}</p>
-          )}
 
           {/* Action card */}
           <Card className={plan.fbaGap > 0 ? "border-amber-500/30" : "border-emerald-500/30"}>
