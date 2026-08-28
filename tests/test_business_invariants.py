@@ -394,6 +394,110 @@ class TestAdsSyncSplit:
             sync_ads(days=7, campaigns_only=True, search_terms_only=True)
 
 
+# ── 4c2. Enqueue catch-up stays campaigns-only ────────────────
+
+
+class TestAdsEnqueuePayload:
+    """Dashboard / Dana ads_sync must not start a 90-minute search-term
+    report unless the payload explicitly asks for it."""
+
+    def test_empty_payload_is_7d_campaigns_only(self):
+        from src.main import _ads_enqueue_kwargs
+        kw = _ads_enqueue_kwargs({})
+        assert kw["days"] == 7
+        assert kw["campaigns_only"] is True
+        assert kw["search_terms_only"] is False
+        assert kw["placements_only"] is False
+
+    def test_missing_payload_defaults(self):
+        from src.main import _ads_enqueue_kwargs
+        kw = _ads_enqueue_kwargs(None)
+        assert kw["days"] == 7
+        assert kw["campaigns_only"] is True
+
+    def test_days_only_does_not_pull_search_terms(self):
+        """Kickstart `{days: 7}` must stay a short campaigns refresh."""
+        from src.main import _ads_enqueue_kwargs
+        kw = _ads_enqueue_kwargs({"days": 7})
+        assert kw["days"] == 7
+        assert kw["campaigns_only"] is True
+        assert kw["search_terms_only"] is False
+        assert kw["placements_only"] is False
+
+    def test_explicit_days_honored(self):
+        from src.main import _ads_enqueue_kwargs
+        assert _ads_enqueue_kwargs({"days": 3})["days"] == 3
+
+    def test_campaigns_only_false_is_full_suite(self):
+        from src.main import _ads_enqueue_kwargs
+        kw = _ads_enqueue_kwargs({"campaigns_only": False})
+        assert kw["campaigns_only"] is False
+        assert kw["search_terms_only"] is False
+        assert kw["placements_only"] is False
+
+    def test_search_terms_only_explicit(self):
+        from src.main import _ads_enqueue_kwargs
+        kw = _ads_enqueue_kwargs({"search_terms_only": True})
+        assert kw["search_terms_only"] is True
+        assert kw["campaigns_only"] is False
+        assert kw["placements_only"] is False
+
+    def test_placements_only_explicit(self):
+        from src.main import _ads_enqueue_kwargs
+        kw = _ads_enqueue_kwargs({"placements_only": True, "days": 14})
+        assert kw["placements_only"] is True
+        assert kw["campaigns_only"] is False
+        assert kw["days"] == 14
+
+    def test_mutually_exclusive_only_flags_rejected(self):
+        from src.main import _ads_enqueue_kwargs
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            _ads_enqueue_kwargs(
+                {"campaigns_only": True, "search_terms_only": True})
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            _ads_enqueue_kwargs(
+                {"search_terms_only": True, "placements_only": True})
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            _ads_enqueue_kwargs(
+                {"campaigns_only": True, "placements_only": True})
+
+    def test_string_false_allows_full_suite(self):
+        from src.main import _ads_enqueue_kwargs
+        kw = _ads_enqueue_kwargs({"campaigns_only": "false", "days": "7"})
+        assert kw["campaigns_only"] is False
+        assert kw["days"] == 7
+
+    def test_string_true_search_terms_only(self):
+        from src.main import _ads_enqueue_kwargs
+        kw = _ads_enqueue_kwargs({"search_terms_only": "true"})
+        assert kw["search_terms_only"] is True
+        assert kw["campaigns_only"] is False
+
+    def test_job_worker_uses_payload_resolver(self):
+        import inspect
+        from src.main import _run_job_worker
+        src = inspect.getsource(_run_job_worker)
+        assert "_ads_enqueue_kwargs" in src
+        assert 'payload.get("days", 14)' not in src
+
+    def test_scheduled_jobs_keep_their_only_flags(self):
+        import inspect
+        from src.main import (
+            _run_ads_campaigns_sync, _run_ads_search_terms_sync,
+            _run_ads_placements_sync, _run_ads_campaigns_backfill,
+        )
+        camp = inspect.getsource(_run_ads_campaigns_sync)
+        assert "days=7" in camp
+        assert "campaigns_only=True" in camp
+        st = inspect.getsource(_run_ads_search_terms_sync)
+        assert "search_terms_only=True" in st
+        pl = inspect.getsource(_run_ads_placements_sync)
+        assert "placements_only=True" in pl
+        bf = inspect.getsource(_run_ads_campaigns_backfill)
+        assert "days=90" in bf
+        assert "campaigns_only=True" in bf
+
+
 # ── 4d. Ads sync outcome classification ───────────────────────
 
 

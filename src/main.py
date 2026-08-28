@@ -6183,6 +6183,56 @@ def _run_cpa_exports():
         job_finish(run_id, "success", "All CPA exports uploaded")
 
 
+def _payload_flag(value, default: bool = False) -> bool:
+    """Parse a JSON / Slack / Dana payload flag into a bool."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def _ads_enqueue_kwargs(payload: dict | None) -> dict:
+    """Resolve ads_sync / ppc_sync agent_jobs payload.
+
+    Dashboard / Dana catch-up is a short campaigns refresh: 7 days,
+    campaigns_only. Search terms (~90 min poll cap) and placements stay
+    on their scheduled jobs unless the payload explicitly asks for them.
+
+    A 90-minute search-term pull would occupy job_worker (APScheduler
+    max_instances=1) and stall inventory_sync / other queued agent_jobs.
+
+    Explicit overrides:
+      campaigns_only: false — full suite (old enqueue behavior)
+      search_terms_only     — search-term report only
+      placements_only       — placements only
+    """
+    payload = payload or {}
+    raw_days = payload.get("days", 7)
+    days = int(7 if raw_days in (None, "") else raw_days)
+
+    search_terms_only = _payload_flag(payload.get("search_terms_only"), False)
+    placements_only = _payload_flag(payload.get("placements_only"), False)
+    if "campaigns_only" in payload and payload["campaigns_only"] is not None:
+        campaigns_only = _payload_flag(payload["campaigns_only"], True)
+    else:
+        campaigns_only = not (search_terms_only or placements_only)
+
+    only_flags = (campaigns_only, search_terms_only, placements_only)
+    if sum(bool(f) for f in only_flags) > 1:
+        raise ValueError(
+            "campaigns_only, search_terms_only and placements_only "
+            "are mutually exclusive")
+
+    return {
+        "days": days,
+        "campaigns_only": campaigns_only,
+        "search_terms_only": search_terms_only,
+        "placements_only": placements_only,
+        "label": "dashboard-enqueue",
+    }
+
+
 def _run_job_worker():
     """Poll agent_jobs for pending work and execute."""
     from src.db import get_client
@@ -6228,8 +6278,10 @@ def _run_job_worker():
                 fetch_orders(start, end)
                 fetch_inventory(start, end)
             elif job_type in ("ads_sync", "ppc_sync"):
-                days = int(payload.get("days", 14))
-                _run_ads_sync_job("ads_sync", days=days, label="dashboard-enqueue")
+                # Honour payload flags. Default is 7d campaigns-only so a
+                # dashboard / Dana catch-up cannot start search terms.
+                kwargs = _ads_enqueue_kwargs(payload)
+                _run_ads_sync_job("ads_sync", **kwargs)
             elif job_type == "inventory_sync":
                 _run_inventory_sync()
             elif job_type == "sqp_sync":
