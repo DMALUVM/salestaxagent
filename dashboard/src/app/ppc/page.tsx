@@ -666,7 +666,7 @@ export default function PPCPage() {
     try {
       await fetch("/api/ppc/sync", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ days }),
+        body: JSON.stringify({ days, campaigns_only: true }),
       });
       await loadData();
     } catch { /* */ }
@@ -878,9 +878,9 @@ export default function PPCPage() {
             {generating && <RefreshCw className="mr-1 h-3 w-3 animate-spin" />}
             {generating ? "Generating..." : `Generate Recs (${range.toUpperCase()})`}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => syncAds(14)} disabled={syncing}>
+          <Button variant="outline" size="sm" onClick={() => syncAds(7)} disabled={syncing}>
             <RefreshCw className={`mr-1 h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing..." : "Sync 14D"}
+            {syncing ? "Syncing..." : "Sync 7D"}
           </Button>
         </div>
       </div>
