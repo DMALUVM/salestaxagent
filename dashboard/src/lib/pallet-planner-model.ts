@@ -28,10 +28,10 @@ export const DEFAULT_INBOUND_CARTON_UNITS = CARTON_20X16X14_UNITS;
 export const LOCKED_TONIGHT_3PL_FBA_SEND: Record<string, number> = {
   DDPE0004Shop: 5_400, // assorted — 20 boxes of 270
   DDPE0003Shop: 4_860, // orange — 18 boxes of 270
-  DDPE0002Shop: 0, // peppermint not in this send
+  DDPE0002Shop: 2_700, // peppermint — 10 boxes of 270
   DDPE0001Shop: 0, // unscented not in this send
 };
-export const LOCKED_TONIGHT_3PL_FBA_TOTAL = 10_260;
+export const LOCKED_TONIGHT_3PL_FBA_TOTAL = 12_960;
 export const FAMILY_FBA_CAP_PEAK = 55_600;
 export const FAMILY_FBA_CAP_OCT_DEC = 49_400;
 
