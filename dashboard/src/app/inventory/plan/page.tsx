@@ -21,6 +21,9 @@ import {
 import { isConfigured } from "@/lib/supabase";
 import { Shield, AlertTriangle, Play } from "lucide-react";
 import Link from "next/link";
+import type { InventoryLeadtimeSummary, InventorySettings } from "@/lib/types";
+import type { AmazonMonthlySale } from "@/lib/pallet-planner-model";
+import { planProduction } from "@/lib/production-planner-model";
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -78,6 +81,8 @@ export default function PlanSkuPage() {
   const [include3pl, setInclude3pl] = useState(false);
   const [stress, setStress] = useState(1.0);
   const [ran, setRan] = useState(false);
+  const [plannedQty, setPlannedQty] = useState("");
+  const [availableDate, setAvailableDate] = useState("");
 
   const snapshots = (raw?.snapshots ?? []) as InventorySnapshot[];
   const velocities = (raw?.velocity ?? []) as SkuVelocity[];
@@ -271,6 +276,62 @@ export default function PlanSkuPage() {
   const snap = snapshots.find((s) => s.sku === selectedSku);
   const awdItem = awdList.find((a) => a.sku === selectedSku);
   const tplItem = tplList.find((t) => t.sku === selectedSku);
+  const settings = (raw as { settings?: InventorySettings | null } | null)?.settings ?? null;
+  const leadtime = (raw as { leadtime?: InventoryLeadtimeSummary | null } | null)?.leadtime ?? null;
+  const amazonLipSales = ((raw as { amazonLipSales?: AmazonMonthlySale[] } | null)?.amazonLipSales ?? []) as AmazonMonthlySale[];
+
+  const production = useMemo(() => {
+    if (!selectedSku) return null;
+    const qty = plannedQty.trim() === "" ? null : Number(plannedQty);
+    const land = availableDate.trim() === "" ? null : availableDate;
+    const today = new Date();
+    const asOf = localDate(today);
+    const fba = snap
+      ? Number(snap.fulfillable ?? 0) +
+        Number(snap.reserved ?? 0) +
+        Number(snap.researching ?? 0) +
+        Number(snap.unfulfillable ?? 0)
+      : null;
+    const inbound = snap
+      ? Number(snap.inbound_working ?? 0) +
+        Number(snap.inbound_shipped ?? 0) +
+        Number(snap.inbound_receiving ?? 0)
+      : null;
+    const daily =
+      vel && vel.total_u_30 != null && !Number.isNaN(Number(vel.total_u_30))
+        ? Number(vel.total_u_30)
+        : null;
+    return planProduction({
+      sku: selectedSku,
+      productName: vel?.product_name ?? undefined,
+      plannedQty: qty != null && Number.isFinite(qty) ? qty : null,
+      availableDate: land,
+      asOf,
+      onHand: {
+        fba,
+        inbound,
+        awd: awdItem ? Number(awdItem.awd_on_hand ?? 0) : null,
+        tpl: tplItem ? Number(tplItem.available ?? 0) : null,
+      },
+      dailyVelocity: daily,
+      monthlySales: amazonLipSales,
+      settings,
+      leadtime,
+      weekDemand: plan?.weeks,
+    });
+  }, [
+    selectedSku,
+    plannedQty,
+    availableDate,
+    snap,
+    vel,
+    awdItem,
+    tplItem,
+    amazonLipSales,
+    settings,
+    leadtime,
+    plan,
+  ]);
 
   // Auto-run when SKU comes from URL param
   useEffect(() => {
@@ -362,6 +423,37 @@ export default function PlanSkuPage() {
                 <input type="checkbox" checked={include3pl} onChange={(e) => setInclude3pl(e.target.checked)} />
                 3PL in FBA supply
               </label>
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">
+                Planned production qty
+              </label>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={1}
+                placeholder="e.g. 2800"
+                value={plannedQty}
+                onChange={(e) => setPlannedQty(e.target.value)}
+                className="mt-1 w-full rounded border bg-background px-3 py-2 text-sm"
+              />
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Recommend-only. Nothing places a PO.
+              </p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">
+                Available date
+              </label>
+              <input
+                type="date"
+                value={availableDate}
+                onChange={(e) => setAvailableDate(e.target.value)}
+                className="mt-1 w-full rounded border bg-background px-3 py-2 text-sm"
+              />
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -528,6 +620,45 @@ export default function PlanSkuPage() {
               </CardContent>
             </Card>
           </div>
+
+          <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
+            <Card>
+              <CardContent className="p-3">
+                <p className="text-[10px] text-muted-foreground uppercase">
+                  New OOS after qty lands
+                </p>
+                <p className="text-lg font-semibold tabular-nums">
+                  {production?.newOosDate ?? "—"}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3">
+                <p className="text-[10px] text-muted-foreground uppercase">
+                  Recommended next PO date
+                </p>
+                <p className="text-lg font-semibold tabular-nums">
+                  {production?.recommendedPoDate ?? "—"}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-3">
+                <p className="text-[10px] text-muted-foreground uppercase">
+                  Recommended next PO qty
+                </p>
+                <p className="text-lg font-semibold tabular-nums">
+                  {production?.recommendedPoQty != null ? fmt(production.recommendedPoQty) : "—"}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+          {production?.omittedLine && (
+            <p className="text-xs text-muted-foreground">{production.omittedLine}</p>
+          )}
+          {production?.leadNote && (
+            <p className="text-xs text-muted-foreground">{production.leadNote}</p>
+          )}
 
           {/* Action card */}
           <Card className={plan.fbaGap > 0 ? "border-amber-500/30" : "border-emerald-500/30"}>

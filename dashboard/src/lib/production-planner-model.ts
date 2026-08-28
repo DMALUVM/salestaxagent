@@ -1,8 +1,9 @@
 /**
- * Production Planner — recommend-only PO date/qty for one SKU.
+ * Recommend-only production landing math for /inventory/plan (Plan SKU).
  *
  * Reuses the pallet-planner holiday demand / cover / peak-receive helpers
  * and the existing Formunova production lead. Does not invent a forecast.
+ * Not a separate page.
  */
 
 import { PRODUCTION_LEAD_DAYS } from "./inventory-four-numbers";
@@ -41,6 +42,12 @@ export type ProductionOnHand = {
   tpl?: OptionalUnits;
 };
 
+export type ProductionWeekDemand = {
+  start: string;
+  end: string;
+  demand: number;
+};
+
 export type ProductionPlanInput = {
   sku: string;
   productName?: string;
@@ -53,6 +60,8 @@ export type ProductionPlanInput = {
   monthlySales?: AmazonMonthlySale[] | null;
   settings?: PlannerSettings | null;
   leadtime?: PlannerLeadtime | null;
+  /** When set, new OOS walks this Plan SKU weekly demand (no second forecast). */
+  weekDemand?: ProductionWeekDemand[] | null;
 };
 
 export type ProductionPlanResult = {
@@ -199,6 +208,48 @@ export function subtractDays(iso: string, days: number): string {
   return addDays(iso, -Math.max(0, days));
 }
 
+/** Walk Plan SKU weekly demand, landing planned qty on available date. */
+export function newOosFromWeeklyDemand(opts: {
+  stock: number | null;
+  weeks: ProductionWeekDemand[] | null | undefined;
+  inject?: { date: string; qty: number } | null;
+}): string | null {
+  if (opts.stock == null || !opts.weeks?.length || !opts.inject) return null;
+  let remaining = opts.stock;
+  const land = opts.inject.date;
+  let landed = false;
+  if (land < opts.weeks[0].start) {
+    remaining += opts.inject.qty;
+    landed = true;
+  }
+  for (const w of opts.weeks) {
+    if (!landed && land >= w.start && land <= w.end) {
+      remaining += opts.inject.qty;
+      landed = true;
+    }
+    const demand = Number(w.demand) || 0;
+    if (demand <= 0) continue;
+    if (remaining < demand) {
+      const span = Math.max(daysBetween(w.start, w.end), 0);
+      return addDays(w.start, Math.floor((remaining / demand) * (span + 1)));
+    }
+    remaining -= demand;
+  }
+  if (!landed) {
+    remaining += opts.inject.qty;
+    const last = opts.weeks[opts.weeks.length - 1];
+    const daily = Number(last.demand) > 0 ? Number(last.demand) / 7 : null;
+    if (daily != null && daily > 0) {
+      return walkOosDate({
+        start: land > last.end ? land : addDays(last.end, 1),
+        stock: remaining,
+        dailyOn: () => daily,
+      });
+    }
+  }
+  return null;
+}
+
 export function planProduction(input: ProductionPlanInput): ProductionPlanResult {
   const family = productionFamily(input.sku);
   const policy = plannerPolicy(input.settings, input.leadtime);
@@ -253,15 +304,22 @@ export function planProduction(input: ProductionPlanInput): ProductionPlanResult
       ? { date: input.availableDate, qty: Number(input.plannedQty) }
       : null;
 
-  const newOosDate =
-    onHand.stock != null && dailyOn && planned
-      ? walkOosDate({
-          start: input.asOf,
+  const newOosDate = planned
+    ? input.weekDemand?.length
+      ? newOosFromWeeklyDemand({
           stock: onHand.stock,
-          dailyOn,
+          weeks: input.weekDemand,
           inject: planned,
         })
-      : null;
+      : onHand.stock != null && dailyOn
+        ? walkOosDate({
+            start: input.asOf,
+            stock: onHand.stock,
+            dailyOn,
+            inject: planned,
+          })
+        : null
+    : null;
 
   const recommendedPoDate =
     newOosDate != null ? subtractDays(newOosDate, leadDays + coverDays) : null;

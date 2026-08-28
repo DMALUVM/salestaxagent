@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -154,6 +154,29 @@ describe("Formunova production plan", () => {
     assert.equal(awdOnly.omitted.includes("AWD"), false);
   });
 
+  test("weekly Plan SKU demand + 2800 landing still sets next PO = new OOS − lead − cover", () => {
+    const asOf = "2026-08-28";
+    const weeks = [];
+    let cursor = asOf;
+    for (let i = 0; i < 40; i++) {
+      const end = addDays(cursor, 6);
+      weeks.push({ start: cursor, end, demand: 20 * 7 });
+      cursor = addDays(end, 1);
+    }
+    const plan = planProduction({
+      sku: DEO,
+      plannedQty: 2_800,
+      availableDate: "2026-10-15",
+      asOf,
+      onHand: { fba: 1_400, inbound: 0, awd: 0, tpl: 0 },
+      dailyVelocity: 20,
+      weekDemand: weeks,
+    });
+    assert.ok(plan.newOosDate);
+    assert.equal(plan.recommendedPoDate, subtractDays(plan.newOosDate!, 70 + 60));
+    assert.equal(plan.recommendedPoQty, 2_600);
+  });
+
   test("missing sales is omitted, not a fake 0 daily", () => {
     const plan = planProduction({
       sku: DEO,
@@ -266,15 +289,24 @@ describe("production planner source lock", () => {
     assert.match(model, /FIRST_WAVE_AWD_TARGET_CAP = 61_425/);
   });
 
-  test("route is /production-planner with one sidebar link", () => {
+  test("lives on /inventory/plan only — no /production-planner route or nav link", () => {
     const nav = src("src/components/nav.tsx");
-    const page = src("src/app/production-planner/page.tsx");
-    assert.match(nav, /href: "\/production-planner"/);
-    assert.match(nav, /label: "Production Planner"/);
-    assert.equal(nav.split("href: \"/production-planner\"").length - 1, 1);
+    const planPage = src("src/app/inventory/plan/page.tsx");
+    assert.equal(existsSync(path.join(process.cwd(), "src/app/production-planner/page.tsx")), false);
+    assert.doesNotMatch(nav, /production-planner|Production Planner/);
     assert.doesNotMatch(nav, /\/planning\/production|\/inventory\/production/);
-    assert.match(page, /Production Planner/);
-    assert.match(page, /Recommend-only/);
-    assert.doesNotMatch(page, /place a PO|submitOrder|createPO/i);
+    assert.match(planPage, /Planned production qty/);
+    assert.match(planPage, /Available date/);
+    assert.match(planPage, /New OOS after qty lands/);
+    assert.match(planPage, /Recommended next PO date/);
+    assert.match(planPage, /Recommended next PO qty/);
+    assert.match(planPage, /planProduction/);
+    assert.match(planPage, /Recommend-only/);
+    assert.match(planPage, /Plan through/);
+    assert.match(planPage, /Buffer days/);
+    assert.match(planPage, /AWD in FBA supply/);
+    assert.match(planPage, /3PL in FBA supply/);
+    assert.match(planPage, /Stress test/);
+    assert.doesNotMatch(planPage, /place a PO|submitOrder|createPO/i);
   });
 });
