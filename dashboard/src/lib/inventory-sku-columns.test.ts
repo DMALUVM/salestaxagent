@@ -6,8 +6,12 @@ import {
   DEFAULT_VISIBLE_COLUMN_KEYS,
   formatSkuQty,
   migrateSortColumn,
+  PHONE_HIDDEN_SKU_COLUMN_KEYS,
+  PHONE_KEEP_SKU_COLUMN_KEYS,
+  PHONE_SKU_COLUMN_HIDE_CLASS,
   resolveVisibleColumns,
   SKU_TABLE_COLUMNS,
+  skuColumnPhoneClass,
   visibleSkuTableColumns,
 } from "./inventory-sku-columns";
 
@@ -129,5 +133,30 @@ describe("sort column migration", () => {
   test("old FBA on-hand sort key becomes fulfillable", () => {
     assert.equal(migrateSortColumn("fba_on_hand"), "fba_fulfillable");
     assert.equal(migrateSortColumn(null), "fba_fulfillable");
+  });
+});
+
+describe("phone-only SKU column hide", () => {
+  test("phone-hidden keys get hidden md:table-cell; keep-on-phone keys do not", () => {
+    assert.equal(PHONE_SKU_COLUMN_HIDE_CLASS, "hidden md:table-cell");
+    for (const key of PHONE_HIDDEN_SKU_COLUMN_KEYS) {
+      assert.equal(skuColumnPhoneClass(key), "hidden md:table-cell");
+      assert.match(skuColumnPhoneClass(key), /hidden/);
+      assert.match(skuColumnPhoneClass(key), /md:table-cell/);
+    }
+    for (const key of PHONE_KEEP_SKU_COLUMN_KEYS) {
+      assert.equal(skuColumnPhoneClass(key), "");
+      assert.doesNotMatch(skuColumnPhoneClass(key), /hidden/);
+      assert.doesNotMatch(skuColumnPhoneClass(key), /md:table-cell/);
+    }
+    const all = new Set(SKU_TABLE_COLUMNS.map((c) => c.key));
+    for (const key of [...PHONE_HIDDEN_SKU_COLUMN_KEYS, ...PHONE_KEEP_SKU_COLUMN_KEYS]) {
+      all.delete(key);
+    }
+    assert.deepEqual([...all], [], "every SKU column is either phone-hidden or kept");
+    const defaults = resolveVisibleColumns(null);
+    for (const key of PHONE_HIDDEN_SKU_COLUMN_KEYS) {
+      assert.equal(defaults.includes(key), true, `${key} stays in prefs/defaults`);
+    }
   });
 });

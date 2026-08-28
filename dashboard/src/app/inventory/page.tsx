@@ -58,6 +58,7 @@ import {
   formatSkuQty,
   migrateSortColumn,
   resolveVisibleColumns,
+  skuColumnPhoneClass,
   visibleSkuTableColumns,
 } from "@/lib/inventory-sku-columns";
 
@@ -866,7 +867,7 @@ export default function InventoryPage() {
                     title={tip}
                     className={`cursor-pointer hover:text-foreground text-right whitespace-nowrap ${
                       key === "sku" ? "text-left sticky left-0 z-20 bg-card" : ""
-                    }`}
+                    } ${skuColumnPhoneClass(key)}`}
                     onClick={() => handleSort(key)}
                   >
                     {label}
@@ -958,12 +959,12 @@ export default function InventoryPage() {
                     </TableCell>
                     )}
                     {visibleKeys.has("total_u_7") && (
-                    <TableCell className="text-right tabular-nums">
+                    <TableCell className={`text-right tabular-nums ${skuColumnPhoneClass("total_u_7")}`}>
                       {r.total_u_7.toFixed(1)}
                     </TableCell>
                     )}
                     {visibleKeys.has("total_u_30") && (
-                    <TableCell className="text-right tabular-nums">
+                    <TableCell className={`text-right tabular-nums ${skuColumnPhoneClass("total_u_30")}`}>
                       {r.total_u_30.toFixed(1)}
                     </TableCell>
                     )}
@@ -971,7 +972,7 @@ export default function InventoryPage() {
                     <TableCell
                       className={`text-right tabular-nums ${
                         r.rate_agreement === "investigate" ? "text-amber-600 font-medium" : "text-muted-foreground"
-                      }`}
+                      } ${skuColumnPhoneClass("inventory_u_30")}`}
                       title={
                         r.inventory_u_30 != null && r.rate_divergence_pct != null
                           ? `${r.rate_divergence_pct}% vs orders V30`
@@ -982,12 +983,12 @@ export default function InventoryPage() {
                     </TableCell>
                     )}
                     {visibleKeys.has("measured_receive_days") && (
-                    <TableCell className="text-right tabular-nums text-muted-foreground" title={r.receive_sample_n ? `n=${r.receive_sample_n} shipments` : undefined}>
+                    <TableCell className={`text-right tabular-nums text-muted-foreground ${skuColumnPhoneClass("measured_receive_days")}`} title={r.receive_sample_n ? `n=${r.receive_sample_n} shipments` : undefined}>
                       {r.measured_receive_days != null && r.measured_receive_days > 0 ? `${r.measured_receive_days}d` : "—"}
                     </TableCell>
                     )}
                     {visibleKeys.has("measured_replenish_days") && (
-                    <TableCell className="text-right tabular-nums text-muted-foreground" title={r.replenish_sample_n ? `n=${r.replenish_sample_n} replenishments` : undefined}>
+                    <TableCell className={`text-right tabular-nums text-muted-foreground ${skuColumnPhoneClass("measured_replenish_days")}`} title={r.replenish_sample_n ? `n=${r.replenish_sample_n} replenishments` : undefined}>
                       {r.measured_replenish_days != null && r.measured_replenish_days > 0 ? `${r.measured_replenish_days}d` : "—"}
                     </TableCell>
                     )}
@@ -1006,14 +1007,14 @@ export default function InventoryPage() {
                     </TableCell>
                     )}
                     {visibleKeys.has("pipeline_dos") && (
-                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                    <TableCell className={`text-right tabular-nums text-muted-foreground ${skuColumnPhoneClass("pipeline_dos")}`}>
                       {r.pipeline_dos > 999
                         ? "999+"
                         : fmt(r.pipeline_dos)}
                     </TableCell>
                     )}
                     {visibleKeys.has("amz_rec_qty") && (
-                    <TableCell className="text-right tabular-nums">
+                    <TableCell className={`text-right tabular-nums ${skuColumnPhoneClass("amz_rec_qty")}`}>
                       {fmt(r.amz_rec_qty)}
                     </TableCell>
                     )}
@@ -1021,19 +1022,19 @@ export default function InventoryPage() {
                     <TableCell
                       className={`text-right tabular-nums font-medium ${
                         r.our_reorder_qty > 0 ? "text-amber-600" : ""
-                      }`}
+                      } ${skuColumnPhoneClass("our_reorder_qty")}`}
                     >
                       {fmt(r.our_reorder_qty)}
                     </TableCell>
                     )}
                     {visibleKeys.has("stockout_date") && (
-                    <TableCell className="text-right text-xs"
+                    <TableCell className={`text-right text-xs ${skuColumnPhoneClass("stockout_date")}`}
                       title={r.channel === "shopify_only" ? "Warehouse reaches 0" : "FBA reaches 0"}>
                       {r.stockout_date?.slice(5) ?? "—"}
                     </TableCell>
                     )}
                     {visibleKeys.has("network_oos_date") && (
-                    <TableCell className="text-right text-xs text-muted-foreground"
+                    <TableCell className={`text-right text-xs text-muted-foreground ${skuColumnPhoneClass("network_oos_date")}`}
                       title="All owned network stock reaches 0">
                       {r.network_oos_date?.slice(5) ?? "—"}
                     </TableCell>

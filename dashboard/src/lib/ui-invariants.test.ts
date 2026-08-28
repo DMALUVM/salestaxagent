@@ -125,6 +125,55 @@ describe("pallet planner ship view", () => {
     assert.doesNotMatch(api, /awd_on_hand\s*>\s*0/);
   });
 
+  test("inventory SKU table hides secondary columns on phone only", () => {
+    const page = src("src/app/inventory/page.tsx");
+    const cols = src("src/lib/inventory-sku-columns.ts");
+    const nav = src("src/components/nav.tsx");
+    assert.match(page, /skuColumnPhoneClass/);
+    assert.match(page, /skuColumnPhoneClass\(key\)/);
+    assert.match(page, /overflow-x-auto/);
+    assert.match(page, /resolveVisibleColumns\(saved\)/);
+    assert.doesNotMatch(page, /card-layout|sku-card/);
+    assert.match(cols, /PHONE_HIDDEN_SKU_COLUMN_KEYS/);
+    assert.match(cols, /hidden md:table-cell/);
+    const resolver = cols.slice(
+      cols.indexOf("export function resolveVisibleColumns"),
+      cols.indexOf("export function visibleSkuTableColumns"),
+    );
+    assert.doesNotMatch(resolver, /PHONE_HIDDEN|skuColumnPhoneClass|hidden md:table-cell/);
+    const hidden = [
+      "total_u_7",
+      "total_u_30",
+      "inventory_u_30",
+      "measured_receive_days",
+      "measured_replenish_days",
+      "pipeline_dos",
+      "amz_rec_qty",
+      "our_reorder_qty",
+      "stockout_date",
+      "network_oos_date",
+    ];
+    for (const key of hidden) {
+      assert.match(page, new RegExp(`skuColumnPhoneClass\\("${key}"\\)`));
+    }
+    const keep = [
+      "sku",
+      "fba_fulfillable",
+      "awd_on_hand",
+      "tpl_available",
+      "inbound",
+      "total_amazon",
+      "owned_total",
+      "dos",
+      "flag",
+    ];
+    for (const key of keep) {
+      assert.doesNotMatch(page, new RegExp(`skuColumnPhoneClass\\("${key}"\\)`));
+    }
+    const mobile = nav.slice(nav.indexOf("export function MobileHeader"));
+    assert.match(mobile, /inline-flex h-10 w-10 items-center justify-center/);
+  });
+
   test("FBA column is SC on-hand; Total Amazon is the only new column", () => {
     const page = src("src/app/inventory/page.tsx");
     assert.match(page, /formatSkuQty\(r\.fba_fulfillable\)/);
