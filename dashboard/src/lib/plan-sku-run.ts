@@ -3,9 +3,11 @@
  * Production landing cards must not depend on the weekly `plan` object.
  */
 
-export const PLAN_ERR_NO_SKU = "Select a SKU. Run Plan cannot run without one.";
+export const PLAN_ERR_NO_SKU = "Select a SKU or a category. Run Plan cannot run without one.";
 export const PLAN_ERR_NO_VELOCITY =
   "No velocity for this SKU (V30 missing or 0). Weekly plan needs velocity. New OOS / next PO still show when qty and available date are set.";
+export const PLAN_ERR_NO_CATEGORY_VELOCITY =
+  "No velocity for this category (V30 missing or 0). Weekly plan needs velocity. New OOS / next PO still show when qty and available date are set.";
 
 /** Exact, case-fold, and Shop-suffix keys so DDPE00019 matches DDPE00019Shop. */
 export function skuMatchKeys(sku: string | null | undefined): string[] {
@@ -64,11 +66,14 @@ export function showProductionStrip(opts: {
 
 export function planRunError(opts: {
   selectedSku: string;
+  selectedCategory?: string;
   velocityDaily: number | null;
 }): string | null {
-  if (!opts.selectedSku.trim()) return PLAN_ERR_NO_SKU;
+  const sku = opts.selectedSku.trim();
+  const cat = (opts.selectedCategory ?? "").trim();
+  if (!sku && !cat) return PLAN_ERR_NO_SKU;
   if (opts.velocityDaily == null || opts.velocityDaily <= 0) {
-    return PLAN_ERR_NO_VELOCITY;
+    return sku ? PLAN_ERR_NO_VELOCITY : PLAN_ERR_NO_CATEGORY_VELOCITY;
   }
   return null;
 }
@@ -76,6 +81,7 @@ export function planRunError(opts: {
 /** What the page must show — weekly plan null must not hide landing cards. */
 export function planSkuOutput(opts: {
   selectedSku: string;
+  selectedCategory?: string;
   plannedQty: number | null;
   availableDate: string | null;
   ran: boolean;
@@ -95,6 +101,7 @@ export function planSkuOutput(opts: {
     error: opts.ran
       ? planRunError({
           selectedSku: opts.selectedSku,
+          selectedCategory: opts.selectedCategory,
           velocityDaily: opts.velocityDaily,
         })
       : null,

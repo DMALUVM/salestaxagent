@@ -31,6 +31,18 @@ import {
   skusMatch,
   velocityDaily,
 } from "@/lib/plan-sku-run";
+import {
+  PLAN_CATEGORY_IDS,
+  PLAN_CATEGORY_LABELS,
+  categoryFamilySku,
+  categoryOnHand,
+  categoryVelocity,
+  groupSkusByCategory,
+  isPlanCategoryId,
+  liveCategorySkus,
+  snapshotFba,
+  snapshotInbound,
+} from "@/lib/plan-sku-categories";
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -90,6 +102,7 @@ export default function PlanSkuPage() {
   const [ran, setRan] = useState(false);
   const [plannedQty, setPlannedQty] = useState("");
   const [availableDate, setAvailableDate] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("");
 
   const snapshots = (raw?.snapshots ?? []) as InventorySnapshot[];
   const velocities = (raw?.velocity ?? []) as SkuVelocity[];
@@ -106,15 +119,44 @@ export default function PlanSkuPage() {
     return Array.from(set).sort();
   }, [snapshots, velocities]);
 
+  const velSkus = useMemo(() => velocities.map((v) => v.sku), [velocities]);
+  const categorySkus = useMemo(
+    () =>
+      isPlanCategoryId(selectedCategory)
+        ? liveCategorySkus(selectedCategory, velSkus)
+        : [],
+    [selectedCategory, velSkus],
+  );
+  const categoryMode = !selectedSku && isPlanCategoryId(selectedCategory);
+  const categorySums = useMemo(() => {
+    if (!isPlanCategoryId(selectedCategory)) return null;
+    const skus = liveCategorySkus(selectedCategory, velSkus);
+    return {
+      skus,
+      onHand: categoryOnHand(skus, snapshots, awdList, tplList),
+      vel: categoryVelocity(skus, velocities),
+    };
+  }, [selectedCategory, velSkus, snapshots, awdList, tplList, velocities]);
+
+  const groupedSkuOptions = useMemo(() => {
+    const list = isPlanCategoryId(selectedCategory)
+      ? skuOptions.filter((s) => categorySkus.some((c) => skusMatch(c, s)))
+      : skuOptions;
+    return groupSkusByCategory(list);
+  }, [skuOptions, selectedCategory, categorySkus]);
+
   const plan = useMemo((): PlanResult | null => {
-    if (!ran || !selectedSku) return null;
+    if (!ran) return null;
+    if (!selectedSku && !isPlanCategoryId(selectedCategory)) return null;
 
-    const snap = findBySku(snapshots, selectedSku);
-    const vel = findBySku(velocities, selectedSku);
-    const awdItem = findBySku(awdList, selectedSku);
-    const tplItem = findBySku(tplList, selectedSku);
+    const snap = selectedSku ? findBySku(snapshots, selectedSku) : undefined;
+    const vel = selectedSku ? findBySku(velocities, selectedSku) : undefined;
+    const awdItem = selectedSku ? findBySku(awdList, selectedSku) : undefined;
+    const tplItem = selectedSku ? findBySku(tplList, selectedSku) : undefined;
 
-    const baseDaily = velocityDaily(vel);
+    const baseDaily = selectedSku
+      ? velocityDaily(vel)
+      : categorySums?.vel.daily ?? null;
     if (baseDaily == null || baseDaily <= 0) return null;
 
     const seasonMap = new Map<number, number>();
@@ -122,19 +164,22 @@ export default function PlanSkuPage() {
       seasonMap.set(Number(s.week), Number(s.multiplier));
 
     // Holiday forecast: prefer imported weekly series when available
-    const skuForecast = forecastRows.filter((f) => skusMatch(f.sku, selectedSku));
+    const skuForecast = selectedSku
+      ? forecastRows.filter((f) => skusMatch(f.sku, selectedSku))
+      : forecastRows.filter((f) =>
+          categorySkus.some((sku) => skusMatch(f.sku, sku)),
+        );
     // Build sorted array of forecast weeks for range lookup
     const scenarioKey = "correction_factor";
-    const forecastWeeks: { start: number; units: number }[] = [];
+    const forecastByStart = new Map<number, number>();
     for (const f of skuForecast) {
-      if (f.scenario === scenarioKey) {
-        forecastWeeks.push({
-          start: new Date(f.week_start + "T00:00:00").getTime(),
-          units: Number(f.units),
-        });
-      }
+      if (f.scenario !== scenarioKey) continue;
+      const start = new Date(f.week_start + "T00:00:00").getTime();
+      forecastByStart.set(start, (forecastByStart.get(start) ?? 0) + Number(f.units));
     }
-    forecastWeeks.sort((a, b) => a.start - b.start);
+    const forecastWeeks: { start: number; units: number }[] = [...forecastByStart.entries()]
+      .map(([start, units]) => ({ start, units }))
+      .sort((a, b) => a.start - b.start);
     const hasForecast = forecastWeeks.length > 0;
 
     // Find forecast that overlaps the plan week [cursorMs, endMs].
@@ -156,17 +201,18 @@ export default function PlanSkuPage() {
       return best;
     }
 
-    const fba =
-      Number(snap?.fulfillable ?? 0) +
-      Number(snap?.reserved ?? 0) +
-      Number(snap?.researching ?? 0) +
-      Number(snap?.unfulfillable ?? 0);
-    const inbound =
-      Number(snap?.inbound_working ?? 0) +
-      Number(snap?.inbound_shipped ?? 0) +
-      Number(snap?.inbound_receiving ?? 0);
-    const awdOh = Number(awdItem?.awd_on_hand ?? 0);
-    const tplOh = Number(tplItem?.available ?? 0);
+    const fba = selectedSku
+      ? (snapshotFba(snap) ?? 0)
+      : (categorySums?.onHand.fba ?? 0);
+    const inbound = selectedSku
+      ? (snapshotInbound(snap) ?? 0)
+      : (categorySums?.onHand.inbound ?? 0);
+    const awdOh = selectedSku
+      ? Number(awdItem?.awd_on_hand ?? 0)
+      : (categorySums?.onHand.awd ?? 0);
+    const tplOh = selectedSku
+      ? Number(tplItem?.available ?? 0)
+      : (categorySums?.onHand.tpl ?? 0);
 
     // Two supply pools
     const fbaSupply = fba + inbound + (useAwd ? awdOh : 0);
@@ -267,6 +313,9 @@ export default function PlanSkuPage() {
   }, [
     ran,
     selectedSku,
+    selectedCategory,
+    categorySkus,
+    categorySums,
     snapshots,
     velocities,
     seasonality,
@@ -277,6 +326,7 @@ export default function PlanSkuPage() {
     useAwd,
     include3pl,
     stress,
+    forecastRows,
   ]);
 
   const vel = findBySku(velocities, selectedSku);
@@ -294,39 +344,49 @@ export default function PlanSkuPage() {
     landingQty != null && Number.isFinite(landingQty) ? landingQty : null;
 
   const productionInput = useMemo(() => {
-    if (!selectedSku) return null;
     const today = new Date();
-    const fba = snap
-      ? Number(snap.fulfillable ?? 0) +
-        Number(snap.reserved ?? 0) +
-        Number(snap.researching ?? 0) +
-        Number(snap.unfulfillable ?? 0)
-      : null;
-    const inbound = snap
-      ? Number(snap.inbound_working ?? 0) +
-        Number(snap.inbound_shipped ?? 0) +
-        Number(snap.inbound_receiving ?? 0)
-      : null;
-    const daily = dailyV30;
-    return {
-      sku: selectedSku,
-      productName: vel?.product_name ?? undefined,
-      plannedQty: landingQtySafe,
-      availableDate: landingDate,
-      asOf: localDate(today),
-      onHand: {
-        fba,
-        inbound,
-        awd: awdItem ? Number(awdItem.awd_on_hand ?? 0) : null,
-        tpl: tplItem ? Number(tplItem.available ?? 0) : null,
-      },
-      dailyVelocity: daily,
-      monthlySales: amazonLipSales,
-      settings,
-      leadtime,
-    };
+    if (selectedSku) {
+      const fba = snapshotFba(snap);
+      const inbound = snapshotInbound(snap);
+      return {
+        sku: selectedSku,
+        productName: vel?.product_name ?? undefined,
+        plannedQty: landingQtySafe,
+        availableDate: landingDate,
+        asOf: localDate(today),
+        onHand: {
+          fba,
+          inbound,
+          awd: awdItem ? Number(awdItem.awd_on_hand ?? 0) : null,
+          tpl: tplItem ? Number(tplItem.available ?? 0) : null,
+        },
+        dailyVelocity: dailyV30,
+        monthlySales: amazonLipSales,
+        settings,
+        leadtime,
+      };
+    }
+    if (categoryMode && categorySums && isPlanCategoryId(selectedCategory)) {
+      return {
+        sku: categoryFamilySku(selectedCategory, categorySums.skus),
+        productName: PLAN_CATEGORY_LABELS[selectedCategory],
+        plannedQty: landingQtySafe,
+        availableDate: landingDate,
+        asOf: localDate(today),
+        onHand: categorySums.onHand,
+        dailyVelocity: categorySums.vel.daily,
+        monthlySales: [] as AmazonMonthlySale[],
+        settings,
+        leadtime,
+        summedVelocity: true,
+      };
+    }
+    return null;
   }, [
     selectedSku,
+    categoryMode,
+    selectedCategory,
+    categorySums,
     landingQtySafe,
     landingDate,
     snap,
@@ -368,8 +428,13 @@ export default function PlanSkuPage() {
     plannedQty: landingQtySafe,
     availableDate: landingDate,
   });
+  const runDaily = categoryMode ? (categorySums?.vel.daily ?? null) : dailyV30;
   const runError = ran
-    ? planRunError({ selectedSku, velocityDaily: dailyV30 })
+    ? planRunError({
+        selectedSku,
+        selectedCategory,
+        velocityDaily: runDaily,
+      })
     : null;
 
   function onRunPlan() {
@@ -419,7 +484,33 @@ export default function PlanSkuPage() {
       {/* Controls */}
       <Card>
         <CardContent className="p-4 space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">
+                Category
+              </label>
+              <select
+                value={selectedCategory}
+                onChange={(e) => {
+                  setSelectedCategory(e.target.value);
+                  setSelectedSku("");
+                  setRan(false);
+                }}
+                className="mt-1 w-full rounded border bg-background px-3 py-2 text-sm"
+              >
+                <option value="">SKU mode</option>
+                {PLAN_CATEGORY_IDS.map((id) => (
+                  <option key={id} value={id}>
+                    {PLAN_CATEGORY_LABELS[id]}
+                  </option>
+                ))}
+              </select>
+              {categoryMode && (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {categorySkus.length} SKUs · family OOS / next PO
+                </p>
+              )}
+            </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">
                 SKU
@@ -432,12 +523,29 @@ export default function PlanSkuPage() {
                 }}
                 className="mt-1 w-full rounded border bg-background px-3 py-2 text-sm"
               >
-                <option value="">Select SKU...</option>
-                {skuOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
+                <option value="">
+                  {categoryMode ? "All in category" : "Select SKU..."}
+                </option>
+                {PLAN_CATEGORY_IDS.map((id) =>
+                  groupedSkuOptions[id].length ? (
+                    <optgroup key={id} label={PLAN_CATEGORY_LABELS[id]}>
+                      {groupedSkuOptions[id].map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null,
+                )}
+                {groupedSkuOptions.other.length > 0 && (
+                  <optgroup label="Other">
+                    {groupedSkuOptions.other.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
             <div>
@@ -532,8 +640,8 @@ export default function PlanSkuPage() {
         </CardContent>
       </Card>
 
-      {/* Supply summary (when SKU selected) */}
-      {selectedSku && vel && (
+      {/* Supply summary (SKU or category) */}
+      {(selectedSku && vel) || categoryMode ? (
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
           <Card>
             <CardContent className="p-3">
@@ -541,12 +649,13 @@ export default function PlanSkuPage() {
                 Velocity
               </p>
               <p className="text-lg font-semibold tabular-nums">
-                {(dailyV30 ?? Number(vel.total_u_30) ?? 0).toFixed(1)}{" "}
+                {(runDaily ?? 0).toFixed(1)}{" "}
                 <span className="text-xs text-muted-foreground">u/day</span>
               </p>
               <p className="text-[10px] text-muted-foreground">
-                Amz {Number(vel.amazon_u_30).toFixed(1)} · Shop{" "}
-                {Number(vel.shopify_u_30).toFixed(1)}
+                {categoryMode
+                  ? `${categorySkus.length} SKUs summed`
+                  : `Amz ${Number(vel?.amazon_u_30 ?? 0).toFixed(1)} · Shop ${Number(vel?.shopify_u_30 ?? 0).toFixed(1)}`}
               </p>
             </CardContent>
           </Card>
@@ -556,19 +665,18 @@ export default function PlanSkuPage() {
                 FBA
               </p>
               <p className="text-lg font-semibold tabular-nums">
-                {fmt(
-                  Number(snap?.fulfillable ?? 0) +
-                    Number(snap?.reserved ?? 0) +
-                    Number(snap?.researching ?? 0) +
-                    Number(snap?.unfulfillable ?? 0),
-                )}
+                {categoryMode
+                  ? categorySums?.onHand.fba != null
+                    ? fmt(categorySums.onHand.fba)
+                    : "—"
+                  : fmt(snapshotFba(snap) ?? 0)}
               </p>
               <p className="text-[10px] text-muted-foreground">
-                +{fmt(
-                  Number(snap?.inbound_working ?? 0) +
-                    Number(snap?.inbound_shipped ?? 0) +
-                    Number(snap?.inbound_receiving ?? 0),
-                )}{" "}
+                +{categoryMode
+                  ? (categorySums?.onHand.inbound != null
+                    ? fmt(categorySums.onHand.inbound)
+                    : "—")
+                  : fmt(snapshotInbound(snap) ?? 0)}{" "}
                 inbound
               </p>
             </CardContent>
@@ -579,7 +687,11 @@ export default function PlanSkuPage() {
                 AWD
               </p>
               <p className="text-lg font-semibold tabular-nums">
-                {fmt(awdItem?.awd_on_hand ?? 0)}
+                {fmt(
+                  categoryMode
+                    ? (categorySums?.onHand.awd ?? 0)
+                    : (awdItem?.awd_on_hand ?? 0),
+                )}
               </p>
             </CardContent>
           </Card>
@@ -589,12 +701,16 @@ export default function PlanSkuPage() {
                 3PL
               </p>
               <p className="text-lg font-semibold tabular-nums">
-                {fmt(tplItem?.available ?? 0)}
+                {fmt(
+                  categoryMode
+                    ? (categorySums?.onHand.tpl ?? 0)
+                    : (tplItem?.available ?? 0),
+                )}
               </p>
             </CardContent>
           </Card>
         </div>
-      )}
+      ) : null}
 
       <div id="plan-run-status">
         {runError && (

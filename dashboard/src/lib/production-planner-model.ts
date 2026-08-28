@@ -62,6 +62,8 @@ export type ProductionPlanInput = {
   leadtime?: PlannerLeadtime | null;
   /** When set, new OOS walks this Plan SKU weekly demand (no second forecast). */
   weekDemand?: ProductionWeekDemand[] | null;
+  /** Category batch: summed V30, family lead/cover. Not a single-SKU holiday curve. */
+  summedVelocity?: boolean;
 };
 
 export type ProductionPlanResult = {
@@ -304,7 +306,7 @@ export function planProduction(input: ProductionPlanInput): ProductionPlanResult
   let holidayRow: HolidayDemandRow | undefined;
   let dailyOn: ((iso: string) => number | null) | null = null;
 
-  if (family === "lip_balm") {
+  if (family === "lip_balm" && !input.summedVelocity) {
     const sales = input.monthlySales ?? [];
     if (!skuHasPositiveSales(sales, input.sku)) {
       omitted.push("sales");
@@ -357,13 +359,13 @@ export function planProduction(input: ProductionPlanInput): ProductionPlanResult
     newOosDate != null ? subtractDays(newOosDate, leadDays + coverDays) : null;
 
   let recommendedPoQty: number | null = null;
-  if (family === "lip_balm" && holidayRow) {
+  if (family === "lip_balm" && holidayRow && !input.summedVelocity) {
     const build = skuProductionBuild(holidayRow, {
       coverDays,
       receiveDays: leadDays,
     });
     recommendedPoQty = coverUnitsFromDaily(build.decDaily, leadDays + coverDays);
-  } else if (family === "formunova" && v30 != null && v30 > 0) {
+  } else if ((family === "formunova" || input.summedVelocity) && v30 != null && v30 > 0) {
     recommendedPoQty = coverUnitsFromDaily(v30, leadDays + coverDays);
   }
 
