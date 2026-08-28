@@ -144,6 +144,38 @@ export function addDays(iso: string, days: number): string {
   return toIso(d);
 }
 
+/** Pad past available date so Plan SKU weeks cover landing + new OOS. */
+export const PLAN_THROUGH_LANDING_PAD_MONTHS = 18;
+
+export function addMonths(iso: string, months: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return toIso(new Date(y, m - 1 + months, d));
+}
+
+/**
+ * When planned qty and available date are both set, raise Plan through to
+ * the later of (new OOS, available + 18 months). Empty qty/date → null
+ * (do not stomp a user Plan through). Never shrinks a later user override.
+ */
+export function autoPlanThrough(opts: {
+  plannedQty: number | null;
+  availableDate: string | null;
+  newOosDate: string | null;
+  currentUntil: string;
+}): string | null {
+  const qty = opts.plannedQty;
+  const avail = opts.availableDate;
+  if (qty == null || !Number.isFinite(qty) || qty <= 0 || !avail) return null;
+  const pad = addMonths(avail, PLAN_THROUGH_LANDING_PAD_MONTHS);
+  const floor = [opts.newOosDate, pad]
+    .filter((d): d is string => !!d)
+    .sort()
+    .at(-1);
+  if (!floor) return null;
+  if (!opts.currentUntil || floor > opts.currentUntil) return floor;
+  return opts.currentUntil;
+}
+
 export function daysBetween(start: string, end: string): number {
   return Math.round((parseIso(end).getTime() - parseIso(start).getTime()) / 86_400_000);
 }

@@ -23,7 +23,7 @@ import { Shield, AlertTriangle, Play } from "lucide-react";
 import Link from "next/link";
 import type { InventoryLeadtimeSummary, InventorySettings } from "@/lib/types";
 import type { AmazonMonthlySale } from "@/lib/pallet-planner-model";
-import { planProduction } from "@/lib/production-planner-model";
+import { autoPlanThrough, planProduction } from "@/lib/production-planner-model";
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -280,12 +280,14 @@ export default function PlanSkuPage() {
   const leadtime = (raw as { leadtime?: InventoryLeadtimeSummary | null } | null)?.leadtime ?? null;
   const amazonLipSales = ((raw as { amazonLipSales?: AmazonMonthlySale[] } | null)?.amazonLipSales ?? []) as AmazonMonthlySale[];
 
-  const production = useMemo(() => {
+  const landingQty = plannedQty.trim() === "" ? null : Number(plannedQty);
+  const landingDate = availableDate.trim() === "" ? null : availableDate;
+  const landingQtySafe =
+    landingQty != null && Number.isFinite(landingQty) ? landingQty : null;
+
+  const productionInput = useMemo(() => {
     if (!selectedSku) return null;
-    const qty = plannedQty.trim() === "" ? null : Number(plannedQty);
-    const land = availableDate.trim() === "" ? null : availableDate;
     const today = new Date();
-    const asOf = localDate(today);
     const fba = snap
       ? Number(snap.fulfillable ?? 0) +
         Number(snap.reserved ?? 0) +
@@ -301,12 +303,12 @@ export default function PlanSkuPage() {
       vel && vel.total_u_30 != null && !Number.isNaN(Number(vel.total_u_30))
         ? Number(vel.total_u_30)
         : null;
-    return planProduction({
+    return {
       sku: selectedSku,
       productName: vel?.product_name ?? undefined,
-      plannedQty: qty != null && Number.isFinite(qty) ? qty : null,
-      availableDate: land,
-      asOf,
+      plannedQty: landingQtySafe,
+      availableDate: landingDate,
+      asOf: localDate(today),
       onHand: {
         fba,
         inbound,
@@ -317,12 +319,11 @@ export default function PlanSkuPage() {
       monthlySales: amazonLipSales,
       settings,
       leadtime,
-      weekDemand: plan?.weeks,
-    });
+    };
   }, [
     selectedSku,
-    plannedQty,
-    availableDate,
+    landingQtySafe,
+    landingDate,
     snap,
     vel,
     awdItem,
@@ -330,8 +331,31 @@ export default function PlanSkuPage() {
     amazonLipSales,
     settings,
     leadtime,
-    plan,
   ]);
+
+  // Daily walk only — used to raise Plan through so weeks cover landing + new OOS.
+  const seedProduction = useMemo(
+    () => (productionInput ? planProduction(productionInput) : null),
+    [productionInput],
+  );
+
+  const production = useMemo(() => {
+    if (!productionInput) return null;
+    const weekly = plan?.weeks?.length
+      ? planProduction({ ...productionInput, weekDemand: plan.weeks })
+      : seedProduction;
+    return weekly?.newOosDate ? weekly : seedProduction;
+  }, [productionInput, plan, seedProduction]);
+
+  useEffect(() => {
+    const next = autoPlanThrough({
+      plannedQty: landingQtySafe,
+      availableDate: landingDate,
+      newOosDate: seedProduction?.newOosDate ?? null,
+      currentUntil: untilDate,
+    });
+    if (next && next !== untilDate) setUntilDate(next);
+  }, [landingQtySafe, landingDate, seedProduction?.newOosDate, untilDate]);
 
   // Auto-run when SKU comes from URL param
   useEffect(() => {

@@ -6,7 +6,10 @@ import path from "node:path";
 import {
   EXAMPLE_FORMUNOVA_SKU,
   FORMUNOVA_PO_LEAD_DAYS,
+  PLAN_THROUGH_LANDING_PAD_MONTHS,
   addDays,
+  addMonths,
+  autoPlanThrough,
   isLipBalmSku,
   omittedLine,
   planProduction,
@@ -253,6 +256,84 @@ describe("lip balm production plan", () => {
   });
 });
 
+describe("auto Plan through for landing", () => {
+  test("qty + available date extends plan-through past new OOS, or avail+18mo if later", () => {
+    assert.equal(PLAN_THROUGH_LANDING_PAD_MONTHS, 18);
+    const available = "2026-10-15";
+    const pad = addMonths(available, 18);
+    assert.equal(pad, "2028-04-15");
+
+    const daily = planProduction({
+      sku: DEO,
+      plannedQty: 2_800,
+      availableDate: available,
+      asOf: "2026-08-28",
+      onHand: { fba: 1_400, inbound: 0, awd: 0, tpl: 0 },
+      dailyVelocity: 20,
+    });
+    assert.equal(daily.newOosDate, "2027-03-26");
+    assert.ok(pad > daily.newOosDate!);
+
+    const extended = autoPlanThrough({
+      plannedQty: 2_800,
+      availableDate: available,
+      newOosDate: daily.newOosDate,
+      currentUntil: "2027-01-15",
+    });
+    assert.equal(extended, pad);
+    assert.ok(extended! > daily.newOosDate!);
+    assert.ok(extended! >= addMonths(available, 18));
+
+    const farOos = "2030-06-01";
+    const whenOosLater = autoPlanThrough({
+      plannedQty: 2_800,
+      availableDate: available,
+      newOosDate: farOos,
+      currentUntil: "2027-01-15",
+    });
+    assert.equal(whenOosLater, farOos);
+    assert.ok(whenOosLater! > pad);
+  });
+
+  test("empty qty or date does not stomp a user plan-through", () => {
+    const userUntil = "2027-06-01";
+    assert.equal(
+      autoPlanThrough({
+        plannedQty: null,
+        availableDate: "2026-10-15",
+        newOosDate: "2027-03-26",
+        currentUntil: userUntil,
+      }),
+      null,
+    );
+    assert.equal(
+      autoPlanThrough({
+        plannedQty: 2_800,
+        availableDate: null,
+        newOosDate: "2027-03-26",
+        currentUntil: userUntil,
+      }),
+      null,
+    );
+    assert.equal(
+      autoPlanThrough({
+        plannedQty: 0,
+        availableDate: "2026-10-15",
+        newOosDate: "2027-03-26",
+        currentUntil: userUntil,
+      }),
+      null,
+    );
+    const keepLater = autoPlanThrough({
+      plannedQty: 2_800,
+      availableDate: "2026-10-15",
+      newOosDate: "2027-03-26",
+      currentUntil: "2029-12-01",
+    });
+    assert.equal(keepLater, "2029-12-01");
+  });
+});
+
 describe("production planner source lock", () => {
   test("model calls pallet-planner holiday helpers and documents the 10-week pick", () => {
     const model = src("src/lib/production-planner-model.ts");
@@ -301,8 +382,10 @@ describe("production planner source lock", () => {
     assert.match(planPage, /Recommended next PO date/);
     assert.match(planPage, /Recommended next PO qty/);
     assert.match(planPage, /planProduction/);
+    assert.match(planPage, /autoPlanThrough/);
     assert.match(planPage, /Recommend-only/);
     assert.match(planPage, /Plan through/);
+    assert.match(planPage, /seedProduction/);
     assert.match(planPage, /Buffer days/);
     assert.match(planPage, /AWD in FBA supply/);
     assert.match(planPage, /3PL in FBA supply/);
