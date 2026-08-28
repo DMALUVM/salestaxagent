@@ -72,7 +72,7 @@ describe("pallet planner ship view", () => {
     assert.match(ship, /Marpac→Tulsa/);
     assert.match(model, /Marpac→Tulsa/);
     assert.match(ship, /mix TBD/);
-    assert.match(page + "\n" + ship, /August 3PL→FBA 10,260/);
+    assert.match(page + "\n" + ship, /August 3PL→FBA 12,960/);
     assert.match(ship, /August · 3PL→FBA/);
     assert.doesNotMatch(ship, /3PL→Marpac/);
     assert.doesNotMatch(model, /3PL→Marpac/);
@@ -181,6 +181,9 @@ describe("pallet planner ship view", () => {
     assert.match(page, /formatSkuQty\(r\.awd_on_hand\)/);
     assert.match(page, /<span className=\{awdCellToneClass\(r\.awd_tone\)\}>/);
     assert.doesNotMatch(page, /TableCell className=\{`text-right tabular-nums \$\{awdCellToneClass/);
+    const awd = src("src/lib/inventory-awd-rows.ts");
+    assert.match(awd, /return "text-sky-300"/);
+    assert.doesNotMatch(awd, /return "text-zinc-200"/);
     assert.doesNotMatch(page, /key: "awd_inbound"/);
     assert.doesNotMatch(page, /label: "AWD inbound"/);
     assert.match(page, /owned\.fbaOnHand/);

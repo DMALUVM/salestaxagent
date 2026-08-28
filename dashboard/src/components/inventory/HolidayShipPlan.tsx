@@ -273,7 +273,7 @@ export function HolidayShipPlan({
           First wave: assorted + orange end of September, then unscented + peppermint (2 AWD cards/month max).
           Not the {fmt(OPTIMISTIC_AWD_TARGET_CAP)} high water.
           Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
-          {" "}August: Marpac→Tulsa TBD and 3PL→FBA 10,260.
+          {" "}August: Marpac→Tulsa TBD and 3PL→FBA 12,960.
         </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {entries

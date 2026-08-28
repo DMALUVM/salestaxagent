@@ -7,7 +7,7 @@
  * Do not substitute the AWD high-water planning card (76,211) as on-hand.
  *
  * Number color only (no cell fill, no new column):
- *   white  = inbound > 0 and on-hand = 0 (shipped, none checked in)
+ *   white  = inbound > 0 and on-hand = 0 (in transit; sky, not body text)
  *   orange = inbound > 0 and on-hand > 0 (partial receive)
  *   green  = on-hand > 0 and inbound = 0 (fully available)
  *   none   = no AWD row, or a 0/0 row
@@ -72,7 +72,10 @@ export function awdCellTone(row: AwdRowLike | null | undefined): AwdCellTone {
 /** Text color for the AWD number. Never sets a cell background. */
 export function awdCellToneClass(tone: AwdCellTone): string {
   if (tone === "white") {
-    return "text-zinc-200";
+    // Table body inherits text-foreground (dark ≈ oklch 0.985 / zinc-50).
+    // text-zinc-200 matches that, so in-transit looked uncoded. Sky is a
+    // cool light tone, readable on the dark table, not body / muted.
+    return "text-sky-300";
   }
   if (tone === "orange") {
     return "text-orange-400";

@@ -76,6 +76,10 @@ describe("AWD number color (text only, no cell fill)", () => {
       "white",
     );
     assert.equal(
+      awdCellTone({ sku: "DDPE0001Shop", awd_inbound: 1_080 }),
+      "white",
+    );
+    assert.equal(
       awdCellTone({ sku: "X", awd_on_hand: 64, awd_inbound: 200 }),
       "orange",
     );
@@ -85,7 +89,9 @@ describe("AWD number color (text only, no cell fill)", () => {
     );
     assert.equal(awdCellTone(null), null);
     assert.equal(awdCellTone({ sku: "Z", awd_on_hand: 0, awd_inbound: 0 }), null);
-    assert.match(awdCellToneClass("white"), /text-zinc-2/);
+    assert.match(awdCellToneClass("white"), /text-sky-3/);
+    assert.doesNotMatch(awdCellToneClass("white"), /text-zinc-200/);
+    assert.doesNotMatch(awdCellToneClass("white"), /text-foreground/);
     assert.match(awdCellToneClass("orange"), /text-orange/);
     assert.match(awdCellToneClass("green"), /text-emerald/);
     assert.doesNotMatch(awdCellToneClass("white"), /bg-/);
