@@ -20,6 +20,7 @@ from src.inventory.shipment_timing import (
     update_received_at,
     update_shipped_at,
 )
+from src.rules import SPAPI_MAX_CHUNK_DAYS
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,17 @@ SHIPMENT_STATUSES = (
     "CANCELLED",
     "ERROR",
 )
+# DATE_RANGE only returns shipments Amazon last-updated in the window.
+# Stored open rows must be re-fetched by ShipmentIdList so status/receive
+# can move even when LastUpdatedDate is stale.
+OPEN_REFRESH_STATUSES = frozenset({
+    "WORKING",
+    "IN_TRANSIT",
+    "SHIPPED",
+    "RECEIVING",
+    "DELIVERED",
+    "CHECKED_IN",
+})
 
 
 def _shipments_query_params(
@@ -70,6 +82,58 @@ def _shipments_query_params(
     for status in SHIPMENT_STATUSES:
         params.append(("ShipmentStatusList", status))
     return params
+
+
+def _date_range_chunks(
+    start: datetime,
+    end: datetime,
+    chunk_days: int | None = None,
+) -> list[tuple[datetime, datetime]]:
+    """Newest-first DATE_RANGE windows of ≤SPAPI_MAX_CHUNK_DAYS.
+
+    Amazon getShipments DATE_RANGE filters by LastUpdatedDate. A single
+    180-day window can return HTTP 200 with empty ShipmentData instead of
+    an error. Narrow newest-first chunks keep recent updates visible.
+    """
+    size = SPAPI_MAX_CHUNK_DAYS if chunk_days is None else chunk_days
+    if end <= start or size <= 0:
+        return []
+    chunks: list[tuple[datetime, datetime]] = []
+    cursor_end = end
+    delta = timedelta(days=size)
+    while cursor_end > start:
+        cursor_start = max(start, cursor_end - delta)
+        if cursor_start >= cursor_end:
+            break
+        chunks.append((cursor_start, cursor_end))
+        cursor_end = cursor_start
+    return chunks
+
+
+def _dedupe_shipments(shipments: list[dict]) -> list[dict]:
+    """Keep first payload per ShipmentId (newest DATE_RANGE chunk wins)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for sh in shipments:
+        sid = sh.get("ShipmentId") or sh.get("shipmentId")
+        if sid:
+            if sid in seen:
+                continue
+            seen.add(sid)
+        out.append(sh)
+    return out
+
+
+def _open_refresh_ids(existing: dict[str, dict], seen_ids: set[str]) -> list[str]:
+    """Stored open FBA IDs that DATE_RANGE did not return this pull."""
+    ids: list[str] = []
+    for sid, row in existing.items():
+        if not sid or sid in seen_ids:
+            continue
+        status = (row.get("shipment_status") or "").upper()
+        if status in OPEN_REFRESH_STATUSES:
+            ids.append(str(sid))
+    return sorted(ids)
 
 
 def _get_shipments_page(
@@ -199,19 +263,22 @@ def sync_inbound_shipments(
     transport_budget = TRANSPORT_FETCH_LIMIT
 
     shipments: list[dict] = []
-    next_token: str | None = None
     v0_error: str | None = None
+    chunks = _date_range_chunks(start, now)
     try:
-        while True:
-            page = _get_shipments_page(start, now, next_token)
-            shipments.extend(page.get("ShipmentData") or [])
-            next_token = page.get("NextToken")
-            if not next_token:
-                break
+        for chunk_start, chunk_end in chunks:
+            next_token: str | None = None
+            while True:
+                page = _get_shipments_page(chunk_start, chunk_end, next_token)
+                shipments.extend(page.get("ShipmentData") or [])
+                next_token = page.get("NextToken")
+                if not next_token:
+                    break
     except SPAPIError as e:
         v0_error = str(e)[:200]
         log.warning("[Inbound] v0 getShipments failed: %s", v0_error)
 
+    shipments = _dedupe_shipments(shipments)
     ship_rows, item_rows, transport_budget = _rows_from_shipments(
         shipments,
         existing=existing,
@@ -243,6 +310,27 @@ def sync_inbound_shipments(
                 seen_ids.add(row["shipment_id"])
         item_rows.extend(extra_items)
 
+    open_ids = _open_refresh_ids(existing, seen_ids)
+    open_by_id_count = 0
+    if open_ids:
+        # DATE_RANGE can be empty (wide window, or no LastUpdated in range)
+        # while WORKING / IN_TRANSIT rows still sit in our table. QueryType=
+        # SHIPMENT re-pulls those IDs so skip_empty cannot freeze synced_at.
+        open_shipments = _get_shipments_by_ids(open_ids)
+        open_by_id_count = len(open_shipments)
+        extra_rows, extra_items, transport_budget = _rows_from_shipments(
+            open_shipments,
+            existing=existing,
+            start=start,
+            now=now,
+            transport_budget=transport_budget,
+        )
+        for row in extra_rows:
+            if row["shipment_id"] not in seen_ids:
+                ship_rows.append(row)
+                seen_ids.add(row["shipment_id"])
+        item_rows.extend(extra_items)
+
     # Do not call Fulfillment Inbound v2024 getInboundPlan. This seller's
     # listInboundPlans results are AWD warehouse→AWD plans (wf* IDs) that
     # reject GetInboundPlan with 400. Warehouse→AWD timing comes from the
@@ -254,8 +342,11 @@ def sync_inbound_shipments(
         "dry_run": dry_run,
         "v0_shipments": len(shipments),
         "v0_error": v0_error,
+        "date_range_chunks": len(chunks),
         "awd_fba_ids": len(awd_fba_ids),
         "awd_by_id_shipments": awd_by_id_count,
+        "open_ids_refreshed": len(open_ids),
+        "open_by_id_shipments": open_by_id_count,
         "v2024_plans": 0,
         "v2024_skipped": True,
     }
@@ -330,6 +421,12 @@ def _rows_from_shipments(
             })
 
         prev = existing.get(sid)
+        if not sh_items and prev:
+            try:
+                shipped = int(prev.get("units_shipped") or 0)
+                received = int(prev.get("units_received") or 0)
+            except (TypeError, ValueError):
+                pass
         transport_dt = None
         if not parse_ts((prev or {}).get("shipped_at")) and transport_budget > 0:
             if status in CLOSED_STATUSES or status in {"SHIPPED", "RECEIVING", "IN_TRANSIT", "DELIVERED"}:
