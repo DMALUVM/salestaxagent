@@ -44,10 +44,9 @@ async function paginate<T>(
  * real $0-revenue day.
  *
  * Monthly rows: sales_by_sku (Amazon) × sku_costs + ads for history.
- * When pnl_daily (or sales_daily) covers a month and is materially more
- * complete than sales_by_sku — the in-progress month, typically — that
- * month's sales/units/COGS come from the daily totals. Shopify is never
- * folded into Amazon contribution.
+ * The in-progress month uses sales_daily / pnl_daily account when those
+ * Amazon totals are more complete. Closed prior months stay on
+ * sales_by_sku. Shopify is never folded into Amazon contribution.
  */
 export async function GET() {
   try {
@@ -189,6 +188,14 @@ async function loadMonthly(
           .range(from, to),
       );
     } catch { /* sku grain may be empty */ }
+    let salesDaily: { sale_date: string; gross_sales: number; channel: string }[] = [];
+    try {
+      salesDaily = await paginate((from, to) =>
+        sb.from("sales_daily").select("sale_date,gross_sales,channel")
+          .eq("channel", "amazon")
+          .range(from, to),
+      );
+    } catch { /* sales_daily may be empty */ }
     return buildAmazonMonthlyPnl({
       skuRows,
       costs,
@@ -202,6 +209,7 @@ async function loadMonthly(
         channel: "amazon",
       })),
       dailySkus,
+      salesDaily,
       asOf,
     });
   } catch {

@@ -4,10 +4,10 @@
  * Mirrors src/pnl_monthly.py. Constants must match
  * config/business_rules.json → pnl.default_referral_pct / default_fba_fee_per_unit.
  *
- * When pnl_daily (account, and sku grain when present) covers a month
- * and Amazon gross_sales is materially ahead of sales_by_sku, that month
- * is replaced by the daily totals. Shopify is never mixed in. Ads stay
- * on ads_campaigns_daily / ads_monthly_spend — never invented.
+ * When sales_daily / pnl_daily covers the in-progress Amazon month and
+ * is more complete than sales_by_sku, that month is replaced by the
+ * daily totals. Closed prior months stay on sales_by_sku. Shopify is
+ * never mixed in. Ads stay on ads_campaigns_daily / ads_monthly_spend.
  *
  * Ads: an imported ads_monthly_spend row wins for that month (full
  * SKU Economics / Ads Console month). Otherwise campaign days from
@@ -49,12 +49,20 @@ export interface AdsMonthSpend {
   spend: number;
 }
 
-/** Account-grain daily Amazon row (pnl_daily or sales_daily + units). */
+/** Account-grain daily Amazon row (pnl_daily). */
 export interface DailyAccountRow {
   date: string;
   gross_sales: number;
   units: number;
   est_cogs?: number;
+  channel?: string;
+}
+
+/** Amazon sales_daily row — sales truth; units come from pnl_daily. */
+export interface SalesDailyRow {
+  sale_date?: string;
+  date?: string;
+  gross_sales: number;
   channel?: string;
 }
 
@@ -125,6 +133,7 @@ export function buildAmazonMonthlyPnl(opts: {
   adsByMonth?: AdsMonthSpend[];
   dailyAccount?: DailyAccountRow[];
   dailySkus?: DailySkuRow[];
+  salesDaily?: SalesDailyRow[];
   asOf?: string | null;
   referralPct?: number;
   fbaPerUnit?: number;
@@ -256,7 +265,7 @@ export function buildAmazonMonthlyPnl(opts: {
     avgCogs,
     adsSpend,
     adsDays,
-    dailyAccount: opts.dailyAccount ?? [],
+    dailyAccount: mergeSalesDaily(opts.dailyAccount ?? [], opts.salesDaily ?? [], opts.asOf ?? null),
     dailySkus: opts.dailySkus ?? [],
     asOf: opts.asOf ?? null,
     referralPct,
@@ -343,6 +352,45 @@ export function dailyCoversMonth(
   return days >= Math.max(1, expected - DAILY_MONTH_COVERAGE_SLACK);
 }
 
+export function isOpenMonth(ym: string, asOf: string | null): boolean {
+  if (!asOf || ym.length !== 7) return false;
+  return asOf < monthEnd(`${ym}-01`);
+}
+
+/** Prefer sales_daily Amazon sales when they beat pnl_daily for a day. */
+export function mergeSalesDaily(
+  account: DailyAccountRow[],
+  salesDaily: SalesDailyRow[],
+  asOf: string | null,
+): DailyAccountRow[] {
+  const byDate = new Map<string, DailyAccountRow>();
+  for (const r of account) {
+    if ((r.channel || "amazon").toLowerCase() !== "amazon") continue;
+    if (asOf && r.date > asOf) continue;
+    byDate.set(r.date, {
+      date: r.date,
+      gross_sales: Number(r.gross_sales) || 0,
+      units: Number(r.units) || 0,
+      est_cogs: Number(r.est_cogs) || 0,
+      channel: "amazon",
+    });
+  }
+  for (const r of salesDaily) {
+    if ((r.channel || "amazon").toLowerCase() !== "amazon") continue;
+    const date = (r.sale_date || r.date || "").slice(0, 10);
+    if (date.length !== 10) continue;
+    if (asOf && date > asOf) continue;
+    const sales = Number(r.gross_sales) || 0;
+    const existing = byDate.get(date);
+    if (!existing) {
+      byDate.set(date, { date, gross_sales: sales, units: 0, est_cogs: 0, channel: "amazon" });
+    } else if (sales > existing.gross_sales + DAILY_SALES_MATERIAL_DELTA) {
+      existing.gross_sales = sales;
+    }
+  }
+  return [...byDate.values()];
+}
+
 function overlayDailyMonths(opts: {
   months: MonthlyPnlRow[];
   skusByMonth: Record<string, MonthlySkuLine[]>;
@@ -371,7 +419,10 @@ function overlayDailyMonths(opts: {
     const existing = monthByYm.get(ym);
     const skuSales = existing?.gross_sales ?? 0;
     const moreComplete = dailySales > skuSales + DAILY_SALES_MATERIAL_DELTA;
-    if (!moreComplete && existing) continue;
+    // Closed prior months stay on sales_by_sku. Only the in-progress
+    // month may take daily totals, and only when those are ahead.
+    if (!isOpenMonth(ym, opts.asOf)) continue;
+    if (existing && !moreComplete) continue;
 
     const skuDays = skuByYm.get(ym) ?? [];
     let cogs: number;

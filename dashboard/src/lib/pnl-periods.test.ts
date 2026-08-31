@@ -288,5 +288,7 @@ describe("table no longer hides history behind a 35-day slice", () => {
     assert.match(api, /\.range\(/);
     assert.match(api, /dailyAccount/);
     assert.match(api, /grain", "sku"/);
+    assert.match(api, /salesDaily/);
+    assert.match(api, /sales_daily/);
   });
 });
