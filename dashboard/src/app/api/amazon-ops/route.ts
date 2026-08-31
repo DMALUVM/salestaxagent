@@ -1,4 +1,8 @@
 import { getServerSupabase } from "@/lib/supabase-server";
+import {
+  loadShippedAsinTitleOverrides,
+  resolveParentProductNames,
+} from "@/lib/amazon-ops-titles";
 
 /** GET /api/amazon-ops — Sales & Traffic + Reimbursements with title resolution. */
 export async function GET() {
@@ -26,49 +30,21 @@ export async function GET() {
       reimbursements = r.data ?? [];
     } catch { /* table may not exist */ }
 
-    // Resolve parent ASIN → product title.
+    // Parent ASIN → parent display name. Overrides ship with the dashboard
+    // (not process.cwd()). Exact DB match only — no child-ASIN prefix fallback.
     if (asinTraffic.length > 0) {
-      // Step 1: config/asin_titles.json manual overrides
-      let overrides: Record<string, string> = {};
-      try {
-        const fs = await import("fs");
-        const path = await import("path");
-        const p = path.join(process.cwd(), "config", "asin_titles.json");
-        if (fs.existsSync(p)) {
-          overrides = JSON.parse(fs.readFileSync(p, "utf-8"));
-        }
-      } catch { /* ok */ }
-
-      // Step 2: Build ASIN→title from all DB tables
-      const titleMap = new Map<string, string>();
+      const dbTitles: { asin?: string | null; product_name?: string | null }[] = [];
       for (const table of ["sku_velocity", "fba_returns", "fba_reimbursements", "inventory_restock"]) {
         try {
           const r = await sb.from(table).select("asin,product_name").limit(300);
-          for (const row of r.data ?? []) {
-            if (row.asin && row.product_name && !titleMap.has(row.asin)) {
-              titleMap.set(row.asin, row.product_name);
-            }
-          }
+          for (const row of r.data ?? []) dbTitles.push(row);
         } catch { /* table may not exist */ }
       }
-
-      for (const row of asinTraffic) {
-        const parentAsin = row.parent_asin as string;
-        if (row.product_name) continue;
-
-        // Override
-        if (overrides[parentAsin]) { row.product_name = overrides[parentAsin]; continue; }
-        // Direct DB match
-        if (titleMap.has(parentAsin)) { row.product_name = titleMap.get(parentAsin); continue; }
-        // Prefix match (parent shares first 6 chars with child)
-        const prefix = parentAsin.slice(0, 6);
-        for (const [childAsin, title] of titleMap) {
-          if (childAsin.startsWith(prefix)) {
-            row.product_name = title.split(" - ")[0].trim();
-            break;
-          }
-        }
-      }
+      resolveParentProductNames(
+        asinTraffic,
+        loadShippedAsinTitleOverrides(),
+        dbTitles,
+      );
     }
 
     try {
