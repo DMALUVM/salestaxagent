@@ -7,10 +7,12 @@
  * When sales_daily / pnl_daily covers a month completely (closed-day
  * count matches the calendar, with slack only on the in-progress month)
  * and Amazon gross is materially higher than sales_by_sku, that month
- * is replaced by the daily totals — including closed months such as
- * July. Incomplete daily windows (May inside a 90-day pnl_daily slice)
- * stay on sales_by_sku. Shopify is never mixed in. Ads stay on
- * ads_campaigns_daily / ads_monthly_spend.
+ * is replaced by the daily account totals — including closed months
+ * such as July. Headline sales / units / contribution come from stored
+ * pnl_daily account rows, not a re-derived fee formula and not
+ * amazon_net_proceeds (settlement posted-date). SKU Economics is a
+ * check, not an ingest. Incomplete daily windows stay on sales_by_sku.
+ * Shopify is never mixed in.
  *
  * Ads: an imported ads_monthly_spend row wins for that month (full
  * SKU Economics / Ads Console month). Otherwise campaign days from
@@ -58,6 +60,13 @@ export interface DailyAccountRow {
   gross_sales: number;
   units: number;
   est_cogs?: number;
+  est_referral_fees?: number;
+  est_fba_fees?: number;
+  ad_spend?: number;
+  est_contribution?: number | null;
+  net_after_ads?: number | null;
+  /** Settlement posted-date. Never rolled into Month contribution. */
+  amazon_net_proceeds?: number | null;
   channel?: string;
 }
 
@@ -300,9 +309,13 @@ function accountMonthRow(opts: {
   source: "sku_monthly" | "daily";
   salesBasis: "sales_by_sku" | "daily";
   closedDays?: number;
+  /** Stored pnl_daily account contribution. Never amazon_net_proceeds. */
+  contribution?: number;
 }): MonthlyPnlRow {
   const ads = opts.adsKnown ? money(opts.adsSpend) : 0;
-  const contribution = money(opts.sales - opts.referral - opts.fba - ads - opts.cogs);
+  const contribution = opts.contribution != null
+    ? money(opts.contribution)
+    : money(opts.sales - opts.referral - opts.fba - ads - opts.cogs);
   const start = monthStart(opts.date || `${opts.ym}-01`);
   return {
     date: start,
@@ -380,6 +393,11 @@ export function mergeSalesDaily(
       gross_sales: Number(r.gross_sales) || 0,
       units: Number(r.units) || 0,
       est_cogs: Number(r.est_cogs) || 0,
+      est_referral_fees: r.est_referral_fees,
+      est_fba_fees: r.est_fba_fees,
+      ad_spend: r.ad_spend,
+      est_contribution: r.est_contribution,
+      net_after_ads: r.net_after_ads,
       channel: "amazon",
     });
   }
@@ -397,6 +415,25 @@ export function mergeSalesDaily(
     }
   }
   return [...byDate.values()];
+}
+
+/** Sum stored pnl_daily account economics. Ignores amazon_net_proceeds. */
+function storedAccountEconomics(days: DailyAccountRow[]): {
+  referral: number;
+  fba: number;
+  cogs: number;
+  ads: number;
+  contribution: number;
+} | null {
+  if (!days.length) return null;
+  if (!days.every((r) => r.net_after_ads != null || r.est_contribution != null)) return null;
+  return {
+    referral: money(days.reduce((s, r) => s + (Number(r.est_referral_fees) || 0), 0)),
+    fba: money(days.reduce((s, r) => s + (Number(r.est_fba_fees) || 0), 0)),
+    cogs: money(days.reduce((s, r) => s + (Number(r.est_cogs) || 0), 0)),
+    ads: money(days.reduce((s, r) => s + (Number(r.ad_spend) || 0), 0)),
+    contribution: money(days.reduce((s, r) => s + Number(r.net_after_ads ?? r.est_contribution ?? 0), 0)),
+  };
 }
 
 function overlayDailyMonths(opts: {
@@ -433,20 +470,39 @@ function overlayDailyMonths(opts: {
     if (existing && !moreComplete) continue;
 
     const skuDays = skuByYm.get(ym) ?? [];
-    let cogs: number;
+    let skuCogs: number | null = null;
     if (skuDays.length > 0) {
       const built = buildDailySkuLines(skuDays, opts.costs, opts.avgCogs, opts.titles, opts.referralPct, opts.fbaPerUnit);
       opts.skusByMonth[ym] = built.lines;
       for (const sku of built.missing) opts.missing.add(sku);
-      cogs = built.cogs;
-    } else if (existing && skuSales > 0) {
-      cogs = money(existing.est_cogs * (dailySales / skuSales));
-    } else {
-      cogs = money(days.reduce((s, r) => s + (Number(r.est_cogs) || 0), 0));
+      skuCogs = built.cogs;
     }
 
-    const referral = money(dailySales * opts.referralPct);
-    const fba = money(dailyUnits * opts.fbaPerUnit);
+    // Headline economics come from stored pnl_daily account when present
+    // (July: $103,140.12 / 7,405 / $21,757.74). Recalculate only when the
+    // account rows have no contribution — never from amazon_net_proceeds
+    // (settlement posted-date) and never from SKU Economics net proceeds.
+    const stored = storedAccountEconomics(days);
+    let cogs: number;
+    let referral: number;
+    let fba: number;
+    let adsSpend: number;
+    let contribution: number | undefined;
+    if (stored) {
+      referral = stored.referral;
+      fba = stored.fba;
+      cogs = stored.cogs;
+      adsSpend = stored.ads > 0 ? stored.ads : (opts.adsSpend[ym] ?? existing?.ad_spend ?? 0);
+      contribution = stored.contribution;
+    } else {
+      referral = money(dailySales * opts.referralPct);
+      fba = money(dailyUnits * opts.fbaPerUnit);
+      adsSpend = opts.adsSpend[ym] ?? existing?.ad_spend ?? 0;
+      if (skuCogs != null) cogs = skuCogs;
+      else if (existing && skuSales > 0) cogs = money(existing.est_cogs * (dailySales / skuSales));
+      else cogs = money(days.reduce((s, r) => s + (Number(r.est_cogs) || 0), 0));
+    }
+
     const next = accountMonthRow({
       ym,
       date: existing?.date ?? `${ym}-01`,
@@ -455,11 +511,12 @@ function overlayDailyMonths(opts: {
       referral,
       fba,
       cogs,
-      adsSpend: opts.adsSpend[ym] ?? existing?.ad_spend ?? 0,
-      adsKnown: (opts.adsDays[ym]?.size ?? 0) > 0 || existing?.ads_basis === "known",
+      adsSpend,
+      adsKnown: (opts.adsDays[ym]?.size ?? 0) > 0 || existing?.ads_basis === "known" || (stored?.ads ?? 0) > 0,
       source: "daily",
       salesBasis: "daily",
       closedDays: days.length,
+      contribution,
     });
 
     if (existing) {

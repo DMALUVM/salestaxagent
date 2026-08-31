@@ -237,7 +237,18 @@ describe("SKU monthly contribution", () => {
   });
 
   test("complete closed July overlays daily Amazon totals, not stale sales_by_sku", () => {
-    const julyDaily = amazonDays("2026-07", 31, 103140.12, 7405);
+    // SKU Economics Jul 1–31 is ground truth for "do not stay on $81k":
+    // sales $105,402.85 / NP $25,561.96. Headline still comes from
+    // pnl_daily account ($103,140.12 / 7,405 / $21,757.74), not the
+    // file and not settlement amazon_net_proceeds ($128k).
+    const julyDaily = amazonDays("2026-07", 31, 103140.12, 7405, {
+      ads: 18782.09,
+      contrib: 21757.74,
+      referral: 15471.02,
+      fba: 25917.5,
+      cogs: 20211.77,
+      proceeds: 128000,
+    });
     const result = buildAmazonMonthlyPnl({
       skuRows: [
         { channel: "amazon", sku: "AA", period_start: "2026-07-01", units: 5548, gross_sales: 81332.82 },
@@ -263,14 +274,10 @@ describe("SKU monthly contribution", () => {
     assert.equal(jul.sales_basis, "daily");
     assert.equal(jul.closed_days, 31);
     assert.equal(jul.ad_spend, 18782.09);
-    // SKU-row contribution was $14,649.39 on 5,548 units. Overlay must
-    // move fees / COGS / units with sales, not lift sales alone.
-    assert.equal(jul.est_referral_fees, 15471.02);
-    assert.equal(jul.est_fba_fees, 25917.5);
-    assert.equal(jul.est_cogs, 21104.25);
-    // 103140.12 - 15471.02 - 25917.50 - 18782.09 - 21104.25 = 21865.26
-    assert.equal(jul.net_after_ads, 21865.26);
+    assert.equal(jul.net_after_ads, 21757.74);
     assert.notEqual(jul.net_after_ads, 14649.39);
+    assert.notEqual(jul.net_after_ads, 25561.96);
+    assert.equal(jul.amazon_net_proceeds, null);
     assert.equal(result.skusByMonth["2026-07"][0].units, 7405);
     assert.notEqual(result.skusByMonth["2026-07"][0].units, 5548);
     assert.equal(aug?.gross_sales, 94807.47);
@@ -315,7 +322,20 @@ describe("SKU monthly contribution", () => {
   });
 });
 
-function amazonDays(ym: string, count: number, sales: number, units: number) {
+function amazonDays(
+  ym: string,
+  count: number,
+  sales: number,
+  units: number,
+  econ?: {
+    ads?: number;
+    contrib?: number;
+    referral?: number;
+    fba?: number;
+    cogs?: number;
+    proceeds?: number;
+  },
+) {
   const days = [];
   const salesEach = Math.round((sales / count) * 100) / 100;
   const unitsEach = Math.floor(units / count);
@@ -326,11 +346,31 @@ function amazonDays(ym: string, count: number, sales: number, units: number) {
       units: unitsEach,
       est_cogs: 0,
       channel: "amazon",
+      ...(econ
+        ? {
+            ad_spend: 0,
+            est_referral_fees: 0,
+            est_fba_fees: 0,
+            est_contribution: 0,
+            net_after_ads: 0,
+            amazon_net_proceeds: 0,
+          }
+        : {}),
     });
   }
   const salesSum = days.reduce((s, r) => s + r.gross_sales, 0);
   const unitsSum = days.reduce((s, r) => s + r.units, 0);
   days[days.length - 1].gross_sales = Math.round((days[days.length - 1].gross_sales + sales - salesSum) * 100) / 100;
   days[days.length - 1].units += units - unitsSum;
+  if (econ) {
+    const last = days[days.length - 1];
+    last.ad_spend = econ.ads ?? 0;
+    last.est_referral_fees = econ.referral ?? 0;
+    last.est_fba_fees = econ.fba ?? 0;
+    last.est_cogs = econ.cogs ?? 0;
+    last.est_contribution = econ.contrib ?? 0;
+    last.net_after_ads = econ.contrib ?? 0;
+    last.amazon_net_proceeds = econ.proceeds ?? 0;
+  }
   return days;
 }
