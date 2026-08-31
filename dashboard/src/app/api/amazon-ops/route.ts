@@ -30,8 +30,8 @@ export async function GET() {
       reimbursements = r.data ?? [];
     } catch { /* table may not exist */ }
 
-    // Parent ASIN → parent display name. Overrides ship with the dashboard
-    // (not process.cwd()). Exact DB match only — no child-ASIN prefix fallback.
+    // Parent ASIN → parent display name. Overrides are bundled with the
+    // dashboard. Exact DB match only — no child-ASIN prefix fallback.
     if (asinTraffic.length > 0) {
       const dbTitles: { asin?: string | null; product_name?: string | null }[] = [];
       for (const table of ["sku_velocity", "fba_returns", "fba_reimbursements", "inventory_restock"]) {

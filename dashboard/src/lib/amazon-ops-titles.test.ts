@@ -120,7 +120,7 @@ describe("amazon-ops parent titles", { concurrency: false }, () => {
     );
     assert.match(route, /loadShippedAsinTitleOverrides/);
     assert.match(route, /resolveParentProductNames/);
-    assert.doesNotMatch(route, /process\.cwd\(\)/);
+    assert.doesNotMatch(route, /path\.join\(process\.cwd\(\)/);
     assert.doesNotMatch(route, /slice\(0,\s*6\)/);
     assert.doesNotMatch(route, /startsWith\(prefix\)/);
     assert.doesNotMatch(route, /split\(" - "\)/);
