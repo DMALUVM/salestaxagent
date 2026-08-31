@@ -385,7 +385,7 @@ describe("table no longer hides history behind a 35-day slice", () => {
     assert.match(api, /attachMonthReimbursements|attachDayReimbursements/);
     assert.match(api, /gross_sales - referral - fba - ad_spend - cogs/);
     assert.ok(
-      api.indexOf("loadMonthly") < api.indexOf("attachMonthReimbursements"),
+      api.indexOf("await loadMonthly") < api.indexOf("attachMonthReimbursements(monthly.months"),
       "reimbursements attach after the daily overlay, not inside it",
     );
     const table = readFileSync(path.join(process.cwd(), "src/components/pnl-table.tsx"), "utf8");
