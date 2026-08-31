@@ -218,7 +218,8 @@ export function PnlTable({
           {usingMonthly ? (
             <>
               Amazon SKU economics {storedMin ?? "—"} → {storedMax ?? "—"}
-              ({monthly.length} month{monthly.length === 1 ? "" : "s"} from <code>sales_by_sku</code>).
+              ({monthly.length} month{monthly.length === 1 ? "" : "s"} from <code>sales_by_sku</code>
+              {monthly.some((r) => r.source === "daily") ? ", daily overlay when more complete" : ""}).
               Showing {lookbackHint}. Average is contribution ÷ calendar days in the visible months.
               Fees are estimated (15% referral + $3.50 FBA / unit). COGS is units × <code>sku_costs</code>.
               {adsDateMin
@@ -311,7 +312,7 @@ export function PnlTable({
                       <TableCell colSpan={10} className="py-3">
                         {grain === "day" ? (
                           <DayDetail date={p.start} row={p.rows[0] ?? p.openRows[0]} />
-                        ) : p.source === "sku_monthly" ? (
+                        ) : usingMonthly ? (
                           <MonthSkuDetail
                             period={p}
                             lines={mergeSkuLines(p, monthlySkus)}

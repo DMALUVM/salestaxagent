@@ -34,6 +34,9 @@ export interface PnlRow {
   ads_basis?: "known" | "unknown";
   source?: "daily" | "sku_monthly";
   period_end?: string;
+  /** Actual closed Amazon days behind a monthly row (daily overlay). */
+  closed_days?: number;
+  sales_basis?: "sales_by_sku" | "daily";
 }
 
 export type FeesBasis = "settled" | "estimated" | "mixed" | "preliminary";
@@ -253,14 +256,20 @@ function rollup(
 function rollupMonthlyMonth(row: PnlRow, asOf: string | null): PnlPeriod {
   const base = rollup("month", [row], [], asOf);
   // One stored month is a complete month (or MTD), not "1 of 31d".
-  const days = base.calendarDays;
+  // calendarDays is the full month so the current month labels as
+  // "partial · 30 of 31d" instead of "partial · 30d".
+  const fullMonthDays = inclusiveDays(base.start, base.end);
+  const days = typeof row.closed_days === "number" && row.closed_days > 0
+    ? row.closed_days
+    : base.calendarDays;
   const endsShort = Boolean(asOf && asOf < base.end);
   return {
     ...base,
     days,
-    partial: endsShort,
+    calendarDays: fullMonthDays,
+    partial: endsShort || days < fullMonthDays,
     avgDaily: days > 0 ? money(base.contribution / days) : null,
-    source: "sku_monthly",
+    source: row.source === "daily" ? "daily" : "sku_monthly",
     adsBasis: row.ads_basis === "unknown" ? "unknown" : "known",
     rows: [row],
   };

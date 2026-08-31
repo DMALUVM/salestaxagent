@@ -43,9 +43,11 @@ async function paginate<T>(
  * but $0 sales are dropped — that pattern is a stale/partial write, not a
  * real $0-revenue day.
  *
- * Monthly rows: computed from sales_by_sku (Amazon) × sku_costs + ads.
- * That table already holds 2024-08 → current month, so Month/Year on
- * /profit can show 2024–2026 without a 2-year orders-report pull.
+ * Monthly rows: sales_by_sku (Amazon) × sku_costs + ads for history.
+ * When pnl_daily (or sales_daily) covers a month and is materially more
+ * complete than sales_by_sku — the in-progress month, typically — that
+ * month's sales/units/COGS come from the daily totals. Shopify is never
+ * folded into Amazon contribution.
  */
 export async function GET() {
   try {
@@ -84,7 +86,8 @@ export async function GET() {
       );
     } catch { /* table may not exist yet */ }
 
-    const monthly = await loadMonthly(sb, adsByDay, adsByMonth);
+    const asOf = amazonAsOf();
+    const monthly = await loadMonthly(sb, adsByDay, adsByMonth, daily, asOf);
 
     const parseMeta = (m: PnlRow["meta"]): Record<string, unknown> => {
       if (!m) return {};
@@ -103,7 +106,6 @@ export async function GET() {
       };
     });
 
-    const asOf = amazonAsOf();
     const today = amazonToday();
     const latestClosed = rows.find(
       (r) => r.date <= asOf && (!adsDateMax || r.date <= adsDateMax)
@@ -140,7 +142,7 @@ export async function GET() {
       adsSource: adsByMonth.length
         ? "ads_monthly_spend (import) then ads_campaigns_daily.spend"
         : "ads_campaigns_daily.spend",
-      monthlySource: "sales_by_sku × sku_costs (Amazon)",
+      monthlySource: "sales_by_sku × sku_costs; daily overlay when more complete (Amazon)",
       adsImportedMonths: adsByMonth.map((r) => r.period_start),
     });
   } catch {
@@ -157,6 +159,8 @@ async function loadMonthly(
   sb: SupabaseClient,
   adsByDay: { date: string; spend: number }[],
   adsByMonth: { period_start: string; spend: number }[] = [],
+  dailyAccount: PnlRow[] = [],
+  asOf: string | null = null,
 ) {
   const empty = {
     months: [],
@@ -174,11 +178,31 @@ async function loadMonthly(
     const costs = await paginate((from, to) =>
       sb.from("sku_costs").select("sku,cogs_per_unit").range(from, to),
     );
+    let dailySkus: { date: string; sku: string; units: number; gross_sales: number; est_cogs: number }[] = [];
+    try {
+      dailySkus = await paginate((from, to) =>
+        sb.from("pnl_daily")
+          .select("date,sku,units,gross_sales,est_cogs")
+          .eq("grain", "sku")
+          .eq("channel", "amazon")
+          .neq("sku", "__unallocated__")
+          .range(from, to),
+      );
+    } catch { /* sku grain may be empty */ }
     return buildAmazonMonthlyPnl({
       skuRows,
       costs,
       adsByDay,
       adsByMonth,
+      dailyAccount: dailyAccount.map((r) => ({
+        date: r.date,
+        gross_sales: Number(r.gross_sales) || 0,
+        units: Number(r.units) || 0,
+        est_cogs: Number(r.est_cogs) || 0,
+        channel: "amazon",
+      })),
+      dailySkus,
+      asOf,
     });
   } catch {
     return empty;
