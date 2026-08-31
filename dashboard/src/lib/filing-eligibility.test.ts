@@ -102,6 +102,11 @@ describe("frequency mismatch", () => {
     const f = filing({ period_type: "semi_annual", period_label: "2026-H2", period_end: "2026-12-31", due_date: "2027-01-20" });
     assert.equal(isOpenObligation(f, nexus({ assigned_frequency: null })), true);
   });
+
+  test("leftover periodics are superseded when the state files casual", () => {
+    const f = filing({ period_type: "quarterly", period_label: "2026-Q3", period_end: "2026-09-30", due_date: "2026-10-20" });
+    assert.equal(obligationStatus(f, nexus({ assigned_frequency: "casual" }))?.reason, "superseded_frequency");
+  });
 });
 
 describe("pre-registration", () => {

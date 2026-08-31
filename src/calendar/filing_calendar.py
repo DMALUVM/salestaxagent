@@ -15,6 +15,11 @@ from src.rules import agent_today
 
 def generate_filing_entries(state_code: str, frequency: str, year: int,
                             due_day: int = 20) -> list[dict]:
+    # Casual is a first-class assigned_frequency but has no periodic calendar.
+    # Unknown frequencies must also no-op rather than invent quarters.
+    if frequency not in ("monthly", "quarterly", "semi_annual", "annual"):
+        return []
+
     entries = []
 
     if frequency == "monthly":

@@ -113,6 +113,11 @@ def obligation_status(filing: dict, nexus: dict | None) -> Ineligible | None:
             and period_type in PERIODIC_TYPES and freq in PERIODIC_TYPES):
         return Ineligible("superseded_frequency",
                           f"period_type={period_type}, state files {freq}")
+    # Casual has no periodic calendar. Leftover monthly/quarterly/semi_annual
+    # rows after a frequency change are not live obligations.
+    if freq == "casual" and period_type in PERIODIC_TYPES:
+        return Ineligible("superseded_frequency",
+                          f"period_type={period_type}, state files casual")
 
     return None
 

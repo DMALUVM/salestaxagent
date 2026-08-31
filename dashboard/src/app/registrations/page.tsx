@@ -23,17 +23,15 @@ import {
 } from "@/components/ui/table";
 import { getSupabase } from "@/lib/supabase";
 import {
+  FILING_FREQUENCIES,
+  FILING_FREQUENCY_LABELS,
+} from "@/lib/filing-frequencies";
+import {
   Shield, Search, CheckCircle, AlertTriangle, Eye, Minus,
   Pencil, Save,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
-
-const FREQUENCIES = ["monthly", "quarterly", "semi_annual", "annual"] as const;
-const FREQ_LABELS: Record<string, string> = {
-  monthly: "Monthly", quarterly: "Quarterly",
-  semi_annual: "Semi-Annual", annual: "Annual",
-};
 
 const REC_META: Record<Recommendation, { label: string; color: string; icon: typeof AlertTriangle }> = {
   REGISTER_NOW: { label: "Register Now", color: "text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800", icon: AlertTriangle },
@@ -176,8 +174,8 @@ function EditDialog({
             <Select value={form.assigned_frequency}
               onChange={(e) => setForm((f) => ({ ...f, assigned_frequency: e.target.value }))}
               disabled={!form.is_registered} className="mt-1">
-              <option value="">{rec.filing_frequency_default ? `Default (${FREQ_LABELS[rec.filing_frequency_default] ?? rec.filing_frequency_default})` : "Select frequency..."}</option>
-              {FREQUENCIES.map((f) => <option key={f} value={f}>{FREQ_LABELS[f]}</option>)}
+              <option value="">{rec.filing_frequency_default ? `Default (${FILING_FREQUENCY_LABELS[rec.filing_frequency_default] ?? rec.filing_frequency_default})` : "Select frequency..."}</option>
+              {FILING_FREQUENCIES.map((f) => <option key={f} value={f}>{FILING_FREQUENCY_LABELS[f]}</option>)}
             </Select>
           </div>
           <div>

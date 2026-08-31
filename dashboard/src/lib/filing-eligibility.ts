@@ -116,6 +116,14 @@ export function obligationStatus(
       detail: `period_type=${periodType}, state files ${freq}`,
     };
   }
+  // Casual has no periodic calendar. Leftover monthly/quarterly/semi_annual
+  // rows after a frequency change are not live obligations.
+  if (freq === "casual" && PERIODIC_TYPES.has(periodType ?? "")) {
+    return {
+      reason: "superseded_frequency",
+      detail: `period_type=${periodType}, state files casual`,
+    };
+  }
 
   return null;
 }
