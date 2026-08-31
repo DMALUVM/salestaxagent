@@ -13,6 +13,7 @@ The --amazon flag auto-detects the report type:
   - All Orders              (has amazon-order-id, sku, item-price) → sales_by_sku
   - SKU Economics / Ads     (ad fee or campaign spend) → ads_monthly_spend
   - Inventory Event Detail  (has fulfillment-center-id, date-time)
+  - FBA Reimbursements      (has reimbursement-id, approval-date)
   - Custom Combined Tax     (has ship_from_state, ship_to_state)
 """
 from __future__ import annotations
@@ -55,6 +56,10 @@ def ingest(amazon_path, shopify_api, shopify_csv_path, reg_path, dry_run):
         from src.parsers.amazon_tax_report import is_custom_combined_tax
         from src.parsers.amazon_orders_skus import is_amazon_orders_report
         from src.parsers.amazon_inventory import is_inventory_event_detail
+        from src.parsers.amazon_reimbursements import (
+            ingest_amazon_reimbursements,
+            is_fba_reimbursements_report,
+        )
         from src.parsers.amazon_ads_spend import (
             detect_ads_spend_report,
             ingest_amazon_ads_spend,
@@ -99,6 +104,13 @@ def ingest(amazon_path, shopify_api, shopify_csv_path, reg_path, dry_run):
             from src.parsers.amazon_inventory import ingest_amazon_inventory
             result = ingest_amazon_inventory(amazon_path, dry_run=dry_run)
             _print_result("Amazon Inventory", result)
+        elif is_fba_reimbursements_report(_headers):
+            click.echo("  Detected: FBA Reimbursements report")
+            result = ingest_amazon_reimbursements(amazon_path, dry_run=dry_run)
+            click.echo(f"\n  FBA Reimbursements:")
+            click.echo(f"  Rows parsed:   {result.get('rows_parsed', 0):,}")
+            click.echo(f"  Total amount:  ${result.get('total_amount', 0):,.2f}")
+            click.echo(f"  Rows inserted: {result.get('rows_inserted', 0):,}")
         else:
             click.echo("  Could not detect report type from headers.")
             click.echo(f"  Headers: {', '.join(_headers[:12])}")

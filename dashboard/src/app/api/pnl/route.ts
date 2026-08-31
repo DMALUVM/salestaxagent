@@ -1,6 +1,11 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 import { amazonAsOf, amazonToday } from "@/lib/as-of";
 import { buildAmazonMonthlyPnl } from "@/lib/sku-monthly-pnl";
+import {
+  attachDayReimbursements,
+  attachMonthReimbursements,
+  sumReimbursementsByDay,
+} from "@/lib/fba-reimbursements";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 interface PnlRow {
@@ -91,22 +96,36 @@ export async function GET() {
     const asOf = amazonAsOf();
     const monthly = await loadMonthly(sb, adsByDay, adsByMonth, daily, asOf);
 
+    let reimbByDay: Record<string, number> = {};
+    try {
+      const reimbRows = await paginate((from, to) =>
+        sb.from("fba_reimbursements").select("approval_date,amount_total")
+          .order("approval_date", { ascending: true })
+          .range(from, to),
+      );
+      reimbByDay = sumReimbursementsByDay(reimbRows);
+    } catch { /* table may be empty or missing */ }
+
     const parseMeta = (m: PnlRow["meta"]): Record<string, unknown> => {
       if (!m) return {};
       if (typeof m === "object") return m as Record<string, unknown>;
       try { return JSON.parse(m) as Record<string, unknown>; } catch { return {}; }
     };
 
-    const rows = daily.map((r) => {
-      const meta = parseMeta(r.meta);
-      return {
-        ...r,
-        fees_basis: typeof meta.fees_basis === "string" ? meta.fees_basis : "estimated",
-        cogs_basis: typeof meta.cogs_basis === "string" ? meta.cogs_basis : null,
-        settled_payout: typeof meta.settled_payout === "number" ? meta.settled_payout : null,
-        source: "daily" as const,
-      };
-    });
+    const rows = attachDayReimbursements(
+      daily.map((r) => {
+        const meta = parseMeta(r.meta);
+        return {
+          ...r,
+          fees_basis: typeof meta.fees_basis === "string" ? meta.fees_basis : "estimated",
+          cogs_basis: typeof meta.cogs_basis === "string" ? meta.cogs_basis : null,
+          settled_payout: typeof meta.settled_payout === "number" ? meta.settled_payout : null,
+          source: "daily" as const,
+        };
+      }),
+      reimbByDay,
+    );
+    const monthlyRows = attachMonthReimbursements(monthly.months, reimbByDay);
 
     const today = amazonToday();
     const latestClosed = rows.find(
@@ -119,7 +138,7 @@ export async function GET() {
 
     return Response.json({
       daily: rows,
-      monthly: monthly.months,
+      monthly: monthlyRows,
       monthlySkus: monthly.skusByMonth,
       skuCoverageMin: monthly.coverageMin,
       skuCoverageMax: monthly.coverageMax,

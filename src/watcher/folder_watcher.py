@@ -16,6 +16,10 @@ from src.parsers.amazon_ads_spend import (
 )
 from src.parsers.amazon_inventory import ingest_amazon_inventory, is_inventory_event_detail
 from src.parsers.amazon_orders_skus import ingest_amazon_orders_skus, is_amazon_orders_report
+from src.parsers.amazon_reimbursements import (
+    ingest_amazon_reimbursements,
+    is_fba_reimbursements_report,
+)
 from src.parsers.shopify_orders import ingest_shopify_csv
 
 
@@ -72,11 +76,17 @@ class IncomingFileHandler(FileSystemEventHandler):
                         f"[Watcher] Amazon inventory: {result.get('rows_inserted', 0)} rows, "
                         f"states: {result.get('states_found', [])}"
                     )
+                elif is_fba_reimbursements_report(headers):
+                    result = ingest_amazon_reimbursements(path)
+                    self.print_fn(
+                        f"[Watcher] FBA reimbursements: {result.get('rows_inserted', 0)} rows, "
+                        f"${result.get('total_amount', 0):,.2f}"
+                    )
                 else:
                     self.print_fn(
                         f"[Watcher] Unrecognized Amazon file {path.name} — "
                         f"expected SKU Economics, Ads Console, All Orders, "
-                        f"or Inventory Event Detail"
+                        f"Inventory Event Detail, or FBA Reimbursements"
                     )
                     return
                 if result.get("warnings"):

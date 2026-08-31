@@ -84,6 +84,7 @@ export default function ProfitPage() {
       // formula to the window, and keeps the UI from re-deriving anything.
       net: sum(rows, "net_after_ads"),
       payout: sum(rows, "amazon_net_proceeds"),
+      reimburse: sum(rows, "reimbursements"),
       days: rows.length,
     });
 
@@ -239,10 +240,13 @@ export default function ProfitPage() {
                   { label: "− Ad Spend", value: -last30.ads, color: "text-red-500" },
                   { label: "− COGS", value: -last30.cogs, color: "text-red-500" },
                   { label: "= Contribution (operating net)", value: last30.net, color: last30.net >= 0 ? "text-emerald-600 font-semibold" : "text-red-600 font-semibold" },
+                  { label: "FBA reimbursements (cash, not in contribution)", value: last30.reimburse, color: last30.reimburse >= 0 ? "text-muted-foreground" : "text-red-500", signed: true },
                 ].map((item) => (
                   <div key={item.label} className="flex justify-between">
                     <span className="text-muted-foreground">{item.label}</span>
-                    <span className={`tabular-nums ${item.color}`}>${fmtD(Math.abs(item.value))}</span>
+                    <span className={`tabular-nums ${item.color}`}>
+                      {item.signed && item.value < 0 ? "-" : ""}${fmtD(Math.abs(item.value))}
+                    </span>
                   </div>
                 ))}
                 <div className="flex justify-between border-t pt-2 text-xs">

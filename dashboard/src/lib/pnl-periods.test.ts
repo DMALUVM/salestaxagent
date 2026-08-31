@@ -35,6 +35,7 @@ function row(date: string, contrib: number, extra: Partial<PnlRow> = {}): PnlRow
     source: extra.source,
     period_end: extra.period_end,
     closed_days: extra.closed_days,
+    reimbursements: extra.reimbursements,
   };
 }
 
@@ -286,6 +287,7 @@ describe("buildPnlPeriods", () => {
     assert.equal(jul.calendarDays, 31);
     assert.equal(jul.partial, false);
     assert.equal(jul.avgDaily, 701.86);
+    assert.equal(jul.reimbursements, 0);
     assert.equal(aug?.source, "daily");
     assert.equal(aug?.sales, 94807.47);
 
@@ -299,6 +301,47 @@ describe("buildPnlPeriods", () => {
     assert.equal(year.key, "2026");
     assert.equal(year.sales, 197947.59);
     assert.equal(year.contribution, 41757.74);
+  });
+
+  test("reimbursements sit beside contribution and never enter it or avg/day", () => {
+    const rows = [
+      row("2026-07-02", 200, { reimbursements: 100 }),
+      row("2026-07-28", 150, { reimbursements: -3373.53 }),
+    ];
+    const days = buildPnlPeriods({ rows, grain: "day", lookback: "all", asOf: "2026-07-31" });
+    assert.equal(days[0].contribution, 150);
+    assert.equal(days[0].reimbursements, -3373.53);
+    assert.equal(days[0].avgDaily, 150);
+    assert.equal(days[1].contribution, 200);
+    assert.equal(days[1].reimbursements, 100);
+    assert.equal(days[1].avgDaily, 200);
+
+    const summary = summarizePeriods(days);
+    assert.equal(summary.contribution, 350);
+    assert.equal(summary.reimbursements, -3273.53);
+    assert.equal(summary.avgDaily, 175);
+
+    const monthly = [
+      row("2026-07-01", 21757.74, {
+        source: "daily",
+        reimbursements: -3273.53,
+        ads_basis: "known",
+        gross_sales: 103140.12,
+        closed_days: 31,
+      }),
+    ];
+    const [jul] = buildPnlPeriods({
+      rows,
+      monthly,
+      grain: "month",
+      lookback: "all",
+      asOf: "2026-07-31",
+    });
+    assert.equal(jul.contribution, 21757.74);
+    assert.equal(jul.sales, 103140.12);
+    assert.equal(jul.source, "daily");
+    assert.equal(jul.reimbursements, -3273.53);
+    assert.equal(jul.avgDaily, Math.round((21757.74 / 31) * 100) / 100);
   });
 
   test("daily-overlaid current month uses real closed days in the label", () => {
@@ -338,5 +381,18 @@ describe("table no longer hides history behind a 35-day slice", () => {
     assert.match(api, /grain", "sku"/);
     assert.match(api, /salesDaily/);
     assert.match(api, /sales_daily/);
+    assert.match(api, /fba_reimbursements/);
+    assert.match(api, /attachMonthReimbursements|attachDayReimbursements/);
+    assert.match(api, /gross_sales - referral - fba - ad_spend - cogs/);
+    assert.ok(
+      api.indexOf("loadMonthly") < api.indexOf("attachMonthReimbursements"),
+      "reimbursements attach after the daily overlay, not inside it",
+    );
+    const table = readFileSync(path.join(process.cwd(), "src/components/pnl-table.tsx"), "utf8");
+    assert.match(table, />Reimburse</);
+    assert.doesNotMatch(
+      table,
+      /contribution \+ .*reimburse|reimburse.*\+ .*contribution/i,
+    );
   });
 });

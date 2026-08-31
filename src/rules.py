@@ -48,6 +48,9 @@ SPAPI_ORDERS_MAX_AGE_YEARS: int = int(
 SPAPI_INVENTORY_LEDGER_DAYS: int = _RULES["spapi"].get("inventory_ledger_days", 14)
 SPAPI_INVENTORY_BACKFILL_DAYS: int = _RULES["spapi"].get(
     "inventory_ledger_backfill_days", 90)
+# FBA reimbursements: cash credits/reversals on approval_date (LA day).
+# Wider than 30d so a July reimbursement is still pulled at the end of August.
+SPAPI_REIMBURSEMENTS_DAYS: int = int(_RULES["spapi"].get("reimbursements_days", 90))
 
 # ── Ads ───────────────────────────────────────────────────
 ADS_MAX_REPORT_DAYS: int = _RULES["ads"]["max_report_days"]

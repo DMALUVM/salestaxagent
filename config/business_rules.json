@@ -22,9 +22,11 @@
     "orders_report_max_age_years": 2,
     "inventory_ledger_days": 14,
     "inventory_ledger_backfill_days": 90,
+    "reimbursements_days": 90,
     "//orders_report_max_age_years": "GET_FLAT_FILE_ALL_ORDERS_* purchase-date floor. Chunks older than this come back DONE with 0 rows. Jan–Jul 2024 is past this wall as of 2026-08; do not poll them.",
     "//inventory_ledger_days": "Daily inventory-ledger window. Physical nexus depends on this feed, so the window is wider than strictly needed: Amazon can restate ledger rows for several days, and a wider window re-upserts them rather than missing them. Upsert-only — a narrow or wide window never deletes older events.",
-    "//inventory_ledger_backfill_days": "Weekly deeper re-pull, for ledger rows Amazon settled after the daily window had moved on. Also upsert-only."
+    "//inventory_ledger_backfill_days": "Weekly deeper re-pull, for ledger rows Amazon settled after the daily window had moved on. Also upsert-only.",
+    "//reimbursements_days": "Nightly GET_FBA_REIMBURSEMENTS_DATA window. A 30d window drops July approvals by late August. Chunked to max_chunk_days."
   },
   "ads": {
     "max_report_days": 31,
