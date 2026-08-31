@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { attachCostProductNames, skuCostWriteRow } from "@/lib/costs-product-name";
 
-/** GET /api/costs — all sku_costs rows. */
+/** GET /api/costs — sku_costs rows, product_name from sku_velocity when null. */
 export async function GET() {
   try {
     const sb = getServerSupabase();
@@ -10,13 +11,22 @@ export async function GET() {
       if (error.code === "PGRST205") return Response.json({ costs: [] });
       return Response.json({ error: error.message }, { status: 500 });
     }
-    return Response.json({ costs: data ?? [] });
+
+    const costs = data ?? [];
+    const { data: velocity, error: velError } = await sb
+      .from("sku_velocity")
+      .select("sku,product_name");
+    if (velError && velError.code !== "PGRST205") {
+      // Velocity is display-only fallback — still return costs.
+      return Response.json({ costs: attachCostProductNames(costs, []) });
+    }
+    return Response.json({ costs: attachCostProductNames(costs, velocity ?? []) });
   } catch (e) {
     return Response.json({ costs: [] });
   }
 }
 
-/** PUT /api/costs — upsert a single SKU cost. */
+/** PUT /api/costs — upsert cogs_per_unit and product_name onto sku_costs. */
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
@@ -26,12 +36,17 @@ export async function PUT(request: NextRequest) {
     if (isNaN(cost) || cost < 0) return Response.json({ error: "Invalid cost" }, { status: 400 });
 
     const sb = getServerSupabase();
-    const { error } = await sb.from("sku_costs").upsert({
-      sku, cogs_per_unit: cost,
-      product_name: product_name || null,
-      notes: notes || null,
-      source: "dashboard",
-    }, { onConflict: "sku" });
+    const { error } = await sb.from("sku_costs").upsert(
+      skuCostWriteRow({
+        sku,
+        cogs_per_unit: cost,
+        product_name,
+        notes,
+        source: "dashboard",
+        includeProductName: Object.prototype.hasOwnProperty.call(body, "product_name"),
+      }),
+      { onConflict: "sku" },
+    );
 
     if (error) return Response.json({ error: error.message }, { status: 500 });
     return Response.json({ ok: true, sku });
@@ -49,17 +64,21 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: "rows array required" }, { status: 400 });
     }
 
-    const sb = getServerSupabase();
-    const cleaned = rows.filter((r) => r.sku && !isNaN(r.cogs_per_unit) && r.cogs_per_unit >= 0)
-      .map((r) => ({
-        sku: r.sku.trim(),
-        cogs_per_unit: Math.round(r.cogs_per_unit * 10000) / 10000,
-        product_name: r.product_name?.trim() || null,
-        source: "upload",
-      }));
+    const cleaned = rows
+      .filter((r) => r.sku && !isNaN(r.cogs_per_unit) && r.cogs_per_unit >= 0)
+      .map((r) =>
+        skuCostWriteRow({
+          sku: r.sku.trim(),
+          cogs_per_unit: Math.round(r.cogs_per_unit * 10000) / 10000,
+          product_name: r.product_name,
+          source: "upload",
+          includeProductName: Object.prototype.hasOwnProperty.call(r, "product_name"),
+        }),
+      );
 
     if (!cleaned.length) return Response.json({ error: "No valid rows" }, { status: 400 });
 
+    const sb = getServerSupabase();
     const { error } = await sb.from("sku_costs").upsert(cleaned, { onConflict: "sku" });
     if (error) return Response.json({ error: error.message }, { status: 500 });
 
