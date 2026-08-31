@@ -179,28 +179,25 @@ describe("SKU monthly contribution", () => {
     assert.equal(result.months[0].closed_days, undefined);
   });
 
-  test("partial daily coverage does not replace a complete sales_by_sku month", () => {
+  test("May incomplete pnl_daily stays on sales_by_sku even when daily is lower", () => {
     const result = buildAmazonMonthlyPnl({
       skuRows: [
-        { channel: "amazon", sku: "AA", period_start: "2026-05-01", units: 8000, gross_sales: 110000 },
+        { channel: "amazon", sku: "AA", period_start: "2026-05-01", units: 8200, gross_sales: 124280 },
       ],
       costs: [{ sku: "AA", cogs_per_unit: 3 }],
       adsByDay: [],
-      dailyAccount: [
-        { date: "2026-05-28", gross_sales: 4000, units: 280, est_cogs: 800, channel: "amazon" },
-        { date: "2026-05-29", gross_sales: 3800, units: 260, est_cogs: 780, channel: "amazon" },
-        { date: "2026-05-30", gross_sales: 3900, units: 270, est_cogs: 790, channel: "amazon" },
-        { date: "2026-05-31", gross_sales: 3603.81, units: 258, est_cogs: 629.02, channel: "amazon" },
-      ],
-      asOf: "2026-08-30",
+      dailyAccount: amazonDays("2026-05", 4, 15304, 980),
+      asOf: "2026-08-31",
     });
-    assert.equal(result.months[0].gross_sales, 110000);
+    assert.equal(result.months[0].gross_sales, 124280);
     assert.equal(result.months[0].source, "sku_monthly");
+    assert.equal(result.months[0].sales_basis, "sales_by_sku");
   });
 
-  test("daily coverage helper requires a near-complete month", () => {
-    assert.equal(dailyCoversMonth(4, "2026-05", "2026-08-30"), false);
-    assert.equal(dailyCoversMonth(31, "2026-07", "2026-08-30"), true);
+  test("daily coverage helper requires a complete closed month", () => {
+    assert.equal(dailyCoversMonth(4, "2026-05", "2026-08-31"), false);
+    assert.equal(dailyCoversMonth(31, "2026-07", "2026-08-31"), true);
+    assert.equal(dailyCoversMonth(29, "2026-07", "2026-08-31"), false);
     assert.equal(dailyCoversMonth(30, "2026-08", "2026-08-30"), true);
     assert.equal(dailyCoversMonth(28, "2026-08", "2026-08-30"), true);
     assert.equal(dailyCoversMonth(27, "2026-08", "2026-08-30"), false);
@@ -239,26 +236,70 @@ describe("SKU monthly contribution", () => {
     assert.equal(hist.source, "sku_monthly");
   });
 
-  test("closed prior month stays on sales_by_sku even when daily is higher", () => {
+  test("complete closed July overlays daily Amazon totals, not stale sales_by_sku", () => {
+    // SKU Economics Jul 1–31 is ground truth for "do not stay on $81k":
+    // sales $105,402.85 / NP $25,561.96. Headline still comes from
+    // pnl_daily account ($103,140.12 / 7,405 / $21,757.74), not the
+    // file and not settlement amazon_net_proceeds ($128k).
+    const julyDaily = amazonDays("2026-07", 31, 103140.12, 7405, {
+      ads: 18782.09,
+      contrib: 21757.74,
+      referral: 15471.02,
+      fba: 25917.5,
+      cogs: 20211.77,
+      proceeds: 128000,
+    });
     const result = buildAmazonMonthlyPnl({
       skuRows: [
         { channel: "amazon", sku: "AA", period_start: "2026-07-01", units: 5548, gross_sales: 81332.82 },
         { channel: "amazon", sku: "AA", period_start: "2026-08-01", units: 6400, gross_sales: 92324.84 },
       ],
       costs: [{ sku: "AA", cogs_per_unit: 2.85 }],
-      adsByDay: [],
+      adsByDay: [{ date: "2026-07-15", spend: 18782.09 }],
       dailyAccount: [
-        ...amazonDays("2026-07", 31, 103140.12, 7405),
+        ...julyDaily,
         ...amazonDays("2026-08", 30, 94807.47, 6466),
       ],
+      dailySkus: julyDaily.map((d) => ({
+        date: d.date, sku: "AA", units: d.units, gross_sales: d.gross_sales,
+      })),
       asOf: "2026-08-30",
     });
     const jul = result.months.find((m) => m.date.startsWith("2026-07"));
     const aug = result.months.find((m) => m.date.startsWith("2026-08"));
-    assert.equal(jul?.gross_sales, 81332.82);
-    assert.equal(jul?.source, "sku_monthly");
+    assert.ok(jul);
+    assert.equal(jul.gross_sales, 103140.12);
+    assert.equal(jul.units, 7405);
+    assert.equal(jul.source, "daily");
+    assert.equal(jul.sales_basis, "daily");
+    assert.equal(jul.closed_days, 31);
+    assert.equal(jul.ad_spend, 18782.09);
+    assert.equal(jul.net_after_ads, 21757.74);
+    assert.notEqual(jul.net_after_ads, 14649.39);
+    assert.notEqual(jul.net_after_ads, 25561.96);
+    assert.equal(jul.amazon_net_proceeds, null);
+    assert.equal(result.skusByMonth["2026-07"][0].units, 7405);
+    assert.notEqual(result.skusByMonth["2026-07"][0].units, 5548);
     assert.equal(aug?.gross_sales, 94807.47);
     assert.equal(aug?.source, "daily");
+  });
+
+  test("June sku≈daily stays on sales_by_sku", () => {
+    const result = buildAmazonMonthlyPnl({
+      skuRows: [
+        { channel: "amazon", sku: "AA", period_start: "2026-06-01", units: 8000, gross_sales: 119374 },
+      ],
+      costs: [{ sku: "AA", cogs_per_unit: 2.85 }],
+      adsByDay: [],
+      dailyAccount: amazonDays("2026-06", 30, 119088, 7980),
+      asOf: "2026-08-31",
+    });
+    const jun = result.months.find((m) => m.date.startsWith("2026-06"));
+    assert.ok(jun);
+    assert.equal(jun.gross_sales, 119374);
+    assert.equal(jun.units, 8000);
+    assert.equal(jun.source, "sku_monthly");
+    assert.equal(jun.sales_basis, "sales_by_sku");
   });
 
   test("sales_daily Amazon sales win when they beat pnl_daily; Shopify is ignored", () => {
@@ -281,7 +322,20 @@ describe("SKU monthly contribution", () => {
   });
 });
 
-function amazonDays(ym: string, count: number, sales: number, units: number) {
+function amazonDays(
+  ym: string,
+  count: number,
+  sales: number,
+  units: number,
+  econ?: {
+    ads?: number;
+    contrib?: number;
+    referral?: number;
+    fba?: number;
+    cogs?: number;
+    proceeds?: number;
+  },
+) {
   const days = [];
   const salesEach = Math.round((sales / count) * 100) / 100;
   const unitsEach = Math.floor(units / count);
@@ -292,11 +346,31 @@ function amazonDays(ym: string, count: number, sales: number, units: number) {
       units: unitsEach,
       est_cogs: 0,
       channel: "amazon",
+      ...(econ
+        ? {
+            ad_spend: 0,
+            est_referral_fees: 0,
+            est_fba_fees: 0,
+            est_contribution: 0,
+            net_after_ads: 0,
+            amazon_net_proceeds: 0,
+          }
+        : {}),
     });
   }
   const salesSum = days.reduce((s, r) => s + r.gross_sales, 0);
   const unitsSum = days.reduce((s, r) => s + r.units, 0);
   days[days.length - 1].gross_sales = Math.round((days[days.length - 1].gross_sales + sales - salesSum) * 100) / 100;
   days[days.length - 1].units += units - unitsSum;
+  if (econ) {
+    const last = days[days.length - 1];
+    last.ad_spend = econ.ads ?? 0;
+    last.est_referral_fees = econ.referral ?? 0;
+    last.est_fba_fees = econ.fba ?? 0;
+    last.est_cogs = econ.cogs ?? 0;
+    last.est_contribution = econ.contrib ?? 0;
+    last.net_after_ads = econ.contrib ?? 0;
+    last.amazon_net_proceeds = econ.proceeds ?? 0;
+  }
   return days;
 }

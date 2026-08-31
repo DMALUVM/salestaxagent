@@ -44,9 +44,12 @@ async function paginate<T>(
  * real $0-revenue day.
  *
  * Monthly rows: sales_by_sku (Amazon) × sku_costs + ads for history.
- * The in-progress month uses sales_daily / pnl_daily account when those
- * Amazon totals are more complete. Closed prior months stay on
- * sales_by_sku. Shopify is never folded into Amazon contribution.
+ * Any month with complete sales_daily / pnl_daily Amazon coverage uses
+ * those account totals (sales / units / contribution) when they are
+ * more complete than sales_by_sku — closed July included. Settlement
+ * amazon_net_proceeds is not Month contribution. SKU Economics is a
+ * check, not an ingest. Incomplete daily windows stay on sales_by_sku.
+ * Shopify is never folded into Amazon contribution.
  */
 export async function GET() {
   try {
@@ -206,6 +209,12 @@ async function loadMonthly(
         gross_sales: Number(r.gross_sales) || 0,
         units: Number(r.units) || 0,
         est_cogs: Number(r.est_cogs) || 0,
+        est_referral_fees: Number(r.est_referral_fees) || 0,
+        est_fba_fees: Number(r.est_fba_fees) || 0,
+        ad_spend: Number(r.ad_spend) || 0,
+        est_contribution: r.est_contribution == null ? null : Number(r.est_contribution),
+        net_after_ads: r.net_after_ads == null ? null : Number(r.net_after_ads),
+        // amazon_net_proceeds is settlement posted-date — not Month contribution
         channel: "amazon",
       })),
       dailySkus,

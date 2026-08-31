@@ -253,6 +253,54 @@ describe("buildPnlPeriods", () => {
     assert.deepEqual(months.map((p) => p.key), ["2026-08", "2026-07"]);
   });
 
+  test("daily-overlaid closed July uses 31 calendar days and daily contribution", () => {
+    const monthly = [
+      row("2026-07-01", 21757.74, {
+        source: "daily",
+        ads_basis: "known",
+        gross_sales: 103140.12,
+        units: 7405,
+        closed_days: 31,
+      }),
+      row("2026-08-01", 20000, {
+        source: "daily",
+        ads_basis: "known",
+        gross_sales: 94807.47,
+        closed_days: 30,
+      }),
+    ];
+    const months = buildPnlPeriods({
+      rows: [],
+      monthly,
+      grain: "month",
+      lookback: "all",
+      asOf: "2026-08-31",
+    });
+    const jul = months.find((p) => p.key === "2026-07");
+    const aug = months.find((p) => p.key === "2026-08");
+    assert.ok(jul);
+    assert.equal(jul.sales, 103140.12);
+    assert.equal(jul.contribution, 21757.74);
+    assert.equal(jul.source, "daily");
+    assert.equal(jul.days, 31);
+    assert.equal(jul.calendarDays, 31);
+    assert.equal(jul.partial, false);
+    assert.equal(jul.avgDaily, 701.86);
+    assert.equal(aug?.source, "daily");
+    assert.equal(aug?.sales, 94807.47);
+
+    const [year] = buildPnlPeriods({
+      rows: [],
+      monthly,
+      grain: "year",
+      lookback: "all",
+      asOf: "2026-08-31",
+    });
+    assert.equal(year.key, "2026");
+    assert.equal(year.sales, 197947.59);
+    assert.equal(year.contribution, 41757.74);
+  });
+
   test("daily-overlaid current month uses real closed days in the label", () => {
     const monthly = [
       row("2026-08-01", 20000, {

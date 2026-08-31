@@ -1024,6 +1024,15 @@ class TestAdsPollResilience:
 class TestSpapiOrderFreshness:
     """Re-upserted monthly sales_by_state rows must refresh ingested_at."""
 
+    def test_period_starts_in_range_is_requested_months_only(self):
+        from datetime import date
+        from src.amazon_sp.reports import _period_starts_in_range
+
+        assert _period_starts_in_range(date(2026, 8, 1), date(2026, 8, 30)) == {"2026-08-01"}
+        assert _period_starts_in_range(date(2026, 7, 15), date(2026, 8, 15)) == {
+            "2026-07-01", "2026-08-01",
+        }
+
     def test_stamp_sets_iso_utc(self):
         from datetime import datetime, timezone
         from src.amazon_sp.reports import _stamp_ingested_at
@@ -1032,6 +1041,53 @@ class TestSpapiOrderFreshness:
         rows = [{"state_code": "TX", "source": "amazon_spapi"}]
         _stamp_ingested_at(rows, now=now)
         assert rows[0]["ingested_at"] == now.isoformat()
+
+    def test_stamp_skips_period_starts_not_in_the_report(self):
+        from datetime import datetime, timezone
+        from src.amazon_sp.reports import _stamp_ingested_at
+
+        now = datetime(2026, 8, 31, 17, 53, tzinfo=timezone.utc)
+        rows = [
+            {"period_start": "2026-08-01", "gross_sales": 92324.84},
+            {"period_start": "2026-07-01", "gross_sales": 81332.82},
+        ]
+        _stamp_ingested_at(rows, now=now, period_starts={"2026-08-01"})
+        assert rows[0]["ingested_at"] == now.isoformat()
+        assert "ingested_at" not in rows[1]
+        assert rows[1]["gross_sales"] == 81332.82
+
+    def test_upsert_amazon_sku_rows_drops_months_outside_report(self, monkeypatch):
+        from src.amazon_sp import reports as reports
+
+        captured: dict = {}
+
+        def fake_upsert(table, rows, on_conflict=None):
+            captured["rows"] = rows
+            return len(rows)
+
+        monkeypatch.setattr(reports, "upsert_rows", fake_upsert)
+        inserted, deduped = reports.upsert_amazon_sku_rows(
+            [
+                {
+                    "channel": "amazon", "sku": "AA", "state_code": "TX",
+                    "period_start": "2026-08-01", "source": "amazon_spapi",
+                    "units": 10, "gross_sales": 100.0, "net_sales": 100.0,
+                    "order_count": 1,
+                },
+                {
+                    "channel": "amazon", "sku": "AA", "state_code": "TX",
+                    "period_start": "2026-07-01", "source": "amazon_spapi",
+                    "units": 5548, "gross_sales": 81332.82, "net_sales": 81332.82,
+                    "order_count": 1,
+                },
+            ],
+            period_starts={"2026-08-01"},
+        )
+        assert inserted == 1
+        assert len(deduped) == 1
+        assert captured["rows"][0]["period_start"] == "2026-08-01"
+        assert captured["rows"][0]["ingested_at"]
+        assert all(r["period_start"] != "2026-07-01" for r in captured["rows"])
 
     def test_fetch_orders_upsert_includes_ingested_at(self, monkeypatch):
         from datetime import date
