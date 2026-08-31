@@ -57,6 +57,10 @@ function computeNextDue(
   let periodEndDate: Date;
   const freq = frequency.toLowerCase().replace("-", "_");
 
+  if (freq === "casual") {
+    return null;
+  }
+
   if (freq === "monthly") {
     periodEndDate = new Date(y, m + 1, 0);
   } else if (freq === "quarterly") {

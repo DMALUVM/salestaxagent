@@ -79,6 +79,9 @@ def compute_next_due(
 
     freq = frequency.lower().replace("-", "_")
 
+    if freq == "casual":
+        return None
+
     if freq == "monthly":
         if m == 12:
             pe = date(y + 1, 1, 1) - timedelta(days=1)
