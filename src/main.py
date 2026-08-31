@@ -4697,6 +4697,24 @@ def run():
             click.echo("[Scheduler] SP-API refresh daily at 06:00 "
                        "(orders 7d, inventory ledger 14d)")
 
+            # Current-month sales_by_sku only. spapi_refresh writes
+            # sales_daily / sales_by_state, not SKU months — without this
+            # the in-progress month freezes at the last manual
+            # backfill-amazon-skus. Window is month-start → yesterday
+            # (one All Orders chunk). Never the CLI default of 2025-01-01.
+            scheduler.add_job(
+                _run_amazon_sku_month,
+                "cron",
+                hour=6,
+                minute=20,
+                id="amazon_sku_month",
+                misfire_grace_time=3600,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo("[Scheduler] Amazon SKU month daily at 06:20 "
+                       "(current month → yesterday, after spapi_refresh)")
+
             # Weekly deeper ledger re-pull. Sunday 04:00 keeps it clear of the
             # 06:00 daily refresh and of the ads jobs at 05:00-05:30.
             scheduler.add_job(
@@ -5407,6 +5425,8 @@ def _run_spapi_refresh():
         print(f"[PnL] {ts} Error: {e}")
 
     status, message = _spapi_refresh_outcome(errors, orders_inserted)
+    # amazon_sku_month at 06:20 owns sales_by_sku. Do not pull All Orders
+    # a second time here — fetch_orders already holds that report at 06:00.
     if status == "fail":
         job_finish(run_id, status, message)
         try:
@@ -5419,6 +5439,88 @@ def _run_spapi_refresh():
             pass
     else:
         job_finish(run_id, status, message)
+
+
+ALL_ORDERS_JOB_NAMES = ("spapi_refresh", "amazon_sku_month")
+
+
+def _all_orders_busy(exclude_run_id: str | None = None) -> str | None:
+    """job_name of an in-flight All Orders pull, or None.
+
+    fetch_orders (spapi_refresh) and fetch_amazon_skus (amazon_sku_month)
+    share GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL. A second
+    request while one is polling is skipped, not stacked.
+    """
+    try:
+        from src.db import get_client
+        rows = (
+            get_client().table("job_runs")
+            .select("id,job_name,status")
+            .in_("job_name", list(ALL_ORDERS_JOB_NAMES))
+            .eq("status", "running")
+            .execute().data
+        ) or []
+    except Exception:
+        return None
+    for r in rows:
+        if exclude_run_id and r.get("id") == exclude_run_id:
+            continue
+        return r.get("job_name") or "all_orders"
+    return None
+
+
+def _run_amazon_sku_month():
+    """06:20 — current-month Amazon sales_by_sku only.
+
+    start = first day of the Amazon month containing yesterday, end =
+    yesterday. That is one ≤30-day All Orders chunk for most of the
+    month. Never the backfill-amazon-skus CLI default of 2025-01-01.
+    Shopify SKU backfill is not scheduled here.
+    """
+    from src.db import job_start, job_finish
+    from src.rules import current_month_sku_range
+    from src.amazon_sp.reports import fetch_amazon_skus
+
+    run_id = job_start("amazon_sku_month")
+    start, end = current_month_sku_range()
+    # Fail closed if a future edit forgets the current-month window and
+    # would request the backfill-amazon-skus default (2025-01-01 → now).
+    if start != end.replace(day=1) or (end - start).days > 31:
+        job_finish(run_id, "fail",
+                   f"refusing non-current-month All Orders window {start}→{end}")
+        return
+
+    busy = _all_orders_busy(exclude_run_id=run_id)
+    if busy:
+        msg = f"skipped — {busy} already pulling All Orders"
+        print(f"[Amazon SKU month] {msg}")
+        job_finish(run_id, "skipped", msg, stats={
+            "start": start.isoformat(), "end": end.isoformat(), "chunks": 0,
+        })
+        return
+
+    try:
+        result = fetch_amazon_skus(start, end)
+    except Exception as e:
+        print(f"[Amazon SKU month] Failed {start} → {end}: {e}")
+        job_finish(run_id, "fail", str(e)[:500], stats={
+            "start": start.isoformat(), "end": end.isoformat(),
+        })
+        return
+
+    chunks = int(result.get("chunks") or 0)
+    inserted = int(result.get("rows_inserted") or 0)
+    msg = (f"{start} → {end}: {chunks} chunk(s), "
+           f"{result.get('unique_skus', 0)} SKUs, {inserted} rows")
+    print(f"[Amazon SKU month] {msg}")
+    job_finish(run_id, "success", msg, stats={
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "chunks": chunks,
+        "sku_rows": result.get("sku_rows", 0),
+        "unique_skus": result.get("unique_skus", 0),
+        "rows_inserted": inserted,
+    })
 
 
 def _run_paid_ads_freshness():
