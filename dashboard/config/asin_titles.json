@@ -1,0 +1,6 @@
+{
+  "_comment": "Manual parent ASIN title overrides. Used when SP-API listings report is unavailable or ASIN is delisted. Keys are ASINs, values are display titles. Dashboard copy so Vercel (cwd=dashboard/) ships this file.",
+  "B0CLHTF8YN": "Tallowbourn Lip Balm 3pk",
+  "B0DQFKMJFY": "Tallowbourn Tallow Balm for Face & Body",
+  "B0HBSZ71XQ": "Tallowbourn Tallow Deodorant"
+}
