@@ -252,7 +252,7 @@ describe("SKU monthly contribution", () => {
       dailySkus: julyDaily.map((d) => ({
         date: d.date, sku: "AA", units: d.units, gross_sales: d.gross_sales,
       })),
-      asOf: "2026-08-31",
+      asOf: "2026-08-30",
     });
     const jul = result.months.find((m) => m.date.startsWith("2026-07"));
     const aug = result.months.find((m) => m.date.startsWith("2026-08"));
