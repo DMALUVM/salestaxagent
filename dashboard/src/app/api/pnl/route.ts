@@ -44,8 +44,9 @@ async function paginate<T>(
  * real $0-revenue day.
  *
  * Monthly rows: sales_by_sku (Amazon) × sku_costs + ads for history.
- * The in-progress month uses sales_daily / pnl_daily account when those
- * Amazon totals are more complete. Closed prior months stay on
+ * Any month with complete sales_daily / pnl_daily Amazon coverage uses
+ * those account totals when they are more complete than sales_by_sku
+ * (closed July included). Incomplete daily windows stay on
  * sales_by_sku. Shopify is never folded into Amazon contribution.
  */
 export async function GET() {

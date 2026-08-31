@@ -4,10 +4,13 @@
  * Mirrors src/pnl_monthly.py. Constants must match
  * config/business_rules.json → pnl.default_referral_pct / default_fba_fee_per_unit.
  *
- * When sales_daily / pnl_daily covers the in-progress Amazon month and
- * is more complete than sales_by_sku, that month is replaced by the
- * daily totals. Closed prior months stay on sales_by_sku. Shopify is
- * never mixed in. Ads stay on ads_campaigns_daily / ads_monthly_spend.
+ * When sales_daily / pnl_daily covers a month completely (closed-day
+ * count matches the calendar, with slack only on the in-progress month)
+ * and Amazon gross is materially higher than sales_by_sku, that month
+ * is replaced by the daily totals — including closed months such as
+ * July. Incomplete daily windows (May inside a 90-day pnl_daily slice)
+ * stay on sales_by_sku. Shopify is never mixed in. Ads stay on
+ * ads_campaigns_daily / ads_monthly_spend.
  *
  * Ads: an imported ads_monthly_spend row wins for that month (full
  * SKU Economics / Ads Console month). Otherwise campaign days from
@@ -349,7 +352,12 @@ export function dailyCoversMonth(
   const end = monthEnd(start);
   const cap = asOf && asOf < end ? asOf : end;
   const expected = inclusiveDays(start, cap);
-  return days >= Math.max(1, expected - DAILY_MONTH_COVERAGE_SLACK);
+  // In-progress month: allow a couple of missing closed days so MTD
+  // still overlays. Closed months must have every calendar day — a
+  // 90-day pnl_daily window that only catches the last days of May
+  // must not replace a complete sales_by_sku month.
+  const slack = isOpenMonth(ym, asOf) ? DAILY_MONTH_COVERAGE_SLACK : 0;
+  return days >= Math.max(1, expected - slack);
 }
 
 export function isOpenMonth(ym: string, asOf: string | null): boolean {
@@ -419,9 +427,9 @@ function overlayDailyMonths(opts: {
     const existing = monthByYm.get(ym);
     const skuSales = existing?.gross_sales ?? 0;
     const moreComplete = dailySales > skuSales + DAILY_SALES_MATERIAL_DELTA;
-    // Closed prior months stay on sales_by_sku. Only the in-progress
-    // month may take daily totals, and only when those are ahead.
-    if (!isOpenMonth(ym, opts.asOf)) continue;
+    // Overlay any month with complete daily coverage when daily Amazon
+    // gross is materially ahead of sales_by_sku. June (sku ≈ daily)
+    // stays on sku. Incomplete daily months stay on sku.
     if (existing && !moreComplete) continue;
 
     const skuDays = skuByYm.get(ym) ?? [];
