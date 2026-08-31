@@ -38,6 +38,43 @@ CONFIRMED_PHYSICAL_NEXUS: dict[str, dict] = {
     },
 }
 
+# User-set registration / compliance / economic fields the engine must not clobber.
+_PRESERVE_FIELDS = (
+    "is_registered", "registration_date", "assigned_frequency",
+    "last_filed_through", "account_number",
+    "has_economic_nexus", "economic_nexus_since",
+    "economic_progress_amount", "economic_progress_transactions",
+    "economic_progress_percent", "compliance_resolved",
+    "compliance_resolved_at", "compliance_hidden", "compliance_notes",
+)
+
+
+def _registration_locks_confidence(existing: dict | None) -> bool:
+    """True when Tess/Dave have already set confidence on a registered state.
+
+    FBA-inventory legal posture (contested/low) is a different fact from
+    registration-record confidence. Once a registered row has confidence,
+    the engine must not overwrite it.
+    """
+    if not existing:
+        return False
+    return bool(existing.get("is_registered") and existing.get("confidence"))
+
+
+def _preserve_existing_status(row: dict, existing: dict | None) -> None:
+    """Copy user-set registration/compliance/economic fields onto an engine upsert.
+
+    Engine must NEVER overwrite user-set registration or compliance state.
+    """
+    if not existing:
+        return
+    for keep_field in _PRESERVE_FIELDS:
+        val = existing.get(keep_field)
+        if val is not None:
+            row[keep_field] = val
+    if _registration_locks_confidence(existing):
+        row["confidence"] = existing["confidence"]
+
 
 def evaluate_physical_nexus() -> dict:
     inventory_events = fetch_all("inventory_events", order="event_date")
@@ -185,18 +222,7 @@ def evaluate_physical_nexus() -> dict:
         if not existing:
             existing_records = fetch_all("nexus_status", {"state_code": state_code})
             existing = existing_records[0] if existing_records else None
-        if existing:
-            for keep_field in (
-                "is_registered", "registration_date", "assigned_frequency",
-                "last_filed_through", "account_number",
-                "has_economic_nexus", "economic_nexus_since",
-                "economic_progress_amount", "economic_progress_transactions",
-                "economic_progress_percent", "compliance_resolved",
-                "compliance_resolved_at", "compliance_hidden", "compliance_notes",
-            ):
-                val = existing.get(keep_field)
-                if val is not None:
-                    nexus_row[keep_field] = val
+        _preserve_existing_status(nexus_row, existing)
 
         nexus_updates.append(nexus_row)
 
@@ -232,7 +258,8 @@ def evaluate_physical_nexus() -> dict:
             for u in nexus_updates:
                 if u["state_code"] == sc:
                     u["has_physical_nexus"] = True
-                    u["confidence"] = conf
+                    if not _registration_locks_confidence(u):
+                        u["confidence"] = conf
                     existing_src = u.get("physical_nexus_source", "")
                     u["physical_nexus_source"] = f"{source}; {existing_src}" if existing_src else source
                     if not u.get("action_notes"):
@@ -255,18 +282,7 @@ def evaluate_physical_nexus() -> dict:
                 "confidence": conf,
             }
             # Preserve registration + compliance + economic fields
-            if existing:
-                for keep_field in (
-                    "is_registered", "registration_date", "assigned_frequency",
-                    "last_filed_through", "account_number",
-                    "has_economic_nexus", "economic_nexus_since",
-                    "economic_progress_amount", "economic_progress_transactions",
-                    "economic_progress_percent", "compliance_resolved",
-                    "compliance_resolved_at", "compliance_hidden", "compliance_notes",
-                ):
-                    val = existing.get(keep_field)
-                    if val is not None:
-                        confirmed_row[keep_field] = val
+            _preserve_existing_status(confirmed_row, existing)
             nexus_updates.append(confirmed_row)
 
         # Check for franchise flags
