@@ -3372,14 +3372,15 @@ def spapi_traffic_cmd(days, dry_run):
 
 
 @cli.command("spapi-reimbursements")
-@click.option("--days", default=30, help="Days back to fetch")
+@click.option("--days", default=90, help="Days back to fetch (chunked ≤30)")
 @click.option("--dry-run", is_flag=True)
 def spapi_reimbursements_cmd(days, dry_run):
     """Fetch FBA reimbursements via SP-API."""
-    from datetime import date as d, timedelta
+    from datetime import timedelta
     from src.amazon_sp.reports import fetch_reimbursements
+    from src.rules import amazon_as_of
 
-    end = d.today() - timedelta(days=1)
+    end = amazon_as_of()
     start = end - timedelta(days=days)
     if dry_run:
         click.echo("DRY RUN\n")
@@ -5387,12 +5388,15 @@ def _run_spapi_refresh():
     except Exception as e:
         print(f"[SP-API] {ts} Sales&Traffic error: {e}")
 
-    # Reimbursements (30d window)
+    # Reimbursements (90d window, chunked ≤30d). A 30d pull drops July
+    # approvals by late August — the cash Dave wants visible on /profit.
     try:
         from src.amazon_sp.reports import fetch_reimbursements
-        reimb_start = end - timedelta(days=30)
+        from src.rules import SPAPI_REIMBURSEMENTS_DAYS
+        reimb_start = end - timedelta(days=SPAPI_REIMBURSEMENTS_DAYS)
         reimb = fetch_reimbursements(reimb_start, end)
-        print(f"[SP-API] {ts} Reimbursements: {reimb.get('rows_parsed', 0)} rows, ${reimb.get('total_amount', 0):,.2f}")
+        print(f"[SP-API] {ts} Reimbursements ({reimb_start}→{end}): "
+              f"{reimb.get('rows_parsed', 0)} rows, ${reimb.get('total_amount', 0):,.2f}")
     except Exception as e:
         print(f"[SP-API] {ts} Reimbursements error: {e}")
 

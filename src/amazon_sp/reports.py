@@ -9,7 +9,7 @@ import csv
 import io
 import re
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from src.channels import AMAZON
 from src.db import delete_rows, log_audit, log_ingestion, upsert_rows
@@ -231,6 +231,26 @@ def _parse_money(value: str) -> float:
         return float(v)
     except (ValueError, TypeError):
         return 0.0
+
+
+def _parse_signed_money(value: str) -> float:
+    """Signed cash: credits positive, reversals negative.
+
+    Seller Central / SP-API reimbursements use ``-12.34``, ``($12.34)``,
+    or ``$12.34``. Parentheses always mean a reversal.
+    """
+    v = (value or "").strip()
+    if not v or v in {".", "-", "—", "n/a", "na"}:
+        return 0.0
+    neg = v.startswith("(") and v.endswith(")")
+    v = v.replace("$", "").replace(",", "").replace("(", "").replace(")", "").strip()
+    if not v:
+        return 0.0
+    try:
+        amt = float(v)
+    except (ValueError, TypeError):
+        return 0.0
+    return -amt if neg else amt
 
 
 def _month_start(d: date) -> date:
@@ -1325,8 +1345,13 @@ def fetch_sales_traffic(
 # FBA Reimbursements
 # ---------------------------------------------------------------------------
 
-def parse_reimbursements(content: str) -> dict:
-    """Parse GET_FBA_REIMBURSEMENTS_DATA TSV report."""
+def parse_reimbursements(content: str, source_file: str = SOURCE_LABEL) -> dict:
+    """Parse GET_FBA_REIMBURSEMENTS_DATA TSV / Seller Central CSV.
+
+    ``approval_date`` is stored as noon America/Los_Angeles on the Amazon
+    approval day so a date-only string cannot shift to the previous LA day
+    when Postgres reads it as UTC midnight.
+    """
     result: dict = {
         "rows_total": 0, "rows_parsed": 0, "rows_skipped": 0,
         "records": [], "total_amount": 0.0,
@@ -1347,57 +1372,107 @@ def parse_reimbursements(content: str) -> dict:
         if not approval or not reimb_id:
             result["rows_skipped"] += 1
             continue
+        la_day = _parse_date(approval)
+        if not la_day:
+            result["rows_skipped"] += 1
+            continue
 
-        amt = _parse_money(_get(row, H, "amount-total"))
+        amt = _parse_signed_money(_get(row, H, "amount-total"))
         result["total_amount"] += amt
+        approval_dt = datetime.combine(la_day, time(12, 0), tzinfo=AMAZON_TZ)
 
         result["records"].append({
-            "approval_date": approval,
+            "approval_date": approval_dt.isoformat(),
             "reimbursement_id": reimb_id,
             "case_id": _get(row, H, "case-id") or None,
             "order_id": _get(row, H, "amazon-order-id") or None,
             "reason": _get(row, H, "reason") or None,
-            "sku": _get(row, H, "sku") or None,
+            # Empty string (not NULL) so UNIQUE (reimbursement_id, sku) upserts.
+            "sku": _get(row, H, "sku") or "",
             "fnsku": _get(row, H, "fnsku") or None,
             "asin": _get(row, H, "asin") or None,
             "product_name": _get(row, H, "product-name") or None,
             "condition": _get(row, H, "condition") or None,
             "currency": _get(row, H, "currency-unit") or "USD",
-            "amount_per_unit": _parse_money(_get(row, H, "amount-per-unit")),
+            "amount_per_unit": _parse_signed_money(_get(row, H, "amount-per-unit")),
             "amount_total": amt,
             "qty_cash": int(float(_get(row, H, "quantity-reimbursed-cash") or "0")),
             "qty_inventory": int(float(_get(row, H, "quantity-reimbursed-inventory") or "0")),
             "qty_total": int(float(_get(row, H, "quantity-reimbursed-total") or "0")),
-            "source_file": SOURCE_LABEL,
+            "source_file": source_file,
         })
         result["rows_parsed"] += 1
 
     return result
 
 
+def _dedupe_reimbursements(records: list[dict]) -> list[dict]:
+    """Last row wins on (reimbursement_id, sku) — the upsert conflict key."""
+    seen: dict[tuple[str, str], int] = {}
+    for i, rec in enumerate(records):
+        seen[(str(rec.get("reimbursement_id") or ""), str(rec.get("sku") or ""))] = i
+    return [records[i] for i in sorted(seen.values())]
+
+
 def fetch_reimbursements(
     start: date, end: date,
     dry_run: bool = False, on_poll: callable | None = None,
 ) -> dict:
-    """Fetch FBA reimbursements report and upsert."""
-    content = request_and_download(FBA_REIMBURSEMENTS_REPORT, start, end, on_poll=on_poll)
-    parsed = parse_reimbursements(content)
+    """Fetch FBA reimbursements report (chunked ≤30d) and upsert."""
+    import logging
+    log = logging.getLogger(__name__)
 
+    chunks = _date_chunks(start, end)
+    records: list[dict] = []
+    rows_parsed = 0
+    rows_total = 0
+    total_amount = 0.0
+    chunk_errors = 0
+
+    for c_start, c_end in chunks:
+        try:
+            content = request_and_download(
+                FBA_REIMBURSEMENTS_REPORT, c_start, c_end, on_poll=on_poll)
+        except Exception as e:
+            chunk_errors += 1
+            log.warning("Reimbursements chunk %s->%s failed: %s", c_start, c_end, e)
+            continue
+        parsed = parse_reimbursements(content)
+        records.extend(parsed["records"])
+        rows_parsed += parsed["rows_parsed"]
+        rows_total += parsed["rows_total"]
+        total_amount += parsed["total_amount"]
+
+    deduped = _dedupe_reimbursements(records)
     summary = {
         "report_type": "reimbursements",
         "period": f"{start} to {end}",
-        "rows_parsed": parsed["rows_parsed"],
-        "total_amount": round(parsed["total_amount"], 2),
+        "chunks": len(chunks),
+        "chunk_errors": chunk_errors,
+        "rows_total": rows_total,
+        "rows_parsed": rows_parsed,
+        "rows_deduped": max(0, len(records) - len(deduped)),
+        "total_amount": round(total_amount, 2),
         "dry_run": dry_run,
         "rows_inserted": 0,
     }
 
-    if dry_run or not parsed["records"]:
+    if dry_run or not deduped:
         return summary
 
     inserted = upsert_rows(
-        "fba_reimbursements", parsed["records"],
+        "fba_reimbursements", deduped,
         on_conflict="reimbursement_id,sku",
     )
     summary["rows_inserted"] = inserted
+    try:
+        log_ingestion(
+            filename=f"spapi_reimbursements_{start}_{end}",
+            file_type="amazon_reimbursements",
+            rows_total=rows_total,
+            rows_inserted=inserted,
+            rows_skipped=max(0, rows_total - rows_parsed),
+        )
+    except Exception:
+        log.warning("Could not log reimbursements ingestion", exc_info=True)
     return summary

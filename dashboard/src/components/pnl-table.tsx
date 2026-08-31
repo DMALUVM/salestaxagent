@@ -220,7 +220,8 @@ export function PnlTable({
               Amazon SKU economics {storedMin ?? "—"} → {storedMax ?? "—"}
               ({monthly.length} month{monthly.length === 1 ? "" : "s"} from <code>sales_by_sku</code>
               {monthly.some((r) => r.source === "daily") ? ", daily overlay when more complete" : ""}).
-              Showing {lookbackHint}. Average is contribution ÷ calendar days in the visible months.
+              Showing {lookbackHint}. Average is contribution ÷ calendar days in the visible months
+              (FBA reimbursements are shown beside contribution and are not in the average).
               Fees are estimated (15% referral + $3.50 FBA / unit). COGS is units × <code>sku_costs</code>.
               {adsDateMin
                 ? ` Ad spend from the Ads API starts ${adsDateMin} (~95-day ceiling). Upload monthly SKU Economics CSVs (Sept 2024 onward) or Ads Console for earlier months.`
@@ -233,6 +234,7 @@ export function PnlTable({
             <>
               Stored {storedMin ?? "—"} → {storedMax ?? "—"} ({rows.length} Amazon day{rows.length === 1 ? "" : "s"}).
               Showing {lookbackHint}. Average is contribution ÷ days with a stored row — missing days are not filled with $0.
+              Reimburse is FBA inventory cash (approval day) and is not in contribution or the average.
               Weeks are Sunday–Saturday on the Amazon calendar (America/Los_Angeles).
               {historyShorterThanLookback && (
                 <> P&amp;L rows start {storedMin} — older days were never synced, so this {lookback}d window is partial.</>
@@ -253,6 +255,7 @@ export function PnlTable({
               <TableHead className="text-right">Ads</TableHead>
               <TableHead className="text-right">COGS</TableHead>
               <TableHead className="text-right font-semibold">Contribution</TableHead>
+              <TableHead className="text-right">Reimburse</TableHead>
               <TableHead className="text-right font-semibold">Avg / day</TableHead>
               <TableHead>Fees basis</TableHead>
             </TableRow>
@@ -260,7 +263,7 @@ export function PnlTable({
           <TableBody>
             {periods.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">
                   {usingMonthly
                     ? "No Amazon SKU months in this lookback."
                     : "No stored P&L days in this lookback. Nightly sync keeps 90 days; Month/Year use sales_by_sku from Aug 2024 (SP-API)."}
@@ -302,6 +305,9 @@ export function PnlTable({
                     <TableCell className={`text-right tabular-nums font-medium ${moneyClass(p.contribution)}`}>
                       ${fmtD(p.contribution)}
                     </TableCell>
+                    <TableCell className={`text-right tabular-nums ${moneyClass(p.reimbursements)}`}>
+                      ${fmtD(p.reimbursements)}
+                    </TableCell>
                     <TableCell className={`text-right tabular-nums font-medium ${moneyClass(p.avgDaily)}`}>
                       {p.avgDaily == null ? "—" : `$${fmtD(p.avgDaily)}`}
                     </TableCell>
@@ -309,7 +315,7 @@ export function PnlTable({
                   </TableRow>
                   {open && (
                     <TableRow className="bg-muted/40 hover:bg-muted/40">
-                      <TableCell colSpan={10} className="py-3">
+                      <TableCell colSpan={11} className="py-3">
                         {grain === "day" ? (
                           <DayDetail date={p.start} row={p.rows[0] ?? p.openRows[0]} />
                         ) : usingMonthly ? (
@@ -350,6 +356,9 @@ export function PnlTable({
                 <TableCell className="text-right tabular-nums">${fmtD(summary.cogs)}</TableCell>
                 <TableCell className={`text-right tabular-nums font-semibold ${moneyClass(summary.contribution)}`}>
                   ${fmtD(summary.contribution)}
+                </TableCell>
+                <TableCell className={`text-right tabular-nums ${moneyClass(summary.reimbursements)}`}>
+                  ${fmtD(summary.reimbursements)}
                 </TableCell>
                 <TableCell className={`text-right tabular-nums font-semibold ${moneyClass(summary.avgDaily)}`}>
                   {summary.avgDaily == null ? "—" : `$${fmtD(summary.avgDaily)}`}
@@ -632,10 +641,13 @@ function DayDetail({ date, row }: { date: string; row: PnlRow }) {
             { label: "− Ad spend", value: -Number(row.ad_spend ?? 0), color: "text-red-500" },
             { label: "− COGS", value: -Number(row.est_cogs ?? 0), color: "text-red-500" },
             { label: "= Contribution", value: Number(row.net_after_ads ?? 0), color: Number(row.net_after_ads ?? 0) >= 0 ? "font-semibold text-emerald-600" : "font-semibold text-red-600" },
+            { label: "FBA reimbursements (cash)", value: Number(row.reimbursements ?? 0), color: Number(row.reimbursements ?? 0) < 0 ? "text-red-500" : "text-muted-foreground", signed: true },
           ].map((l) => (
             <div key={l.label} className="flex justify-between gap-4">
               <span className="text-muted-foreground">{l.label}</span>
-              <span className={`tabular-nums ${l.color}`}>${fmtD(Math.abs(l.value))}</span>
+              <span className={`tabular-nums ${l.color}`}>
+                {l.signed && l.value < 0 ? "-" : ""}${fmtD(Math.abs(l.value))}
+              </span>
             </div>
           ))}
         </div>

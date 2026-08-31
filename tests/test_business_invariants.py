@@ -83,6 +83,11 @@ class TestBusinessRulesConfig:
     def test_pnl_contribution_formula(self):
         assert "cogs" in self.cfg["pnl"]["contribution_formula"]
         assert "ad_spend" in self.cfg["pnl"]["contribution_formula"]
+        assert "reimburse" not in self.cfg["pnl"]["contribution_formula"]
+
+    def test_spapi_reimbursements_window_covers_a_closed_month(self):
+        assert self.cfg["spapi"]["reimbursements_days"] >= 90
+        assert self.cfg["spapi"]["reimbursements_days"] >= self.cfg["spapi"]["max_chunk_days"]
 
 
 # ── 2. Rules module exposes correct constants ─────────────────

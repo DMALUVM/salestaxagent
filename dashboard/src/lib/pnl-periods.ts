@@ -37,6 +37,11 @@ export interface PnlRow {
   /** Actual closed Amazon days behind a monthly row (daily overlay). */
   closed_days?: number;
   sales_basis?: "sales_by_sku" | "daily";
+  /**
+   * FBA reimbursements on the Amazon approval day. Cash awareness only —
+   * never added into contribution / net_after_ads / avgDaily.
+   */
+  reimbursements?: number;
 }
 
 export type FeesBasis = "settled" | "estimated" | "mixed" | "preliminary";
@@ -61,6 +66,8 @@ export interface PnlPeriod {
   ads: number;
   cogs: number;
   contribution: number;
+  /** Signed FBA reimbursements in the period. Not inside contribution. */
+  reimbursements: number;
   /** contribution ÷ days. Null when the period has no closed day. */
   avgDaily: number | null;
   feesBasis: FeesBasis;
@@ -80,6 +87,7 @@ export interface PnlPeriodSummary {
   ads: number;
   cogs: number;
   contribution: number;
+  reimbursements: number;
   avgDaily: number | null;
 }
 
@@ -220,6 +228,7 @@ function rollup(
   const ads = money(source.reduce((s, r) => s + n(r, "ad_spend"), 0));
   const cogs = money(source.reduce((s, r) => s + n(r, "est_cogs"), 0));
   const contribution = money(source.reduce((s, r) => s + n(r, "net_after_ads"), 0));
+  const reimbursements = money(source.reduce((s, r) => s + n(r, "reimbursements"), 0));
   const endsShort = Boolean(asOf && asOf < bounds.end);
   // closed is newest-first; the oldest stored day is the last element.
   const oldest = closed.length ? closed[closed.length - 1].date : "";
@@ -244,6 +253,7 @@ function rollup(
     ads,
     cogs,
     contribution,
+    reimbursements,
     avgDaily: days > 0 ? money(contribution / days) : null,
     feesBasis: open ? "preliminary" : feesBasisOf(closed),
     adsBasis: adsBasisOf(source),
@@ -371,6 +381,7 @@ export function summarizePeriods(periods: PnlPeriod[]): PnlPeriodSummary {
     ads: money(closed.reduce((s, p) => s + p.ads, 0)),
     cogs: money(closed.reduce((s, p) => s + p.cogs, 0)),
     contribution,
+    reimbursements: money(closed.reduce((s, p) => s + p.reimbursements, 0)),
     avgDaily: days > 0 ? money(contribution / days) : null,
   };
 }
