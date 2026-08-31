@@ -37,15 +37,44 @@ FBA_REIMBURSEMENTS_REPORT = "GET_FBA_REIMBURSEMENTS_DATA"
 SOURCE_LABEL = "amazon_spapi"
 
 
-def _stamp_ingested_at(rows: list[dict], now: datetime | None = None) -> list[dict]:
+def _period_start_key(value: object) -> str:
+    if hasattr(value, "isoformat"):
+        return value.isoformat()[:10]
+    return str(value or "")[:10]
+
+
+def _period_starts_in_range(start: date, end: date) -> set[str]:
+    """First-of-month keys that overlap [start, end] inclusive."""
+    out: set[str] = set()
+    y, m = start.year, start.month
+    while date(y, m, 1) <= end:
+        out.add(date(y, m, 1).isoformat())
+        if m == 12:
+            y, m = y + 1, 1
+        else:
+            m += 1
+    return out
+
+
+def _stamp_ingested_at(
+    rows: list[dict],
+    now: datetime | None = None,
+    period_starts: set[str] | None = None,
+) -> list[dict]:
     """Set ingested_at so a PostgREST upsert refreshes the freshness column.
 
     sales_by_state / sales_by_sku default ingested_at to now() on INSERT only.
     Re-upserts of the same monthly key left the old timestamp, so a successful
     morning refresh could look a week stale on the tax SoT rows.
+
+    When `period_starts` is given, only those first-of-month keys are
+    stamped. An August-only All Orders pull must not restamp July.
     """
     ts = (now or datetime.now(timezone.utc)).isoformat()
+    allowed = {_period_start_key(p) for p in period_starts} if period_starts is not None else None
     for row in rows:
+        if allowed is not None and _period_start_key(row.get("period_start")) not in allowed:
+            continue
         row["ingested_at"] = ts
     return rows
 
@@ -581,7 +610,8 @@ def fetch_amazon_skus(
     if dry_run or not all_rows:
         return summary
 
-    inserted, deduped = upsert_amazon_sku_rows(all_rows)
+    allowed = _period_starts_in_range(start, end)
+    inserted, deduped = upsert_amazon_sku_rows(all_rows, period_starts=allowed)
     summary["rows_inserted"] = inserted
 
     log_ingestion(
@@ -606,8 +636,19 @@ def fetch_amazon_skus(
     return summary
 
 
-def upsert_amazon_sku_rows(rows: list[dict]) -> tuple[int, list[dict]]:
-    """Dedupe and upsert sales_by_sku rows (SP-API or All Orders CSV)."""
+def upsert_amazon_sku_rows(
+    rows: list[dict],
+    period_starts: set[str] | None = None,
+) -> tuple[int, list[dict]]:
+    """Dedupe and upsert sales_by_sku rows (SP-API or All Orders CSV).
+
+    `period_starts` limits both the write and the ingested_at stamp to
+    months actually in the requested report window. Timezone-spillover
+    July keys from an August-only pull are dropped, not restamped.
+    """
+    if period_starts is not None:
+        allowed = {_period_start_key(p) for p in period_starts}
+        rows = [r for r in rows if _period_start_key(r.get("period_start")) in allowed]
     if not rows:
         return 0, []
     seen: dict[tuple, dict] = {}
@@ -629,7 +670,7 @@ def upsert_amazon_sku_rows(rows: list[dict]) -> tuple[int, list[dict]]:
             seen[key] = dict(row)
 
     deduped = list(seen.values())
-    _stamp_ingested_at(deduped)
+    _stamp_ingested_at(deduped, period_starts=period_starts)
     inserted = upsert_rows(
         "sales_by_sku", deduped,
         on_conflict="channel,sku,state_code,period_start,source",
@@ -825,8 +866,14 @@ def fetch_orders(
     if dry_run or not all_records:
         return summary
 
-    rows = [r.model_dump() for r in all_records]
-    _stamp_ingested_at(rows)
+    allowed = _period_starts_in_range(start, end)
+    rows = [
+        r.model_dump() for r in all_records
+        if _period_start_key(getattr(r, "period_start", None)) in allowed
+    ]
+    if not rows:
+        return summary
+    _stamp_ingested_at(rows, period_starts=allowed)
     inserted = upsert_rows(
         "sales_by_state", rows,
         on_conflict="state_code,channel,period_start,period_end",
