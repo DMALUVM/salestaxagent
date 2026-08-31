@@ -175,6 +175,18 @@ def amazon_as_of(now: datetime | None = None) -> date:
     return amazon_today(now) - timedelta(days=1)
 
 
+def current_month_sku_range(as_of: date | None = None) -> tuple[date, date]:
+    """Closed Amazon days in the month that contains `as_of`.
+
+    start = first of that month, end = as_of (yesterday in LA when omitted).
+    This is the only window `amazon_sku_month` may request — never the
+    `backfill-amazon-skus` CLI default of 2025-01-01 (22+ All Orders chunks).
+    """
+    end = as_of if as_of is not None else amazon_as_of()
+    start = end.replace(day=1)
+    return start, end
+
+
 def window_start(as_of: date, days: int) -> date:
     """Inclusive start of a `days`-long window ending on `as_of`."""
     return as_of - timedelta(days=days - 1)

@@ -34,6 +34,7 @@ function row(date: string, contrib: number, extra: Partial<PnlRow> = {}): PnlRow
     ads_basis: extra.ads_basis,
     source: extra.source,
     period_end: extra.period_end,
+    closed_days: extra.closed_days,
   };
 }
 
@@ -211,8 +212,10 @@ describe("buildPnlPeriods", () => {
     assert.deepEqual(months.map((p) => p.key), ["2026-08", "2026-07", "2025-12"]);
     assert.equal(months[0].source, "sku_monthly");
     assert.equal(months[0].days, 23); // MTD through as-of
+    assert.equal(months[0].calendarDays, 31);
     assert.equal(months[0].avgDaily, 100);
     assert.equal(months[0].partial, true);
+    assert.equal(coverageLabel(months[0]), "partial · 23 of 31d");
     assert.equal(months[1].days, 31);
     assert.equal(months[1].partial, false);
     assert.equal(months[1].avgDaily, 100);
@@ -249,6 +252,30 @@ describe("buildPnlPeriods", () => {
     });
     assert.deepEqual(months.map((p) => p.key), ["2026-08", "2026-07"]);
   });
+
+  test("daily-overlaid current month uses real closed days in the label", () => {
+    const monthly = [
+      row("2026-08-01", 20000, {
+        source: "daily",
+        ads_basis: "known",
+        gross_sales: 94863.43,
+        closed_days: 30,
+      }),
+    ];
+    const [aug] = buildPnlPeriods({
+      rows: [],
+      monthly,
+      grain: "month",
+      lookback: "all",
+      asOf: "2026-08-30",
+    });
+    assert.equal(aug.sales, 94863.43);
+    assert.equal(aug.source, "daily");
+    assert.equal(aug.days, 30);
+    assert.equal(aug.calendarDays, 31);
+    assert.equal(aug.partial, true);
+    assert.equal(coverageLabel(aug), "partial · 30 of 31d");
+  });
 });
 
 describe("table no longer hides history behind a 35-day slice", () => {
@@ -259,5 +286,9 @@ describe("table no longer hides history behind a 35-day slice", () => {
     assert.match(page, /PnlTable|buildPnlPeriods/);
     assert.doesNotMatch(api, /\.limit\(400\)/, "400-row cap would hide a year of account days");
     assert.match(api, /\.range\(/);
+    assert.match(api, /dailyAccount/);
+    assert.match(api, /grain", "sku"/);
+    assert.match(api, /salesDaily/);
+    assert.match(api, /sales_daily/);
   });
 });
