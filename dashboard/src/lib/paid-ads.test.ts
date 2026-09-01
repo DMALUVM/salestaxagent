@@ -296,10 +296,84 @@ describe("page / API invariants", () => {
     assert.match(intelUi, /EMPTY_BRIEF|brief \?\?/);
     assert.equal(PAID_ADS_ATTRIBUTION.includes("not a live"), true);
     assert.doesNotMatch(page, /puppeteer|playwright|ads\.google\.com|business\.facebook\.com/i);
-    assert.doesNotMatch(intelUi, /puppeteer|playwright|ads\.google\.com/i);
+    assert.doesNotMatch(intelUi, /puppeteer|playwright/i);
     assert.match(intelUi, /No OAuth/);
     assert.doesNotMatch(ingest, /puppeteer|playwright|ads\.google\.com/i);
     assert.doesNotMatch(csvIngest, /puppeteer|playwright|ads\.google\.com/i);
+  });
+
+  test("DataStatus How-to is the manual CSV pull; re-export opens it", () => {
+    const status = intelUi.slice(intelUi.indexOf("function DataStatus("));
+    assert.match(status, /What data is loaded/);
+    assert.match(status, /PaidAdsCsvHowto/);
+    assert.match(intelUi, /How-to: pull CSVs/);
+    assert.match(status, /setHowtoOpen\(true\)/);
+    const stale = status.slice(status.indexOf("s.stale ?"), status.indexOf("s.days_behind}d"));
+    assert.match(stale, /<button/);
+    assert.doesNotMatch(stale, /<span/);
+    assert.match(status, /\{s\.days_behind\}d — re-export/);
+    const reexport = status.slice(
+      status.lastIndexOf("<button", status.indexOf("{s.days_behind}d — re-export")),
+      status.indexOf("{s.days_behind}d — re-export") + 40,
+    );
+    assert.match(reexport, /onClick=\{\(\) => setHowtoOpen\(true\)\}/);
+    assert.match(reexport, /\{s\.days_behind\}d — re-export/);
+  });
+
+  test("How-to has exact Google/Meta/GSC URLs and GSC file names", () => {
+    const howto = intelUi.slice(
+      intelUi.indexOf("const GOOGLE_ADS_CSV_URL"),
+      intelUi.indexOf("async function copyText("),
+    );
+    assert.match(
+      howto,
+      /https:\/\/ads\.google\.com\/aw\/reporteditor\/view\?ocid=1485260312&reportId=933344634/,
+    );
+    assert.match(
+      howto,
+      /https:\/\/adsmanager\.facebook\.com\/adsmanager\/reporting\?act=156983680801147&business_id=1028304628604309/,
+    );
+    assert.match(howto, /https:\/\/search\.google\.com\/search-console/);
+    assert.match(howto, /Queries\.csv/);
+    assert.match(howto, /Pages\.csv/);
+    assert.match(howto, /Chart\.csv/);
+    assert.doesNotMatch(howto, /resource_id/);
+    assert.match(howto, /Tallowbourn Ads Ops Daily/);
+    assert.match(howto, /Tallowbourn Meta Ads Ops Daily/);
+  });
+
+  test("How-to lists GA4 columns and does not invent an Explore name", () => {
+    const howto = intelUi.slice(
+      intelUi.indexOf("const GOOGLE_ADS_CSV_URL"),
+      intelUi.indexOf("async function copyText("),
+    );
+    for (const col of [
+      "Date",
+      "Session default channel group",
+      "Landing page",
+      "Device category",
+      "Sessions",
+      "Active users",
+      "Key events",
+      "Total revenue",
+    ]) {
+      assert.match(howto, new RegExp(col.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    }
+    assert.match(howto, /Save an Explore/);
+    assert.doesNotMatch(howto, /Tallowbourn GA4|Explore Daily|saved Explore name/i);
+  });
+
+  test("How-to is Dashboard upload only — no schedule or email export copy", () => {
+    const howto = intelUi.slice(
+      intelUi.indexOf("const GOOGLE_ADS_CSV_URL"),
+      intelUi.indexOf("async function copyText("),
+    );
+    assert.match(howto, /Dashboard/);
+    assert.match(howto, /\/paid-ads → Upload/);
+    assert.match(howto, /select ALL files at once/);
+    assert.doesNotMatch(howto, /warehouse/i);
+    assert.doesNotMatch(howto, /schedule/i);
+    assert.doesNotMatch(howto, /e-?mail/i);
   });
 
   test("ingest/read use production window tables and uniques", () => {
