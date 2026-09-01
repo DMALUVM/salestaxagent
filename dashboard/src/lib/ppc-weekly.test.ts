@@ -9,6 +9,8 @@ import {
   WEEKLY_CADENCE,
   WEEKLY_CSV_HEADERS,
   WEEKLY_GROK_PROMPT,
+  STANDING_GROK_PROMPT,
+  grokPromptFor,
   WEEKLY_HOLD,
   WEEKLY_LOCK_DAYS,
   applyWeeklyLocks,
@@ -119,6 +121,9 @@ describe("Blake 24d execute list", () => {
     assert.equal(list.account_cvr_branded, 35.6);
     assert.equal(list.account_cvr_nonbranded, 25.6);
     assert.equal(list.click_floor, 10);
+    assert.equal(list.grok_prompt, WEEKLY_GROK_PROMPT);
+    assert.match(list.grok_prompt, /Do not wait for 90d/);
+    assert.doesNotMatch(list.grok_prompt, /Wait for ads_search_terms_daily/);
     for (const r of list.rows) {
       assert.equal(r.current_bid, null);
       assert.equal(r.window, BLAKE_24D_WINDOW_LABEL);
@@ -296,18 +301,28 @@ describe("7-day lock after Done/Skipped", () => {
 });
 
 describe("cadence + HOLD live in copy, not extra pages", () => {
-  test("standing Grok prompt carries cadence, lock, HOLD, formulas", () => {
-    assert.match(WEEKLY_GROK_PROMPT, /one Monday pass/i);
-    assert.match(WEEKLY_GROK_PROMPT, /Harvest every other week/i);
-    assert.match(WEEKLY_GROK_PROMPT, /Monthly extras first Monday/i);
+  test("24d execute Grok prompt is the execute list; does not wait for 90d", () => {
+    assert.match(WEEKLY_GROK_PROMPT, /pasted CSV from This week IS the execute list/i);
+    assert.match(WEEKLY_GROK_PROMPT, /2026-08-06\.\.08-29 \(24d\)/);
+    assert.match(WEEKLY_GROK_PROMPT, /Do not refuse rows because the window is 24d/);
+    assert.match(WEEKLY_GROK_PROMPT, /Do not wait for 90d/);
+    assert.match(WEEKLY_GROK_PROMPT, /Do not say "no execute list this pass\."/);
+    assert.match(WEEKLY_GROK_PROMPT, /One row = one Amazon click/);
+    assert.match(WEEKLY_GROK_PROMPT, /Nothing writes to Amazon/);
+    assert.match(WEEKLY_GROK_PROMPT, /no TOS raise on Hero Exact \/ Auto Loose/);
+    assert.match(WEEKLY_GROK_PROMPT, /no Aquaphor\/Carpe harvest/);
+    assert.match(WEEKLY_GROK_PROMPT, /bid_down not pause/);
     assert.match(WEEKLY_GROK_PROMPT, /7 days/);
     assert.match(WEEKLY_GROK_PROMPT, /still-\$0 bleeders/i);
-    assert.match(WEEKLY_GROK_PROMPT, /Hero Exact or Auto Loose/);
-    assert.match(WEEKLY_GROK_PROMPT, /Aquaphor or Carpe/);
-    assert.match(WEEKLY_GROK_PROMPT, /bid_down, not pause/);
     assert.match(WEEKLY_GROK_PROMPT, /CPC × 0\.42 \/ ACOS/);
     assert.match(WEEKLY_GROK_PROMPT, /CPC × 1\.15/);
+    assert.doesNotMatch(WEEKLY_GROK_PROMPT, /Wait for ads_search_terms_daily/);
+    assert.doesNotMatch(WEEKLY_GROK_PROMPT, /Do not use the stored 24d/);
+    assert.doesNotMatch(WEEKLY_GROK_PROMPT, /one Monday pass only/i);
     assert.doesNotMatch(WEEKLY_GROK_PROMPT, /deodorant men/i);
+    assert.equal(grokPromptFor("blake_24d"), WEEKLY_GROK_PROMPT);
+    assert.notEqual(grokPromptFor("blake_24d"), STANDING_GROK_PROMPT);
+    assert.match(STANDING_GROK_PROMPT, /Wait for ads_search_terms_daily/);
   });
 
   test("cadence and HOLD arrays match Dave's lock", () => {
@@ -334,6 +349,16 @@ describe("/ppc This week tab — Blake 24d list, nightly 7d unchanged", () => {
   const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-bleeders.tsx"), "utf8");
   const main = readFileSync(path.join(process.cwd(), "..", "src", "main.py"), "utf8");
 
+  test("/ppc default landing is This week; Actions is not a peer", () => {
+    assert.match(page, /useState<"search" \| "campaigns" \| "bleeders">\("bleeders"\)/);
+    assert.match(page, /\(\["bleeders", "search", "campaigns"\] as const\)/);
+    assert.doesNotMatch(page, /id: "ppc-queue", label: "Actions"/);
+    assert.doesNotMatch(page, /\(\["actions", "search", "campaigns", "bleeders"\]/);
+    assert.match(page, /Old queue — ads_recommendations diagnostics/);
+    assert.match(page, /<details/);
+    assert.doesNotMatch(page, /<details[^>]*\sopen/);
+  });
+
   test("This week stays on /ppc, not a third ads home", () => {
     assert.match(page, /tab === "bleeders"/);
     assert.match(page, /<PpcBleeders/);
@@ -341,11 +366,14 @@ describe("/ppc This week tab — Blake 24d list, nightly 7d unchanged", () => {
     assert.doesNotMatch(page, /href="\/paid-ads"/);
   });
 
-  test("UI ships Done, Skipped, CSV, 24d window chip, standing Grok prompt", () => {
+  test("UI ships Done, Skipped, CSV, 24d Grok prompt", () => {
     assert.match(ui, /Done/);
     assert.match(ui, /Skipped/);
     assert.match(ui, /weeklyToCsv/);
     assert.match(ui, /grok_prompt/);
+    assert.match(ui, /grokPromptFor\("blake_24d"\)/);
+    assert.match(ui, /24d execute prompt copied/);
+    assert.doesNotMatch(ui, /wait for 90d min\/max/);
     assert.match(ui, /"dismissed"/);
     assert.match(ui, /"applied"/);
     assert.match(ui, /window_chip/);

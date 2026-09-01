@@ -8,7 +8,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { ClipboardCopy, Download } from "lucide-react";
-import { recTypeOfWeekly, weeklyToCsv, type WeeklyPayload, type WeeklyRow, type WeeklyStatus } from "@/lib/ppc-weekly";
+import { grokPromptFor, recTypeOfWeekly, weeklyToCsv, WEEKLY_GROK_PROMPT, type WeeklyPayload, type WeeklyRow, type WeeklyStatus } from "@/lib/ppc-weekly";
 
 function fmtD(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -115,11 +115,18 @@ export function PpcBleeders({
   }
 
   async function copyPrompt() {
-    const text = data?.grok_prompt ?? "";
+    const text = data?.execute_list === "blake_24d"
+      ? grokPromptFor("blake_24d")
+      : (data?.grok_prompt ?? WEEKLY_GROK_PROMPT);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      onNotice?.({ kind: "success", text: "Standing Grok prompt copied. This week is the 24d Blake-ranked list; 90d backfill continues for next Monday." });
+      onNotice?.({
+        kind: "success",
+        text: data?.execute_list === "blake_24d"
+          ? "24d execute prompt copied. This week CSV is the execute list. Nothing writes to Amazon."
+          : "24d execute prompt copied. Window 2026-08-06..08-29. Do not wait for 90d. Nothing writes to Amazon.",
+      });
     } catch (e) {
       onNotice?.({
         kind: "error",

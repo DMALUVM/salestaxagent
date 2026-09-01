@@ -109,8 +109,10 @@ describe("playbook is ranking, not a second generator", () => {
   const playbook = readFileSync(path.join(process.cwd(), "src/components/ppc-playbook.tsx"), "utf8");
 
   test("the page still renders the full Actions list", () => {
-    assert.match(page, /Actions \(\$\{recs\.length\}\)/);
+    assert.match(page, /Old queue — ads_recommendations diagnostics/);
     assert.match(page, /updateRec\(r\.id, "applied"\)/);
+    assert.match(page, /recs\.map\(\(r\) => \{/);
+    assert.doesNotMatch(page, /Actions \(\$\{recs\.length\}\)/);
   });
 
   test("PpcPlaybook is fed the live recs, not a parallel queue", () => {

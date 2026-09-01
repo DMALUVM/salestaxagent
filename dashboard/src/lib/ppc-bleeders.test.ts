@@ -240,6 +240,11 @@ describe("surfaces stay on /ppc; nightly 7d unchanged", () => {
     assert.doesNotMatch(page, /href="\/paid-ads"/);
   });
 
+  test("Actions is not a jump-nav peer of This week", () => {
+    assert.match(page, /useState<"search" \| "campaigns" \| "bleeders">\("bleeders"\)/);
+    assert.doesNotMatch(page, /id: "ppc-queue", label: "Actions"/);
+  });
+
   test("weekday search-term ingest is still 7 closed days", () => {
     const daily = main.slice(main.indexOf("def _run_ads_search_terms_sync"),
                              main.indexOf("def _run_ads_search_terms_backfill"));
