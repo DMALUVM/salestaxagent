@@ -6,6 +6,8 @@ import {
 import { loadMergedStrategy, roleTargetOf, shareStatusOf } from "@/lib/ads-strategy-settings";
 import { decisionPatch, isMarkableStatus } from "@/lib/ppc-mark";
 import { buildDailyReconcile } from "@/lib/ads-reconcile";
+import { isBranded } from "@/lib/brand-terms";
+import { clickFloor, cvrPct, emptyWeeklyList, storedWindow } from "@/lib/ppc-weekly";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -94,7 +96,7 @@ export async function GET() {
     // panel surface it so a Sponsored Brands line is never mistaken for a
     // Sponsored Products one.
     const CAMPAIGN_COLS =
-      "date,campaign_id,campaign_name,campaign_type,spend,sales_14d,orders_14d,clicks,impressions";
+      "date,campaign_id,campaign_name,campaign_type,campaign_status,spend,sales_14d,orders_14d,clicks,impressions";
     // Errors encountered while loading. An empty page must mean "the database
     // has no rows", never "a query failed" — conflating the two is what turned
     // a runtime bug into a confident "No Ads data yet" on a table with 12,000
@@ -531,8 +533,8 @@ export async function GET() {
       const pageSize = 1000;
       while (true) {
         const r = await sb.from("ads_search_terms_daily")
-          .select("date,search_term,campaign_id,campaign_name,ad_group_name," +
-                  "match_type,spend,sales_14d,orders_14d,clicks,impressions")
+          .select("date,search_term,campaign_id,campaign_name,ad_group_id,ad_group_name," +
+                  "keyword,match_type,spend,sales_14d,orders_14d,clicks,impressions")
           .gte("date", cutoffs["90d"]).lte("date", asOf)
           .order("date", { ascending: true })
           .order("search_term", { ascending: true })
@@ -624,6 +626,45 @@ export async function GET() {
     // Back-compat for any caller still reading the flat list.
     const searchTerms = searchTermsByRange["7d"];
 
+    // ── This week: coverage + empty execute list until 90d min/max ──
+    // Do not call buildBleeders. Do not seed from the stored 24d window.
+    // Lane CVR / click floor are context only. Nothing writes to Amazon.
+    const search = storedWindow(termRows.map((r) => String(r.date ?? "")));
+    const placementWin = storedWindow(placementRows.map((r) => String(r.date ?? "")));
+    let campOrders = 0;
+    let campClicks = 0;
+    if (search.start && search.end) {
+      for (const r of allCampaignRows) {
+        const d = String(r.date ?? "");
+        if (!d || d < search.start || d > search.end) continue;
+        campOrders += Number(r.orders_14d ?? 0);
+        campClicks += Number(r.clicks ?? 0);
+      }
+    }
+    const accountCvr = cvrPct(campOrders, campClicks) ?? 0;
+    let brandedOrders = 0, brandedClicks = 0, nonOrders = 0, nonClicks = 0;
+    for (const r of termRows) {
+      const clicks = Number(r.clicks ?? 0);
+      const orders = Number(r.orders_14d ?? 0);
+      if (isBranded(String(r.search_term ?? ""))) {
+        brandedOrders += orders;
+        brandedClicks += clicks;
+      } else {
+        nonOrders += orders;
+        nonClicks += clicks;
+      }
+    }
+    const brandedCvr = cvrPct(brandedOrders, brandedClicks);
+    const nonCvr = cvrPct(nonOrders, nonClicks);
+    const bleeders = emptyWeeklyList({
+      search,
+      placement: placementWin.days > 0 ? placementWin : null,
+      account_cvr: Math.round(accountCvr * 100) / 100,
+      account_cvr_branded: brandedCvr === null ? null : Math.round(brandedCvr * 100) / 100,
+      account_cvr_nonbranded: nonCvr === null ? null : Math.round(nonCvr * 100) / 100,
+      click_floor: clickFloor(accountCvr),
+    });
+
     // ── Recommendations (paginated — a limit here would under-count the
     //    "Actions (N)" badge, which must match what is actually open) ──
     let recommendations: unknown[] = [];
@@ -649,7 +690,7 @@ export async function GET() {
     // Only finished runs qualify: a row stuck in "running" would otherwise
     // report a sync that never landed as the freshest one.
     const ADS_JOBS = ["ads_sync", "ads_campaigns_sync", "ads_search_terms_sync",
-                      "ads_campaigns_backfill"];
+                      "ads_search_terms_backfill", "ads_campaigns_backfill"];
     let lastSync: string | null = null;
     let lastSyncJob: string | null = null;
     let lastSyncStatus: string | null = null;
@@ -717,6 +758,7 @@ export async function GET() {
       rolesByRange, adTypesByRange, spendScopeByRange, dailyReconcile,
       placementsByRange, placementsAvailable,
       searchTerms, searchTermsByRange, recommendations,
+      bleeders,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
       targetAcos, targetAcosAsOf,
     });
@@ -733,6 +775,7 @@ export async function GET() {
       placementsByRange: null, placementsAvailable: false,
       strategy: null,
       searchTerms: [], searchTermsByRange: null, recommendations: [],
+      bleeders: emptyWeeklyList(),
       asOf: null, today: null, adsThrough: null,
       lastSyncJob: null, lastSyncStatus: null, lastActions: null,
       dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,

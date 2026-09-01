@@ -511,6 +511,8 @@ class TestAdsEnqueuePayload:
         assert "campaigns_only=True" in camp
         st = inspect.getsource(_run_ads_search_terms_sync)
         assert "search_terms_only=True" in st
+        assert "days=7" in st
+        assert "days=90" not in st
         pl = inspect.getsource(_run_ads_placements_sync)
         assert "placements_only=True" in pl
         bf = inspect.getsource(_run_ads_campaigns_backfill)
@@ -998,6 +1000,30 @@ class TestAdsPollResilience:
         src = inspect.getsource(_run_ads_campaigns_backfill)
         assert "sb_sd_days" in src
         assert "ADS_SB_SD_BACKFILL_DAYS" in src
+
+    def test_sunday_search_terms_backfill_is_90d_own_cron(self):
+        """Sunday 03:30 search-term 90d is its own job. Weekday 7d stays 7d."""
+        import inspect
+        from src import main as main_mod
+        from src.main import (
+            _run_ads_search_terms_backfill, _run_ads_search_terms_sync,
+            _run_ads_campaigns_sync,
+        )
+        bf = inspect.getsource(_run_ads_search_terms_backfill)
+        assert "days=90" in bf
+        assert "search_terms_only=True" in bf
+        assert "days=7" not in bf
+        daily = inspect.getsource(_run_ads_search_terms_sync)
+        assert "days=7" in daily
+        assert "days=90" not in daily
+        nightly = inspect.getsource(_run_ads_campaigns_sync)
+        assert "_run_ads_search_terms_sync" in nightly
+        assert "_run_ads_search_terms_backfill" not in nightly
+        sched = inspect.getsource(main_mod)
+        assert 'id="ads_search_terms_backfill"' in sched
+        assert 'hour=3' in sched
+        assert 'minute=30' in sched
+        assert 'day_of_week="sun"' in sched
 
     def test_busy_ads_job_is_skipped_not_failed(self):
         import inspect

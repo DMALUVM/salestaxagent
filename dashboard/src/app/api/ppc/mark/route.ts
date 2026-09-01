@@ -1,22 +1,44 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 import {
-  decisionPatch, isMarkableStatus, loopCounts, type MarkLoop,
+  decisionPatch, isMarkableStatus, loopCounts, markBleeder,
+  type BleederMark, type MarkLoop,
 } from "@/lib/ppc-mark";
 
 /**
  * POST /api/ppc/mark — the dashboard half of `ads-mark`.
  *
  * Updates ads_recommendations.status AND mirrors onto ads_action_decisions
- * with the same decision_patch ads-mark writes. Does not generate
- * recommendations. Does not write to Amazon. Never auto-applies.
+ * with the same decision_patch ads-mark writes. Bleeders checkboxes upsert
+ * a decision row directly (no ads_recommendations queue row).
+ * Does not generate recommendations. Does not write to Amazon. Never auto-applies.
  *
- * Body: { id, status: "applied" | "dismissed" }
+ * Body: { id, status } | { bleeder, status: "applied" | "open" | "dismissed" }
  */
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const id = typeof body.id === "string" ? body.id : "";
     const status = typeof body.status === "string" ? body.status : "";
+    const bleeder = body.bleeder && typeof body.bleeder === "object"
+      ? body.bleeder as BleederMark
+      : null;
+
+    if (bleeder) {
+      if (!isMarkableStatus(status) || (status !== "applied" && status !== "open" && status !== "dismissed")) {
+        return Response.json({
+          ok: false,
+          error: "status must be applied, open, or dismissed",
+        }, { status: 400 });
+      }
+      const sb = getServerSupabase();
+      const result = await markBleeder(sb, bleeder, status);
+      if (!result.ok) {
+        return Response.json({ ok: false, error: result.error }, { status: 400 });
+      }
+      const loop = await readLoop(sb);
+      return Response.json({ ...result, loop });
+    }
+
+    const id = typeof body.id === "string" ? body.id : "";
     if (!id) {
       return Response.json({ ok: false, error: "id required" }, { status: 400 });
     }

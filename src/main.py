@@ -5001,6 +5001,19 @@ def run():
             )
             click.echo("[Scheduler] Ads campaigns backfill weekly Sunday 03:00 (SP 90d, SB/SD 7d)")
 
+            scheduler.add_job(
+                _run_ads_search_terms_backfill,
+                "cron",
+                day_of_week="sun",
+                hour=3,
+                minute=30,
+                id="ads_search_terms_backfill",
+                misfire_grace_time=7200,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo("[Scheduler] Ads search terms backfill weekly Sunday 03:30 (90d, 7d chunks; weekday 7d unchanged)")
+
             # Placement performance at 05:15 — between campaigns and search
             # terms. Second spCampaigns report, so it is its own job rather
             # than doubling the 05:00 run's time.
@@ -6129,6 +6142,18 @@ def _run_ads_search_terms_sync():
     """05:30 — 7 days of search terms in 7-day chunks (one chunk, 90-min cap)."""
     _run_ads_sync_job("ads_search_terms_sync", days=7, search_terms_only=True,
                       label="search terms")
+
+
+def _run_ads_search_terms_backfill():
+    """Sunday 03:30 — 90 days of search terms in existing 7-day chunks.
+
+    Weekday ads_search_terms_sync stays 7 closed days. This job is the only
+    90d search-term pull. It is not chained from nightly campaigns and must
+    not run in CI or on merge.
+    """
+    _run_ads_sync_job(
+        "ads_search_terms_backfill", days=90, search_terms_only=True,
+        label="search terms 90d")
 
 
 def _run_ads_campaigns_backfill():

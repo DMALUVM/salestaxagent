@@ -15,7 +15,9 @@ import { SqpStatus } from "@/components/sqp-status";
 import { BrandShare } from "@/components/brand-share";
 import { PpcPlaybook } from "@/components/ppc-playbook";
 import { PpcSkuAds } from "@/components/ppc-sku-ads";
+import { PpcBleeders } from "@/components/ppc-bleeders";
 import { PpcReconcile } from "@/components/ppc-reconcile";
+import type { WeeklyPayload } from "@/lib/ppc-weekly";
 import type { DailyReconcileSummary } from "@/lib/ads-reconcile";
 import { isConfigured } from "@/lib/supabase";
 import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy, Settings2 } from "lucide-react";
@@ -151,6 +153,7 @@ interface PPCData {
   searchTerms: SearchTerm[];
   searchTermsByRange: Record<Range, SearchTerm[]> | null;
   recommendations: Rec[];
+  bleeders?: WeeklyPayload | null;
   /** Newest finished ads sync of any kind, plus which job and how it ended. */
   lastSync: string | null; lastSyncJob: string | null; lastSyncStatus: string | null;
   /** Last successful scheduled actions run — the queue refreshes on its own. */
@@ -349,6 +352,7 @@ const SYNC_JOB_LABELS: Record<string, string> = {
   ads_sync: "manual sync",
   ads_campaigns_sync: "campaigns",
   ads_search_terms_sync: "search terms",
+  ads_search_terms_backfill: "search terms 90d",
   ads_campaigns_backfill: "90d backfill",
 };
 
@@ -522,7 +526,7 @@ const RANGE_DAYS: Record<Range, number> = { "7d": 7, "14d": 14, "30d": 30, "90d"
 export default function PPCPage() {
   const [data, setData] = useState<PPCData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"actions" | "search" | "campaigns">("actions");
+  const [tab, setTab] = useState<"actions" | "search" | "campaigns" | "bleeders">("actions");
   // Which search term is expanded, and whether its drilldown shows campaigns
   // (default) or the per-day series. Daily rows are never the default view —
   // that is what made one term look like a dozen campaigns.
@@ -551,6 +555,17 @@ export default function PPCPage() {
   // Bumps ImpactPanel after Apply/Dismiss so awaiting-vs-recorded counts refresh
   // without a full /api/ppc reload. Declared here — before any early return.
   const [impactRefresh, setImpactRefresh] = useState(0);
+
+  useEffect(() => {
+    const go = () => {
+      if (typeof window !== "undefined" && window.location.hash === "#ppc-bleeders") {
+        setTab("bleeders");
+      }
+    };
+    go();
+    window.addEventListener("hashchange", go);
+    return () => window.removeEventListener("hashchange", go);
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -893,6 +908,7 @@ export default function PPCPage() {
           { id: "ppc-budget", label: "Budget" },
           { id: "ppc-placement", label: "Placement" },
           { id: "ppc-queue", label: "Actions" },
+          { id: "ppc-bleeders", label: "This week" },
         ]}
       />
 
@@ -1339,13 +1355,17 @@ export default function PPCPage() {
 
           {/* Tab bar + plan export */}
           <div id="ppc-queue" className="scroll-mt-14 flex flex-wrap items-center justify-between gap-2">
+            <span id="ppc-bleeders" className="sr-only">This week</span>
             <div className="flex gap-1">
-              {(["actions", "search", "campaigns"] as const).map((t) => (
+              {(["actions", "search", "campaigns", "bleeders"] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
                     tab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"
                   }`}>
-                  {t === "actions" ? `Actions (${recs.length})` : t === "search" ? "Search Terms" : "Campaigns"}
+                  {t === "actions" ? `Actions (${recs.length})`
+                    : t === "search" ? "Search Terms"
+                    : t === "campaigns" ? "Campaigns"
+                    : `This week (${data?.bleeders?.open_count ?? 0})`}
                 </button>
               ))}
             </div>
@@ -1724,6 +1744,14 @@ export default function PPCPage() {
                 </Table>
               </CardContent>
             </Card>
+          )}
+
+          {tab === "bleeders" && (
+            <PpcBleeders
+              data={data?.bleeders}
+              onNotice={setNotice}
+              onMarked={() => setImpactRefresh((n) => n + 1)}
+            />
           )}
 
           {/* Disclaimer */}
