@@ -1508,11 +1508,13 @@ class TestAdsSearchTermSlotStop:
 
     def test_one_shot_cli_is_search_terms_only_and_stops(self):
         import inspect
-        from src.main import ads_search_terms_backfill_cmd
-        src = inspect.getsource(ads_search_terms_backfill_cmd)
-        assert "search_terms_only=True" in src
-        assert "skip_existing_search_term_weeks=True" in src
-        assert "newest_first_search_terms=True" in src
-        assert "AdsSyncBusy" in src
-        assert "Do not retry in a loop" in src
-        assert "cancel_report" in src
+        from src import main as main_mod
+        src = inspect.getsource(main_mod)
+        start = src.index("def ads_search_terms_backfill_cmd")
+        body = src[start:src.index("def _ads_sync_outcome")]
+        assert "search_terms_only=True" in body
+        assert "skip_existing_search_term_weeks=True" in body
+        assert "newest_first_search_terms=True" in body
+        assert "AdsSyncBusy" in body
+        assert "Do not retry in a loop" in body
+        assert "cancel_report" in body
