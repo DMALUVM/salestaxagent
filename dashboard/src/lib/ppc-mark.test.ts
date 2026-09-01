@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import { decisionPatch, isMarkableStatus, loopCounts } from "./ppc-mark";
+import { decisionPatch, isMarkableStatus, loopCounts, markBleeder } from "./ppc-mark";
 
 describe("decisionPatch — same columns as ads-mark", () => {
   test("applied writes applied_at", () => {
@@ -39,6 +39,54 @@ describe("loopCounts", () => {
   });
 });
 
+describe("bleeder checkbox writes applied on ads_action_decisions", () => {
+  test("markBleeder upserts status=applied and applied_at, never Amazon", async () => {
+    const writes: Array<Record<string, unknown>> = [];
+    const sb = {
+      from: (table: string) => {
+        assert.equal(table, "ads_action_decisions");
+        return {
+          upsert: (row: Record<string, unknown>) => {
+            writes.push(row);
+            return {
+              select: async () => ({ data: [{ id: "dec-bleeder" }], error: null }),
+            };
+          },
+          update: () => ({ eq: async () => ({ error: null }) }),
+        };
+      },
+    };
+    const result = await markBleeder(sb, {
+      checklist_id: "2026-08-29|c1|ag1|dud|BROAD|negative_exact",
+      as_of: "2026-08-29",
+      rec_type: "BLEEDER_NEGATIVE_EXACT",
+      action_type: "negative_exact",
+      campaign_id: "c1",
+      campaign_name: "SP Exact",
+      search_term: "dud",
+      priority: "P0",
+      impact_estimate: 7,
+    }, "applied", "2026-09-01T12:00:00.000Z");
+    assert.equal(result.ok, true);
+    assert.equal(result.decisionLogged, true);
+    assert.equal(result.decisionId, "dec-bleeder");
+    assert.equal(result.status, "applied");
+    assert.equal(writes[0].status, "applied");
+    assert.equal(writes[0].applied_at, "2026-09-01T12:00:00.000Z");
+    assert.equal(writes[0].entity_name, "2026-08-29|c1|ag1|dud|BROAD|negative_exact");
+  });
+
+  test("rejects auto-apply", async () => {
+    const result = await markBleeder({
+      from: () => { throw new Error("must not write"); },
+    }, {
+      checklist_id: "x", as_of: "2026-08-29", rec_type: "BLEEDER_NEGATIVE_EXACT",
+      action_type: "negative_exact", campaign_id: "c1",
+    }, "auto-apply");
+    assert.equal(result.ok, false);
+  });
+});
+
 describe("dashboard Apply/Dismiss hits /api/ppc/mark", () => {
   const page = readFileSync(path.join(process.cwd(), "src/app/ppc/page.tsx"), "utf8");
   const mark = readFileSync(path.join(process.cwd(), "src/app/api/ppc/mark/route.ts"), "utf8");
@@ -50,11 +98,19 @@ describe("dashboard Apply/Dismiss hits /api/ppc/mark", () => {
     assert.doesNotMatch(page, /amazonads|ads-api|sp-api.*write/i);
   });
 
+  test("Bleeders checkbox also posts to /api/ppc/mark", () => {
+    const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-bleeders.tsx"), "utf8");
+    assert.match(ui, /fetch\("\/api\/ppc\/mark"/);
+    assert.match(ui, /bleeder:/);
+    assert.doesNotMatch(ui, /amazonads|auto-apply/i);
+  });
+
   test("the mark route updates both tables with decisionPatch", () => {
     assert.match(mark, /ads_recommendations/);
     assert.match(mark, /ads_action_decisions/);
     assert.match(mark, /decisionPatch/);
     assert.match(mark, /Never auto-applies/);
+    assert.match(mark, /markBleeder/);
     assert.doesNotMatch(mark, /auto-apply|amazonads\.amazon/);
   });
 

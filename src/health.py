@@ -173,8 +173,8 @@ def collect(cfg: dict | None = None, now: datetime | None = None) -> dict:
             from src.amazon_ads.export_brief import ADS_JOBS
         except Exception:
             ADS_JOBS = ["ads_sync", "ads_campaigns_sync",
-                        "ads_search_terms_sync", "ads_placements_sync",
-                        "ads_campaigns_backfill"]
+                        "ads_search_terms_sync", "ads_search_terms_backfill",
+                        "ads_placements_sync", "ads_campaigns_backfill"]
         try:
             # Partial is a real completed pull (SP committed, SB/SD missed).
             # Counting only success made a nightly SB timeout look like

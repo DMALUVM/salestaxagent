@@ -143,3 +143,85 @@ export function loopCounts(
     outcomesRecorded: outcomes.length,
   };
 }
+
+/** Payload the Bleeders checkbox writes onto ads_action_decisions. */
+export interface BleederMark {
+  checklist_id: string;
+  as_of: string;
+  rec_type: string;
+  action_type: string;
+  campaign_id: string;
+  campaign_name?: string;
+  ad_group_id?: string;
+  entity_type?: string;
+  search_term?: string | null;
+  priority?: string;
+  impact_estimate?: number;
+  evidence?: Record<string, unknown>;
+  suggested_action?: string;
+}
+
+export interface BleederMarkClient {
+  from: (table: string) => {
+    upsert: (row: Record<string, unknown>, opts?: { onConflict?: string }) => {
+      select: (cols: string) => PromiseLike<{
+        data: Array<Record<string, unknown>> | null;
+        error: { message: string } | null;
+      }>;
+    };
+    update: (patch: Record<string, unknown>) => {
+      eq: (col: string, val: unknown) => PromiseLike<{ error: { message: string } | null }>;
+    };
+  };
+}
+
+/**
+ * Checkbox → ads_action_decisions.status = applied (or open).
+ * Never writes to Amazon. Never auto-applies a Seller Central change.
+ */
+export async function markBleeder(
+  sb: BleederMarkClient,
+  bleeder: BleederMark,
+  status: string,
+  nowIso: string = new Date().toISOString(),
+): Promise<MarkResult> {
+  const patch = decisionPatch(status, nowIso);
+  if (!patch) {
+    return { ok: false, decisionLogged: false, decisionId: null,
+             error: `invalid status ${JSON.stringify(status)}` };
+  }
+  if (!bleeder.checklist_id || !bleeder.as_of || !bleeder.rec_type || !bleeder.campaign_id) {
+    return { ok: false, decisionLogged: false, decisionId: null,
+             error: "checklist_id, as_of, rec_type and campaign_id required" };
+  }
+
+  const row: Record<string, unknown> = {
+    as_of_date: bleeder.as_of,
+    rec_type: bleeder.rec_type,
+    action_type: bleeder.action_type,
+    entity_name: bleeder.checklist_id,
+    entity_type: bleeder.entity_type ?? "search_term",
+    campaign_id: String(bleeder.campaign_id),
+    campaign_name: bleeder.campaign_name ?? "",
+    ad_group_id: bleeder.ad_group_id ?? "",
+    search_term: bleeder.search_term ?? null,
+    priority: bleeder.priority ?? "P0",
+    impact_estimate: bleeder.impact_estimate ?? 0,
+    evidence: {
+      ...(bleeder.evidence ?? {}),
+      checklist_id: bleeder.checklist_id,
+      action_type: bleeder.action_type,
+    },
+    suggested_change: { suggested_action: bleeder.suggested_action ?? "" },
+    ...patch,
+  };
+
+  const upserted = await sb.from("ads_action_decisions")
+    .upsert(row, { onConflict: "as_of_date,rec_type,entity_name,campaign_id" })
+    .select("id");
+  if (upserted.error) {
+    return { ok: false, decisionLogged: false, decisionId: null, error: upserted.error.message };
+  }
+  const decisionId = upserted.data?.[0]?.id ? String(upserted.data[0].id) : null;
+  return { ok: true, decisionLogged: true, decisionId, status: status as MarkStatus };
+}

@@ -6,6 +6,7 @@ import {
 import { loadMergedStrategy, roleTargetOf, shareStatusOf } from "@/lib/ads-strategy-settings";
 import { decisionPatch, isMarkableStatus } from "@/lib/ppc-mark";
 import { buildDailyReconcile } from "@/lib/ads-reconcile";
+import { BLEEDER_REC_TYPES, buildBleeders, emptyBleeders } from "@/lib/ppc-bleeders";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -94,7 +95,7 @@ export async function GET() {
     // panel surface it so a Sponsored Brands line is never mistaken for a
     // Sponsored Products one.
     const CAMPAIGN_COLS =
-      "date,campaign_id,campaign_name,campaign_type,spend,sales_14d,orders_14d,clicks,impressions";
+      "date,campaign_id,campaign_name,campaign_type,campaign_status,spend,sales_14d,orders_14d,clicks,impressions";
     // Errors encountered while loading. An empty page must mean "the database
     // has no rows", never "a query failed" — conflating the two is what turned
     // a runtime bug into a confident "No Ads data yet" on a table with 12,000
@@ -531,8 +532,8 @@ export async function GET() {
       const pageSize = 1000;
       while (true) {
         const r = await sb.from("ads_search_terms_daily")
-          .select("date,search_term,campaign_id,campaign_name,ad_group_name," +
-                  "match_type,spend,sales_14d,orders_14d,clicks,impressions")
+          .select("date,search_term,campaign_id,campaign_name,ad_group_id,ad_group_name," +
+                  "keyword,match_type,spend,sales_14d,orders_14d,clicks,impressions")
           .gte("date", cutoffs["90d"]).lte("date", asOf)
           .order("date", { ascending: true })
           .order("search_term", { ascending: true })
@@ -624,6 +625,29 @@ export async function GET() {
     // Back-compat for any caller still reading the flat list.
     const searchTerms = searchTermsByRange["7d"];
 
+    // ── Bleeders: stored search-term window, lane-split CVR, persist via mark ──
+    // Uses every ads_search_terms_daily row already loaded (today 2026-08-06
+    // .. 2026-08-29). Does not invent a 60d window. Does not write to Amazon.
+    let bleederDecisions: Array<{
+      id?: string; entity_name?: string | null; status?: string | null;
+      rec_type?: string | null; campaign_id?: string | null;
+    }> = [];
+    try {
+      const r = await sb.from("ads_action_decisions")
+        .select("id,entity_name,status,rec_type,campaign_id")
+        .in("rec_type", Object.values(BLEEDER_REC_TYPES))
+        .limit(5000);
+      if (!r.error) {
+        bleederDecisions = (r.data ?? []) as typeof bleederDecisions;
+      }
+    } catch { /* learning tables may be absent */ }
+
+    const bleeders = buildBleeders(
+      termRows as Parameters<typeof buildBleeders>[0],
+      allCampaignRows as Parameters<typeof buildBleeders>[1],
+      bleederDecisions,
+    );
+
     // ── Recommendations (paginated — a limit here would under-count the
     //    "Actions (N)" badge, which must match what is actually open) ──
     let recommendations: unknown[] = [];
@@ -649,7 +673,7 @@ export async function GET() {
     // Only finished runs qualify: a row stuck in "running" would otherwise
     // report a sync that never landed as the freshest one.
     const ADS_JOBS = ["ads_sync", "ads_campaigns_sync", "ads_search_terms_sync",
-                      "ads_campaigns_backfill"];
+                      "ads_search_terms_backfill", "ads_campaigns_backfill"];
     let lastSync: string | null = null;
     let lastSyncJob: string | null = null;
     let lastSyncStatus: string | null = null;
@@ -717,6 +741,7 @@ export async function GET() {
       rolesByRange, adTypesByRange, spendScopeByRange, dailyReconcile,
       placementsByRange, placementsAvailable,
       searchTerms, searchTermsByRange, recommendations,
+      bleeders,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
       targetAcos, targetAcosAsOf,
     });
@@ -733,6 +758,7 @@ export async function GET() {
       placementsByRange: null, placementsAvailable: false,
       strategy: null,
       searchTerms: [], searchTermsByRange: null, recommendations: [],
+      bleeders: emptyBleeders(),
       asOf: null, today: null, adsThrough: null,
       lastSyncJob: null, lastSyncStatus: null, lastActions: null,
       dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,
