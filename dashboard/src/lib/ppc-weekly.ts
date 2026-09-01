@@ -1,9 +1,11 @@
 /**
  * This week's /ppc execute list.
  *
- * Empty until ads_search_terms_daily covers SEARCH_TERM_EXECUTE_MIN_DAYS
- * (80d of a 90d Sunday pull). Do not ship the stored 24d window as an
- * execute list. buildBlake24dList stays a library. Nothing writes to Amazon.
+ * THIS WEEK: Blake ranked 2026-06-30..08-31 (63d stored, 23 days with
+ * rows, SP-only). HOLD is lifted for that pasted list — see
+ * buildBlake63dList. emptyWeeklyList stays the 90d-empty helper for later
+ * Mondays. buildBlake24dList stays a library. Do not auto-buildBleeders.
+ * Nothing writes to Amazon.
  *
  * When a row is later marked Done (applied) or Skipped (dismissed), the
  * same campaign+term+action stays locked for 7 days via applied_at /
@@ -95,7 +97,7 @@ export interface WeeklyLockDecision {
   dismissed_at?: string | null;
 }
 
-export type ExecuteList = "empty" | "blake_24d";
+export type ExecuteList = "empty" | "blake_24d" | "blake_63d";
 
 export interface WeeklyPayload {
   execute_ready: boolean;
@@ -137,7 +139,7 @@ export const WEEKLY_HOLD = [
 ] as const;
 
 /** Empty-until-90d standing prompt. Copy Grok must not use this when
- *  execute_list === "blake_24d" — Dave unlocked the 24d pass. */
+ *  execute_list is blake_63d or blake_24d — those are pasted execute lists. */
 export const STANDING_GROK_PROMPT = [
   "You are ranking THIS WEEK's Amazon PPC execute list for Tallowbourn.",
   "Do not invent rows. Wait for ads_search_terms_daily min/max after the Sunday 90d search-term pull. Do not use the stored 24d window as an execute list.",
@@ -145,6 +147,7 @@ export const STANDING_GROK_PROMPT = [
   "Nothing writes to Amazon. Dave marks Done or Skipped after Campaign Manager.",
 ].join("\n");
 
+/** Library prompt for the retired 24d list. This week uses WEEKLY_GROK_PROMPT_63D. */
 export const WEEKLY_GROK_PROMPT = [
   "You are ranking THIS WEEK's Amazon PPC execute list for Tallowbourn.",
   "The pasted CSV from This week IS the execute list for this pass.",
@@ -160,8 +163,24 @@ export const WEEKLY_GROK_PROMPT = [
   "CSV columns: id, rank, action, campaign, ad_group, term, match_type, clicks, spend, sales, acos, term_cvr, account_cvr_lane, current_bid, new_bid, placement, window, why.",
 ].join("\n");
 
-/** blake_24d copies the 24d execute prompt; empty uses the standing wait. */
+export const WEEKLY_GROK_PROMPT_63D = [
+  "You are ranking THIS WEEK's Amazon PPC execute list for Tallowbourn.",
+  "The pasted CSV from This week IS the execute list for this pass.",
+  "Window is 2026-06-30..08-31 (63d stored, 23 days with rows, SP-only). Do not refuse rows because the window is 63d. Do not call this 90d or 24d. Do not wait for 90d. Do not say \"no execute list this pass.\"",
+  "One row = one Amazon click in Seller Central. Then Dave marks Done or Skipped on the This week card.",
+  "Nothing writes to Amazon.",
+  "HOLD: no TOS raise this pass; no Aquaphor/Carpe harvest; organic lip balm / lip balm organic = bid_down not pause.",
+  "Actions allowed: pause_keyword, negative_exact, bid_down, bid_up, cut_detail_page, raise_tos, cut_ros, harvest_exact, brand_defense.",
+  "Cut bleeders on term CVR below that row's lane account CVR (branded vs non-branded from brand_terms.json), not clicks>10 and sales=$0-only. Click floor from blended account CVR: <4% → 25; 5–10% incl. → 15; else 10. 10/$0 is a flag, not the only filter.",
+  "current_bid is always blank (no bid column in Dashboard). new_bid down = CPC × 0.42 / ACOS (ACOS = spend/sales). new_bid up unused this pass.",
+  "After Done or Skipped, do not re-open the same campaign+term+action for 7 days (applied_at / dismissed_at). Exception: still-$0 bleeders may reappear.",
+  "Search-term reports are SP-only (23 days with rows; Jun/Jul mostly weekly samples; 8/30 missing; 8/31 in). Do not invent a keyword or product-target daily table. Placement grain is campaign+placement from ads_placement_daily.",
+  "CSV columns: id, rank, action, campaign, ad_group, term, match_type, clicks, spend, sales, acos, term_cvr, account_cvr_lane, current_bid, new_bid, placement, window, why.",
+].join("\n");
+
+/** blake_63d is This week; blake_24d keeps the retired 24d execute prompt. */
 export function grokPromptFor(executeList: ExecuteList): string {
+  if (executeList === "blake_63d") return WEEKLY_GROK_PROMPT_63D;
   if (executeList === "blake_24d") return WEEKLY_GROK_PROMPT;
   return STANDING_GROK_PROMPT;
 }
