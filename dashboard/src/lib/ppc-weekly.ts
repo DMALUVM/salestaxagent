@@ -96,9 +96,11 @@ export interface WeeklyLockDecision {
   dismissed_at?: string | null;
 }
 
+export type ExecuteList = "empty" | "blake_24d";
+
 export interface WeeklyPayload {
   execute_ready: boolean;
-  execute_list: "empty" | "blake_24d";
+  execute_list: ExecuteList;
   window_chip?: string;
   window: {
     search: WeeklyWindow;
@@ -135,19 +137,35 @@ export const WEEKLY_HOLD = [
   "organic lip balm / lip balm organic = bid_down, not pause.",
 ] as const;
 
-export const WEEKLY_GROK_PROMPT = [
+/** Empty-until-90d standing prompt. Copy Grok must not use this when
+ *  execute_list === "blake_24d" — Dave unlocked the 24d pass. */
+export const STANDING_GROK_PROMPT = [
   "You are ranking THIS WEEK's Amazon PPC execute list for Tallowbourn.",
   "Do not invent rows. Wait for ads_search_terms_daily min/max after the Sunday 90d search-term pull. Do not use the stored 24d window as an execute list.",
   "One Monday pass only — no mid-week churn. Harvest every other week. Monthly extras first Monday.",
+  "Nothing writes to Amazon. Dave marks Done or Skipped after Campaign Manager.",
+].join("\n");
+
+export const WEEKLY_GROK_PROMPT = [
+  "You are ranking THIS WEEK's Amazon PPC execute list for Tallowbourn.",
+  "The pasted CSV from This week IS the execute list for this pass.",
+  "Window is 2026-08-06..08-29 (24d). Do not refuse rows because the window is 24d. Do not wait for 90d. Do not say \"no execute list this pass.\"",
+  "One row = one Amazon click in Seller Central. Then Dave marks Done or Skipped on the This week card.",
+  "Nothing writes to Amazon.",
+  "HOLD: no TOS raise on Hero Exact / Auto Loose; no Aquaphor/Carpe harvest; organic lip balm / lip balm organic = bid_down not pause.",
   "Actions allowed: pause_keyword, negative_exact, bid_down, bid_up, cut_detail_page, raise_tos, cut_ros, harvest_exact, brand_defense.",
   "Cut bleeders on term CVR below that row's lane account CVR (branded vs non-branded from brand_terms.json), not clicks>10 and sales=$0-only. Click floor from blended account CVR: <4% → 25; 5–10% incl. → 15; else 10. 10/$0 is a flag, not the only filter.",
   "current_bid is always blank (no bid column in Dashboard). new_bid down = CPC × 0.42 / ACOS (ACOS = spend/sales). new_bid up = CPC × 1.15.",
-  "HOLD: do not raise TOS on Hero Exact or Auto Loose. Do not harvest Aquaphor or Carpe. organic lip balm / lip balm organic = bid_down, not pause.",
   "After Done or Skipped, do not re-open the same campaign+term+action for 7 days (applied_at / dismissed_at). Exception: still-$0 bleeders may reappear.",
   "Search-term reports are SP-only. Do not invent a keyword or product-target daily table. Placement grain is campaign+placement from ads_placement_daily.",
-  "Nothing writes to Amazon. Dave marks Done or Skipped after Campaign Manager.",
   "CSV columns: id, rank, action, campaign, ad_group, term, match_type, clicks, spend, sales, acos, term_cvr, account_cvr_lane, current_bid, new_bid, placement, window, why.",
 ].join("\n");
+
+/** blake_24d copies the 24d execute prompt, not the empty-until-90d standing one. */
+export function grokPromptFor(executeList: ExecuteList): string {
+  if (executeList === "blake_24d") return WEEKLY_GROK_PROMPT;
+  return WEEKLY_GROK_PROMPT;
+}
 
 export function cvrPct(orders: number, clicks: number): number | null {
   if (clicks <= 0) return null;

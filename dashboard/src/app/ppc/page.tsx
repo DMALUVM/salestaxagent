@@ -526,7 +526,7 @@ const RANGE_DAYS: Record<Range, number> = { "7d": 7, "14d": 14, "30d": 30, "90d"
 export default function PPCPage() {
   const [data, setData] = useState<PPCData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"actions" | "search" | "campaigns" | "bleeders">("actions");
+  const [tab, setTab] = useState<"search" | "campaigns" | "bleeders">("bleeders");
   // Which search term is expanded, and whether its drilldown shows campaigns
   // (default) or the per-day series. Daily rows are never the default view —
   // that is what made one term look like a dozen campaigns.
@@ -664,7 +664,6 @@ export default function PPCPage() {
       }
 
       await loadData();
-      setTab("actions");
       setNotice({
         kind: "success",
         text: `Generated ${result.count} recommendation${result.count === 1 ? "" : "s"} from the last ${RANGE_DAYS[range]} days at ${targetAcos}% target ACOS.`,
@@ -907,7 +906,6 @@ export default function PPCPage() {
           { id: "ppc-sku-ads", label: "SKU ads" },
           { id: "ppc-budget", label: "Budget" },
           { id: "ppc-placement", label: "Placement" },
-          { id: "ppc-queue", label: "Actions" },
           { id: "ppc-bleeders", label: "This week" },
         ]}
       />
@@ -1340,7 +1338,7 @@ export default function PPCPage() {
 
           {/* Wasted spend alert */}
           {wastedTotal > 5 && (
-            <Card className="border-red-500/30 cursor-pointer" onClick={() => setTab("actions")}>
+            <Card className="border-red-500/30 cursor-pointer" onClick={() => setTab("bleeders")}>
               <CardContent className="p-4 flex items-center gap-3">
                 <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
                 <div>
@@ -1353,185 +1351,21 @@ export default function PPCPage() {
             </Card>
           )}
 
-          {/* Tab bar + plan export */}
-          <div id="ppc-queue" className="scroll-mt-14 flex flex-wrap items-center justify-between gap-2">
-            <span id="ppc-bleeders" className="sr-only">This week</span>
+          {/* Tab bar — This week is the only execute surface. Actions is not a peer. */}
+          <div id="ppc-bleeders" className="scroll-mt-14 flex flex-wrap items-center justify-between gap-2">
             <div className="flex gap-1">
-              {(["actions", "search", "campaigns", "bleeders"] as const).map((t) => (
+              {(["bleeders", "search", "campaigns"] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
                     tab === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"
                   }`}>
-                  {t === "actions" ? `Actions (${recs.length})`
-                    : t === "search" ? "Search Terms"
+                  {t === "search" ? "Search Terms"
                     : t === "campaigns" ? "Campaigns"
                     : `This week (${data?.bleeders?.open_count ?? 0})`}
                 </button>
               ))}
             </div>
-            {tab === "actions" && (
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={exportPlan} disabled={!recs.length}>
-                  <Download className="mr-1 h-3 w-3" />
-                  Export plan (.md)
-                </Button>
-                <Button variant="outline" size="sm" onClick={copyGrokPrompt}
-                        disabled={exporting}
-                        title="Full account brief: economics, placement, brand mix, organic-rank gate, term overlap, every action with its reasoning, and the known gaps">
-                  <ClipboardCopy className="mr-1 h-3 w-3" />
-                  {exporting ? "Building brief…" : "Copy full AI brief"}
-                </Button>
-                <Button variant="outline" size="sm" onClick={downloadBrief}
-                        disabled={downloading}
-                        title="Download the same brief as a markdown file">
-                  <Download className="mr-1 h-3 w-3" />
-                  {downloading ? "Building…" : "Download brief"}
-                </Button>
-              </div>
-            )}
           </div>
-
-          {/* Actions queue */}
-          {tab === "actions" && (
-            <Card>
-              <CardContent className="p-0 overflow-x-auto">
-                {recs.length === 0 ? (
-                  <div className="p-6 text-center">
-                    <p className="text-sm font-medium">No open recommendations.</p>
-                    <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-                      Run <strong>Generate Recommendations</strong> after an Ads sync has pulled search terms.
-                      Without search-term rows there is nothing to negate, harvest or re-bid — sync first
-                      (<code>python -m src.main ads-sync --days {rangeDays}</code>), then generate.
-                    </p>
-                    <Button variant="outline" size="sm" className="mt-3" onClick={generateRecs} disabled={generating}>
-                      {generating && <RefreshCw className="mr-1 h-3 w-3 animate-spin" />}
-                      {generating ? "Generating..." : `Generate Recommendations (${range.toUpperCase()}, ${targetAcos}% ACOS)`}
-                    </Button>
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-14">Priority</TableHead>
-                        <TableHead className="w-32">Action</TableHead>
-                        <TableHead>Do this</TableHead>
-                        <TableHead className="w-[160px]">Campaign</TableHead>
-                        <TableHead className="w-24 text-right">Impact</TableHead>
-                        <TableHead className="w-20" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {recs.map((r) => {
-                        const at = actionTypeOf(r);
-                        const open = expanded === r.id;
-                        return (
-                        <Fragment key={r.id}>
-                        <TableRow className="cursor-pointer" onClick={() => setExpanded(open ? null : r.id)}>
-                          <TableCell>
-                            <Badge variant="outline" className={`text-[10px] ${PRIORITY_COLORS[r.priority] ?? ""}`}>
-                              {r.priority}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={`text-[10px] whitespace-nowrap ${ACTION_STYLES[at]}`}>
-                              {ACTION_LABELS[at]}
-                            </Badge>
-                            {/* Organic-rank gate. Only ever present on bid
-                                increases — decreases and negatives carry no
-                                rank fields, so rankBadgeOf returns null. */}
-                            {(() => {
-                              const rb = rankBadgeOf(r);
-                              if (!rb) return null;
-                              const tone =
-                                rb.tone === "danger"
-                                  ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900"
-                                  : rb.tone === "warn"
-                                  ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900"
-                                  : "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900/60 dark:text-slate-400 dark:border-slate-700";
-                              return (
-                                <Badge
-                                  variant="outline"
-                                  className={`mt-1 block text-[9px] whitespace-normal ${tone}`}
-                                  title={rb.title}
-                                >
-                                  {rb.label}
-                                </Badge>
-                              );
-                            })()}
-                          </TableCell>
-                          <TableCell className="text-xs">
-                            {/* Fixed-width block: a table cell would otherwise
-                                stretch to fit the sentence and push Campaign
-                                and Impact off-screen. */}
-                            <div className="flex w-[26rem] items-start gap-1.5 whitespace-normal xl:w-[34rem]">
-                              <ChevronRight className={`mt-0.5 h-3 w-3 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
-                              <span className={open ? "" : "line-clamp-2"}>{doThisOf(r)}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground truncate max-w-[160px]" title={r.campaign_name}>
-                            {r.campaign_name}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums font-medium text-red-600">${fmtD(r.impact_estimate)}</TableCell>
-                          <TableCell onClick={(e) => e.stopPropagation()}>
-                            <div className="flex gap-1">
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0"
-                                title="Mark applied" onClick={() => updateRec(r.id, "applied")}>
-                                <CheckCircle className="h-3 w-3 text-emerald-500" />
-                              </Button>
-                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0"
-                                title="Dismiss" onClick={() => updateRec(r.id, "dismissed")}>
-                                <X className="h-3 w-3 text-muted-foreground" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                        {open && (
-                          <TableRow className="bg-muted/40 hover:bg-muted/40">
-                            <TableCell />
-                            <TableCell colSpan={5} className="py-3">
-                              {/* whitespace-normal: TableCell sets nowrap, which
-                                  would run these sentences off the card. */}
-                              <dl className="grid max-w-4xl gap-x-6 gap-y-2 text-xs whitespace-normal sm:grid-cols-[7rem_1fr]">
-                                <dt className="text-muted-foreground">Do this</dt>
-                                <dd className="font-medium">{doThisOf(r)}</dd>
-                                <dt className="text-muted-foreground">Why</dt>
-                                <dd>{whyOf(r)}</dd>
-                                <dt className="text-muted-foreground">
-                                  {r.entity_type === "campaign" ? "Campaign" : r.entity_type === "keyword" ? "Keyword" : "Search term"}
-                                </dt>
-                                <dd className="break-all">{r.entity_name}</dd>
-                                <dt className="text-muted-foreground">Campaign</dt>
-                                <dd>
-                                  {r.campaign_name || "—"}
-                                  {adGroupsOf(r).length > 0 && (
-                                    <span className="text-muted-foreground"> · ad group {adGroupsOf(r).join(", ")}</span>
-                                  )}
-                                </dd>
-                                {matchTypesOf(r).length > 0 && (<>
-                                  <dt className="text-muted-foreground">Match type</dt>
-                                  <dd>{matchTypesOf(r).join(", ")}</dd>
-                                </>)}
-                                {suggestedBidOf(r) !== null && (<>
-                                  <dt className="text-muted-foreground">Suggested bid</dt>
-                                  <dd className="tabular-nums">${fmtD(suggestedBidOf(r) as number)}</dd>
-                                </>)}
-                                <dt className="text-muted-foreground">Impact estimate</dt>
-                                <dd className="tabular-nums">${fmtD(r.impact_estimate)}</dd>
-                              </dl>
-                            </TableCell>
-                          </TableRow>
-                        )}
-                        </Fragment>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {tab === "actions" && <ImpactPanel refreshToken={impactRefresh} />}
 
           {/* Search terms */}
           {tab === "search" && (
@@ -1753,6 +1587,170 @@ export default function PPCPage() {
               onMarked={() => setImpactRefresh((n) => n + 1)}
             />
           )}
+
+          <details className="rounded-lg border border-dashed text-muted-foreground">
+            <summary className="cursor-pointer select-none px-4 py-2 text-xs">
+              Old queue — ads_recommendations diagnostics
+            </summary>
+            <div className="space-y-3 border-t p-3">
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={exportPlan} disabled={!recs.length}>
+                  <Download className="mr-1 h-3 w-3" />
+                  Export plan (.md)
+                </Button>
+                <Button variant="outline" size="sm" onClick={copyGrokPrompt}
+                        disabled={exporting}
+                        title="Full account brief: economics, placement, brand mix, organic-rank gate, term overlap, every action with its reasoning, and the known gaps">
+                  <ClipboardCopy className="mr-1 h-3 w-3" />
+                  {exporting ? "Building brief…" : "Copy full AI brief"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={downloadBrief}
+                        disabled={downloading}
+                        title="Download the same brief as a markdown file">
+                  <Download className="mr-1 h-3 w-3" />
+                  {downloading ? "Building…" : "Download brief"}
+                </Button>
+              </div>
+              <Card>
+              <CardContent className="p-0 overflow-x-auto">
+                {recs.length === 0 ? (
+                  <div className="p-6 text-center">
+                    <p className="text-sm font-medium">No open recommendations.</p>
+                    <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+                      Run <strong>Generate Recommendations</strong> after an Ads sync has pulled search terms.
+                      Without search-term rows there is nothing to negate, harvest or re-bid — sync first
+                      (<code>python -m src.main ads-sync --days {rangeDays}</code>), then generate.
+                    </p>
+                    <Button variant="outline" size="sm" className="mt-3" onClick={generateRecs} disabled={generating}>
+                      {generating && <RefreshCw className="mr-1 h-3 w-3 animate-spin" />}
+                      {generating ? "Generating..." : `Generate Recommendations (${range.toUpperCase()}, ${targetAcos}% ACOS)`}
+                    </Button>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-14">Priority</TableHead>
+                        <TableHead className="w-32">Action</TableHead>
+                        <TableHead>Do this</TableHead>
+                        <TableHead className="w-[160px]">Campaign</TableHead>
+                        <TableHead className="w-24 text-right">Impact</TableHead>
+                        <TableHead className="w-20" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {recs.map((r) => {
+                        const at = actionTypeOf(r);
+                        const open = expanded === r.id;
+                        return (
+                        <Fragment key={r.id}>
+                        <TableRow className="cursor-pointer" onClick={() => setExpanded(open ? null : r.id)}>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[10px] ${PRIORITY_COLORS[r.priority] ?? ""}`}>
+                              {r.priority}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[10px] whitespace-nowrap ${ACTION_STYLES[at]}`}>
+                              {ACTION_LABELS[at]}
+                            </Badge>
+                            {/* Organic-rank gate. Only ever present on bid
+                                increases — decreases and negatives carry no
+                                rank fields, so rankBadgeOf returns null. */}
+                            {(() => {
+                              const rb = rankBadgeOf(r);
+                              if (!rb) return null;
+                              const tone =
+                                rb.tone === "danger"
+                                  ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900"
+                                  : rb.tone === "warn"
+                                  ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900"
+                                  : "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900/60 dark:text-slate-400 dark:border-slate-700";
+                              return (
+                                <Badge
+                                  variant="outline"
+                                  className={`mt-1 block text-[9px] whitespace-normal ${tone}`}
+                                  title={rb.title}
+                                >
+                                  {rb.label}
+                                </Badge>
+                              );
+                            })()}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {/* Fixed-width block: a table cell would otherwise
+                                stretch to fit the sentence and push Campaign
+                                and Impact off-screen. */}
+                            <div className="flex w-[26rem] items-start gap-1.5 whitespace-normal xl:w-[34rem]">
+                              <ChevronRight className={`mt-0.5 h-3 w-3 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+                              <span className={open ? "" : "line-clamp-2"}>{doThisOf(r)}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground truncate max-w-[160px]" title={r.campaign_name}>
+                            {r.campaign_name}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums font-medium text-red-600">${fmtD(r.impact_estimate)}</TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0"
+                                title="Mark applied" onClick={() => updateRec(r.id, "applied")}>
+                                <CheckCircle className="h-3 w-3 text-emerald-500" />
+                              </Button>
+                              <Button variant="ghost" size="sm" className="h-6 w-6 p-0"
+                                title="Dismiss" onClick={() => updateRec(r.id, "dismissed")}>
+                                <X className="h-3 w-3 text-muted-foreground" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {open && (
+                          <TableRow className="bg-muted/40 hover:bg-muted/40">
+                            <TableCell />
+                            <TableCell colSpan={5} className="py-3">
+                              {/* whitespace-normal: TableCell sets nowrap, which
+                                  would run these sentences off the card. */}
+                              <dl className="grid max-w-4xl gap-x-6 gap-y-2 text-xs whitespace-normal sm:grid-cols-[7rem_1fr]">
+                                <dt className="text-muted-foreground">Do this</dt>
+                                <dd className="font-medium">{doThisOf(r)}</dd>
+                                <dt className="text-muted-foreground">Why</dt>
+                                <dd>{whyOf(r)}</dd>
+                                <dt className="text-muted-foreground">
+                                  {r.entity_type === "campaign" ? "Campaign" : r.entity_type === "keyword" ? "Keyword" : "Search term"}
+                                </dt>
+                                <dd className="break-all">{r.entity_name}</dd>
+                                <dt className="text-muted-foreground">Campaign</dt>
+                                <dd>
+                                  {r.campaign_name || "—"}
+                                  {adGroupsOf(r).length > 0 && (
+                                    <span className="text-muted-foreground"> · ad group {adGroupsOf(r).join(", ")}</span>
+                                  )}
+                                </dd>
+                                {matchTypesOf(r).length > 0 && (<>
+                                  <dt className="text-muted-foreground">Match type</dt>
+                                  <dd>{matchTypesOf(r).join(", ")}</dd>
+                                </>)}
+                                {suggestedBidOf(r) !== null && (<>
+                                  <dt className="text-muted-foreground">Suggested bid</dt>
+                                  <dd className="tabular-nums">${fmtD(suggestedBidOf(r) as number)}</dd>
+                                </>)}
+                                <dt className="text-muted-foreground">Impact estimate</dt>
+                                <dd className="tabular-nums">${fmtD(r.impact_estimate)}</dd>
+                              </dl>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </Fragment>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+              <ImpactPanel refreshToken={impactRefresh} />
+            </div>
+          </details>
+
 
           {/* Disclaimer */}
           <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
