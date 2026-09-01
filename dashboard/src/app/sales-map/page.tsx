@@ -3,7 +3,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
 import type { SalesByState } from "@/lib/types";
-import { normalizeChannel, SHOPIFY, AMAZON, channelLabel, isQuarantinedSource } from "@/lib/channels";
 import { useUSGeo, useDarkMode } from "@/lib/use-us-geo";
 import { LoadingState } from "@/components/loading";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +13,13 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { DollarSign, MapPinned, ShoppingBag, Package, Info } from "lucide-react";
+import {
+  aggregateSalesMap,
+  type ChannelFilter,
+  type MonthFilter,
+  type StateAgg,
+  type YearFilter,
+} from "@/lib/sales-map-agg";
 
 // ---------------------------------------------------------------------------
 // Types & constants
@@ -28,11 +34,6 @@ function fmtD(n: number): string {
     maximumFractionDigits: 2,
   });
 }
-
-type YearFilter = "all" | "2024" | "2025" | "2026";
-type ChannelFilter = "all" | "shopify" | "amazon";
-/** null = full year/all; "latest" = most recent month; "YYYY-MM" = specific */
-type MonthFilter = null | "latest" | string;
 
 const YEARS: { value: YearFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -51,71 +52,6 @@ const CHANNELS: { value: ChannelFilter; label: string }[] = [
   { value: "amazon", label: "Amazon" },
   { value: "shopify", label: "Shopify" },
 ];
-
-interface StateAgg {
-  total: number;
-  shopify: number;
-  amazon: number;
-  orders: number;
-  shopifyOrders: number;
-  amazonOrders: number;
-}
-
-// ---------------------------------------------------------------------------
-// Aggregation
-// ---------------------------------------------------------------------------
-
-function aggregate(
-  sales: SalesByState[],
-  year: YearFilter,
-  channel: ChannelFilter,
-  month: MonthFilter,
-  availableMonths: string[],
-): Record<string, StateAgg> {
-  const m: Record<string, StateAgg> = {};
-
-  // Resolve "latest" to the actual most-recent month string
-  const resolvedMonth =
-    month === "latest" && availableMonths.length > 0
-      ? availableMonths[availableMonths.length - 1]
-      : month;
-
-  for (const s of sales) {
-    if (isQuarantinedSource(s.source)) continue;
-    const ps = s.period_start ?? "";
-    if (year !== "all" && ps.slice(0, 4) !== year) continue;
-
-    // Month filter: match YYYY-MM prefix of period_start
-    if (resolvedMonth && resolvedMonth !== "latest") {
-      if (ps.slice(0, 7) !== resolvedMonth) continue;
-    }
-
-    const ch = normalizeChannel(s.channel);
-    if (channel !== "all" && ch !== channel) continue;
-
-    const sc = s.state_code;
-    if (!m[sc])
-      m[sc] = {
-        total: 0,
-        shopify: 0,
-        amazon: 0,
-        orders: 0,
-        shopifyOrders: 0,
-        amazonOrders: 0,
-      };
-
-    m[sc].total += s.gross_sales;
-    m[sc].orders += s.order_count;
-    if (ch === SHOPIFY) {
-      m[sc].shopify += s.gross_sales;
-      m[sc].shopifyOrders += s.order_count;
-    } else if (ch === AMAZON) {
-      m[sc].amazon += s.gross_sales;
-      m[sc].amazonOrders += s.order_count;
-    }
-  }
-  return m;
-}
 
 // ---------------------------------------------------------------------------
 // Color ramp: gray → amber → orange → deep rose (log-scaled)
@@ -277,10 +213,9 @@ function StateDrawer({
               </p>
             </div>
 
-            {/* Channel split (always show both) */}
             <div className="space-y-2">
               <h4 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Channel Breakdown
+                Source mix (ship-to)
               </h4>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <span className="flex items-center gap-2">
@@ -293,6 +228,22 @@ function StateDrawer({
                     ({fmt(agg.shopifyOrders)})
                   </span>
                 </span>
+                {(agg.shopifySeller > 0 || agg.shopifyShop > 0 || agg.shopifySub > 0) && (
+                  <>
+                    <span className="pl-6 text-xs text-muted-foreground">Seller</span>
+                    <span className="text-right text-xs tabular-nums text-muted-foreground">
+                      ${fmtD(agg.shopifySeller)}
+                    </span>
+                    <span className="pl-6 text-xs text-muted-foreground">Shop</span>
+                    <span className="text-right text-xs tabular-nums text-muted-foreground">
+                      ${fmtD(agg.shopifyShop)}
+                    </span>
+                    <span className="pl-6 text-xs text-muted-foreground">Subscription</span>
+                    <span className="text-right text-xs tabular-nums text-muted-foreground">
+                      ${fmtD(agg.shopifySub)}
+                    </span>
+                  </>
+                )}
                 <span className="flex items-center gap-2">
                   <Package className="h-3.5 w-3.5 text-amber-500" />
                   Amazon
@@ -304,6 +255,12 @@ function StateDrawer({
                   </span>
                 </span>
               </div>
+              <p className="text-[10px] text-muted-foreground">
+                Amazon + Shopify = ${fmtD(agg.amazon + agg.shopify)}
+                {Math.abs(agg.amazon + agg.shopify - agg.total) > 0.01
+                  ? ` · leftover $${fmtD(agg.total - agg.amazon - agg.shopify)}`
+                  : " · matches total"}
+              </p>
             </div>
 
             {agg.total > 0 && (
@@ -328,8 +285,10 @@ function StateDrawer({
             <div className="flex items-start gap-2 rounded-lg border border-muted bg-muted/20 p-3">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <p className="text-[10px] text-muted-foreground">
-                County breakdown requires address-level order data (not in DB
-                yet). This view aggregates at the state level.
+                Destination (ship-to) from <code>sales_by_state.gross_sales</code>
+                — Amazon <code>amazon_spapi</code> ship-state + Shopify
+                shipping address. Shop + subscription count as Shopify.
+                Quarantined tax dumps are skipped. Not ship-from / FC.
               </p>
             </div>
           </div>
@@ -410,8 +369,8 @@ export default function SalesMapPage() {
     setMonth(null); // reset to full year
   }, []);
 
-  const aggs = useMemo(
-    () => aggregate(sales, year, channel, month, availableMonths),
+  const { byState: aggs, unmapped, skippedQuarantine } = useMemo(
+    () => aggregateSalesMap(sales, year, channel, month, availableMonths),
     [sales, year, channel, month, availableMonths],
   );
 
@@ -426,8 +385,11 @@ export default function SalesMapPage() {
 
   const vals = Object.values(aggs);
   const stateCount = Object.keys(aggs).length;
-  const totalSales = vals.reduce((s, a) => s + a.total, 0);
-  const totalOrders = vals.reduce((s, a) => s + a.orders, 0);
+  const totalSales = vals.reduce((s, a) => s + a.total, 0) + unmapped.total;
+  const totalOrders = vals.reduce((s, a) => s + a.orders, 0) + unmapped.orders;
+  const totalAmazon = vals.reduce((s, a) => s + a.amazon, 0) + unmapped.amazon;
+  const totalShopify = vals.reduce((s, a) => s + a.shopify, 0) + unmapped.shopify;
+  const caAgg = aggs.CA;
   const maxSales = Math.max(...vals.map((a) => a.total), 1);
   const posVals = vals.filter((a) => a.total > 0).map((a) => a.total);
   const minSales = posVals.length > 0 ? Math.min(...posVals) : 0;
@@ -464,7 +426,7 @@ export default function SalesMapPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Sales Map</h1>
           <p className="text-sm text-muted-foreground">
-            Gross sales by state
+            Gross sales by destination (ship-to) state
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -531,7 +493,7 @@ export default function SalesMapPage() {
               <p className="text-lg font-semibold tabular-nums">
                 ${fmt(Math.round(totalSales))}
               </p>
-              <p className="text-[11px] text-muted-foreground">Gross sales</p>
+              <p className="text-[11px] text-muted-foreground">Gross sales (ship-to)</p>
             </div>
           </CardContent>
         </Card>
@@ -573,6 +535,32 @@ export default function SalesMapPage() {
             </p>
           </CardContent>
         </Card>
+      </div>
+
+      <div className="flex items-start gap-2 rounded-lg border bg-muted/20 px-3 py-2">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <div className="space-y-0.5 text-[11px] text-muted-foreground">
+          <p>
+            {periodLabel} · <code className="text-[10px]">sales_by_state.gross_sales</code> ·
+            destination (ship-to), not ship-from. Amazon{" "}
+            <code className="text-[10px]">amazon_spapi</code> ${fmt(Math.round(totalAmazon))} +
+            Shopify (seller + Shop + sub) ${fmt(Math.round(totalShopify))}. Quarantined
+            tax dumps skipped
+            {skippedQuarantine > 0 ? ` ($${fmt(Math.round(skippedQuarantine))} not shown)` : ""}.
+          </p>
+          {caAgg && channel === "all" && (year === "2026" || year === "2025") && month === null && (
+            <p className="tabular-nums">
+              CA {year}: Amazon ${fmt(Math.round(caAgg.amazon))} + Shopify $
+              {fmt(Math.round(caAgg.shopify))} = ${fmt(Math.round(caAgg.total))}
+            </p>
+          )}
+          <p>
+            Blank / unmapped ship-to:{" "}
+            {unmapped.total > 0
+              ? `$${fmtD(unmapped.total)} (${fmt(unmapped.orders)} orders) — not on the map`
+              : "none"}
+          </p>
+        </div>
       </div>
 
       {/* Map */}

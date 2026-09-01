@@ -1,6 +1,5 @@
 /**
- * Sales-map QA: destination / ship-to, quarantine, additive Shopify.
- * Hypothesis: already correct. This locks the feed; do not rebuild the map.
+ * Sales-map page must show destination attribution, not just compute it.
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -9,15 +8,17 @@ import path from "path";
 
 const root = process.cwd();
 
-describe("sales-map attribution", () => {
+describe("sales-map page attribution", () => {
   const page = readFileSync(path.join(root, "src/app/sales-map/page.tsx"), "utf8");
   const channels = readFileSync(path.join(root, "src/lib/channels.ts"), "utf8");
+  const agg = readFileSync(path.join(root, "src/lib/sales-map-agg.ts"), "utf8");
 
-  test("reads sales_by_state and skips quarantined sources", () => {
+  test("reads sales_by_state via aggregateSalesMap", () => {
     assert.match(page, /useSupabaseQuery<SalesByState>/);
     assert.match(page, /"sales_by_state"/);
-    assert.match(page, /isQuarantinedSource\(s\.source\)/);
-    assert.match(page, /m\[sc\]\.total \+= s\.gross_sales/);
+    assert.match(page, /aggregateSalesMap/);
+    assert.match(agg, /isQuarantinedSource\(s\.source\)/);
+    assert.match(agg, /gross_sales/);
   });
 
   test("quarantine set is the two Amazon tax dumps", () => {
@@ -25,17 +26,23 @@ describe("sales-map attribution", () => {
     assert.match(channels, /amazon_tax_report/);
   });
 
-  test("all-channel total includes shopify_shop and shopify_sub", () => {
-    // normalizeChannel maps those to distinct channels; they still add to total
-    // when the filter is "all" because the skip is only quarantine + year/channel.
-    assert.match(page, /if \(channel !== "all" && ch !== channel\) continue/);
-    assert.match(page, /normalizeChannel\(s\.channel\)/);
-    const shop = readFileSync(path.join(root, "src/lib/channels.ts"), "utf8");
-    assert.match(shop, /SHOPIFY_SHOP = "shopify_shop"/);
-    assert.match(shop, /SHOPIFY_SUB = "shopify_sub"/);
+  test("Shopify filter is additive (seller + Shop + sub)", () => {
+    assert.match(agg, /isShopifyFamily/);
+    assert.match(channels, /export function isShopifyFamily/);
+    assert.match(page, /seller \+ Shop \+ sub/);
+  });
+
+  test("page copy states destination ship-to and feed", () => {
+    assert.match(page, /destination \(ship-to\)/);
+    assert.match(page, /sales_by_state\.gross_sales/);
+    assert.match(page, /amazon_spapi/);
+    assert.match(page, /Blank \/ unmapped ship-to/);
+    assert.match(page, /Quarantined/);
+    assert.match(page, /CA \{year\}/);
   });
 
   test("does not use ship-from / inventory_events", () => {
-    assert.doesNotMatch(page, /inventory_events|ship_from|ship-from|fc_to_state/);
+    assert.doesNotMatch(page, /inventory_events|ship_from|fc_to_state/);
+    assert.doesNotMatch(agg, /inventory_events|ship_from|fc_to_state/);
   });
 });
