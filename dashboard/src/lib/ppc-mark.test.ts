@@ -76,6 +76,30 @@ describe("bleeder checkbox writes applied on ads_action_decisions", () => {
     assert.equal(writes[0].entity_name, "2026-08-29|c1|ag1|dud|BROAD|negative_exact");
   });
 
+  test("markBleeder dismissed writes dismissed_at", async () => {
+    const writes: Array<Record<string, unknown>> = [];
+    const sb = {
+      from: (table: string) => {
+        assert.equal(table, "ads_action_decisions");
+        return {
+          upsert: (row: Record<string, unknown>) => {
+            writes.push(row);
+            return { select: async () => ({ data: [{ id: "dec-skip" }], error: null }) };
+          },
+          update: () => ({ eq: async () => ({ error: null }) }),
+        };
+      },
+    };
+    const result = await markBleeder(sb, {
+      checklist_id: "id1", as_of: "2026-08-29", rec_type: "WEEKLY_NEGATIVE_EXACT",
+      action_type: "negative_exact", campaign_id: "c1", search_term: "dud",
+    }, "dismissed", "2026-09-01T12:00:00.000Z");
+    assert.equal(result.ok, true);
+    assert.equal(result.status, "dismissed");
+    assert.equal(writes[0].status, "dismissed");
+    assert.equal(writes[0].dismissed_at, "2026-09-01T12:00:00.000Z");
+  });
+
   test("rejects auto-apply", async () => {
     const result = await markBleeder({
       from: () => { throw new Error("must not write"); },
@@ -98,10 +122,14 @@ describe("dashboard Apply/Dismiss hits /api/ppc/mark", () => {
     assert.doesNotMatch(page, /amazonads|ads-api|sp-api.*write/i);
   });
 
-  test("Bleeders checkbox also posts to /api/ppc/mark", () => {
+  test("This week Done/Skipped posts to /api/ppc/mark", () => {
     const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-bleeders.tsx"), "utf8");
     assert.match(ui, /fetch\("\/api\/ppc\/mark"/);
     assert.match(ui, /bleeder:/);
+    assert.match(ui, /"applied"/);
+    assert.match(ui, /"dismissed"/);
+    assert.match(ui, /Done/);
+    assert.match(ui, /Skipped/);
     assert.doesNotMatch(ui, /amazonads|auto-apply/i);
   });
 

@@ -1,12 +1,12 @@
 /**
- * Dave-executable Amazon PPC bleeders.
+ * Bleeder classifier library — not this week's /ppc execute list.
  *
- * Cut bar is term CVR below that row's lane account CVR (branded vs
- * non-branded), not a clicks>10 and sales=$0-only filter. 10/$0 is R3 / a
- * flag. Click floor follows GNO from the blended account CVR.
+ * GET /api/ppc must not call buildBleeders. The execute table stays empty
+ * until ads_search_terms_daily min/max covers the Sunday 90d pull and Blake
+ * ranks. Cut bar is term CVR below that row's lane account CVR (branded vs
+ * non-branded). 10/$0 is R3 / a flag. Click floor follows GNO.
  *
- * Nothing here writes to Amazon. Checking a box records applied on
- * ads_action_decisions via /api/ppc/mark.
+ * Nothing here writes to Amazon.
  */
 
 import { isBranded, laneOf, type BrandLane } from "./brand-terms";

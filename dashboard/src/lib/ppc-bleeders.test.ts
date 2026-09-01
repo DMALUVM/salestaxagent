@@ -220,13 +220,12 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
     assert.equal(out.open_count, out.rows.length - 1);
   });
 
-  test("does not ship harvest or placement views", () => {
+  test("classifier stays a library — GET must not ship it as this week's list", () => {
     const src = readFileSync(path.join(process.cwd(), "src/lib/ppc-bleeders.ts"), "utf8");
     assert.match(src, /harvest_exact/);
-    assert.match(src, /placement_modifier/);
-    assert.match(src, /later cadence/);
-    const page = readFileSync(path.join(process.cwd(), "src/app/ppc/page.tsx"), "utf8");
-    assert.doesNotMatch(page, /placement_modifier/);
+    const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/route.ts"), "utf8");
+    assert.doesNotMatch(route, /buildBleeders\s*\(/);
+    assert.match(route, /emptyWeeklyList/);
   });
 });
 
@@ -234,10 +233,10 @@ describe("surfaces stay on /ppc; nightly 7d unchanged", () => {
   const page = readFileSync(path.join(process.cwd(), "src/app/ppc/page.tsx"), "utf8");
   const main = readFileSync(path.join(process.cwd(), "..", "src", "main.py"), "utf8");
 
-  test("Bleeders is a tab on /ppc, not a third ads home", () => {
+  test("This week is a tab on /ppc, not a third ads home", () => {
     assert.match(page, /tab === "bleeders"/);
     assert.match(page, /<PpcBleeders/);
-    assert.match(page, /Bleeders \(\$\{data\?\.bleeders\?\.open_count/);
+    assert.match(page, /This week \(\$\{data\?\.bleeders\?\.open_count/);
     assert.doesNotMatch(page, /href="\/paid-ads"/);
   });
 

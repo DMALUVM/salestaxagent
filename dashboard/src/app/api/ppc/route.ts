@@ -6,7 +6,8 @@ import {
 import { loadMergedStrategy, roleTargetOf, shareStatusOf } from "@/lib/ads-strategy-settings";
 import { decisionPatch, isMarkableStatus } from "@/lib/ppc-mark";
 import { buildDailyReconcile } from "@/lib/ads-reconcile";
-import { BLEEDER_REC_TYPES, buildBleeders, emptyBleeders } from "@/lib/ppc-bleeders";
+import { isBranded } from "@/lib/brand-terms";
+import { clickFloor, cvrPct, emptyWeeklyList, storedWindow } from "@/lib/ppc-weekly";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -625,28 +626,44 @@ export async function GET() {
     // Back-compat for any caller still reading the flat list.
     const searchTerms = searchTermsByRange["7d"];
 
-    // ── Bleeders: stored search-term window, lane-split CVR, persist via mark ──
-    // Uses every ads_search_terms_daily row already loaded (today 2026-08-06
-    // .. 2026-08-29). Does not invent a 60d window. Does not write to Amazon.
-    let bleederDecisions: Array<{
-      id?: string; entity_name?: string | null; status?: string | null;
-      rec_type?: string | null; campaign_id?: string | null;
-    }> = [];
-    try {
-      const r = await sb.from("ads_action_decisions")
-        .select("id,entity_name,status,rec_type,campaign_id")
-        .in("rec_type", Object.values(BLEEDER_REC_TYPES))
-        .limit(5000);
-      if (!r.error) {
-        bleederDecisions = (r.data ?? []) as typeof bleederDecisions;
+    // ── This week: coverage + empty execute list until 90d min/max ──
+    // Do not call buildBleeders. Do not seed from the stored 24d window.
+    // Lane CVR / click floor are context only. Nothing writes to Amazon.
+    const search = storedWindow(termRows.map((r) => String(r.date ?? "")));
+    const placementWin = storedWindow(placementRows.map((r) => String(r.date ?? "")));
+    let campOrders = 0;
+    let campClicks = 0;
+    if (search.start && search.end) {
+      for (const r of allCampaignRows) {
+        const d = String(r.date ?? "");
+        if (!d || d < search.start || d > search.end) continue;
+        campOrders += Number(r.orders_14d ?? 0);
+        campClicks += Number(r.clicks ?? 0);
       }
-    } catch { /* learning tables may be absent */ }
-
-    const bleeders = buildBleeders(
-      termRows as Parameters<typeof buildBleeders>[0],
-      allCampaignRows as Parameters<typeof buildBleeders>[1],
-      bleederDecisions,
-    );
+    }
+    const accountCvr = cvrPct(campOrders, campClicks) ?? 0;
+    let brandedOrders = 0, brandedClicks = 0, nonOrders = 0, nonClicks = 0;
+    for (const r of termRows) {
+      const clicks = Number(r.clicks ?? 0);
+      const orders = Number(r.orders_14d ?? 0);
+      if (isBranded(String(r.search_term ?? ""))) {
+        brandedOrders += orders;
+        brandedClicks += clicks;
+      } else {
+        nonOrders += orders;
+        nonClicks += clicks;
+      }
+    }
+    const brandedCvr = cvrPct(brandedOrders, brandedClicks);
+    const nonCvr = cvrPct(nonOrders, nonClicks);
+    const bleeders = emptyWeeklyList({
+      search,
+      placement: placementWin.days > 0 ? placementWin : null,
+      account_cvr: Math.round(accountCvr * 100) / 100,
+      account_cvr_branded: brandedCvr === null ? null : Math.round(brandedCvr * 100) / 100,
+      account_cvr_nonbranded: nonCvr === null ? null : Math.round(nonCvr * 100) / 100,
+      click_floor: clickFloor(accountCvr),
+    });
 
     // ── Recommendations (paginated — a limit here would under-count the
     //    "Actions (N)" badge, which must match what is actually open) ──
@@ -758,7 +775,7 @@ export async function GET() {
       placementsByRange: null, placementsAvailable: false,
       strategy: null,
       searchTerms: [], searchTermsByRange: null, recommendations: [],
-      bleeders: emptyBleeders(),
+      bleeders: emptyWeeklyList(),
       asOf: null, today: null, adsThrough: null,
       lastSyncJob: null, lastSyncStatus: null, lastActions: null,
       dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,

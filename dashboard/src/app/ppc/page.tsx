@@ -17,7 +17,7 @@ import { PpcPlaybook } from "@/components/ppc-playbook";
 import { PpcSkuAds } from "@/components/ppc-sku-ads";
 import { PpcBleeders } from "@/components/ppc-bleeders";
 import { PpcReconcile } from "@/components/ppc-reconcile";
-import type { BleedersPayload } from "@/lib/ppc-bleeders";
+import type { WeeklyPayload } from "@/lib/ppc-weekly";
 import type { DailyReconcileSummary } from "@/lib/ads-reconcile";
 import { isConfigured } from "@/lib/supabase";
 import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy, Settings2 } from "lucide-react";
@@ -153,7 +153,7 @@ interface PPCData {
   searchTerms: SearchTerm[];
   searchTermsByRange: Record<Range, SearchTerm[]> | null;
   recommendations: Rec[];
-  bleeders?: BleedersPayload | null;
+  bleeders?: WeeklyPayload | null;
   /** Newest finished ads sync of any kind, plus which job and how it ended. */
   lastSync: string | null; lastSyncJob: string | null; lastSyncStatus: string | null;
   /** Last successful scheduled actions run — the queue refreshes on its own. */
@@ -908,7 +908,7 @@ export default function PPCPage() {
           { id: "ppc-budget", label: "Budget" },
           { id: "ppc-placement", label: "Placement" },
           { id: "ppc-queue", label: "Actions" },
-          { id: "ppc-bleeders", label: "Bleeders" },
+          { id: "ppc-bleeders", label: "This week" },
         ]}
       />
 
@@ -1355,7 +1355,7 @@ export default function PPCPage() {
 
           {/* Tab bar + plan export */}
           <div id="ppc-queue" className="scroll-mt-14 flex flex-wrap items-center justify-between gap-2">
-            <span id="ppc-bleeders" className="sr-only">Bleeders</span>
+            <span id="ppc-bleeders" className="sr-only">This week</span>
             <div className="flex gap-1">
               {(["actions", "search", "campaigns", "bleeders"] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)}
@@ -1365,7 +1365,7 @@ export default function PPCPage() {
                   {t === "actions" ? `Actions (${recs.length})`
                     : t === "search" ? "Search Terms"
                     : t === "campaigns" ? "Campaigns"
-                    : `Bleeders (${data?.bleeders?.open_count ?? 0})`}
+                    : `This week (${data?.bleeders?.open_count ?? 0})`}
                 </button>
               ))}
             </div>
