@@ -6,8 +6,10 @@ import {
 import { loadMergedStrategy, roleTargetOf, shareStatusOf } from "@/lib/ads-strategy-settings";
 import { decisionPatch, isMarkableStatus } from "@/lib/ppc-mark";
 import { buildDailyReconcile } from "@/lib/ads-reconcile";
-import { isBranded } from "@/lib/brand-terms";
-import { clickFloor, cvrPct, emptyWeeklyList, storedWindow } from "@/lib/ppc-weekly";
+import { cvrPct, emptyWeeklyList } from "@/lib/ppc-weekly";
+import type { WeeklyLockDecision } from "@/lib/ppc-weekly";
+import { buildBlake24dList } from "@/lib/ppc-weekly-blake-24d";
+import type { WeeklyCampaignRef, WeeklyPlacementRef, WeeklyTermRef } from "@/lib/ppc-weekly-blake-24d";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -626,43 +628,97 @@ export async function GET() {
     // Back-compat for any caller still reading the flat list.
     const searchTerms = searchTermsByRange["7d"];
 
-    // ── This week: coverage + empty execute list until 90d min/max ──
-    // Do not call buildBleeders. Do not seed from the stored 24d window.
-    // Lane CVR / click floor are context only. Nothing writes to Amazon.
-    const search = storedWindow(termRows.map((r) => String(r.date ?? "")));
-    const placementWin = storedWindow(placementRows.map((r) => String(r.date ?? "")));
+    // ── This week: Blake-ranked 24d list (2026-08-06..08-29). HOLD lifted
+    //    for this list only. Do not call buildBleeders. Do not wait for 90d.
+    //    Do not label this 90d. Nothing writes to Amazon. ──
+    const BLAKE_START = "2026-08-06";
+    const BLAKE_END = "2026-08-29";
+    const inBlake = (d: string) => d >= BLAKE_START && d <= BLAKE_END;
+
+    const campaignById = new Map<string, WeeklyCampaignRef>();
+    for (const r of allCampaignRows) {
+      const d = String(r.date ?? "");
+      if (!inBlake(d)) continue;
+      const id = String(r.campaign_id ?? "");
+      const name = String(r.campaign_name ?? "");
+      if (!id || !name) continue;
+      campaignById.set(id, { campaign_id: id, campaign_name: name });
+    }
+    const termLookup: WeeklyTermRef[] = [];
+    for (const r of termRows) {
+      const d = String(r.date ?? "");
+      if (!inBlake(d)) continue;
+      const id = String(r.campaign_id ?? "");
+      const name = String(r.campaign_name ?? "");
+      if (id && name && !campaignById.has(id)) {
+        campaignById.set(id, { campaign_id: id, campaign_name: name });
+      }
+      termLookup.push({
+        search_term: String(r.search_term ?? ""),
+        campaign_id: id,
+        campaign_name: name,
+        ad_group_name: String(r.ad_group_name ?? ""),
+        keyword: String(r.keyword ?? ""),
+        match_type: String(r.match_type ?? ""),
+        clicks: Number(r.clicks ?? 0),
+        spend: Number(r.spend ?? 0),
+        sales: Number(r.sales_14d ?? 0),
+      });
+    }
+    const placementLookup: WeeklyPlacementRef[] = [];
+    for (const r of placementRows) {
+      const d = String(r.date ?? "");
+      if (!inBlake(d)) continue;
+      const id = String(r.campaign_id ?? "");
+      if (id && !campaignById.has(id)) {
+        campaignById.set(id, { campaign_id: id, campaign_name: "" });
+      }
+      placementLookup.push({
+        campaign_id: id,
+        campaign_name: campaignById.get(id)?.campaign_name ?? "",
+        placement: String(r.placement ?? ""),
+        clicks: Number(r.clicks ?? 0),
+        spend: Number(r.spend ?? 0),
+        sales: Number(r.sales_14d ?? 0),
+      });
+    }
+
     let campOrders = 0;
     let campClicks = 0;
-    if (search.start && search.end) {
-      for (const r of allCampaignRows) {
-        const d = String(r.date ?? "");
-        if (!d || d < search.start || d > search.end) continue;
-        campOrders += Number(r.orders_14d ?? 0);
-        campClicks += Number(r.clicks ?? 0);
-      }
+    for (const r of allCampaignRows) {
+      const d = String(r.date ?? "");
+      if (!inBlake(d)) continue;
+      campOrders += Number(r.orders_14d ?? 0);
+      campClicks += Number(r.clicks ?? 0);
     }
     const accountCvr = cvrPct(campOrders, campClicks) ?? 0;
-    let brandedOrders = 0, brandedClicks = 0, nonOrders = 0, nonClicks = 0;
-    for (const r of termRows) {
-      const clicks = Number(r.clicks ?? 0);
-      const orders = Number(r.orders_14d ?? 0);
-      if (isBranded(String(r.search_term ?? ""))) {
-        brandedOrders += orders;
-        brandedClicks += clicks;
-      } else {
-        nonOrders += orders;
-        nonClicks += clicks;
+
+    let decisions: WeeklyLockDecision[] = [];
+    try {
+      let offset = 0;
+      const pageSize = 1000;
+      while (true) {
+        const r = await sb.from("ads_action_decisions")
+          .select("id,campaign_id,search_term,action_type,status,applied_at,dismissed_at")
+          .gte("as_of_date", BLAKE_START)
+          .order("as_of_date", { ascending: false })
+          .range(offset, offset + pageSize - 1);
+        if (r.error) throw new Error(r.error.message);
+        const page = (r.data ?? []) as WeeklyLockDecision[];
+        decisions = decisions.concat(page);
+        if (page.length < pageSize) break;
+        offset += pageSize;
       }
-    }
-    const brandedCvr = cvrPct(brandedOrders, brandedClicks);
-    const nonCvr = cvrPct(nonOrders, nonClicks);
-    const bleeders = emptyWeeklyList({
-      search,
-      placement: placementWin.days > 0 ? placementWin : null,
+    } catch { /* learning table may be absent */ }
+
+    const bleeders = buildBlake24dList({
+      lookup: {
+        campaigns: [...campaignById.values()],
+        terms: termLookup,
+        placements: placementLookup,
+      },
+      decisions,
       account_cvr: Math.round(accountCvr * 100) / 100,
-      account_cvr_branded: brandedCvr === null ? null : Math.round(brandedCvr * 100) / 100,
-      account_cvr_nonbranded: nonCvr === null ? null : Math.round(nonCvr * 100) / 100,
-      click_floor: clickFloor(accountCvr),
     });
 
     // ── Recommendations (paginated — a limit here would under-count the

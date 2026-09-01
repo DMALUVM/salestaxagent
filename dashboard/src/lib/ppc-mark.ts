@@ -190,7 +190,8 @@ export async function markBleeder(
     return { ok: false, decisionLogged: false, decisionId: null,
              error: `invalid status ${JSON.stringify(status)}` };
   }
-  if (!bleeder.checklist_id || !bleeder.as_of || !bleeder.rec_type || !bleeder.campaign_id) {
+  const campaignKey = String(bleeder.campaign_id || bleeder.campaign_name || "").trim();
+  if (!bleeder.checklist_id || !bleeder.as_of || !bleeder.rec_type || !campaignKey) {
     return { ok: false, decisionLogged: false, decisionId: null,
              error: "checklist_id, as_of, rec_type and campaign_id required" };
   }
@@ -201,7 +202,7 @@ export async function markBleeder(
     action_type: bleeder.action_type,
     entity_name: bleeder.checklist_id,
     entity_type: bleeder.entity_type ?? "search_term",
-    campaign_id: String(bleeder.campaign_id),
+    campaign_id: campaignKey,
     campaign_name: bleeder.campaign_name ?? "",
     ad_group_id: bleeder.ad_group_id ?? "",
     search_term: bleeder.search_term ?? null,

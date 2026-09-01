@@ -119,7 +119,7 @@ export function PpcBleeders({
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      onNotice?.({ kind: "success", text: "Standing Grok prompt copied. No execute rows — wait for 90d min/max." });
+      onNotice?.({ kind: "success", text: "Standing Grok prompt copied. This week is the 24d Blake-ranked list; 90d backfill continues for next Monday." });
     } catch (e) {
       onNotice?.({
         kind: "error",
@@ -138,7 +138,8 @@ export function PpcBleeders({
     );
   }
 
-  const waiting = !data.execute_ready;
+  const waiting = data.execute_list === "empty" && !data.execute_ready;
+  const blakeReady = data.execute_list === "blake_24d";
 
   return (
     <div className="space-y-3">
@@ -146,7 +147,13 @@ export function PpcBleeders({
         <CardContent className="space-y-2 p-4 text-xs">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <p className="text-sm font-semibold text-foreground">This week — empty until 90d search terms</p>
+              <p className="text-sm font-semibold text-foreground">
+                {blakeReady ? "This week — 24d Blake-ranked list" : "This week — empty until 90d search terms"}
+              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {data.window_chip ? <Badge variant="outline">{data.window_chip}</Badge> : null}
+                <Badge variant="outline">{data.window.search.label}</Badge>
+              </div>
               <p className="mt-0.5 text-muted-foreground">
                 Search terms <span className="font-medium text-foreground">{data.window.search.label}</span>
                 {data.window.placement
@@ -166,9 +173,11 @@ export function PpcBleeders({
             </div>
           </div>
           <p className="text-sm text-foreground">
-            {waiting
-              ? "No execute list this week. Wait for Dana's new min/max on ads_search_terms_daily after the Sunday 90d pull. Blake ranks then. Do not check off a 24d list."
-              : "90d search-term window is present. Execute list stays empty until Blake ranks. No auto-seed."}
+            {blakeReady
+              ? "24d Blake-ranked list for 2026-08-06..08-29. Mark Done or Skipped after Seller Central. 90d backfill continues for next Monday. Nothing writes to Amazon."
+              : waiting
+                ? "No execute list this week. Wait for Dana's new min/max on ads_search_terms_daily after the Sunday 90d pull. Blake ranks then."
+                : "90d search-term window is present. Execute list stays empty until Blake ranks. No auto-seed."}
           </p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 tabular-nums">
             <span>Account CVR <strong className="text-foreground">{data.account_cvr}%</strong></span>
@@ -228,7 +237,7 @@ export function PpcBleeders({
           {shown.length === 0 ? (
             <p className="p-6 text-center text-sm text-muted-foreground">
               {rows.length === 0
-                ? "Empty execute table. CSV headers and Done/Skipped wiring are ready. No seed rows until 90d search-term min/max."
+                ? "Empty execute table. CSV headers and Done/Skipped wiring are ready."
                 : filter === "open" ? "No open rows." : "No rows in this filter."}
             </p>
           ) : (
