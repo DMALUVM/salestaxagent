@@ -1304,3 +1304,68 @@ class TestSearchTermSummaryDateStamp:
         reports.fetch_search_terms(date(2026, 8, 8), date(2026, 8, 21), chunk_days=7)
         dates = sorted(r["date"] for r in written)
         assert dates == ["2026-08-14", "2026-08-21"]
+
+    def test_first_chunk_persists_when_later_chunk_fails(self, monkeypatch):
+        """90d used to buffer every chunk then write once — a timeout after
+        chunk 1 wrote zero rows. Each 7-day chunk must land immediately."""
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        written: list[dict] = []
+        upsert_calls: list[str] = []
+
+        def fake_chunk(cs, ce):
+            if ce >= date(2026, 8, 21):
+                raise TimeoutError("CLOSE_WAIT ghost lock")
+            return [self._term_row(term="week-one")]
+
+        def fake_upsert(table, rows, on_conflict=None):
+            assert table == "ads_search_terms_daily"
+            upsert_calls.append(on_conflict or "")
+            written.extend(rows)
+            return len(rows)
+
+        monkeypatch.setattr(reports, "_fetch_search_terms_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows", fake_upsert)
+
+        result = reports.fetch_search_terms(
+            date(2026, 8, 8), date(2026, 8, 21), chunk_days=7)
+
+        assert result["chunks"] == 2
+        assert result["errors"]
+        assert len(upsert_calls) == 1
+        assert written[0]["search_term"] == "week-one"
+        assert written[0]["date"] == "2026-08-14"
+        assert result["inserted"] == 1
+        assert not any(r["date"] == "2026-08-21" for r in written)
+
+    def test_each_successful_chunk_upserts_immediately(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        upserts: list[list[str]] = []
+
+        def fake_chunk(cs, ce):
+            return [self._term_row(term=ce.isoformat())]
+
+        def fake_upsert(table, rows, on_conflict=None):
+            upserts.append([r["date"] for r in rows])
+            return len(rows)
+
+        monkeypatch.setattr(reports, "_fetch_search_terms_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows", fake_upsert)
+
+        reports.fetch_search_terms(date(2026, 8, 8), date(2026, 8, 21), chunk_days=7)
+        assert len(upserts) == 2
+        assert upserts[0] == ["2026-08-14"]
+        assert upserts[1] == ["2026-08-21"]
+
+    def test_search_term_upsert_is_inside_the_chunk_loop(self):
+        import inspect
+        from src.amazon_ads.reports import fetch_search_terms
+        src = inspect.getsource(fetch_search_terms)
+        loop = src[src.index("for i, (cs, ce)"):src.index("return {")]
+        after = src[src.index("return {"):]
+        assert 'upsert_rows(' in loop
+        assert 'ads_search_terms_daily' in loop
+        assert 'upsert_rows(' not in after
