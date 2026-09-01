@@ -48,7 +48,9 @@ export function PpcBleeders({
   const skippedCount = rows.filter((r) => toUiStatus(r, local) === "skipped").length;
 
   async function mark(row: WeeklyRow, next: WeeklyStatus) {
-    const status = next === "done" ? "applied" : next === "skipped" ? "dismissed" : "open";
+    const current = toUiStatus(row, local);
+    const target = current === next ? "open" : next;
+    const status = target === "done" ? "applied" : target === "skipped" ? "dismissed" : "open";
     setBusy(row.id);
     try {
       const resp = await fetch("/api/ppc/mark", {
@@ -81,15 +83,15 @@ export function PpcBleeders({
         onNotice?.({ kind: "error", text: result.error ?? `Could not mark (${resp.status}).` });
         return;
       }
-      setLocal((m) => ({ ...m, [row.id]: next }));
+      setLocal((m) => ({ ...m, [row.id]: target }));
       onMarked?.();
       onNotice?.({
         kind: result.decisionLogged === false ? "warn" : "success",
-        text: next === "done"
+        text: target === "done"
           ? "Marked Done. Recorded on ads_action_decisions — 7-day lock, nothing writes to Amazon."
-          : next === "skipped"
+          : target === "skipped"
             ? "Marked Skipped. Recorded dismissed_at — 7-day lock, nothing writes to Amazon."
-            : "Reopened.",
+            : "Reopened. Click Done or Skipped again after you act in Seller Central.",
       });
     } catch (e) {
       onNotice?.({
@@ -102,7 +104,7 @@ export function PpcBleeders({
   }
 
   function exportCsv() {
-    const csv = weeklyToCsv(shown);
+    const csv = weeklyToCsv(rows);
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;
@@ -111,7 +113,10 @@ export function PpcBleeders({
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    onNotice?.({ kind: "success", text: `Downloaded ${a.download} — ${shown.length} row(s).` });
+    onNotice?.({
+      kind: "success",
+      text: `Downloaded ${a.download} — ${rows.length} row(s), full list (not the ${filter} filter).`,
+    });
   }
 
   async function copyPrompt() {
@@ -163,12 +168,11 @@ export function PpcBleeders({
                 {data.window_chip ? <Badge variant="outline">{data.window_chip}</Badge> : null}
                 <Badge variant="outline">{data.window.search.label}</Badge>
               </div>
-              <p className="mt-0.5 text-muted-foreground">
-                Search terms <span className="font-medium text-foreground">{data.window.search.label}</span>
-                {data.window.placement
-                  ? <>{" · "}Placements <span className="font-medium text-foreground">{data.window.placement.label}</span></>
-                  : null}
-              </p>
+              {data.window.placement ? (
+                <p className="mt-0.5 text-muted-foreground">
+                  Placements <span className="font-medium text-foreground">{data.window.placement.label}</span>
+                </p>
+              ) : null}
             </div>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={copyPrompt}>
@@ -177,7 +181,7 @@ export function PpcBleeders({
               </Button>
               <Button variant="outline" size="sm" onClick={exportCsv}>
                 <Download className="mr-1 h-3 w-3" />
-                Export CSV
+                Export CSV (all rows)
               </Button>
             </div>
           </div>
@@ -214,7 +218,9 @@ export function PpcBleeders({
 
       <Card>
         <CardContent className="space-y-2 p-4">
-          <p className="text-xs font-medium text-foreground">Standing Grok prompt</p>
+          <p className="text-xs font-medium text-foreground">
+            {blakeReady ? "This week's execute prompt" : "Standing Grok prompt"}
+          </p>
           <textarea
             readOnly
             value={data.grok_prompt}
@@ -246,8 +252,10 @@ export function PpcBleeders({
           {shown.length === 0 ? (
             <p className="p-6 text-center text-sm text-muted-foreground">
               {rows.length === 0
-                ? "Empty execute table. CSV headers and Done/Skipped wiring are ready."
-                : filter === "open" ? "No open rows." : "No rows in this filter."}
+                ? (blakeReady
+                  ? "This week's list loaded with zero rows — check the prompt and notes above."
+                  : "Empty execute table. CSV headers and Done/Skipped wiring are ready.")
+                : filter === "open" ? "No open rows. Switch to All, Done, or Skipped." : "No rows in this filter."}
             </p>
           ) : (
             <Table>
@@ -284,6 +292,7 @@ export function PpcBleeders({
                             variant={status === "done" ? "default" : "outline"}
                             size="sm"
                             disabled={busy === r.id}
+                            title={status === "done" ? "Click again to reopen" : "Mark Done after Seller Central"}
                             onClick={() => mark(r, "done")}
                           >
                             Done
@@ -292,6 +301,7 @@ export function PpcBleeders({
                             variant={status === "skipped" ? "default" : "outline"}
                             size="sm"
                             disabled={busy === r.id}
+                            title={status === "skipped" ? "Click again to reopen" : "Mark Skipped after Seller Central"}
                             onClick={() => mark(r, "skipped")}
                           >
                             Skipped

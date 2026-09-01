@@ -219,27 +219,43 @@ export async function GET() {
     const kpi30 = kpisForRange(30);
     const kpi90 = kpisForRange(90);
 
-    // ── Campaign-level aggregation for selected range (all available data) ──
-    const campaignAgg: Record<string, { spend: number; sales: number; orders: number; clicks: number; impressions: number; type: string }> = {};
-    for (const c of allCampaignRows) {
-      const name = String(c.campaign_name ?? "");
-      if (!campaignAgg[name]) campaignAgg[name] = { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0, type: campaignTypeOf(c) };
-      campaignAgg[name].spend += Number(c.spend ?? 0);
-      campaignAgg[name].sales += Number(c.sales_14d ?? 0);
-      campaignAgg[name].orders += Number(c.orders_14d ?? 0);
-      campaignAgg[name].clicks += Number(c.clicks ?? 0);
-      campaignAgg[name].impressions += Number(c.impressions ?? 0);
+    // ── Campaign-level aggregation per KPI range ──
+    // The 7D/14D/30D/90D toggle used to change the KPI strip while the
+    // Campaigns table always summed the full 90d pull. Same bounds as
+    // rolesByRange / searchTermsByRange so the toggle means one window.
+    function campaignsFor(from: string) {
+      const campaignAgg: Record<string, {
+        spend: number; sales: number; orders: number; clicks: number;
+        impressions: number; type: string;
+      }> = {};
+      for (const c of allCampaignRows) {
+        const d = String(c.date ?? "");
+        if (!d || d < from || d > asOf) continue;
+        const name = String(c.campaign_name ?? "");
+        if (!name) continue;
+        if (!campaignAgg[name]) {
+          campaignAgg[name] = {
+            spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0,
+            type: campaignTypeOf(c),
+          };
+        }
+        campaignAgg[name].spend += Number(c.spend ?? 0);
+        campaignAgg[name].sales += Number(c.sales_14d ?? 0);
+        campaignAgg[name].orders += Number(c.orders_14d ?? 0);
+        campaignAgg[name].clicks += Number(c.clicks ?? 0);
+        campaignAgg[name].impressions += Number(c.impressions ?? 0);
+      }
+      return Object.entries(campaignAgg)
+        .map(([name, d]) => ({
+          campaign_name: name, ...d,
+          campaign_type: d.type,
+          role: classifyCampaign(name),
+          acos: d.sales > 0 ? (d.spend / d.sales) * 100 : 0,
+          roas: d.spend > 0 ? d.sales / d.spend : 0,
+          cvr: d.clicks > 0 ? (d.orders / d.clicks) * 100 : 0,
+        }))
+        .sort((a, b) => b.spend - a.spend);
     }
-    const campaigns = Object.entries(campaignAgg)
-      .map(([name, d]) => ({
-        campaign_name: name, ...d,
-        campaign_type: d.type,
-        role: classifyCampaign(name),
-        acos: d.sales > 0 ? (d.spend / d.sales) * 100 : 0,
-        roas: d.spend > 0 ? d.sales / d.spend : 0,
-        cvr: d.clicks > 0 ? (d.orders / d.clicks) * 100 : 0,
-      }))
-      .sort((a, b) => b.spend - a.spend);
 
     // ── Budget by role and Placement, computed for EVERY range ──
     // Both panels key off the same `cutoffs` the KPI cards and chart use, and
@@ -383,6 +399,11 @@ export async function GET() {
     const adTypesByRange = Object.fromEntries(
       RANGE_KEYS.map((k) => [k, typesFor(cutoffs[k], kpiByRange[k].kpis.spend)])
     ) as Record<RangeKey, ReturnType<typeof typesFor>>;
+
+    const campaignsByRange = Object.fromEntries(
+      RANGE_KEYS.map((k) => [k, campaignsFor(cutoffs[k])]),
+    ) as Record<RangeKey, ReturnType<typeof campaignsFor>>;
+    const campaigns = campaignsByRange["90d"];
 
     // ── Placement rows (optional table) ──
     // Fetched once over the widest window, then aggregated per range in memory
@@ -806,7 +827,7 @@ export async function GET() {
       /** Newest day with ad data at or before as-of. */
       adsThrough: dateMax,
       dateMin, dateMax, daysInDb,
-      campaigns, roleConfigSource: roleConfigSource(),
+      campaigns, campaignsByRange, roleConfigSource: roleConfigSource(),
       strategy: {
         isCustom: strategy.isCustom,
         storageAvailable: strategy.storageAvailable,
@@ -827,7 +848,7 @@ export async function GET() {
       fatalError: e instanceof Error ? e.message : "unknown error",
       loadErrors: [],
       kpi7: null, kpi14: null, kpi30: null, kpi90: null,
-      dailySeries: [], cutoffs: null, campaigns: [],
+      dailySeries: [], cutoffs: null, campaigns: [], campaignsByRange: null,
       rolesByRange: null, adTypesByRange: null, spendScopeByRange: null,
       dailyReconcile: null,
       placementsByRange: null, placementsAvailable: false,

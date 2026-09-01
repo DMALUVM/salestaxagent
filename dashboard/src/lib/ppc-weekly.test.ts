@@ -582,7 +582,22 @@ describe("/ppc This week tab — Blake 63d list, nightly 7d unchanged", () => {
     assert.match(ui, /63d Blake-ranked list/);
     assert.match(ui, /2026-06-30\.\.08-31/);
     assert.match(ui, /Lane CVR/);
+    assert.match(ui, /Export CSV \(all rows\)/);
+    assert.match(ui, /This week's execute prompt/);
+    assert.match(ui, /Click again to reopen/);
     assert.doesNotMatch(ui, /amazonads|auto-apply/i);
+  });
+
+  test("range toggle scopes Campaigns; header buttons enqueue or rebuild old queue", () => {
+    assert.match(page, /campaignsByRange/);
+    const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/route.ts"), "utf8");
+    assert.match(route, /campaignsByRange/);
+    assert.match(route, /function campaignsFor/);
+    assert.match(page, /Enqueue 7D campaigns/);
+    assert.match(page, /Rebuild old queue/);
+    assert.match(page, /campaigns_only: true/);
+    assert.doesNotMatch(page, />Sync 7D</);
+    assert.match(page, /setTab\("search"\)/);
   });
 
   test("weekday search-term ingest is still 7 closed days", () => {

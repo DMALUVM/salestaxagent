@@ -137,6 +137,8 @@ interface PPCData {
   asOf: string | null; today: string | null; adsThrough: string | null;
   dateMin: string | null; dateMax: string | null; daysInDb: number;
   campaigns: CampaignAgg[];
+  /** One campaign table per KPI range — 7D must not show 90d spend. */
+  campaignsByRange: Record<Range, CampaignAgg[]> | null;
   /** One bucket per range — the server owns the bounds for both panels. */
   rolesByRange: Record<Range, RoleBucket> | null;
   adTypesByRange: Record<Range, AdTypeAgg[]> | null;
@@ -666,7 +668,7 @@ export default function PPCPage() {
       await loadData();
       setNotice({
         kind: "success",
-        text: `Generated ${result.count} recommendation${result.count === 1 ? "" : "s"} from the last ${RANGE_DAYS[range]} days at ${targetAcos}% target ACOS.`,
+        text: `Rebuilt ${result.count} old-queue recommendation${result.count === 1 ? "" : "s"} from the last ${RANGE_DAYS[range]} days at ${targetAcos}% target ACOS. This week is unchanged.`,
       });
     } catch (e) {
       setNotice({ kind: "error", text: e instanceof Error ? e.message : String(e) });
@@ -678,13 +680,33 @@ export default function PPCPage() {
   async function syncAds(days: number) {
     setSyncing(true);
     try {
-      await fetch("/api/ppc/sync", {
+      const resp = await fetch("/api/ppc/sync", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ days, campaigns_only: true }),
       });
+      const result: { ok?: boolean; error?: string; hint?: string; message?: string } =
+        await resp.json().catch(() => ({}));
+      if (!resp.ok || result.ok === false) {
+        setNotice({
+          kind: "error",
+          text: result.error ?? result.hint ?? `Could not enqueue sync (${resp.status}).`,
+        });
+        return;
+      }
+      setNotice({
+        kind: "success",
+        text: result.message
+          ?? `Enqueued ${days}d campaigns-only catch-up. Mini worker picks it up — not a search-term pull, nothing writes to Amazon.`,
+      });
       await loadData();
-    } catch { /* */ }
-    setSyncing(false);
+    } catch (e) {
+      setNotice({
+        kind: "error",
+        text: e instanceof Error ? e.message : "Could not enqueue sync.",
+      });
+    } finally {
+      setSyncing(false);
+    }
   }
 
   if (!isConfigured()) return (
@@ -723,7 +745,7 @@ export default function PPCPage() {
     .sort((a, b) =>
       (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) ||
       b.impact_estimate - a.impact_estimate);
-  const campaigns = data?.campaigns ?? [];
+  const campaigns = data?.campaignsByRange?.[range] ?? data?.campaigns ?? [];
   // Both panels read the bucket for the selected range — no client-side date math.
   const roleBucket = data?.rolesByRange?.[range] ?? null;
   const adTypes = data?.adTypesByRange?.[range] ?? [];
@@ -877,7 +899,7 @@ export default function PPCPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Amazon PPC</h1>
           <p className="text-sm text-muted-foreground">
-            Phase 1: Read + Recommend
+            This week = execute in Seller Central. Nothing writes to Amazon.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -888,13 +910,25 @@ export default function PPCPage() {
               className="h-8 w-16 rounded-md border bg-transparent px-2 text-right text-xs tabular-nums text-foreground" />
             %
           </label>
-          <Button variant="outline" size="sm" onClick={generateRecs} disabled={generating || !hasData}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={generateRecs}
+            disabled={generating || !hasData}
+            title="Rebuilds the old ads_recommendations queue in the diagnostics panel. Does not change This week."
+          >
             {generating && <RefreshCw className="mr-1 h-3 w-3 animate-spin" />}
-            {generating ? "Generating..." : `Generate Recs (${range.toUpperCase()})`}
+            {generating ? "Generating..." : `Rebuild old queue (${range.toUpperCase()})`}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => syncAds(7)} disabled={syncing}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => syncAds(7)}
+            disabled={syncing}
+            title="Enqueues a 7-day campaigns-only catch-up for the Mini. Not search terms. Nothing writes to Amazon."
+          >
             <RefreshCw className={`mr-1 h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing..." : "Sync 7D"}
+            {syncing ? "Enqueueing..." : "Enqueue 7D campaigns"}
           </Button>
         </div>
       </div>
@@ -949,7 +983,7 @@ export default function PPCPage() {
             <Target className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">No Ads data yet.</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Run: <code>python -m src.main ads-sync --days 14</code>
+              Run on Mini: <code>./.venv/bin/python -m src.main ads-sync --days 14 --campaigns-only</code>
             </p>
           </CardContent>
         </Card>
@@ -1338,13 +1372,14 @@ export default function PPCPage() {
 
           {/* Wasted spend alert */}
           {wastedTotal > 5 && (
-            <Card className="border-red-500/30 cursor-pointer" onClick={() => setTab("bleeders")}>
+            <Card className="border-red-500/30 cursor-pointer" onClick={() => setTab("search")}>
               <CardContent className="p-4 flex items-center gap-3">
                 <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
                 <div>
                   <p className="font-semibold text-red-600">${fmtD(wastedTotal)} wasted</p>
                   <p className="text-xs text-muted-foreground">
                     {searchTerms.filter((s) => s.orders === 0 && s.spend >= 5).length} terms with $5+ spend, 0 orders
+                    {" "}in the {range.toUpperCase()} search-term table — not the This week execute list
                   </p>
                 </div>
               </CardContent>
@@ -1370,6 +1405,14 @@ export default function PPCPage() {
           {/* Search terms */}
           {tab === "search" && (
             <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Search terms
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    {windowLabel(kpiDays ?? 0)} · SP-only · date is a SUMMARY week-end, not daily grain
+                  </span>
+                </CardTitle>
+              </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -1537,6 +1580,14 @@ export default function PPCPage() {
           {/* Campaigns */}
           {tab === "campaigns" && (
             <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Campaigns
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    {windowLabel(kpiDays ?? 0)}
+                  </span>
+                </CardTitle>
+              </CardHeader>
               <CardContent className="p-0 overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -1757,7 +1808,7 @@ export default function PPCPage() {
             <span>
               Decision support only — user is responsible for all Ads Console changes.
               TACOS = ad spend / Amazon sales. ACOS uses 14-day attribution.
-              Phase 1: no auto-bidding; recommendations must be manually applied in Seller Central.
+              Nothing writes to Amazon. Mark Done or Skipped on This week after you click in Seller Central.
             </span>
           </div>
         </>

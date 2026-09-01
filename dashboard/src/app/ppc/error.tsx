@@ -28,7 +28,7 @@ export default function PpcError({
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Amazon PPC</h1>
-        <p className="text-sm text-muted-foreground">Phase 1: Read + Recommend</p>
+        <p className="text-sm text-muted-foreground">This week = execute in Seller Central. Nothing writes to Amazon.</p>
       </div>
 
       <Card className="border-red-200 dark:border-red-900">
