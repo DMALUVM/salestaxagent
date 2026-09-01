@@ -16,6 +16,7 @@
     { "name": "inventory_planning", "on_conflict": "sku", "restore_order": 30 },
     { "name": "sku_velocity", "on_conflict": "sku", "restore_order": 30 },
     { "name": "sales_by_state", "on_conflict": "state_code,channel,period_start,period_end", "restore_order": 40 },
+    { "name": "sales_by_state_daily", "on_conflict": "state_code,channel,sale_date,source", "restore_order": 39 },
     { "name": "sales_by_sku", "on_conflict": "channel,sku,state_code,period_start,source", "restore_order": 40 },
     { "name": "sales_daily", "on_conflict": "sale_date,state_code,channel", "restore_order": 40 },
     { "name": "shopify_orders", "on_conflict": "order_id", "restore_order": 40 },

@@ -11,8 +11,8 @@ import re
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 
-from src.channels import AMAZON
-from src.db import delete_rows, log_audit, log_ingestion, upsert_rows
+from src.channels import AMAZON, is_quarantined_source
+from src.db import delete_rows, get_client, log_audit, log_ingestion, upsert_rows
 from src.mappers.fc_to_state import fc_to_state
 from src.models.schema import InventoryEvent, SalesByState
 from src.rules import (
@@ -35,6 +35,12 @@ SALES_TRAFFIC_REPORT = "GET_SALES_AND_TRAFFIC_REPORT"
 FBA_REIMBURSEMENTS_REPORT = "GET_FBA_REIMBURSEMENTS_DATA"
 
 SOURCE_LABEL = "amazon_spapi"
+
+# Daily ship-to dest store. Nightly SP-API lookbacks are ~7 days; monthly
+# sales_by_state is keyed on (state, channel, month). Writing that month from
+# the lookback alone replaces ~30 days with ~7. Persist days, rebuild the month.
+DEST_DAILY_TABLE = "sales_by_state_daily"
+DEST_DAILY_CONFLICT = "state_code,channel,sale_date,source"
 
 
 def _period_start_key(value: object) -> str:
@@ -310,6 +316,7 @@ def parse_orders_report(content: str) -> dict:
         "rows_skipped": 0,
         "warnings": [],
         "sales_records": [],
+        "daily_records": [],
         "ship_to_states": set(),
         "total_gross_sales": 0.0,
         "total_tax": 0.0,
@@ -328,6 +335,12 @@ def parse_orders_report(content: str) -> dict:
     H = _build_header_lookup(reader.fieldnames)
 
     sales_agg: dict[tuple, dict] = defaultdict(lambda: {
+        "order_ids": set(),
+        "gross_sales": 0.0,
+        "tax_collected": 0.0,
+        "quantity": 0,
+    })
+    daily_agg: dict[tuple, dict] = defaultdict(lambda: {
         "order_ids": set(),
         "gross_sales": 0.0,
         "tax_collected": 0.0,
@@ -398,6 +411,12 @@ def parse_orders_report(content: str) -> dict:
         bucket["tax_collected"] += tax
         bucket["quantity"] += max(qty, 1)
 
+        day_bucket = daily_agg[(state, purchase_date)]
+        day_bucket["order_ids"].add(order_id)
+        day_bucket["gross_sales"] += price
+        day_bucket["tax_collected"] += tax
+        day_bucket["quantity"] += max(qty, 1)
+
     for (state, period_start), bucket in sales_agg.items():
         period_end = _month_end(period_start)
         record = SalesByState(
@@ -414,6 +433,20 @@ def parse_orders_report(content: str) -> dict:
         result["sales_records"].append(record)
         result["total_gross_sales"] += record.gross_sales
         result["total_tax"] += record.tax_collected
+
+    daily_records: list[dict] = []
+    for (state, sale_date), bucket in daily_agg.items():
+        daily_records.append({
+            "state_code": state,
+            "channel": AMAZON,
+            "sale_date": sale_date.isoformat() if hasattr(sale_date, "isoformat") else str(sale_date)[:10],
+            "order_count": len(bucket["order_ids"]),
+            "gross_sales": round(bucket["gross_sales"], 2),
+            "net_sales": round(bucket["gross_sales"], 2),
+            "tax_collected": round(bucket["tax_collected"], 2),
+            "source": SOURCE_LABEL,
+        })
+    result["daily_records"] = daily_records
 
     result["unique_orders"] = len(all_order_ids)
     result["total_gross_sales"] = round(result["total_gross_sales"], 2)
@@ -801,7 +834,231 @@ def parse_inventory_ledger(content: str) -> dict:
     return result
 
 
-# ── Full fetch-and-ingest orchestrators ──────────────────────
+# ── Amazon destination (ship-to) incremental write ───────────
+
+
+def _sale_date_key(value: object) -> str:
+    if hasattr(value, "isoformat"):
+        return value.isoformat()[:10]
+    return str(value or "")[:10]
+
+
+def _parse_sale_date(value: object) -> date | None:
+    raw = _sale_date_key(value)
+    if len(raw) < 10:
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
+def dest_daily_row_key(row: dict) -> tuple[str, str, str, str]:
+    return (
+        str(row.get("state_code") or "").upper(),
+        str(row.get("channel") or AMAZON),
+        _sale_date_key(row.get("sale_date")),
+        str(row.get("source") or SOURCE_LABEL),
+    )
+
+
+def is_amazon_spapi_dest_row(row: dict) -> bool:
+    """True for Amazon ship-to dest rows from the live SP-API source."""
+    channel = str(row.get("channel") or "").strip().lower() or AMAZON
+    source = str(row.get("source") or "").strip().lower() or SOURCE_LABEL
+    if channel != AMAZON:
+        return False
+    if is_quarantined_source(source):
+        return False
+    return source == SOURCE_LABEL
+
+
+def merge_dest_daily(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    """Incoming days replace the same (state, date). Earlier days are kept.
+
+    Shopify and quarantined Amazon tax dumps are dropped. A short lookback
+    therefore cannot delete Aug 1–23 just because the report only has Aug 24–31.
+    """
+    by_key: dict[tuple[str, str, str, str], dict] = {}
+    for row in existing:
+        if not is_amazon_spapi_dest_row(row):
+            continue
+        by_key[dest_daily_row_key(row)] = dict(row)
+    for row in incoming:
+        if not is_amazon_spapi_dest_row(row):
+            continue
+        by_key[dest_daily_row_key(row)] = dict(row)
+    return list(by_key.values())
+
+
+def rollup_dest_daily_to_month(daily_rows: list[dict]) -> list[dict]:
+    """Roll daily ship-to dest rows up to monthly sales_by_state grain."""
+    agg: dict[tuple[str, str, date, str], dict] = defaultdict(lambda: {
+        "order_count": 0,
+        "gross_sales": 0.0,
+        "tax_collected": 0.0,
+    })
+    for row in daily_rows:
+        if not is_amazon_spapi_dest_row(row):
+            continue
+        sale_date = _parse_sale_date(row.get("sale_date"))
+        if sale_date is None:
+            continue
+        month_start = _month_start(sale_date)
+        key = (
+            str(row.get("state_code") or "").upper(),
+            AMAZON,
+            month_start,
+            SOURCE_LABEL,
+        )
+        bucket = agg[key]
+        bucket["order_count"] += int(row.get("order_count") or 0)
+        bucket["gross_sales"] += float(row.get("gross_sales") or 0)
+        bucket["tax_collected"] += float(row.get("tax_collected") or 0)
+
+    monthly: list[dict] = []
+    for (state, channel, month_start, source), bucket in agg.items():
+        monthly.append({
+            "state_code": state,
+            "channel": channel,
+            "period_start": month_start.isoformat(),
+            "period_end": _month_end(month_start).isoformat(),
+            "order_count": bucket["order_count"],
+            "gross_sales": round(bucket["gross_sales"], 2),
+            "net_sales": round(bucket["gross_sales"], 2),
+            "tax_collected": round(bucket["tax_collected"], 2),
+            "source": source,
+        })
+    return monthly
+
+
+def months_touched_by_daily(daily_rows: list[dict], allowed: set[str] | None = None) -> set[str]:
+    """First-of-month keys present in daily dest rows (optionally filtered)."""
+    out: set[str] = set()
+    for row in daily_rows:
+        sale_date = _parse_sale_date(row.get("sale_date"))
+        if sale_date is None:
+            continue
+        key = _month_start(sale_date).isoformat()
+        if allowed is not None and key not in allowed:
+            continue
+        out.add(key)
+    return out
+
+
+def fetch_dest_daily(
+    start: date,
+    end: date,
+    *,
+    channel: str = AMAZON,
+    source: str = SOURCE_LABEL,
+) -> list[dict]:
+    """Load stored Amazon dest-daily rows for [start, end] inclusive."""
+    client = get_client()
+    all_rows: list[dict] = []
+    page_size = 1000
+    offset = 0
+    while True:
+        result = (
+            client.table(DEST_DAILY_TABLE)
+            .select("*")
+            .eq("channel", channel)
+            .eq("source", source)
+            .gte("sale_date", start.isoformat())
+            .lte("sale_date", end.isoformat())
+            .order("sale_date")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        page = result.data or []
+        all_rows.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+    return all_rows
+
+
+def upsert_amazon_destination_sales(
+    incoming_daily: list[dict],
+    window_start: date,
+    window_end: date,
+    *,
+    existing_daily: list[dict] | None = None,
+) -> dict:
+    """Upsert dest-daily days in the window and rebuild those months only.
+
+    Months with no incoming days are not written (Jan–Jul stay put when the
+    lookback is August). Shopify is never written. Quarantined tax dumps are
+    ignored. Returns ``{daily_upserted, monthly_upserted, months, monthly_rows}``.
+    """
+    allowed = _period_starts_in_range(window_start, window_end)
+    incoming = [
+        dict(r) for r in incoming_daily
+        if is_amazon_spapi_dest_row(r)
+        and _sale_date_key(r.get("sale_date")) >= window_start.isoformat()
+        and _sale_date_key(r.get("sale_date")) <= window_end.isoformat()
+        and (
+            (d := _parse_sale_date(r.get("sale_date"))) is not None
+            and _month_start(d).isoformat() in allowed
+        )
+    ]
+    empty = {
+        "daily_upserted": 0,
+        "monthly_upserted": 0,
+        "months": [],
+        "monthly_rows": [],
+    }
+    if not incoming:
+        return empty
+
+    months = months_touched_by_daily(incoming, allowed)
+    if not months:
+        return empty
+
+    month_start = min(date.fromisoformat(m) for m in months)
+    month_end = max(_month_end(date.fromisoformat(m)) for m in months)
+
+    if existing_daily is None:
+        stored = fetch_dest_daily(month_start, month_end)
+    else:
+        stored = [dict(r) for r in existing_daily if is_amazon_spapi_dest_row(r)]
+
+    # Drop stored days whose month is not in this window so a July row that
+    # happened to be in the fetch range cannot be rebuilt/written.
+    stored = [
+        r for r in stored
+        if (d := _parse_sale_date(r.get("sale_date"))) is not None
+        and _month_start(d).isoformat() in months
+    ]
+
+    merged = merge_dest_daily(stored, incoming)
+    incoming_stamped = _stamp_ingested_at(
+        [dict(r) for r in incoming],
+        period_starts=None,
+    )
+    daily_upserted = upsert_rows(
+        DEST_DAILY_TABLE, incoming_stamped,
+        on_conflict=DEST_DAILY_CONFLICT,
+    )
+
+    monthly_rows = [
+        r for r in rollup_dest_daily_to_month(merged)
+        if _period_start_key(r.get("period_start")) in months
+    ]
+    _stamp_ingested_at(monthly_rows, period_starts=months)
+    monthly_upserted = 0
+    if monthly_rows:
+        monthly_upserted = upsert_rows(
+            "sales_by_state", monthly_rows,
+            on_conflict="state_code,channel,period_start,period_end",
+        )
+
+    return {
+        "daily_upserted": daily_upserted,
+        "monthly_upserted": monthly_upserted,
+        "months": sorted(months),
+        "monthly_rows": monthly_rows,
+    }
 
 
 def fetch_orders(
@@ -815,11 +1072,18 @@ def fetch_orders(
     Automatically splits ranges longer than one calendar month into
     monthly chunks, since Amazon returns empty reports for ranges
     that are too wide.
+
+    Writes are incremental by ship-to day. A 7-day lookback upserts those
+    days into sales_by_state_daily, then rebuilds monthly sales_by_state
+    from ALL stored dest-daily rows for the months in the window. Earlier
+    days in the same month are kept. Months not in the window (Jan–Jul
+    when the lookback is August) are not written. Shopify is not written.
     """
     chunks = _date_chunks(start, end)
 
     # Accumulators across all chunks
     all_records: list[SalesByState] = []
+    all_daily: list[dict] = []
     total_rows = 0
     total_parsed = 0
     total_skipped = 0
@@ -848,6 +1112,7 @@ def fetch_orders(
         total_tax += parsed["total_tax"]
         warnings.extend(parsed["warnings"])
         all_records.extend(parsed["sales_records"])
+        all_daily.extend(parsed.get("daily_records") or [])
 
         if not samples:
             samples = parsed.get("_samples", [])
@@ -883,21 +1148,13 @@ def fetch_orders(
     # Recount unique orders from the aggregated records
     summary["unique_orders"] = sum(r.order_count for r in all_records)
 
-    if dry_run or not all_records:
+    if dry_run or not all_daily:
         return summary
 
-    allowed = _period_starts_in_range(start, end)
-    rows = [
-        r.model_dump() for r in all_records
-        if _period_start_key(getattr(r, "period_start", None)) in allowed
-    ]
-    if not rows:
+    written = upsert_amazon_destination_sales(all_daily, start, end)
+    inserted = written["monthly_upserted"]
+    if not inserted:
         return summary
-    _stamp_ingested_at(rows, period_starts=allowed)
-    inserted = upsert_rows(
-        "sales_by_state", rows,
-        on_conflict="state_code,channel,period_start,period_end",
-    )
     summary["rows_inserted"] = inserted
 
     log_ingestion(

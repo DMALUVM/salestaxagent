@@ -3,9 +3,15 @@
 Locks the ingest path the dashboard /sales-map reads (sales_by_state).
 No map rebuild — attribution only.
 """
+from datetime import date
 from pathlib import Path
 
-from src.amazon_sp.reports import parse_orders_report
+from src.amazon_sp.reports import (
+    merge_dest_daily,
+    parse_orders_report,
+    rollup_dest_daily_to_month,
+    upsert_amazon_destination_sales,
+)
 from src.channels import SHOPIFY, SHOPIFY_SHOP, SHOPIFY_SUB, is_quarantined_source
 
 
@@ -46,3 +52,124 @@ def test_sample_orders_report_buckets_destination():
     assert states["CA"] == 10.0
     assert states["IA"] == 5.0
     assert parsed["ship_to_states"] == {"CA", "IA"}
+    daily = {(r["state_code"], r["sale_date"]): r["gross_sales"]
+             for r in parsed["daily_records"]}
+    assert daily[("CA", "2026-03-01")] == 10.0
+    assert daily[("IA", "2026-03-02")] == 5.0
+    assert all(r["source"] == "amazon_spapi" for r in parsed["daily_records"])
+    assert all(r["channel"] == "amazon" for r in parsed["daily_records"])
+
+
+def _day(state: str, sale_date: str, gross: float, orders: int = 1, **extra) -> dict:
+    row = {
+        "state_code": state,
+        "channel": extra.get("channel", "amazon"),
+        "sale_date": sale_date,
+        "order_count": orders,
+        "gross_sales": gross,
+        "net_sales": extra.get("net_sales", gross),
+        "tax_collected": extra.get("tax_collected", 0.0),
+        "source": extra.get("source", "amazon_spapi"),
+    }
+    return row
+
+
+def test_short_lookback_keeps_earlier_days_in_the_same_month():
+    """A 7-day August pull must not drop Aug 1–20 already stored."""
+    existing = [
+        _day("CA", "2026-08-01", 1000.00, 10),
+        _day("CA", "2026-08-15", 500.00, 5),
+        _day("TX", "2026-08-10", 200.00, 2),
+        _day("CA", "2026-07-31", 999.00, 9),
+    ]
+    incoming = [
+        _day("CA", "2026-08-25", 80.00, 1),
+        _day("TX", "2026-08-28", 40.00, 1),
+    ]
+    merged = merge_dest_daily(existing, incoming)
+    by_day = {(r["state_code"], r["sale_date"]): r["gross_sales"] for r in merged}
+    assert by_day[("CA", "2026-08-01")] == 1000.00
+    assert by_day[("CA", "2026-08-15")] == 500.00
+    assert by_day[("TX", "2026-08-10")] == 200.00
+    assert by_day[("CA", "2026-08-25")] == 80.00
+    assert by_day[("TX", "2026-08-28")] == 40.00
+
+    monthly = rollup_dest_daily_to_month(merged)
+    aug = {r["state_code"]: r for r in monthly if r["period_start"] == "2026-08-01"}
+    assert aug["CA"]["gross_sales"] == 1580.00
+    assert aug["TX"]["gross_sales"] == 240.00
+    assert aug["CA"]["period_end"] == "2026-08-31"
+    assert aug["CA"]["source"] == "amazon_spapi"
+    assert aug["CA"]["channel"] == "amazon"
+
+
+def test_current_month_total_grows_as_more_days_arrive():
+    """Second lookback adds new days; month total grows, earlier days stay."""
+    after_first = merge_dest_daily(
+        [_day("CA", "2026-08-01", 1000.00, 10)],
+        [_day("CA", "2026-08-20", 200.00, 2)],
+    )
+    first_month = rollup_dest_daily_to_month(after_first)
+    assert first_month[0]["gross_sales"] == 1200.00
+
+    after_second = merge_dest_daily(
+        after_first,
+        [_day("CA", "2026-08-28", 50.00, 1)],
+    )
+    second_month = rollup_dest_daily_to_month(after_second)
+    assert second_month[0]["gross_sales"] == 1250.00
+    days = {r["sale_date"] for r in after_second if r["state_code"] == "CA"}
+    assert days == {"2026-08-01", "2026-08-20", "2026-08-28"}
+
+
+def test_merge_ignores_shopify_and_quarantined_tax_dumps():
+    existing = [
+        _day("CA", "2026-08-01", 100.00, channel="shopify", source="shopify_api"),
+        _day("CA", "2026-08-01", 50.00, source="amazon_custom_combined_tax"),
+        _day("CA", "2026-08-01", 25.00, source="amazon_tax_report"),
+        _day("CA", "2026-08-01", 10.00),
+    ]
+    incoming = [_day("CA", "2026-08-25", 5.00)]
+    merged = merge_dest_daily(existing, incoming)
+    assert all(r["channel"] == "amazon" for r in merged)
+    assert all(r["source"] == "amazon_spapi" for r in merged)
+    assert {r["sale_date"] for r in merged} == {"2026-08-01", "2026-08-25"}
+    assert sum(r["gross_sales"] for r in merged) == 15.00
+
+
+def test_short_lookback_does_not_write_closed_months(monkeypatch):
+    """August incoming days must not rebuild or upsert July sales_by_state."""
+    captured: dict = {"upserts": []}
+
+    def fake_upsert(table, rows, on_conflict=None):
+        captured["upserts"].append((table, list(rows), on_conflict))
+        return len(rows)
+
+    monkeypatch.setattr(
+        "src.amazon_sp.reports.upsert_rows", fake_upsert,
+    )
+    existing = [
+        _day("CA", "2026-07-15", 80000.00, 400),
+        _day("CA", "2026-08-01", 1000.00, 10),
+    ]
+    incoming = [_day("CA", "2026-08-25", 80.00, 1)]
+    result = upsert_amazon_destination_sales(
+        incoming,
+        date(2026, 8, 24),
+        date(2026, 8, 31),
+        existing_daily=existing,
+    )
+    assert result["months"] == ["2026-08-01"]
+    assert len(result["monthly_rows"]) == 1
+    assert result["monthly_rows"][0]["period_start"] == "2026-08-01"
+    assert result["monthly_rows"][0]["gross_sales"] == 1080.00
+    assert result["monthly_rows"][0]["source"] == "amazon_spapi"
+
+    monthly_writes = [u for u in captured["upserts"] if u[0] == "sales_by_state"]
+    assert monthly_writes
+    written_starts = {r["period_start"] for r in monthly_writes[0][1]}
+    assert written_starts == {"2026-08-01"}
+    daily_writes = [u for u in captured["upserts"] if u[0] == "sales_by_state_daily"]
+    assert daily_writes
+    assert all(r["sale_date"].startswith("2026-08-") for r in daily_writes[0][1])
+    assert all(r["channel"] == "amazon" for r in daily_writes[0][1])

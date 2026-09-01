@@ -5374,7 +5374,11 @@ def _run_spapi_refresh():
     run_id = job_start("spapi_refresh")
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     end = amazon_as_of()
-    start = end - timedelta(days=7)
+    # Month-start of (as_of − 7d): full current month, and the prior month
+    # for the first week after a roll so a wiped August can still rebuild.
+    # dest-daily upsert + monthly rollup. A 7-day lookback used to REPLACE
+    # the whole month in sales_by_state. Jan–Jul are not in this window.
+    start = (end - timedelta(days=7)).replace(day=1)
     # The inventory ledger gets its own, wider window. It drives physical nexus
     # and therefore registration decisions, and Amazon restates ledger rows for
     # several days after the fact — a 7-day window silently missed those. The
