@@ -69,6 +69,7 @@ const monitorLinks: NavItem[] = [
   { href: "/ppc", label: "Amazon PPC", icon: TrendingUp },
   { href: "/paid-ads", label: "Paid Ads (Shopify)", icon: Megaphone },
   { href: "/sales-map", label: "Sales Map", icon: MapPinned },
+  { href: "/tax-inventory", label: "Tax Inventory", icon: MapPin },
   { href: "/skus", label: "SKU Performance", icon: Package },
   { href: "/compliance", label: "Compliance Guides", icon: BookOpen },
   { href: "/data", label: "Data & Export", icon: Database },
