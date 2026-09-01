@@ -445,4 +445,12 @@ describe("page / API invariants", () => {
   test("paid-ads page has an error boundary", () => {
     assert.ok(existsSync(path.join(root, "src/app/paid-ads/error.tsx")));
   });
+
+  test("Web insights card is on /paid-ads intel, not an invented Shopify Ads table", () => {
+    assert.match(intelUi, /WebInsightsCard/);
+    assert.match(intelUi, /id: "web-insights"/);
+    assert.doesNotMatch(intelUi, /Shopify Ads/);
+    assert.doesNotMatch(page, /warehouse/i);
+    assert.doesNotMatch(intelMig, /shopify_ads|paid_shopify/i);
+  });
 });

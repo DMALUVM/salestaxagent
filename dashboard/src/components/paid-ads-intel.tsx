@@ -8,6 +8,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { SectionNav } from "@/components/section-nav";
+import { WebInsightsCard } from "@/components/web-insights-card";
 import type {
   IntelBundle, IntelCard, IntelFilter, IntelRangeDays, PlatformKpis,
 } from "@/lib/paid-intel/types";
@@ -862,7 +863,8 @@ export function PaidAdsIntel({
   const [deciding, setDeciding] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<UploadReceipt | null>(null);
 
-  const empty = !data.as_of;
+  const hasWeb = Boolean(data.web_insights?.present);
+  const empty = !data.as_of && !hasWeb;
   const adsCards = data.cards.filter((c) => (c.owner ?? "ads") === "ads");
   const siteCards = data.cards.filter((c) => c.owner === "site");
 
@@ -971,13 +973,16 @@ export function PaidAdsIntel({
     ? []
     : [
         { id: "data", label: "Data" },
-        { id: "command", label: "Command" },
-        { id: "intel", label: "This week" },
-        { id: "ads-desk", label: "Ads lead" },
-        { id: "site-desk", label: "Web team" },
-        { id: "campaigns", label: "Campaigns" },
-        ...(data.gsc.hidden ? [] : [{ id: "gsc", label: "Search" }]),
-        { id: "ga4", label: "GA4" },
+        ...(hasWeb ? [{ id: "web-insights", label: "Web insights" }] : []),
+        ...(data.as_of ? [
+          { id: "command", label: "Command" },
+          { id: "intel", label: "This week" },
+          { id: "ads-desk", label: "Ads lead" },
+          { id: "site-desk", label: "Web team" },
+          { id: "campaigns", label: "Campaigns" },
+          ...(data.gsc.hidden ? [] : [{ id: "gsc", label: "Search" }]),
+          { id: "ga4", label: "GA4" },
+        ] : []),
       ];
 
   return (
@@ -1099,6 +1104,10 @@ export function PaidAdsIntel({
         <>
           <SectionNav items={sections} />
 
+          {hasWeb && <WebInsightsCard insights={data.web_insights} />}
+
+          {data.as_of ? (
+          <>
           <section id="command" className="space-y-3 scroll-mt-12">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-semibold tracking-tight">Command</h2>
@@ -1324,6 +1333,8 @@ export function PaidAdsIntel({
               }))}
             />
           </section>
+          </>
+          ) : null}
         </>
       )}
     </div>
@@ -1411,6 +1422,17 @@ function normalizeBundle(raw: IntelBundle): IntelBundle {
     wow: raw.wow ?? { last: raw.kpis?.blended, prior: raw.kpis?.blended },
     cards: (raw.cards ?? []).map((c) => ({ ...c, owner: c.owner === "site" ? "site" : "ads" })),
     log: (raw.log ?? []).map((c) => ({ ...c, owner: c.owner === "site" ? "site" : "ads" })),
+    web_insights: raw.web_insights ?? {
+      present: false,
+      windows: { ga4: null, campaigns: null, gsc_pages: null, gsc_queries: null, gsc_chart: null },
+      gaps: [],
+      converting_landings: [],
+      ad_landings: [],
+      low_ctr_pages: [],
+      money_queries: [],
+      channel_gaps: [],
+      site_vs_ad: "",
+    },
   };
 }
 

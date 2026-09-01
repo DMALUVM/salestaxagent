@@ -20,6 +20,7 @@ const SITE_RULES = [
   "- GA4 figures are last-click sessions and revenue, not ad-platform conversion value. Do not reconcile them to ad spend.",
   "- Do not touch ad campaigns, budgets, or bids. That is the paid-media desk's job.",
   "- Do not redesign a page that is already converting. Fix the pages that leak.",
+  "- Never 404, unpublish, or retarget a live tallowbourn.com URL or handle.",
 ];
 
 export interface SitePromptContext {

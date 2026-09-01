@@ -22,7 +22,7 @@ export default function PaidAdsPage() {
           Set <code className="rounded bg-muted px-1.5 py-0.5 text-xs">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
           <code className="rounded bg-muted px-1.5 py-0.5 text-xs">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>
           {" "}(plus <code className="rounded bg-muted px-1.5 py-0.5 text-xs">SUPABASE_SERVICE_KEY</code> on the server)
-          so this page can read the paid intel warehouse.
+          so this page can read the paid intel on Dashboard.
         </p>
       </div>
     );

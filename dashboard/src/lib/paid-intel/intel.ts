@@ -6,6 +6,7 @@ import {
 } from "./window";
 import { buildCardPrompt, buildGrok, type SitePromptContext } from "./grok";
 import { gradeOutcome, measureCheck, type MeasureContext } from "./outcome";
+import { buildWebInsights } from "./web-insights";
 import type {
   CampaignAgg, CampaignDaily, DecisionStatus, GaDaily, IntelBrief, IntelBundle,
   IntelCard, IntelCheck, IntelDecision, IntelFilter, IntelOwner, IntelRangeDays,
@@ -889,6 +890,13 @@ export function buildIntel(opts: {
       grok: { markdown: "No paid rows uploaded yet.", snapshot: emptySnapshot(), adsDesk: "", siteDesk: "" },
       brief: { headline: "", ads: "", site: "", adsHeadline: "", siteHeadline: "" },
       freshness,
+      web_insights: buildWebInsights({
+        campaigns: opts.campaigns,
+        queries: opts.queries,
+        ga: opts.ga,
+        range,
+        asOf: null,
+      }),
       sources: { campaigns: 0, queries: opts.queries.length, ga: opts.ga.length },
     };
   }
@@ -1030,6 +1038,13 @@ export function buildIntel(opts: {
     gsc: { hidden: hideGsc, queries, pages, chart },
     ga4,
     grok,
+    web_insights: buildWebInsights({
+      campaigns: last,
+      queries: opts.queries,
+      ga,
+      range,
+      asOf,
+    }),
     sources: {
       campaigns: opts.campaigns.length,
       queries: opts.queries.length,
