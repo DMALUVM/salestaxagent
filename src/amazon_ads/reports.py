@@ -539,9 +539,13 @@ def fetch_search_terms(start: date, end: date,
                        chunk_days: int | None = None) -> dict:
     """Fetch SP search term report, chunked to `chunk_days` (default 7).
 
-    Each chunk uses the shared backoff (429/425/one timeout retry). Chunks
-    that still fail are skipped, not fatal — a partial window still
-    produces usable recommendations.
+    Each chunk is upserted as soon as it returns. A 90d Sunday backfill is
+    ~13 chunks; a kill/timeout/ghost lock on a later chunk must leave the
+    weeks already written in ads_search_terms_daily. Buffering the full
+    window and writing once is how a hung 90d CLI wrote zero rows.
+
+    Chunks that still fail after the shared backoff (429/425/one timeout
+    retry) are skipped, not fatal.
 
     Note: the report is requested with timeUnit=SUMMARY, so each chunk returns
     one aggregate row per term. `date` is a window label (chunk END), not a
@@ -551,6 +555,7 @@ def fetch_search_terms(start: date, end: date,
     chunks = _date_chunks(start, end, chunk_days or SEARCH_TERM_CHUNK_DAYS)
     all_parsed: list[dict] = []
     errors: list[str] = []
+    inserted = 0
 
     for i, (cs, ce) in enumerate(chunks, 1):
         log.info("Search terms chunk %d/%d: %s → %s", i, len(chunks), cs, ce)
@@ -562,9 +567,10 @@ def fetch_search_terms(start: date, end: date,
             errors.append(msg)
             continue
 
+        chunk_rows = []
         for r in rows:
             m = _metrics(r)
-            all_parsed.append({
+            chunk_rows.append({
                 # timeUnit=SUMMARY collapses the chunk to one aggregate row.
                 # Stamp chunk END so max(date) is a freshness proxy for the
                 # window (a 7-day chunk ending yesterday would otherwise look
@@ -581,16 +587,22 @@ def fetch_search_terms(start: date, end: date,
                 **m,
             })
 
-    inserted = 0
-    if all_parsed:
-        # Deduplicate on key
-        seen: dict[tuple, dict] = {}
-        for p in all_parsed:
-            key = (p["date"], p["search_term"], p["campaign_id"], p["ad_group_id"])
-            seen[key] = p
-        deduped = list(seen.values())
-        inserted = upsert_rows("ads_search_terms_daily", deduped,
-                               on_conflict="date,search_term,campaign_id,ad_group_id")
+        # Commit this week now. Do not wait for the remaining 90d chunks.
+        if chunk_rows:
+            seen: dict[tuple, dict] = {}
+            for p in chunk_rows:
+                key = (p["date"], p["search_term"], p["campaign_id"], p["ad_group_id"])
+                seen[key] = p
+            try:
+                inserted += upsert_rows(
+                    "ads_search_terms_daily", list(seen.values()),
+                    on_conflict="date,search_term,campaign_id,ad_group_id")
+            except Exception as e:
+                msg = f"Chunk {i} ({cs}→{ce}) upsert: {str(e)[:120]}"
+                log.warning("Search terms %s", msg)
+                errors.append(msg)
+
+        all_parsed.extend(chunk_rows)
 
     return {
         "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),

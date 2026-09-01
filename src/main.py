@@ -6147,6 +6147,8 @@ def _run_ads_search_terms_sync():
 def _run_ads_search_terms_backfill():
     """Sunday 03:30 — 90 days of search terms in existing 7-day chunks.
 
+    fetch_search_terms upserts each 7-day chunk as it returns so a later
+    chunk kill/timeout still leaves earlier weeks in ads_search_terms_daily.
     Weekday ads_search_terms_sync stays 7 closed days. This job is the only
     90d search-term pull. It is not chained from nightly campaigns and must
     not run in CI or on merge.
