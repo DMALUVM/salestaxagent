@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { isBranded, laneOf } from "./brand-terms";
 import {
-  buildBleeders, clickFloor, cvrPct, isGnoTenZero, inclusiveDays,
+  BLEEDER_MIN_WINDOW_DAYS, buildBleeders, clickFloor, cvrPct, isGnoTenZero, inclusiveDays,
   resolveBleederAction, checklistId, recTypeOf,
   type BleederCampaignRow, type BleederTermRow,
 } from "./ppc-bleeders";
@@ -131,10 +131,10 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
              clicks: 15, orders_14d: 0, sales_14d: 0, spend: 9,
              date: "2026-08-29" }),
     ];
-    const out = buildBleeders(terms, campaigns);
+    const out = buildBleeders(terms, campaigns, [], { minWindowDays: 0 });
     assert.equal(out.window.window_days, 24);
     assert.equal(out.window.label.includes("2026-08-06"), true);
-    assert.equal(out.window.label.includes("not 60d"), true);
+    assert.equal(out.window_ready, true);
     assert.equal(out.click_floor, 10);
     assert.ok(out.account_cvr > 27 && out.account_cvr < 28);
 
@@ -157,7 +157,7 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
       term({ search_term: "winner generic", match_type: "BROAD", keyword: "x",
              clicks: 20, orders_14d: 10, sales_14d: 150, spend: 20 }),
     ];
-    const out = buildBleeders(terms, campaigns);
+    const out = buildBleeders(terms, campaigns, [], { minWindowDays: 0 });
     assert.equal(out.rows.some((r) => r.search_term === "winner generic"), false);
   });
 
@@ -168,7 +168,7 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
       term({ search_term: "dud", clicks: 15, orders_14d: 0, sales_14d: 0, spend: 8 }),
       term({ search_term: "big dud", clicks: 25, orders_14d: 0, sales_14d: 0, spend: 20 }),
     ];
-    const out = buildBleeders(terms, lowCamps);
+    const out = buildBleeders(terms, lowCamps, [], { minWindowDays: 0 });
     assert.equal(out.click_floor, 25);
     assert.equal(out.rows.some((r) => r.search_term === "dud"), false);
     assert.equal(out.rows.some((r) => r.search_term === "big dud"), true);
@@ -184,7 +184,7 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
       term({ search_term: "tallowbourn balm", match_type: "PHRASE", keyword: "tallowbourn",
              clicks: 20, orders_14d: 6, sales_14d: 90, spend: 30 }),
     ];
-    const out = buildBleeders(terms, campaigns);
+    const out = buildBleeders(terms, campaigns, [], { minWindowDays: 0 });
     const row = out.rows.find((r) => r.search_term === "tallowbourn balm");
     assert.ok(row, "branded-below-brand-lane must cut even if above non-brand CVR");
     assert.equal(row?.lane, "branded");
@@ -197,7 +197,7 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
       term({ search_term: "lip balm", clicks: 100, orders_14d: 25, sales_14d: 200, spend: 40 }),
       term({ search_term: "dud", campaign_id: "paused", clicks: 20, orders_14d: 0, sales_14d: 0, spend: 10 }),
     ];
-    const out = buildBleeders(terms, campaigns);
+    const out = buildBleeders(terms, campaigns, [], { minWindowDays: 0 });
     assert.equal(out.rows.some((r) => r.campaign_id === "paused"), false);
   });
 
@@ -212,7 +212,7 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
     });
     const out = buildBleeders(terms, campaigns, [
       { entity_name: id, status: "applied", id: "dec-1" },
-    ]);
+    ], { minWindowDays: 0 });
     const row = out.rows.find((r) => r.search_term === "dud");
     assert.equal(row?.status, "done");
     assert.equal(row?.decision_id, "dec-1");
@@ -225,7 +225,25 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
     assert.match(src, /harvest_exact/);
     const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/route.ts"), "utf8");
     assert.doesNotMatch(route, /buildBleeders\s*\(/);
-    assert.match(route, /buildBlake24dList/);
+    assert.doesNotMatch(route, /buildBlake24dList/);
+    assert.match(route, /emptyWeeklyList/);
+  });
+
+  test("default 60d gate refuses a 24d stored window — no fake 60d", () => {
+    const terms: BleederTermRow[] = [
+      term({ search_term: "lip balm", clicks: 1000, orders_14d: 256, sales_14d: 4000, spend: 800,
+             date: "2026-08-06" }),
+      term({ search_term: "dud", clicks: 15, orders_14d: 0, sales_14d: 0, spend: 9,
+             date: "2026-08-29" }),
+    ];
+    const out = buildBleeders(terms, campaigns);
+    assert.equal(BLEEDER_MIN_WINDOW_DAYS, 60);
+    assert.equal(out.window.window_days, 24);
+    assert.equal(out.window_ready, false);
+    assert.equal(out.rows.length, 0);
+    assert.match(out.notes[0], /Need 60/);
+    assert.match(out.notes[0], /not a fake 60d/);
+    assert.match(out.window.label, /not 60d/);
   });
 });
 

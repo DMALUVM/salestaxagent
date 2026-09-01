@@ -1,10 +1,9 @@
 /**
  * This week's /ppc execute list.
  *
- * THIS WEEK: Blake ranked 2026-08-06..08-29 (24d). HOLD is lifted for that
- * list only — see buildBlake24dList. emptyWeeklyList stays the 90d-empty
- * helper for later Mondays. Do not auto-buildBleeders. Nothing writes to
- * Amazon.
+ * Empty until ads_search_terms_daily covers SEARCH_TERM_EXECUTE_MIN_DAYS
+ * (80d of a 90d Sunday pull). Do not ship the stored 24d window as an
+ * execute list. buildBlake24dList stays a library. Nothing writes to Amazon.
  *
  * When a row is later marked Done (applied) or Skipped (dismissed), the
  * same campaign+term+action stays locked for 7 days via applied_at /
@@ -161,10 +160,10 @@ export const WEEKLY_GROK_PROMPT = [
   "CSV columns: id, rank, action, campaign, ad_group, term, match_type, clicks, spend, sales, acos, term_cvr, account_cvr_lane, current_bid, new_bid, placement, window, why.",
 ].join("\n");
 
-/** blake_24d copies the 24d execute prompt, not the empty-until-90d standing one. */
+/** blake_24d copies the 24d execute prompt; empty uses the standing wait. */
 export function grokPromptFor(executeList: ExecuteList): string {
   if (executeList === "blake_24d") return WEEKLY_GROK_PROMPT;
-  return WEEKLY_GROK_PROMPT;
+  return STANDING_GROK_PROMPT;
 }
 
 export function cvrPct(orders: number, clicks: number): number | null {
@@ -374,7 +373,7 @@ export function emptyWeeklyList(partial?: {
     notes,
     cadence: [...WEEKLY_CADENCE],
     hold: [...WEEKLY_HOLD],
-    grok_prompt: WEEKLY_GROK_PROMPT,
+    grok_prompt: grokPromptFor("empty"),
     new_bid: {
       down: "CPC × 0.42 / ACOS (ACOS = spend/sales)",
       up: "CPC × 1.15",

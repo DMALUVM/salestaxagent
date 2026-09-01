@@ -11,7 +11,11 @@ from datetime import date, timedelta
 
 import httpx
 
-from src.amazon_ads.client import fetch_report, SEARCH_TERM_TIMEOUT
+from src.amazon_ads.client import (
+    AdsReportSlotBusy,
+    fetch_report,
+    SEARCH_TERM_TIMEOUT,
+)
 from src.db import upsert_rows
 from src.rules import (
     ADS_CAMPAIGN_CHUNK_DAYS,
@@ -178,18 +182,24 @@ def _normalise_metric_keys(r: dict) -> dict:
 
 
 def _is_transient_report_error(e: Exception) -> bool:
-    """True when creating/polling a new report is likely to succeed.
+    """True when creating a *new* report is likely to succeed.
 
-    429/425 are Amazon asking us to wait. Timeouts mean the previous report
-    sat PENDING until our cap — a fresh, smaller request often completes.
-    Transport and 5xx are the same class of "try again", not a bad config.
+    HTTP 425 on create means the reporting slot is occupied
+    (AdsReportSlotBusy). That is not transient: a wait-loop plus another
+    create is how overlapping 90d CLIs filled the slot. Poll 425 on the
+    *same* report is handled inside poll_report and never reaches here.
+
+    429 / 5xx / transport errors can still back off. Timeouts cancel the
+    hung report in fetch_report, then one fresh create is allowed.
     """
+    if isinstance(e, AdsReportSlotBusy):
+        return False
     if isinstance(e, (TimeoutError, httpx.TimeoutException, httpx.NetworkError)):
         return True
     if isinstance(e, httpx.HTTPStatusError):
-        return e.response.status_code in {429, 425, 500, 502, 503, 504}
+        return e.response.status_code in {429, 500, 502, 503, 504}
     msg = str(e)
-    if "429" in msg or "425" in msg:
+    if "429" in msg:
         return True
     if "timed out" in msg.lower():
         return True
@@ -198,10 +208,10 @@ def _is_transient_report_error(e: Exception) -> bool:
 
 def _transient_label(e: Exception) -> str:
     msg = str(e)
+    if isinstance(e, AdsReportSlotBusy) or "425" in msg:
+        return "slot busy"
     if "429" in msg:
         return "rate limited"
-    if "425" in msg:
-        return "not ready"
     if isinstance(e, TimeoutError) or "timed out" in msg.lower():
         return "timed out"
     return "transient error"
@@ -210,12 +220,11 @@ def _transient_label(e: Exception) -> str:
 def _fetch_report_with_backoff(config: dict, attempts: int = 3,
                                base_sleep: float = 45.0,
                                timeout: int | None = None) -> list[dict]:
-    """fetch_report with backoff on rate limits, 5xx, and poll timeouts.
+    """fetch_report with backoff on rate limits, 5xx, and one poll timeout.
 
-    The Ads reporting API rate-limits aggressively, answers 425 while an
-    identical report is still being produced, and on this account a 30-day
-    SB/SD report can sit PENDING until the poll cap. All three are
-    transient: wait, then create a new report rather than fail the night.
+    HTTP 425 on create (AdsReportSlotBusy) is not retried: creating another
+    report while the slot is occupied is the wait-loop that filled the
+    queue. Poll 425 on the same report stays inside poll_report.
     """
     import time
 
@@ -223,6 +232,8 @@ def _fetch_report_with_backoff(config: dict, attempts: int = 3,
     for attempt in range(attempts):
         try:
             return fetch_report(config, timeout=timeout)
+        except AdsReportSlotBusy:
+            raise
         except Exception as e:
             last = e
             timed_out = (isinstance(e, TimeoutError)
@@ -535,17 +546,46 @@ def fetch_campaigns_daily(start: date, end: date,
     }
 
 
+def _search_term_chunk_present(end: date) -> bool:
+    """True when ads_search_terms_daily already has a SUMMARY row stamped `end`.
+
+    Used to resume a 90d one-shot without re-requesting weeks that landed.
+    A lookup miss must return False (fetch, do not skip) so a DB hiccup
+    cannot invent "already covered" and drop a week.
+    """
+    try:
+        from src.db import fetch_one
+        return fetch_one("ads_search_terms_daily", {"date": end.isoformat()}) is not None
+    except Exception as e:
+        log.warning("Could not check existing search-term date %s: %s — will fetch",
+                    end, e)
+        return False
+
+
 def fetch_search_terms(start: date, end: date,
-                       chunk_days: int | None = None) -> dict:
+                       chunk_days: int | None = None,
+                       skip_existing: bool = False,
+                       newest_first: bool = False) -> dict:
     """Fetch SP search term report, chunked to `chunk_days` (default 7).
+
+    Search-term reports are SP-only (spSearchTerm / SPONSORED_PRODUCTS).
+    SB/SD have no search-term grain in this pipeline — do not silently
+    drop or invent them. Campaigns (SP+SB+SD) are a separate job.
 
     Each chunk is upserted as soon as it returns. A 90d Sunday backfill is
     ~13 chunks; a kill/timeout/ghost lock on a later chunk must leave the
     weeks already written in ads_search_terms_daily. Buffering the full
     window and writing once is how a hung 90d CLI wrote zero rows.
 
-    Chunks that still fail after the shared backoff (429/425/one timeout
-    retry) are skipped, not fatal.
+    HTTP 425 (AdsReportSlotBusy) and poll TimeoutError STOP remaining
+    chunks. Do not continue to the next week — that create would 425
+    immediately. 429 / other chunk errors still skip that week only.
+
+    skip_existing: skip a chunk whose END date is already stored (resume
+    a 90d one-shot). Weekday 7d must leave this False so the last week
+    still refreshes.
+    newest_first: request recent weeks first so a stop still lands
+    freshness. Sunday 90d / one-shot use this; nightly 7d does not care.
 
     Note: the report is requested with timeUnit=SUMMARY, so each chunk returns
     one aggregate row per term. `date` is a window label (chunk END), not a
@@ -553,14 +593,37 @@ def fetch_search_terms(start: date, end: date,
     still mean shorter reports; they are not required for freshness.
     """
     chunks = _date_chunks(start, end, chunk_days or SEARCH_TERM_CHUNK_DAYS)
+    if newest_first:
+        chunks = list(reversed(chunks))
     all_parsed: list[dict] = []
     errors: list[str] = []
+    skipped_existing: list[str] = []
     inserted = 0
+    stopped: str | None = None
 
     for i, (cs, ce) in enumerate(chunks, 1):
+        if skip_existing and _search_term_chunk_present(ce):
+            log.info("Search terms chunk %d/%d: %s → %s — skip, already stored",
+                     i, len(chunks), cs, ce)
+            skipped_existing.append(ce.isoformat())
+            continue
         log.info("Search terms chunk %d/%d: %s → %s", i, len(chunks), cs, ce)
         try:
             rows = _fetch_search_terms_chunk(cs, ce)
+        except AdsReportSlotBusy as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:160]}"
+            log.error("STOP search-term fetch: reporting slot busy (HTTP 425). "
+                      "Remaining chunks not requested. Do not retry in a loop.")
+            errors.append(msg)
+            stopped = "slot_busy"
+            break
+        except TimeoutError as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:160]}"
+            log.error("STOP search-term fetch: report timed out (cancelled). "
+                      "Remaining chunks not requested.")
+            errors.append(msg)
+            stopped = "timeout"
+            break
         except Exception as e:
             msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:120]}"
             log.warning("Search terms %s", msg)
@@ -607,7 +670,11 @@ def fetch_search_terms(start: date, end: date,
     return {
         "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
         "chunk_days": chunk_days or SEARCH_TERM_CHUNK_DAYS,
-        "chunks_ok": len(chunks) - len(errors), "errors": errors,
+        "chunks_ok": len(chunks) - len(errors) - len(skipped_existing),
+        "chunks_skipped_existing": len(skipped_existing),
+        "stopped": stopped,
+        "errors": errors,
+        "coverage": "SP-only",
     }
 
 
@@ -621,6 +688,8 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
              ad_products: tuple[str, ...] | None = None,
              campaign_chunk_days: int | None = None,
              sb_sd_days: int | None = None,
+             skip_existing_search_term_weeks: bool = False,
+             newest_first_search_terms: bool = False,
              on_progress=None) -> dict:
     """Ads sync: campaigns and/or search terms, auto-chunked.
 
@@ -656,6 +725,8 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
             ad_products=ad_products,
             campaign_chunk_days=campaign_chunk_days,
             sb_sd_days=sb_sd_days,
+            skip_existing_search_term_weeks=skip_existing_search_term_weeks,
+            newest_first_search_terms=newest_first_search_terms,
             on_progress=on_progress,
             do_campaigns=campaigns_only or not any(only_flags),
             do_search_terms=search_terms_only or not any(only_flags),
@@ -670,6 +741,8 @@ def _sync_ads_body(*, days: int,
                    ad_products: tuple[str, ...] | None,
                    campaign_chunk_days: int | None,
                    sb_sd_days: int | None,
+                   skip_existing_search_term_weeks: bool,
+                   newest_first_search_terms: bool,
                    on_progress, do_campaigns: bool, do_search_terms: bool,
                    do_placements: bool) -> dict:
     end = amazon_as_of()
@@ -698,7 +771,9 @@ def _sync_ads_body(*, days: int,
     if do_search_terms:
         try:
             results["search_terms"] = fetch_search_terms(
-                start, end, chunk_days=search_term_chunk_days)
+                start, end, chunk_days=search_term_chunk_days,
+                skip_existing=skip_existing_search_term_weeks,
+                newest_first=newest_first_search_terms)
         except Exception as e:
             log.exception("Search term sync failed")
             results["search_terms"] = {"error": str(e)[:200]}

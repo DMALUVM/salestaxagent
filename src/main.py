@@ -838,6 +838,103 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
     click.echo(f"  Job {job_name}: {status} — {message}")
 
 
+def _print_search_term_coverage() -> None:
+    """min/max/count from ads_search_terms_daily — stored dates only."""
+    try:
+        from src.db import get_client
+        client = get_client()
+        lo = (client.table("ads_search_terms_daily").select("date")
+              .order("date", desc=False).limit(1).execute())
+        hi = (client.table("ads_search_terms_daily").select("date")
+              .order("date", desc=True).limit(1).execute())
+        n = client.table("ads_search_terms_daily").select("date", count="exact").limit(1).execute()
+        min_d = (lo.data or [{}])[0].get("date")
+        max_d = (hi.data or [{}])[0].get("date")
+        rows = getattr(n, "count", None)
+        click.echo(f"  ads_search_terms_daily: min={min_d} max={max_d} rows={rows} "
+                   f"(SP-only SUMMARY dates; not padded)")
+    except Exception as e:
+        click.echo(f"  ads_search_terms_daily coverage lookup failed: {e}")
+
+
+@cli.command("ads-search-terms-backfill")
+@click.option("--days", default=90, show_default=True,
+              help="Closed Amazon days to cover (default 90).")
+@click.option("--chunk-days", default=7, show_default=True,
+              help="Ads reporting chunk size. 7 is what this account completes.")
+@click.option("--cancel-report-id", default=None,
+              help="Cancel this PENDING report id, then STOP (no fetch).")
+def ads_search_terms_backfill_cmd(days, chunk_days, cancel_report_id):
+    """One-shot search-terms-only 90d backfill. Never writes to Amazon Ads.
+
+    7-day chunks, upsert each week, skip weeks already stored, newest first.
+    If the reporting slot is busy (HTTP 425) or another ads pull holds the
+    lock: STOP. Do not retry in a loop. Do not run two of these at once.
+
+    Weekday nightly ingest stays 7d. Sunday 03:30 is the scheduled twin of
+    this command. Search-term reports are SP-only.
+    """
+    from src.config import settings
+    if not settings.amazon_ads_enabled:
+        click.echo("Amazon Ads not configured. Set AMAZON_ADS_* in .env")
+        return
+    from src.amazon_ads.client import cancel_report
+    from src.amazon_ads.reports import AdsSyncBusy, sync_ads
+    from src.db import job_start, job_finish
+
+    if cancel_report_id:
+        click.echo(f"Cancelling report {cancel_report_id} (queue cleanup only — "
+                   f"not an ads write)...")
+        ok = cancel_report(cancel_report_id)
+        click.echo("  cancelled" if ok else "  cancel failed or id unknown")
+        click.echo("STOP. Do not start a fetch from this command when cancelling.")
+        return
+
+    click.echo(f"One-shot search-terms-only backfill: last {days}d in "
+               f"{chunk_days}d chunks, skip existing weeks, newest first. "
+               f"SP-only. If 425: STOP.")
+    _print_search_term_coverage()
+    run_id = job_start("ads_search_terms_backfill")
+    try:
+        result = sync_ads(
+            days=days,
+            search_terms_only=True,
+            search_term_chunk_days=chunk_days,
+            skip_existing_search_term_weeks=True,
+            newest_first_search_terms=True,
+            on_progress=click.echo)
+    except AdsSyncBusy as e:
+        job_finish(run_id, "skipped", str(e)[:500])
+        click.echo(f"STOP: {e}")
+        click.echo("Do not start a second search-term CLI. Wait until the slot is free.")
+        return
+    except Exception as e:
+        job_finish(run_id, "fail", str(e)[:500])
+        click.echo(f"STOP: {e}")
+        return
+
+    st = result.get("search_terms") or {}
+    if isinstance(st, dict) and st.get("stopped"):
+        click.echo(f"STOP: search-term fetch halted ({st['stopped']}). "
+                   f"Weeks already upserted were kept. Do not retry in a loop.")
+        for err in (st.get("errors") or [])[:3]:
+            click.echo(f"  ⚠ {err}")
+    elif isinstance(st, dict):
+        click.echo(f"  search_terms: {st.get('rows', 0)} rows, "
+                   f"{st.get('inserted', 0)} inserted, "
+                   f"{st.get('chunks_skipped_existing', 0)} weeks already stored, "
+                   f"{len(st.get('errors') or [])} chunk errors")
+        for err in (st.get("errors") or [])[:3]:
+            click.echo(f"    ⚠ {err}")
+    status, message = _ads_sync_outcome(result, days)
+    job_finish(run_id, status, message,
+               stats=st if isinstance(st, dict) else None)
+    click.echo(f"  Job ads_search_terms_backfill: {status} — {message}")
+    _print_search_term_coverage()
+    click.echo("Proof SQL: select min(date), max(date), count(*), count(distinct date) "
+               "from ads_search_terms_daily;")
+
+
 def _ads_sync_outcome(result: dict, days: int) -> tuple[str, str]:
     """Classify an ads sync as success / partial / fail.
 
@@ -5931,6 +6028,8 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
                       search_terms_only: bool = False,
                       placements_only: bool = False, label: str,
                       sb_sd_days: int | None = None,
+                      skip_existing_search_term_weeks: bool = False,
+                      newest_first_search_terms: bool = False,
                       retry: int = 0) -> str:
     """Shared body for the ads sync jobs. Returns the settled status."""
     from src.db import job_start, job_finish
@@ -5943,7 +6042,9 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
         result = sync_ads(days=days, campaigns_only=campaigns_only,
                           search_terms_only=search_terms_only,
                           placements_only=placements_only,
-                          sb_sd_days=sb_sd_days)
+                          sb_sd_days=sb_sd_days,
+                          skip_existing_search_term_weeks=skip_existing_search_term_weeks,
+                          newest_first_search_terms=newest_first_search_terms)
         status, message = _ads_sync_outcome(result, days)
         camp = result.get("campaigns")
         if isinstance(camp, dict):
@@ -6000,7 +6101,10 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
                     job_name, days=days, campaigns_only=campaigns_only,
                     search_terms_only=search_terms_only,
                     placements_only=placements_only, label=label,
-                    sb_sd_days=sb_sd_days, retry=n),
+                    sb_sd_days=sb_sd_days,
+                    skip_existing_search_term_weeks=skip_existing_search_term_weeks,
+                    newest_first_search_terms=newest_first_search_terms,
+                    retry=n),
                 retry, job_name)
         return status
     except Exception as e:
@@ -6149,12 +6253,16 @@ def _run_ads_search_terms_backfill():
 
     fetch_search_terms upserts each 7-day chunk as it returns so a later
     chunk kill/timeout still leaves earlier weeks in ads_search_terms_daily.
-    Weekday ads_search_terms_sync stays 7 closed days. This job is the only
-    90d search-term pull. It is not chained from nightly campaigns and must
-    not run in CI or on merge.
+    Newest-first + skip weeks already stored so a STOP on 425 keeps recent
+    coverage and the next Sunday (or one-shot) resumes. Weekday
+    ads_search_terms_sync stays 7 closed days. This job is the scheduled
+    90d search-term pull — not chained from nightly campaigns, not a
+    campaigns-only retry, must not run in CI or on merge.
     """
     _run_ads_sync_job(
         "ads_search_terms_backfill", days=90, search_terms_only=True,
+        skip_existing_search_term_weeks=True,
+        newest_first_search_terms=True,
         label="search terms 90d")
 
 

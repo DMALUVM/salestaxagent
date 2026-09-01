@@ -33,15 +33,15 @@ import {
   buildBlake24dList,
 } from "./ppc-weekly-blake-24d";
 
-describe("90d helper still empty — this week is the 24d Blake list", () => {
-  test("Aug 6–29 is 24d; 90d gate stays for later Mondays", () => {
+describe("90d helper still empty — execute table waits for coverage", () => {
+  test("Aug 6–29 is 24d; 90d gate stays until 80d+ is stored", () => {
     assert.equal(inclusiveDays("2026-08-06", "2026-08-29"), 24);
     assert.equal(isExecuteWindowReady(24), false);
     assert.equal(isExecuteWindowReady(SEARCH_TERM_EXECUTE_MIN_DAYS - 1), false);
     assert.equal(isExecuteWindowReady(90), true);
   });
 
-  test("emptyWeeklyList still ships zero rows (next-Monday helper)", () => {
+  test("emptyWeeklyList ships zero rows and the standing prompt", () => {
     const short = emptyWeeklyList({
       search: storedWindow(["2026-08-06", "2026-08-29"]),
       account_cvr: 27.55,
@@ -51,15 +51,19 @@ describe("90d helper still empty — this week is the 24d Blake list", () => {
     assert.equal(short.open_count, 0);
     assert.equal(short.execute_list, "empty");
     assert.equal(short.execute_ready, false);
+    assert.equal(short.grok_prompt, STANDING_GROK_PROMPT);
+    assert.match(short.notes[0], /Not 90d/);
   });
 
-  test("GET /api/ppc ships Blake 24d and does not call buildBleeders", () => {
+  test("GET /api/ppc ships emptyWeeklyList until 80d+; does not auto-Blake or classify", () => {
     const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/route.ts"), "utf8");
-    assert.match(route, /buildBlake24dList/);
+    assert.match(route, /emptyWeeklyList/);
+    assert.match(route, /storedWindow/);
+    assert.doesNotMatch(route, /buildBlake24dList/);
     assert.doesNotMatch(route, /buildBleeders\s*\(/);
     assert.doesNotMatch(route, /from "@\/lib\/ppc-bleeders"/);
-    assert.match(route, /2026-08-06/);
-    assert.match(route, /2026-08-29/);
+    assert.doesNotMatch(route, /2026-08-06/);
+    assert.doesNotMatch(route, /2026-08-29/);
   });
 });
 
@@ -322,6 +326,7 @@ describe("cadence + HOLD live in copy, not extra pages", () => {
     assert.doesNotMatch(WEEKLY_GROK_PROMPT, /deodorant men/i);
     assert.equal(grokPromptFor("blake_24d"), WEEKLY_GROK_PROMPT);
     assert.notEqual(grokPromptFor("blake_24d"), STANDING_GROK_PROMPT);
+    assert.equal(grokPromptFor("empty"), STANDING_GROK_PROMPT);
     assert.match(STANDING_GROK_PROMPT, /Wait for ads_search_terms_daily/);
   });
 
@@ -344,7 +349,7 @@ describe("cadence + HOLD live in copy, not extra pages", () => {
   });
 });
 
-describe("/ppc This week tab — Blake 24d list, nightly 7d unchanged", () => {
+describe("/ppc This week tab — empty until 90d, nightly 7d unchanged", () => {
   const page = readFileSync(path.join(process.cwd(), "src/app/ppc/page.tsx"), "utf8");
   const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-bleeders.tsx"), "utf8");
   const main = readFileSync(path.join(process.cwd(), "..", "src", "main.py"), "utf8");
@@ -366,18 +371,16 @@ describe("/ppc This week tab — Blake 24d list, nightly 7d unchanged", () => {
     assert.doesNotMatch(page, /href="\/paid-ads"/);
   });
 
-  test("UI ships Done, Skipped, CSV, 24d Grok prompt", () => {
+  test("UI ships Done, Skipped, CSV, standing wait-for-90d prompt", () => {
     assert.match(ui, /Done/);
     assert.match(ui, /Skipped/);
     assert.match(ui, /weeklyToCsv/);
     assert.match(ui, /grok_prompt/);
-    assert.match(ui, /grokPromptFor\("blake_24d"\)/);
-    assert.match(ui, /24d execute prompt copied/);
-    assert.doesNotMatch(ui, /wait for 90d min\/max/);
+    assert.match(ui, /empty until 90d search terms/);
+    assert.match(ui, /wait for 90d min\/max/i);
     assert.match(ui, /"dismissed"/);
     assert.match(ui, /"applied"/);
     assert.match(ui, /window_chip/);
-    assert.match(ui, /24d Blake-ranked list/);
     assert.match(ui, /Lane CVR/);
     assert.doesNotMatch(ui, /amazonads|auto-apply/i);
   });

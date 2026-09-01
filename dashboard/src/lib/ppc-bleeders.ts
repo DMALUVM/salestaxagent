@@ -1,12 +1,14 @@
 /**
  * Bleeder classifier library — not this week's /ppc execute list.
  *
- * GET /api/ppc must not call buildBleeders. This week ships Blake's 24d
- * ranked list via buildBlake24dList. Cut bar is term CVR below that row's
- * lane account CVR (branded vs non-branded). 10/$0 is R3 / a flag.
+ * GET /api/ppc must not auto-ship this as the execute table. 60d math
+ * refuses (empty rows + coverage flag) when stored search-term dates are
+ * shorter than BLEEDER_MIN_WINDOW_DAYS. Do not rank a 24d window as 60d.
  *
  * Nothing here writes to Amazon.
  */
+
+export const BLEEDER_MIN_WINDOW_DAYS = 60;
 
 import { isBranded, laneOf, type BrandLane } from "./brand-terms";
 
@@ -109,6 +111,7 @@ export interface BleedersPayload {
     days_with_rows: number;
     label: string;
   };
+  window_ready: boolean;
   account_cvr: number;
   account_cvr_source: "ads_campaigns_daily";
   account_cvr_branded: number | null;
@@ -335,6 +338,7 @@ export function emptyBleeders(): BleedersPayload {
       as_of: "", window_start: "", window_end: "", window_days: 0,
       days_with_rows: 0, label: "No search-term rows stored",
     },
+    window_ready: false,
     account_cvr: 0,
     account_cvr_source: "ads_campaigns_daily",
     account_cvr_branded: null,
@@ -356,7 +360,9 @@ export function buildBleeders(
   termRows: BleederTermRow[],
   campaignRows: BleederCampaignRow[],
   decisions: BleederDecision[] = [],
+  opts?: { minWindowDays?: number },
 ): BleedersPayload {
+  const minWindowDays = opts?.minWindowDays ?? BLEEDER_MIN_WINDOW_DAYS;
   const dates = termRows.map((r) => String(r.date ?? "")).filter(Boolean).sort();
   if (dates.length === 0) return emptyBleeders();
 
@@ -365,6 +371,35 @@ export function buildBleeders(
   const daysWithRows = new Set(dates).size;
   const windowDays = inclusiveDays(windowStart, windowEnd);
   const asOf = windowEnd;
+
+  if (windowDays < minWindowDays) {
+    return {
+      window: {
+        as_of: asOf,
+        window_start: windowStart,
+        window_end: windowEnd,
+        window_days: windowDays,
+        days_with_rows: daysWithRows,
+        label: `${windowStart} → ${windowEnd} · ${windowDays}d stored (not ${minWindowDays}d)`,
+      },
+      window_ready: false,
+      account_cvr: 0,
+      account_cvr_source: "ads_campaigns_daily",
+      account_cvr_branded: null,
+      account_cvr_nonbranded: null,
+      lane_cvr_source: "ads_search_terms_daily + brand_terms.json",
+      click_floor: 10,
+      open_count: 0,
+      applied_count: 0,
+      search_term_coverage: "SP-only",
+      notes: [
+        `Need ${minWindowDays} inclusive search-term days before 60d bleeder math runs. Stored ${windowStart} → ${windowEnd} is ${windowDays}d (${daysWithRows} days with rows) — not a fake ${minWindowDays}d from ${windowDays}d data.`,
+        "Search-term reports are SP-only (spSearchTerm). SB/SD terms will be thin or missing.",
+        "Sunday 03:30 ET 90d search-term backfill (or ads-search-terms-backfill) extends this. Weekday ingest stays 7d. Nothing writes to Amazon.",
+      ],
+      rows: [],
+    };
+  }
 
   const campTotals = campaignWindowTotals(campaignRows, windowStart, windowEnd);
   const accountCvr = cvrPct(campTotals.orders, campTotals.clicks) ?? 0;
@@ -512,7 +547,7 @@ export function buildBleeders(
 
   const appliedCount = rows.filter((r) => r.status === "done").length;
   const notes = [
-    `Search terms stored ${windowStart} → ${windowEnd} (${windowDays} calendar days, ${daysWithRows} days with rows). Not 60d — Sunday 03:30 ET 90d search-term backfill extends this after it lands on mini main.`,
+    `Search terms stored ${windowStart} → ${windowEnd} (${windowDays} calendar days, ${daysWithRows} days with rows). 60d bleeder math ran on the stored window — not padded.`,
     "Search-term reports are SP-only (spSearchTerm). SB/SD terms will be thin or missing. Occasional SB/SD campaign holes (e.g. 8/26) do not block this list.",
     `Blended account CVR ${round2(accountCvr)}% is ads_campaigns_daily orders/clicks over the same window. Lane CVRs are search terms classified by config/brand_terms.json (computed, not the 35.6/25.6 hunch).`,
     "Checking a box records applied on ads_action_decisions. Nothing writes to Amazon.",
@@ -525,8 +560,9 @@ export function buildBleeders(
       window_end: windowEnd,
       window_days: windowDays,
       days_with_rows: daysWithRows,
-      label: `${windowStart} → ${windowEnd} · ${windowDays}d stored (not 60d)`,
+      label: `${windowStart} → ${windowEnd} · ${windowDays}d stored`,
     },
+    window_ready: true,
     account_cvr: round2(accountCvr),
     account_cvr_source: "ads_campaigns_daily",
     account_cvr_branded: brandedCvr === null ? null : round2(brandedCvr),

@@ -8,7 +8,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { ClipboardCopy, Download } from "lucide-react";
-import { grokPromptFor, recTypeOfWeekly, weeklyToCsv, WEEKLY_GROK_PROMPT, type WeeklyPayload, type WeeklyRow, type WeeklyStatus } from "@/lib/ppc-weekly";
+import { grokPromptFor, recTypeOfWeekly, weeklyToCsv, type WeeklyPayload, type WeeklyRow, type WeeklyStatus } from "@/lib/ppc-weekly";
 
 function fmtD(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -115,17 +115,15 @@ export function PpcBleeders({
   }
 
   async function copyPrompt() {
-    const text = data?.execute_list === "blake_24d"
-      ? grokPromptFor("blake_24d")
-      : (data?.grok_prompt ?? WEEKLY_GROK_PROMPT);
+    const text = data?.grok_prompt ?? grokPromptFor(data?.execute_list ?? "empty");
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       onNotice?.({
         kind: "success",
-        text: data?.execute_list === "blake_24d"
-          ? "24d execute prompt copied. This week CSV is the execute list. Nothing writes to Amazon."
-          : "24d execute prompt copied. Window 2026-08-06..08-29. Do not wait for 90d. Nothing writes to Amazon.",
+        text: data?.execute_ready
+          ? "Standing prompt copied. 90d window present — execute list stays empty until ranked. Nothing writes to Amazon."
+          : "Standing prompt copied. Wait for 90d min/max on ads_search_terms_daily. Do not use the stored 24d window as an execute list. Nothing writes to Amazon.",
       });
     } catch (e) {
       onNotice?.({
