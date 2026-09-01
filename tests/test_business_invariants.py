@@ -1022,6 +1022,15 @@ class TestAdsPollResilience:
         assert "from src.amazon_ads.reports import sync_ads" not in src
         assert "dedicated ads_* jobs" in src
 
+    def test_spapi_refresh_orders_from_month_start(self):
+        """Nightly dest rebuild is month-to-date, not a 7-day replace."""
+        import inspect
+        from src.main import _run_spapi_refresh
+        src = inspect.getsource(_run_spapi_refresh)
+        orders_src = src.split("inv_start")[0]
+        assert "start = (end - timedelta(days=7)).replace(day=1)" in orders_src
+        assert "start = end - timedelta(days=7)\n" not in orders_src
+
 
 # ── 4f. SP-API order upsert stamps ingested_at ─────────────────
 
@@ -1099,12 +1108,14 @@ class TestSpapiOrderFreshness:
         import src.amazon_sp.reports as reports
         from src.models.schema import SalesByState
 
-        captured: dict = {}
+        captured: dict = {"calls": []}
 
         def fake_upsert(table, rows, on_conflict=None):
-            captured["table"] = table
-            captured["rows"] = rows
-            captured["on_conflict"] = on_conflict
+            captured["calls"].append({
+                "table": table,
+                "rows": rows,
+                "on_conflict": on_conflict,
+            })
             return len(rows)
 
         rec = SalesByState(
@@ -1119,21 +1130,42 @@ class TestSpapiOrderFreshness:
         )
         monkeypatch.setattr(reports, "_date_chunks", lambda s, e: [(s, e)])
         monkeypatch.setattr(reports, "request_and_download", lambda *a, **k: "x")
+        daily = [{
+            "state_code": "TX", "channel": "amazon",
+            "sale_date": "2026-08-20", "order_count": 1,
+            "gross_sales": 10.0, "net_sales": 10.0,
+            "tax_collected": 0.0, "source": "amazon_spapi",
+        }]
         monkeypatch.setattr(reports, "parse_orders_report", lambda _c: {
             "rows_total": 1, "rows_parsed": 1, "rows_skipped": 0,
             "ship_to_states": {"TX"}, "total_gross_sales": 10.0,
             "total_tax": 0.0, "warnings": [], "sales_records": [rec],
+            "daily_records": daily,
             "unique_orders": 1, "_samples": [rec],
         })
+        monkeypatch.setattr(reports, "fetch_dest_daily", lambda *a, **k: [
+            {
+                "state_code": "TX", "channel": "amazon",
+                "sale_date": "2026-08-01", "order_count": 4,
+                "gross_sales": 40.0, "net_sales": 40.0,
+                "tax_collected": 0.0, "source": "amazon_spapi",
+            },
+        ])
         monkeypatch.setattr(reports, "upsert_rows", fake_upsert)
         monkeypatch.setattr(reports, "log_ingestion", lambda **k: None)
         monkeypatch.setattr(reports, "log_audit", lambda **k: None)
 
         result = reports.fetch_orders(date(2026, 8, 14), date(2026, 8, 21))
         assert result["rows_inserted"] == 1
-        assert captured["table"] == "sales_by_state"
-        assert captured["rows"][0]["ingested_at"]
-        assert captured["rows"][0]["source"] == "amazon_spapi"
+        monthly = [c for c in captured["calls"] if c["table"] == "sales_by_state"]
+        assert monthly
+        assert monthly[0]["rows"][0]["ingested_at"]
+        assert monthly[0]["rows"][0]["source"] == "amazon_spapi"
+        assert monthly[0]["rows"][0]["gross_sales"] == 50.0
+        assert monthly[0]["on_conflict"] == "state_code,channel,period_start,period_end"
+        daily_writes = [c for c in captured["calls"] if c["table"] == "sales_by_state_daily"]
+        assert daily_writes
+        assert daily_writes[0]["rows"][0]["sale_date"] == "2026-08-20"
 
     def test_fetch_amazon_skus_upsert_includes_ingested_at(self, monkeypatch):
         from datetime import date
