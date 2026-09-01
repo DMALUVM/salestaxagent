@@ -32,6 +32,16 @@ export const LOCKED_TONIGHT_3PL_FBA_SEND: Record<string, number> = {
   DDPE0001Shop: 0, // unscented not in this send
 };
 export const LOCKED_TONIGHT_3PL_FBA_TOTAL = 12_960;
+/** Holt via Dave, in transit 2026-08-31. Marpac → Tulsa 3PL only. Not AWD. Not 3PL→FBA. */
+export const LOCKED_AUGUST_MARPAC_TULSA_SEND: Record<string, number> = {
+  DDPE0001Shop: 6_480, // unscented — 24 boxes of 270
+  DDPE0004Shop: 3_240, // assorted — 12 boxes of 270
+  DDPE0003Shop: 3_240, // orange — 12 boxes of 270
+  DDPE0002Shop: 0, // peppermint not on this hop
+};
+export const LOCKED_AUGUST_MARPAC_TULSA_TOTAL = 12_960;
+export const LOCKED_AUGUST_MARPAC_TULSA_DATE = "2026-08-31";
+export const LOCKED_AUGUST_MONTH = "2026-08";
 export const FAMILY_FBA_CAP_PEAK = 55_600;
 export const FAMILY_FBA_CAP_OCT_DEC = 49_400;
 
@@ -57,7 +67,8 @@ export const FIRST_WAVE_AWD_TARGETS: Record<string, number> = {
 };
 export const FIRST_WAVE_AWD_TARGET_CAP = 61_425;
 /** Assorted + orange first — target end of September, then unscented + peppermint.
- *  August may have two hops: Marpac→Tulsa TBD and 3PL→FBA today. */
+ *  August has two hops: locked Marpac→Tulsa 12,960 in transit 2026-08-31,
+ *  and locked 3PL→FBA today. */
 export const FIRST_WAVE_AWD_SHIP_ORDER = [
   "DDPE0004Shop",
   "DDPE0003Shop",
@@ -544,6 +555,16 @@ export function applyLockedTonight3plFbaSend(
     locked: true,
     waitsOnAugust: Object.fromEntries(skus.map((s) => [s, send[s] === 0 && gap[s] > 0 && onHand[s] > 0])),
   };
+}
+
+/** Dave's August Marpac→Tulsa hop. Display lock only — not FBA/AWD. */
+export function lockedAugustMarpacTulsaMix(skus: string[] = LIP_BALM_SKUS): Record<string, number> {
+  const mix: Record<string, number> = {};
+  for (const sku of skus) {
+    const qty = Number(LOCKED_AUGUST_MARPAC_TULSA_SEND[sku] || 0);
+    if (qty > 0) mix[sku] = qty;
+  }
+  return mix;
 }
 
 export function skuProductionBuild(
@@ -1176,6 +1197,9 @@ export type MonthViewEntry = {
   awaitingAugustTotals: boolean;
   units: number;
   mix: Record<string, number>;
+  mixLocked: boolean;
+  inTransit: boolean;
+  availableDate: string | null;
   destination: string;
   hopLabel: string;
   singleSku: boolean;
@@ -1197,7 +1221,6 @@ export function buildMonthViewEntries(opts: {
   palletMax?: number;
   skus?: string[];
 }): MonthViewEntry[] {
-  const productionMonths = opts.productionMonths;
   const horizonByMonth = opts.horizonByMonth;
   const sept = opts.sept;
   const skus = opts.skus ?? LIP_BALM_SKUS;
@@ -1205,7 +1228,9 @@ export function buildMonthViewEntries(opts: {
   const amazonInBy = opts.amazonInBy ?? AMAZON_IN_BY;
   const peakEnd = opts.peakEnd ?? PEAK_END_DEFAULT;
   const committed = opts.committed ?? new Set<string>();
-  const skuAugust = opts.skuAugust ?? sept.skuAugust ?? {};
+  const productionMonths = opts.productionMonths.includes(LOCKED_AUGUST_MONTH)
+    ? opts.productionMonths
+    : [LOCKED_AUGUST_MONTH, ...opts.productionMonths];
   const tplToFba: Record<string, number> = {};
   const mixedNeed: Record<string, number> = {};
   for (const sku of skus) {
@@ -1221,6 +1246,13 @@ export function buildMonthViewEntries(opts: {
   function dates(month: string, destination: string) {
     const h = horizonByMonth[month];
     const recv = h?.receiveDays ?? 35;
+    if (destination === AUGUST_HOP_DESTINATION) {
+      return {
+        role: "gate" as const,
+        shipBy: LOCKED_AUGUST_MARPAC_TULSA_DATE,
+        inAmazon: LOCKED_AUGUST_MARPAC_TULSA_DATE,
+      };
+    }
     if (destination === "3pl_fba") {
       const shipBy = sept.shipBy || septFbaShipBy(recv);
       return {
@@ -1282,6 +1314,11 @@ export function buildMonthViewEntries(opts: {
       awaitingAugustTotals: !!extra.awaitingAugust,
       units: total,
       mix,
+      mixLocked: destination === AUGUST_HOP_DESTINATION && total > 0,
+      inTransit: destination === AUGUST_HOP_DESTINATION && total > 0,
+      availableDate: destination === AUGUST_HOP_DESTINATION
+        ? LOCKED_AUGUST_MARPAC_TULSA_DATE
+        : null,
       destination,
       hopLabel: hopLabel(destination, !!extra.awaitingAugust),
       singleSku: extra.singleSku,
@@ -1296,14 +1333,10 @@ export function buildMonthViewEntries(opts: {
   const entries: MonthViewEntry[] = [];
   for (const month of productionMonths) {
     if (month.endsWith("-08")) {
-      const mix: Record<string, number> = {};
-      for (const sku of skus) {
-        const qty = Number(skuAugust[sku] ?? 0);
-        if (qty > 0) mix[sku] = qty;
-      }
+      const mix = lockedAugustMarpacTulsaMix(skus);
       entries.push(entry(month, mix, AUGUST_HOP_DESTINATION, {
         singleSku: false, track: "mixed_august",
-        awaitingAugust: !!sept.augustTbd && Object.keys(mix).length === 0,
+        awaitingAugust: false,
       }));
       const sendTotal = Object.values(tplToFba).reduce((a, b) => a + b, 0);
       if (sendTotal > 0) {

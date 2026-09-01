@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,8 @@ import {
   LIP_BALM_SKUS,
   FIRST_WAVE_AWD_TARGETS,
   FIRST_WAVE_AWD_TARGET_CAP,
+  LOCKED_AUGUST_MARPAC_TULSA_DATE,
+  LOCKED_AUGUST_MARPAC_TULSA_TOTAL,
   OPTIMISTIC_AWD_ON_HAND_TARGETS,
   OPTIMISTIC_AWD_TARGET_CAP,
   PALLET_MAX_UNITS,
@@ -43,6 +45,7 @@ const SKU_SHORT: Record<string, string> = {
   DDPE0004Shop: "Assorted",
 };
 const FIRST_ACTION_SKUS = ["DDPE0004Shop", "DDPE0003Shop", "DDPE0002Shop", "DDPE0001Shop"] as const;
+const MARPAC_TULSA_SKU_ORDER = ["DDPE0001Shop", "DDPE0004Shop", "DDPE0003Shop"] as const;
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -68,38 +71,16 @@ export function HolidayShipPlan({
   leadtime?: InventoryLeadtimeSummary | null;
 }) {
   const [committed, setCommitted] = useState<Set<string>>(new Set());
-  const [augustQty, setAugustQty] = useState<Record<string, string>>({});
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem("pallet_committed_months");
       if (saved) setCommitted(new Set(JSON.parse(saved)));
     } catch { /* ignore */ }
-    try {
-      const saved = localStorage.getItem("pallet_august_qty");
-      if (saved) setAugustQty(JSON.parse(saved));
-    } catch { /* ignore */ }
-  }, []);
-
-  const setAugust = useCallback((sku: string, value: string) => {
-    setAugustQty((prev) => {
-      const next = { ...prev, [sku]: value };
-      localStorage.setItem("pallet_august_qty", JSON.stringify(next));
-      return next;
-    });
   }, []);
 
   const policy = useMemo(() => plannerPolicy(settings, leadtime), [settings, leadtime]);
   const latestTpl = useMemo(() => latestRowPerSku(tplList), [tplList]);
-
-  const parsedAugust = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const sku of LIP_BALM_SKUS) {
-      const n = parseInt(augustQty[sku] ?? "", 10);
-      out[sku] = Number.isFinite(n) && n > 0 ? n : 0;
-    }
-    return out;
-  }, [augustQty]);
 
   const latestRestock = useMemo(() => latestRowPerSku(restockList ?? []), [restockList]);
   const latestPlanning = useMemo(() => latestRowPerSku(planningList ?? []), [planningList]);
@@ -124,7 +105,7 @@ export function HolidayShipPlan({
       ohInb += skuFba[sku] + skuInbound[sku];
     }
     const plan = buildSeptemberPlan(
-      skuFba, skuInbound, sku3pl, {}, parsedAugust, skuAwd,
+      skuFba, skuInbound, sku3pl, {}, {}, skuAwd,
       { receiveDays: policy.gateReceiveDays, tulsaFloor: policy.tulsaFloorUnits },
     );
     const months = productionHorizonMonths(
@@ -136,12 +117,11 @@ export function HolidayShipPlan({
         productionMonths: months.map((h) => h.month),
         horizonByMonth: Object.fromEntries(months.map((h) => [h.month, h])),
         sept: plan,
-        skuAugust: parsedAugust,
         committed,
       }),
       fbaPlusInbound: ohInb,
     };
-  }, [snapshots, awdList, latestTpl, latestRestock, latestPlanning, parsedAugust, policy, committed]);
+  }, [snapshots, awdList, latestTpl, latestRestock, latestPlanning, policy, committed]);
 
   const fbaAsOf = stampDate(snapshots.find((s) => s.snapshot_at)?.snapshot_at);
   const awdAsOf = stampDate(awdList.find((a) => a.pulled_at)?.pulled_at);
@@ -273,7 +253,7 @@ export function HolidayShipPlan({
           First wave: assorted + orange end of September, then unscented + peppermint (2 AWD cards/month max).
           Not the {fmt(OPTIMISTIC_AWD_TARGET_CAP)} high water.
           Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
-          {" "}August: Marpac→Tulsa TBD and 3PL→FBA 12,960.
+          {" "}August: Marpac→Tulsa {fmt(LOCKED_AUGUST_MARPAC_TULSA_TOTAL)} in transit {LOCKED_AUGUST_MARPAC_TULSA_DATE} and 3PL→FBA 12,960.
         </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {entries
@@ -282,8 +262,6 @@ export function HolidayShipPlan({
             <MonthCard
               key={`${entry.month}-${entry.destination}-${entry.track}-${idx}`}
               entry={entry}
-              augustQty={augustQty}
-              setAugust={setAugust}
             />
           ))}
         </div>
@@ -298,12 +276,8 @@ export function HolidayShipPlan({
 
 function MonthCard({
   entry,
-  augustQty,
-  setAugust,
 }: {
   entry: MonthViewEntry;
-  augustQty: Record<string, string>;
-  setAugust: (sku: string, value: string) => void;
 }) {
   const destLabel = entry.hopLabel
     || (entry.destination === "3pl_fba"
@@ -316,6 +290,7 @@ function MonthCard({
   const isMarpacTulsa = entry.destination === AUGUST_HOP_DESTINATION
     || entry.awaitingAugustTotals;
   const partialMin = palletPartialMinUnits();
+  const inTransitDate = entry.availableDate || entry.shipBy || LOCKED_AUGUST_MARPAC_TULSA_DATE;
 
   return (
     <div
@@ -331,28 +306,13 @@ function MonthCard({
         </div>
       </div>
 
-      {isMarpacTulsa && entry.units === 0 ? (
+      {isMarpacTulsa ? (
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">
-            Marpac→Tulsa · mix TBD — do not invent a mix.
+          <SkuLines mix={entry.mix} order={MARPAC_TULSA_SKU_ORDER} />
+          <p className="text-2xl font-semibold tabular-nums">{fmt(entry.units)}</p>
+          <p className="text-[10px] text-muted-foreground">
+            Marpac→Tulsa · in transit {inTransitDate}
           </p>
-          <div className="grid grid-cols-2 gap-1.5">
-            {LIP_BALM_SKUS.map((sku) => (
-              <label key={sku} className="text-[10px] text-muted-foreground">
-                {SKU_SHORT[sku]}
-                <input
-                  type="number"
-                  min={0}
-                  inputMode="numeric"
-                  placeholder="TBD"
-                  value={augustQty[sku] ?? ""}
-                  onChange={(e) => setAugust(sku, e.target.value)}
-                  className="mt-0.5 w-full rounded border bg-background px-1.5 py-0.5 text-right text-xs tabular-nums"
-                  aria-label={`${SKU_SHORT[sku]} August qty`}
-                />
-              </label>
-            ))}
-          </div>
         </div>
       ) : entry.units === 0 ? (
         <p className="text-xs text-muted-foreground py-2">
@@ -390,10 +350,10 @@ function MonthCard({
   );
 }
 
-function SkuLines({ mix }: { mix: Record<string, number> }) {
+function SkuLines({ mix, order }: { mix: Record<string, number>; order?: readonly string[] }) {
   return (
     <div className="space-y-1">
-      {LIP_BALM_SKUS.map((sku) => {
+      {(order ?? LIP_BALM_SKUS).map((sku) => {
         const qty = mix[sku];
         if (!qty || qty <= 0) return null;
         return (
