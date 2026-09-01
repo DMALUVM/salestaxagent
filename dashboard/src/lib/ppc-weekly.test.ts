@@ -121,6 +121,9 @@ describe("Blake 24d execute list", () => {
     assert.equal(list.account_cvr_branded, 35.6);
     assert.equal(list.account_cvr_nonbranded, 25.6);
     assert.equal(list.click_floor, 10);
+    assert.equal(list.grok_prompt, WEEKLY_GROK_PROMPT);
+    assert.match(list.grok_prompt, /Do not wait for 90d/);
+    assert.doesNotMatch(list.grok_prompt, /Wait for ads_search_terms_daily/);
     for (const r of list.rows) {
       assert.equal(r.current_bid, null);
       assert.equal(r.window, BLAKE_24D_WINDOW_LABEL);
