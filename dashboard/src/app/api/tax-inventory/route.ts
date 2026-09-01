@@ -14,7 +14,10 @@ export const dynamic = "force-dynamic";
 const PAGE = 1000;
 
 async function fetchAll<T>(
-  query: (from: number, to: number) => Promise<{ data: T[] | null; error: { message: string } | null }>,
+  query: (
+    from: number,
+    to: number,
+  ) => Promise<{ data: T[] | null; error: { message: string } | null }>,
 ): Promise<T[]> {
   const all: T[] = [];
   let offset = 0;
@@ -38,17 +41,17 @@ async function loadPeaksFromTable(
   year: number,
 ): Promise<StatePeak[]> {
   const { start, end } = yearBounds(year);
-  const rows = await fetchAll<LedgerDailyRow>((from, to) =>
-    sb
+  const rows = await fetchAll<LedgerDailyRow>(async (from, to) => {
+    const r = await sb
       .from("inventory_ledger_summary_daily")
       .select(
         "snapshot_date,sku,fc_code,state_code,disposition,ending_qty,cogs_per_unit,cogs_value",
       )
       .gte("snapshot_date", start)
       .lte("snapshot_date", end)
-      .range(from, to)
-      .then((r) => ({ data: r.data as LedgerDailyRow[] | null, error: r.error })),
-  );
+      .range(from, to);
+    return { data: (r.data ?? null) as LedgerDailyRow[] | null, error: r.error };
+  });
   return peakByState(rows, year);
 }
 
@@ -56,26 +59,20 @@ async function loadAwdNational(
   sb: ReturnType<typeof getServerSupabase>,
 ): Promise<{ cogs: number; units: number; missingUnits: number }> {
   const [awdRows, costRows] = await Promise.all([
-    fetchAll<{ sku: string; awd_on_hand: number }>((from, to) =>
-      sb
-        .from("inventory_awd")
-        .select("sku,awd_on_hand")
-        .range(from, to)
-        .then((r) => ({
-          data: r.data as { sku: string; awd_on_hand: number }[] | null,
-          error: r.error,
-        })),
-    ),
-    fetchAll<{ sku: string; cogs_per_unit: number | null }>((from, to) =>
-      sb
-        .from("sku_costs")
-        .select("sku,cogs_per_unit")
-        .range(from, to)
-        .then((r) => ({
-          data: r.data as { sku: string; cogs_per_unit: number | null }[] | null,
-          error: r.error,
-        })),
-    ),
+    fetchAll<{ sku: string; awd_on_hand: number }>(async (from, to) => {
+      const r = await sb.from("inventory_awd").select("sku,awd_on_hand").range(from, to);
+      return {
+        data: (r.data ?? null) as { sku: string; awd_on_hand: number }[] | null,
+        error: r.error,
+      };
+    }),
+    fetchAll<{ sku: string; cogs_per_unit: number | null }>(async (from, to) => {
+      const r = await sb.from("sku_costs").select("sku,cogs_per_unit").range(from, to);
+      return {
+        data: (r.data ?? null) as { sku: string; cogs_per_unit: number | null }[] | null,
+        error: r.error,
+      };
+    }),
   ]);
 
   const costs = new Map<string, number>();
