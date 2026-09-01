@@ -1,6 +1,10 @@
 /**
- * Daily inventory action queue for solo-operator workflow.
- * Mirrors core flag/reorder logic from /inventory without seasonal walk-forward.
+ * Daily inventory action queue for the overview panel.
+ *
+ * Reorder qty matches /inventory (target + lead − network supply) without
+ * seasonal walk-forward. CRITICAL does not use the /inventory 60d FBA floor —
+ * that flag is ops-page policy, not a daily "act now" signal. Overview
+ * CRITICAL means cover runs out before a replenishment can arrive.
  */
 
 import { live3plSnapshots } from "./inventory-3pl";
@@ -12,6 +16,9 @@ import type {
   InventorySnapshot,
   SkuVelocity,
 } from "./types";
+
+/** Cover at or above this is healthy — never CRITICAL on overview. */
+export const OVERVIEW_HEALTHY_COVER_DAYS = 45;
 
 export type InventoryAction = {
   sku: string;
@@ -143,7 +150,9 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
 
     const demand = shopifyOnly ? shopifyVel : totalVel;
     const supply = shopifyOnly ? tplAvail : onHand;
-    const dos = demand > eps ? fbaOnHand / demand : fbaOnHand > 0 ? 9999 : 0;
+    // Amazon: FBA sellable cover. Shop-only: warehouse cover (not FBA, which is 0).
+    const coverStock = shopifyOnly ? supply : fbaOnHand;
+    const dos = demand > eps ? coverStock / demand : coverStock > 0 ? 9999 : 0;
     const reorderQty = Math.max(Math.ceil((target + lead) * demand) - supply, 0);
 
     const productName =
@@ -164,13 +173,23 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
       });
     }
 
-    if (!shopifyOnly && dos < 60 && demand > eps) {
+    // Urgency window is receive/lead time, capped so ~45d+ cover is never CRITICAL.
+    const urgencyDays = Math.min(lead, OVERVIEW_HEALTHY_COVER_DAYS);
+    const isCritical = demand > eps && dos < urgencyDays;
+    const coverRounded = Math.round(dos);
+    const coverLabel = shopifyOnly ? "cover" : "FBA cover";
+
+    if (isCritical) {
+      const qtyBit =
+        reorderQty > 0
+          ? `reorder ${reorderQty.toLocaleString()} u`
+          : `${lead}d lead`;
       actions.push({
         sku,
         productName,
         severity: "critical",
         label: `${sku} — CRITICAL`,
-        detail: `${Math.round(dos)}d FBA cover · reorder ${reorderQty.toLocaleString()} u`,
+        detail: `${coverRounded}d ${coverLabel} · ${qtyBit}`,
         href: `/inventory/plan?sku=${encodeURIComponent(sku)}`,
         reorderQty,
         dos,
@@ -183,7 +202,7 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
         productName,
         severity: "restock",
         label: `${sku} — reorder`,
-        detail: `${reorderQty.toLocaleString()} u · ${Math.round(dos)}d cover · ${lead}d lead`,
+        detail: `${reorderQty.toLocaleString()} u · ${coverRounded}d cover · ${lead}d lead`,
         href: `/inventory/plan?sku=${encodeURIComponent(sku)}`,
         reorderQty,
         dos,
