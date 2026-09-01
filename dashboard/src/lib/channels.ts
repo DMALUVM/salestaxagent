@@ -50,6 +50,13 @@ export function isSellerResponsible(channel: string): boolean {
   return normalizeChannel(channel) === SHOPIFY;
 }
 
+/** True if this channel is any Shopify storefront (seller + Shop + subscription).
+ * Use for attributed sales totals — not for seller-remit liability. */
+export function isShopifyFamily(channel: string): boolean {
+  const c = normalizeChannel(channel);
+  return c === SHOPIFY || c === SHOPIFY_SHOP || c === SHOPIFY_SUB;
+}
+
 /** Human-readable label for a channel. */
 export function channelLabel(channel: string): string {
   const c = normalizeChannel(channel);
