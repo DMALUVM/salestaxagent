@@ -74,9 +74,14 @@ function PaidAdsCsvHowto({
               <HowtoLink href={META_ADS_CSV_URL}>{META_ADS_CSV_URL}</HowtoLink>
             </p>
             <p>
-              Saved report: Tallowbourn Meta Ads Ops Daily → Last 7 → Export CSV.
+              Saved report: Tallowbourn Meta Ads Ops Daily MUST include breakdown Day
+              (Campaign × Day) — same bar as Google Ads Daily — then Last 7 → Export CSV.
               Must include Campaign name + Amount spent (USD). Purchases conversion value if present.
               Campaign or ad-set level is OK (parser sums).
+            </p>
+            <p>
+              A range-only export (Reporting starts/ends, no Day column) lands as one day
+              and will not fill the week.
             </p>
           </li>
           <li>
