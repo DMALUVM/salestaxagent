@@ -22,7 +22,10 @@ export async function GET() {
     }
     return Response.json({ costs: attachCostProductNames(costs, velocity ?? []) });
   } catch (e) {
-    return Response.json({ costs: [] });
+    return Response.json(
+      { error: e instanceof Error ? e.message : "costs failed" },
+      { status: 500 },
+    );
   }
 }
 

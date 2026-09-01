@@ -88,7 +88,7 @@ function localDate(d: Date): string {
 }
 
 export default function PlanSkuPage() {
-  const { data: raw, loading } = useInventory();
+  const { data: raw, loading, error } = useInventory();
   const [selectedSku, setSelectedSku] = useState(() => {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("sku") ?? "";
@@ -214,8 +214,10 @@ export default function PlanSkuPage() {
       ? Number(tplItem?.available ?? 0)
       : (categorySums?.onHand.tpl ?? 0);
 
-    // Two supply pools
-    const fbaSupply = fba + inbound + (useAwd ? awdOh : 0);
+    // Two supply pools. AWD/3PL join FBA supply only when the matching
+    // checkbox is on — include3pl used to be a no-op despite being in deps.
+    const fbaSupply =
+      fba + inbound + (useAwd ? awdOh : 0) + (include3pl ? tplOh : 0);
     const ownedTotal = fba + inbound + awdOh + tplOh;
 
     const today = new Date();
@@ -467,6 +469,11 @@ export default function PlanSkuPage() {
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          {error}
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Plan SKU</h1>
@@ -569,17 +576,20 @@ export default function PlanSkuPage() {
               <input
                 type="number"
                 value={bufferDays}
-                onChange={(e) => setBufferDays(Number(e.target.value))}
+                onChange={(e) => {
+                  setBufferDays(Number(e.target.value));
+                  setRan(false);
+                }}
                 className="mt-1 w-full rounded border bg-background px-3 py-2 text-sm"
               />
             </div>
             <div className="flex flex-col justify-end gap-1">
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={useAwd} onChange={(e) => setUseAwd(e.target.checked)} />
+                <input type="checkbox" checked={useAwd} onChange={(e) => { setUseAwd(e.target.checked); setRan(false); }} />
                 AWD in FBA supply
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={include3pl} onChange={(e) => setInclude3pl(e.target.checked)} />
+                <input type="checkbox" checked={include3pl} onChange={(e) => { setInclude3pl(e.target.checked); setRan(false); }} />
                 3PL in FBA supply
               </label>
             </div>
@@ -812,8 +822,13 @@ export default function PlanSkuPage() {
                   Transfer to FBA
                 </p>
                 <p className={`text-lg font-semibold tabular-nums ${plan.fbaGap > 0 ? "text-amber-600" : ""}`}>
-                  {plan.fbaGap > 0 ? fmt(plan.transferFromTpl + plan.transferFromAwd) : "—"}
+                  {plan.transferFromTpl + plan.transferFromAwd > 0
+                    ? fmt(plan.transferFromTpl + plan.transferFromAwd)
+                    : "—"}
                 </p>
+                {plan.fbaGap > 0 && plan.transferFromTpl + plan.transferFromAwd === 0 && (
+                  <p className="text-[10px] text-muted-foreground">No 3PL/AWD to move — see Produce</p>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -1000,8 +1015,9 @@ export default function PlanSkuPage() {
       )}
 
       <p className="text-xs text-muted-foreground">
-        Demand = calibrated 30d velocity × weekly seasonality. FBA stockout =
-        when FBA on-hand is exhausted at seasonal rate. Not financial advice.
+        Demand = imported weekly forecast when available, else V30 ×
+        seasonality. FBA stockout = when FBA on-hand is exhausted at that
+        rate. Not financial advice.
       </p>
     </div>
   );

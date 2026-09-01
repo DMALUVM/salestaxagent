@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/table";
 import { LoadingState } from "@/components/loading";
 import { isConfigured } from "@/lib/supabase";
+import { amazonAsOf, windowStart } from "@/lib/as-of";
 import { Shield, TrendingUp, DollarSign, Eye, ShoppingCart, AlertTriangle } from "lucide-react";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
@@ -40,30 +41,41 @@ export default function AmazonOpsPage() {
     shipped_units: number;
     total_revenue: number;
   }
-  const [data, setData] = useState<{ traffic: TrafficDay[]; asinTraffic: AsinTraffic[]; reimbursements: Reimbursement[]; snsSeller: SnsSeller[]; snsOffers: SnsOffer[] } | null>(null);
+  const [data, setData] = useState<{ traffic: TrafficDay[]; asinTraffic: AsinTraffic[]; reimbursements: Reimbursement[]; snsSeller: SnsSeller[]; snsOffers: SnsOffer[]; error?: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isConfigured()) { setLoading(false); return; }
-    fetch("/api/amazon-ops").then((r) => r.json()).then((d) => {
-      setData(d); setLoading(false);
-    }).catch(() => setLoading(false));
+    fetch("/api/amazon-ops").then(async (r) => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error ?? `Load failed (${r.status})`);
+      setData(d);
+      setLoadError(null);
+      setLoading(false);
+    }).catch((e) => {
+      setLoadError(e instanceof Error ? e.message : String(e));
+      setLoading(false);
+    });
   }, []);
 
-  const { last7, last30, reimbTotal30, reimbByReason } = useMemo(() => {
-    if (!data) return { last7: null, last30: null, reimbTotal30: 0, reimbByReason: [] };
+  const { last7, last30, reimbTotal30, reimbByReason, reimb30 } = useMemo(() => {
+    if (!data) return { last7: null, last30: null, reimbTotal30: 0, reimbByReason: [], reimb30: [] as Reimbursement[] };
+    const asOf = amazonAsOf();
+    const start7 = windowStart(asOf, 7);
+    const start30 = windowStart(asOf, 30);
     const traffic = [...(data.traffic ?? [])].sort((a, b) => b.date.localeCompare(a.date));
-    const t7 = traffic.slice(0, 7);
-    const t30 = traffic;
+    const t7 = traffic.filter((t) => t.date >= start7 && t.date <= asOf);
+    const t30 = traffic.filter((t) => t.date >= start30 && t.date <= asOf);
 
     const avg = (arr: TrafficDay[], key: keyof TrafficDay) =>
       arr.length ? arr.reduce((s, r) => s + Number(r[key] ?? 0), 0) / arr.length : 0;
     const sum = (arr: TrafficDay[], key: keyof TrafficDay) =>
       arr.reduce((s, r) => s + Number(r[key] ?? 0), 0);
 
-    const now = new Date();
-    const d30 = new Date(now); d30.setDate(d30.getDate() - 30);
-    const reimb30 = (data.reimbursements ?? []).filter((r) => r.approval_date >= d30.toISOString());
+    const reimb30 = (data.reimbursements ?? []).filter((r) =>
+      (r.approval_date ?? "").slice(0, 10) >= start30,
+    );
     const rt = reimb30.reduce((s, r) => s + Number(r.amount_total ?? 0), 0);
 
     const reasons: Record<string, number> = {};
@@ -89,6 +101,7 @@ export default function AmazonOpsPage() {
       },
       reimbTotal30: rt,
       reimbByReason: Object.entries(reasons).sort((a, b) => b[1] - a[1]),
+      reimb30,
     };
   }, [data]);
 
@@ -115,7 +128,15 @@ export default function AmazonOpsPage() {
         </p>
       </div>
 
-      {!hasTraffic && !hasReimb ? (
+      {loadError ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" />
+            <p className="text-sm font-medium">Couldn&apos;t load Amazon ops</p>
+            <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+          </CardContent>
+        </Card>
+      ) : !hasTraffic && !hasReimb ? (
         <Card>
           <CardContent className="py-12 text-center">
             <ShoppingCart className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
@@ -152,13 +173,13 @@ export default function AmazonOpsPage() {
                 </Card>
                 <Card>
                   <CardContent className="p-4">
-                    <p className="text-[10px] text-muted-foreground uppercase">Conv. Rate</p>
+                    <p className="text-[10px] text-muted-foreground uppercase">Conv. Rate (7d)</p>
                     <p className="text-2xl font-semibold tabular-nums">{(last7?.convRate ?? 0).toFixed(1)}%</p>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="p-4">
-                    <p className="text-[10px] text-muted-foreground uppercase">Buy Box</p>
+                    <p className="text-[10px] text-muted-foreground uppercase">Buy Box (7d)</p>
                     <p className="text-2xl font-semibold tabular-nums">{(last7?.buyBox ?? 0).toFixed(1)}%</p>
                   </CardContent>
                 </Card>
@@ -201,7 +222,7 @@ export default function AmazonOpsPage() {
               {asinTraffic.length > 0 && (
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Product Performance (period)</CardTitle>
+                    <CardTitle className="text-sm font-medium">Product Performance (latest Brand Analytics pull)</CardTitle>
                   </CardHeader>
                   <CardContent className="p-0 overflow-x-auto">
                     <Table>
@@ -256,7 +277,7 @@ export default function AmazonOpsPage() {
                     </div>
                     <div>
                       <p className="text-[10px] text-muted-foreground uppercase">Events</p>
-                      <p className="text-2xl font-semibold tabular-nums">{reimbursements.filter((r) => r.approval_date >= new Date(Date.now() - 30 * 86400000).toISOString()).length}</p>
+                      <p className="text-2xl font-semibold tabular-nums">{reimb30.length}</p>
                     </div>
                   </div>
                   <Table>
@@ -270,7 +291,7 @@ export default function AmazonOpsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {reimbursements.slice(0, 20).map((r, i) => (
+                      {reimb30.slice(0, 20).map((r, i) => (
                         <TableRow key={i}>
                           <TableCell className="text-xs tabular-nums">{r.approval_date?.slice(0, 10)}</TableCell>
                           <TableCell className="text-xs font-medium">{r.sku || "—"}</TableCell>

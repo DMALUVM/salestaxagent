@@ -69,7 +69,8 @@ describe("Overview registered tile", () => {
     assert.match(src, /const filingToday = agentToday\(\)/);
     assert.match(src, /classifyFilings[\s\S]*filingToday/);
     assert.match(src, /Late Filing/);
-    assert.match(src, /href=\{overdue\.length > 0 \? "\/calendar"/);
+    assert.match(src, /actionsHref/);
+    assert.match(src, /href=\{actionsHref\}/);
     assert.match(src, /QueryError/);
   });
 });

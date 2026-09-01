@@ -36,7 +36,7 @@ export function PpcReconcile({ summary, asOfLabel }: {
               Console reconcile
             </p>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              {summary.windowDays} closed days ({summary.from} → {summary.asOf})
+              Always {summary.windowDays} closed days ({summary.from} → {summary.asOf}), not the 7/14/30/90 toggle
               {asOfLabel ? ` · as-of ${asOfLabel}` : ""}
             </p>
           </div>

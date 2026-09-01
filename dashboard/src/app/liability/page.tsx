@@ -443,8 +443,9 @@ export default function LiabilityPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" className="shrink-0"
-            onClick={() => window.open("/api/export-csv?table=sales_by_state", "_blank")}>
-            <Download className="mr-1.5 h-3.5 w-3.5" /> Export CSV
+            onClick={() => window.open("/api/export-csv?table=sales_by_state", "_blank")}
+            title="Downloads raw sales_by_state rows, not the liability table on this page">
+            <Download className="mr-1.5 h-3.5 w-3.5" /> Export sales (raw)
           </Button>
           <Button variant="outline" size="sm" className="shrink-0"
             onClick={() => window.open(`/api/cpa-packet?start=${new Date().getFullYear()}-01-01&end=${new Date().toISOString().slice(0, 10)}`, "_blank")}>
@@ -801,8 +802,8 @@ export default function LiabilityPage() {
                   <p>
                     <strong>Shopify This Period</strong> = direct sales in this
                     state since the &ldquo;Filed Thru&rdquo; date. If no date
-                    is set, all-time Shopify sales are shown. Set the date on
-                    the{" "}
+                    is set, sales and tax show as $0 until you set Last Filed
+                    Through on the{" "}
                     <a href="/registrations" className="underline">
                       Registrations
                     </a>{" "}

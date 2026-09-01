@@ -154,6 +154,11 @@ describe("plan SKU page wiring", () => {
       "production strip must render before / outside {plan &&}",
     );
     assert.doesNotMatch(page, /setUntilDate\(next\);\s*setRan\(false\)/);
+    assert.match(
+      page,
+      /include3pl \? tplOh/,
+      "3PL in FBA supply checkbox must change fbaSupply",
+    );
   });
 
   test("inventory table files unchanged and no /production-planner", () => {

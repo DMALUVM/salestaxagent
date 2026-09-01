@@ -463,10 +463,7 @@ export default function SalesMapPage() {
           <span className="mx-1 text-muted-foreground/30">|</span>
           {availableMonths.map((ym) => {
             const mm = parseInt(ym.slice(5, 7), 10);
-            const active =
-              resolvedMonth === ym ||
-              (month === "latest" &&
-                ym === availableMonths[availableMonths.length - 1]);
+            const active = month === ym;
             return (
               <button
                 key={ym}

@@ -266,7 +266,7 @@ export default function Pulse() {
     if (entityOverdue > 0) items.push({ label: `${entityOverdue} overdue entity filing${entityOverdue > 1 ? "s" : ""}`, href: "/entity" });
     const dueSoon = up.filter((f) => f.days_until_due >= 0 && f.days_until_due <= 14);
     if (dueSoon.length > 0 && od.length === 0) {
-      items.push({ label: `${dueSoon.length} filing${dueSoon.length > 1 ? "s" : ""} due within 14d`, href: "/liability" });
+      items.push({ label: `${dueSoon.length} filing${dueSoon.length > 1 ? "s" : ""} due within 14d`, href: "/calendar" });
     }
     for (const r of recs.filter((r) => r.recommendation === "REVIEW").slice(0, 2))
       items.push({ label: `${r.state_code} — review with CPA`, href: "/registrations" });
@@ -313,7 +313,15 @@ export default function Pulse() {
 
   // Same eligible set as the chips above — never a raw status filter.
   const upcoming = upcomingOpen.slice(0, 4);
-  const chartMax = Math.max(...sales.last30.map((d) => d.shopify + d.amazon), 1);
+  function dayGross(d: (typeof sales.last30)[number]): number {
+    if (channelFilter === "shopify") return d.shopify;
+    if (channelFilter === "amazon") return d.amazon;
+    return d.total;
+  }
+  const chartMax = Math.max(...sales.last30.map(dayGross), 1);
+  const chartEnd = sales.last30[sales.last30.length - 1]?.date ?? "yesterday";
+  const actionsHref =
+    overdue.length > 0 ? "/calendar" : entityOverdue > 0 ? "/entity" : "/registrations";
 
   return (
     <div className="space-y-6">
@@ -424,10 +432,17 @@ export default function Pulse() {
           <div className="relative">
             <div className="flex gap-px" style={{ height: "160px" }}>
               {sales.last30.map((day, i) => {
-                const total = day.total;
+                const total = dayGross(day);
                 const barH = chartMax > 0 ? (total / chartMax) * 160 : 0;
-                const shopifyH = total > 0 ? (day.shopify / total) * barH : 0;
-                const amazonH = barH - shopifyH;
+                const shopifyH =
+                  channelFilter === "amazon"
+                    ? 0
+                    : channelFilter === "shopify"
+                      ? barH
+                      : day.total > 0
+                        ? (day.shopify / day.total) * barH
+                        : 0;
+                const amazonH = channelFilter === "shopify" ? 0 : barH - shopifyH;
                 const active = hoverDay === i;
                 return (
                   <div
@@ -498,7 +513,7 @@ export default function Pulse() {
               <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-blue-500" /> Shopify</span>
               <span className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-sm bg-orange-400" /> Amazon</span>
             </span>
-            <span>today</span>
+            <span>{chartEnd}</span>
           </div>
         </CardContent>
       </Card>
@@ -511,7 +526,7 @@ export default function Pulse() {
         <Card className={overdue.length > 0 ? "border-red-500/50" : actionCount > 0 ? "border-amber-500/40" : ""}>
           <CardContent className="p-4">
             <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Actions</p>
-            <Link href={overdue.length > 0 ? "/calendar" : "/registrations"}>
+            <Link href={actionsHref}>
               <p className={`mt-1 text-2xl font-semibold tabular-nums ${overdue.length > 0 ? "text-red-600 dark:text-red-400" : actionCount > 0 ? "text-amber-500" : ""}`}>{actionCount}</p>
               <p className="text-xs text-muted-foreground">
                 {overdue.length > 0 ? `${overdue.length} overdue` : actionCount > 0 ? "Needs attention" : "All clear"}
@@ -614,12 +629,14 @@ export default function Pulse() {
                 {upcoming.filter((_, i) => i < 4 - Math.min(overdue.length, 4)).map((f) => {
                   const days = f.days_until_due;
                   return (
-                    <div key={f.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
-                      <span>{f.state_code} <span className="text-muted-foreground">{f.period_label}</span></span>
-                      <span className={`text-xs font-medium ${days <= 7 ? "text-red-500" : days <= 14 ? "text-amber-500" : "text-muted-foreground"}`}>
-                        {days}d &middot; {f.due_date.slice(5)}
-                      </span>
-                    </div>
+                    <Link key={f.id} href="/calendar">
+                      <div className="flex items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted">
+                        <span>{f.state_code} <span className="text-muted-foreground">{f.period_label}</span></span>
+                        <span className={`text-xs font-medium ${days <= 7 ? "text-red-500" : days <= 14 ? "text-amber-500" : "text-muted-foreground"}`}>
+                          {days}d &middot; {f.due_date.slice(5)}
+                        </span>
+                      </div>
+                    </Link>
                   );
                 })}
               </div>

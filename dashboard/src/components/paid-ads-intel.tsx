@@ -847,6 +847,7 @@ export function PaidAdsIntel({
   onRange,
   onFilter,
   onUploaded,
+  loadWarning,
 }: {
   data: IntelBundle;
   range: IntelRangeDays;
@@ -854,6 +855,7 @@ export function PaidAdsIntel({
   onRange: (r: IntelRangeDays) => void;
   onFilter: (f: IntelFilter) => void;
   onUploaded: () => void;
+  loadWarning?: string | null;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -999,6 +1001,12 @@ export function PaidAdsIntel({
       {drag && (
         <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-background/70 text-sm font-medium">
           Drop Google / Meta / GSC / GA4 CSVs
+        </div>
+      )}
+
+      {loadWarning && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+          Partial load: {loadWarning}
         </div>
       )}
 

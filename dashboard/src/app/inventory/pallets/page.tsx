@@ -27,7 +27,7 @@ function SetupPrompt() {
 
 export default function PalletPlanPage() {
   const configured = isConfigured();
-  const { data: raw, loading } = useInventory();
+  const { data: raw, loading, error } = useInventory();
 
   if (!configured) return <SetupPrompt />;
   if (loading) return <LoadingState />;
@@ -42,6 +42,11 @@ export default function PalletPlanPage() {
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          {error}
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Pallet Planner</h1>

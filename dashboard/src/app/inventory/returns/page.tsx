@@ -24,13 +24,20 @@ interface ReturnRow {
 export default function ReturnsPage() {
   const [data, setData] = useState<ReturnRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isConfigured()) { setLoading(false); return; }
-    fetch("/api/fba-returns").then((r) => r.json()).then((d) => {
+    fetch("/api/fba-returns").then(async (r) => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error ?? `Load failed (${r.status})`);
       setData(d.returns ?? []);
+      setLoadError(null);
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch((e) => {
+      setLoadError(e instanceof Error ? e.message : String(e));
+      setLoading(false);
+    });
   }, []);
 
   const now = new Date();
@@ -93,12 +100,20 @@ export default function ReturnsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">FBA Returns</h1>
-          <p className="text-sm text-muted-foreground">Customer return rate by SKU and reason</p>
+          <p className="text-sm text-muted-foreground">Customer return volume by SKU and reason</p>
         </div>
         <Link href="/inventory"><Button variant="outline" size="sm">← Inventory</Button></Link>
       </div>
 
-      {!data.length ? (
+      {loadError ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" />
+            <p className="text-sm font-medium">Couldn&apos;t load returns</p>
+            <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+          </CardContent>
+        </Card>
+      ) : !data.length ? (
         <Card>
           <CardContent className="py-12 text-center">
             <RotateCcw className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />

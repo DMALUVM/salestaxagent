@@ -44,6 +44,32 @@ import {
   Undo2,
 } from "lucide-react";
 
+function throwIfSbError(error: { message: string } | null) {
+  if (error) throw new Error(error.message);
+}
+
+/** Recompute nexus_status.last_filed_through from remaining filed rows. */
+async function syncLastFiledThrough(stateCode: string) {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("filing_calendar")
+    .select("period_end")
+    .eq("state_code", stateCode)
+    .eq("status", "filed");
+  throwIfSbError(error);
+  const maxEnd =
+    (data ?? [])
+      .map((r) => r.period_end as string | null)
+      .filter((d): d is string => !!d)
+      .sort()
+      .at(-1) ?? null;
+  const { error: upErr } = await sb
+    .from("nexus_status")
+    .update({ last_filed_through: maxEnd })
+    .eq("state_code", stateCode);
+  throwIfSbError(upErr);
+}
+
 // ---------------------------------------------------------------------------
 // Mark-complete dialog (single filing)
 // ---------------------------------------------------------------------------
@@ -59,42 +85,33 @@ function MarkCompleteDialog({
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [open, setOpen] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   async function handleSubmit() {
     setSubmitting(true);
-    const sb = getSupabase();
-    await sb
-      .from("filing_calendar")
-      .update({
-        status: "filed",
-        filed_amount: amount ? parseFloat(amount) : null,
-        filed_notes: notes || null,
-        filed_date: new Date().toISOString().slice(0, 10),
-      })
-      .eq("id", filing.id);
-
-    // Update last_filed_through on nexus_status if this period is newer
-    const { data: nexus } = await sb
-      .from("nexus_status")
-      .select("last_filed_through")
-      .eq("state_code", filing.state_code)
-      .limit(1);
-
-    if (nexus?.[0] && filing.period_end) {
-      const current = nexus[0].last_filed_through ?? "";
-      if (filing.period_end > current) {
-        await sb
-          .from("nexus_status")
-          .update({ last_filed_through: filing.period_end })
-          .eq("state_code", filing.state_code);
-      }
+    setErr(null);
+    try {
+      const sb = getSupabase();
+      const { error } = await sb
+        .from("filing_calendar")
+        .update({
+          status: "filed",
+          filed_amount: amount ? parseFloat(amount) : null,
+          filed_notes: notes || null,
+          filed_date: new Date().toISOString().slice(0, 10),
+        })
+        .eq("id", filing.id);
+      throwIfSbError(error);
+      await syncLastFiledThrough(filing.state_code);
+      setOpen(false);
+      setAmount("");
+      setNotes("");
+      onComplete();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
     }
-
-    setSubmitting(false);
-    setOpen(false);
-    setAmount("");
-    setNotes("");
-    onComplete();
   }
 
   return (
@@ -136,6 +153,9 @@ function MarkCompleteDialog({
                 className="mt-1"
               />
             </div>
+            {err && (
+              <p className="text-xs text-red-600 dark:text-red-400">{err}</p>
+            )}
             <Button
               onClick={handleSubmit}
               disabled={submitting}
@@ -162,40 +182,30 @@ function QuickMarkButton({
   onDone: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   async function mark() {
     setBusy(true);
-    const sb = getSupabase();
-    await sb
-      .from("filing_calendar")
-      .update({
-        status: "filed",
-        filed_amount: null,
-        filed_notes: null,
-        filed_date: new Date().toISOString().slice(0, 10),
-      })
-      .eq("id", filing.id);
-
-    // Update last_filed_through
-    if (filing.period_end) {
-      const { data: nexus } = await sb
-        .from("nexus_status")
-        .select("last_filed_through")
-        .eq("state_code", filing.state_code)
-        .limit(1);
-      if (nexus?.[0]) {
-        const current = nexus[0].last_filed_through ?? "";
-        if (filing.period_end > current) {
-          await sb
-            .from("nexus_status")
-            .update({ last_filed_through: filing.period_end })
-            .eq("state_code", filing.state_code);
-        }
-      }
+    setErr(null);
+    try {
+      const sb = getSupabase();
+      const { error } = await sb
+        .from("filing_calendar")
+        .update({
+          status: "filed",
+          filed_amount: null,
+          filed_notes: null,
+          filed_date: new Date().toISOString().slice(0, 10),
+        })
+        .eq("id", filing.id);
+      throwIfSbError(error);
+      await syncLastFiledThrough(filing.state_code);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
-
-    setBusy(false);
-    onDone();
   }
 
   return (
@@ -205,9 +215,10 @@ function QuickMarkButton({
       className="h-7 text-xs text-emerald-600 hover:text-emerald-700 dark:text-emerald-400"
       onClick={mark}
       disabled={busy}
+      title={err ?? "Mark this period filed"}
     >
       <Check className="mr-1 h-3 w-3" />
-      {busy ? "..." : "Mark filed"}
+      {busy ? "..." : err ? "Retry" : "Mark filed"}
     </Button>
   );
 }
@@ -224,20 +235,29 @@ function UndoButton({
   onDone: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   async function undo() {
     setBusy(true);
-    await getSupabase()
-      .from("filing_calendar")
-      .update({
-        status: "pending",
-        filed_amount: null,
-        filed_notes: null,
-        filed_date: null,
-      })
-      .eq("id", filing.id);
-    setBusy(false);
-    onDone();
+    setErr(null);
+    try {
+      const { error } = await getSupabase()
+        .from("filing_calendar")
+        .update({
+          status: "pending",
+          filed_amount: null,
+          filed_notes: null,
+          filed_date: null,
+        })
+        .eq("id", filing.id);
+      throwIfSbError(error);
+      await syncLastFiledThrough(filing.state_code);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -247,6 +267,7 @@ function UndoButton({
       className="h-7 text-xs text-muted-foreground"
       onClick={undo}
       disabled={busy}
+      title={err ?? "Revert to pending and roll back Filed Thru"}
     >
       <Undo2 className="mr-1 h-3 w-3" />
       {busy ? "..." : "Undo"}
@@ -266,53 +287,35 @@ function BulkMarkOverdueButton({
   onDone: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   async function markAll() {
     setBusy(true);
-    const sb = getSupabase();
-    const today = new Date().toISOString().slice(0, 10);
-
-    // Mark all overdue as filed
-    const ids = overdue.map((f) => f.id);
-    await sb
-      .from("filing_calendar")
-      .update({
-        status: "filed",
-        filed_amount: null,
-        filed_notes: "Bulk-marked as filed",
-        filed_date: today,
-      })
-      .in("id", ids);
-
-    // Update last_filed_through for each affected state
-    const byState: Record<string, string> = {};
-    for (const f of overdue) {
-      if (
-        f.period_end &&
-        (!byState[f.state_code] || f.period_end > byState[f.state_code])
-      ) {
-        byState[f.state_code] = f.period_end;
+    setErr(null);
+    try {
+      const sb = getSupabase();
+      const today = new Date().toISOString().slice(0, 10);
+      const ids = overdue.map((f) => f.id);
+      const { error } = await sb
+        .from("filing_calendar")
+        .update({
+          status: "filed",
+          filed_amount: null,
+          filed_notes: "Bulk-marked as filed",
+          filed_date: today,
+        })
+        .in("id", ids);
+      throwIfSbError(error);
+      const states = [...new Set(overdue.map((f) => f.state_code))];
+      for (const sc of states) {
+        await syncLastFiledThrough(sc);
       }
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
-    for (const [sc, pe] of Object.entries(byState)) {
-      const { data: nexus } = await sb
-        .from("nexus_status")
-        .select("last_filed_through")
-        .eq("state_code", sc)
-        .limit(1);
-      if (nexus?.[0]) {
-        const current = nexus[0].last_filed_through ?? "";
-        if (pe > current) {
-          await sb
-            .from("nexus_status")
-            .update({ last_filed_through: pe })
-            .eq("state_code", sc);
-        }
-      }
-    }
-
-    setBusy(false);
-    onDone();
   }
 
   if (overdue.length < 2) return null;
@@ -323,12 +326,15 @@ function BulkMarkOverdueButton({
       size="sm"
       onClick={markAll}
       disabled={busy}
+      title={err ?? undefined}
       className="border-red-200 text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
     >
       <CheckCheck className="mr-1.5 h-3.5 w-3.5" />
       {busy
         ? "Marking..."
-        : `Mark all ${overdue.length} as filed`}
+        : err
+          ? "Retry bulk mark"
+          : `Mark all ${overdue.length} as filed`}
     </Button>
   );
 }
@@ -374,16 +380,22 @@ function NotRequiredButton({
     );
     if (reason === null) return; // cancelled
     setBusy(true);
-    const sb = getSupabase();
-    await sb
-      .from("filing_calendar")
-      .update({
-        status: "not_required",
-        filed_notes: reason.trim() || "marked not required by user",
-      })
-      .eq("id", filing.id);
-    setBusy(false);
-    onDone();
+    try {
+      const sb = getSupabase();
+      const { error } = await sb
+        .from("filing_calendar")
+        .update({
+          status: "not_required",
+          filed_notes: reason.trim() || "marked not required by user",
+        })
+        .eq("id", filing.id);
+      throwIfSbError(error);
+      onDone();
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -570,6 +582,10 @@ export default function CalendarPage() {
   });
   const { data: nexusData, loading: l2, error: e2, refetch: refetchNexus } = useSupabaseQuery<NexusStatus>("nexus_status");
   const [dueWindow, setDueWindow] = useState<DueWindow>("90d");
+  const refreshAll = () => {
+    refetch();
+    refetchNexus();
+  };
 
   if (loading || l2) return <LoadingState />;
   if (error || e2) {
@@ -679,7 +695,7 @@ export default function CalendarPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-1">
-        <span className="mr-1 text-[10px] uppercase text-muted-foreground">Due window</span>
+        <span className="mr-1 text-[10px] uppercase text-muted-foreground">Due window (Upcoming)</span>
         {(["30d", "90d", "all"] as DueWindow[]).map((w) => (
           <Button
             key={w}
@@ -724,7 +740,7 @@ export default function CalendarPage() {
           </TabsList>
 
           {overdue.length > 0 && (
-            <BulkMarkOverdueButton overdue={overdue} onDone={refetch} />
+            <BulkMarkOverdueButton overdue={overdue} onDone={refreshAll} />
           )}
         </div>
 
@@ -734,7 +750,7 @@ export default function CalendarPage() {
               <MonthGroupedFilings
                 rows={overdue}
                 mode="overdue"
-                onRefetch={refetch}
+                onRefetch={refreshAll}
               />
             </CardContent>
           </Card>
@@ -746,7 +762,7 @@ export default function CalendarPage() {
               <MonthGroupedFilings
                 rows={upcoming}
                 mode="upcoming"
-                onRefetch={refetch}
+                onRefetch={refreshAll}
               />
             </CardContent>
           </Card>
@@ -802,7 +818,7 @@ export default function CalendarPage() {
               <MonthGroupedFilings
                 rows={completed}
                 mode="completed"
-                onRefetch={refetch}
+                onRefetch={refreshAll}
               />
             </CardContent>
           </Card>
@@ -810,7 +826,7 @@ export default function CalendarPage() {
       </Tabs>
 
       {filings.length === 0 && (
-        <GenerateFilingsCard onDone={refetch} />
+        <GenerateFilingsCard onDone={refreshAll} />
       )}
     </div>
   );

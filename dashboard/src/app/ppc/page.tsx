@@ -1039,19 +1039,19 @@ export default function PPCPage() {
             </Card>
             <Card className={(kpi?.acos ?? 0) > 35 ? "border-red-500/30" : (kpi?.acos ?? 0) > 25 ? "border-amber-500/30" : "border-emerald-500/30"}>
               <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">ACOS</p>
+                <p className="text-[10px] text-muted-foreground uppercase">ACOS ({range})</p>
                 <p className="text-2xl font-semibold tabular-nums">{(kpi?.acos ?? 0).toFixed(1)}%</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">ROAS</p>
+                <p className="text-[10px] text-muted-foreground uppercase">ROAS ({range})</p>
                 <p className="text-2xl font-semibold tabular-nums">{(kpi?.roas ?? 0).toFixed(1)}x</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">TACOS</p>
+                <p className="text-[10px] text-muted-foreground uppercase">TACOS ({range})</p>
                 <p className="text-2xl font-semibold tabular-nums">{(kpi?.tacos ?? 0).toFixed(1)}%</p>
                 <p className="text-[10px] text-muted-foreground">ad spend / Amazon sales</p>
               </CardContent>
@@ -1668,13 +1668,14 @@ export default function PPCPage() {
                   <div className="p-6 text-center">
                     <p className="text-sm font-medium">No open recommendations.</p>
                     <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-                      Run <strong>Generate Recommendations</strong> after an Ads sync has pulled search terms.
-                      Without search-term rows there is nothing to negate, harvest or re-bid — sync first
-                      (<code>python -m src.main ads-sync --days {rangeDays}</code>), then generate.
+                      Rebuilds the old <code>ads_recommendations</code> queue after an Ads sync
+                      has pulled search terms. Does not change the This week execute list.
+                      Without search-term rows there is nothing to negate, harvest or re-bid —
+                      sync first (<code>./.venv/bin/python -m src.main ads-sync --days {rangeDays}</code>), then rebuild.
                     </p>
                     <Button variant="outline" size="sm" className="mt-3" onClick={generateRecs} disabled={generating}>
                       {generating && <RefreshCw className="mr-1 h-3 w-3 animate-spin" />}
-                      {generating ? "Generating..." : `Generate Recommendations (${range.toUpperCase()}, ${targetAcos}% ACOS)`}
+                      {generating ? "Generating..." : `Rebuild old queue (${range.toUpperCase()}, ${targetAcos}% ACOS)`}
                     </Button>
                   </div>
                 ) : (

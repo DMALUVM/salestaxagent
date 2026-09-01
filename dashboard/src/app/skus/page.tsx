@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useSupabaseQuery } from "@/lib/hooks";
+import { isConfigured } from "@/lib/supabase";
+import { QueryError } from "@/components/query-error";
 import type { SalesBySku } from "@/lib/types";
 import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
 import { displayTitle } from "@/lib/display-title";
@@ -16,7 +18,7 @@ import {
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Package, Search, ArrowUpDown, Info } from "lucide-react";
+import { Package, Search, ArrowUpDown, Info, Shield } from "lucide-react";
 import { buildAmazonMonthlyPnl } from "@/lib/sku-monthly-pnl";
 
 // ---------------------------------------------------------------------------
@@ -338,7 +340,7 @@ export default function SkusPage() {
   const [fromMonth, setFromMonth] = useState<string | null>(null);
   const [toMonth, setToMonth] = useState<string | null>(null);
 
-  const { data: skuData, loading } = useSupabaseQuery<SalesBySku>("sales_by_sku");
+  const { data: skuData, loading, error, refetch } = useSupabaseQuery<SalesBySku>("sales_by_sku");
   const { data: costData } = useSupabaseQuery<{ sku: string; cogs_per_unit: number }>("sku_costs");
 
   const amazonEcon = useMemo(
@@ -412,7 +414,16 @@ export default function SkusPage() {
 
   const selectedAgg = selected ? aggs.find((a) => a.sku === selected) : null;
 
+  if (!isConfigured()) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 text-center">
+        <Shield className="mb-4 h-12 w-12 text-muted-foreground/30" />
+        <h2 className="text-lg font-semibold">Connect to Supabase</h2>
+      </div>
+    );
+  }
   if (loading) return <LoadingState />;
+  if (error) return <QueryError message={error} onRetry={refetch} />;
 
   const totalGross = aggs.reduce((s, a) => s + a.grossSales, 0);
   const totalUnits = aggs.reduce((s, a) => s + a.units, 0);

@@ -40,6 +40,7 @@ export default function PaidAdsPage() {
       onRange={setRange}
       onFilter={setFilter}
       onUploaded={reload}
+      loadWarning={error}
     />
   );
 }

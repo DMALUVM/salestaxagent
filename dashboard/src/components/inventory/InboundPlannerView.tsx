@@ -70,9 +70,11 @@ export function InboundPlannerView() {
   // view; this view no longer makes that unused request.
 
   async function loadAtRiskSkus() {
+    setError(null);
     try {
       const invResp = await fetch("/api/inventory");
-      const invData = await invResp.json();
+      const invData = await invResp.json().catch(() => ({}));
+      if (!invResp.ok) throw new Error(invData.error ?? `Inventory load failed (${invResp.status})`);
       const snaps = invData.snapshots ?? [];
       const vels = invData.velocity ?? [];
       const velMap = new Map(vels.map((v: { sku: string; total_u_30?: number; amazon_u_30?: number }) => [v.sku, v]));
@@ -89,11 +91,13 @@ export function InboundPlannerView() {
         const demand = Number(vel?.total_u_30 ?? 0);
         if (demand > 0.1 && fba / demand < 60) critical.push(sku);
       }
-      if (critical.length) {
-        setSkuInput(critical.slice(0, 12).join(","));
+      if (!critical.length) {
+        setError("No SKUs under 60 days of FBA cover");
+        return;
       }
-    } catch {
-      /* ignore */
+      setSkuInput(critical.slice(0, 12).join(","));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -118,6 +122,7 @@ export function InboundPlannerView() {
       const lead = Number(leadDays) || 0;
 
       const results: SkuPlan[] = [];
+      const failures: string[] = [];
 
       for (const sku of skus) {
         const params = new URLSearchParams({ sku, end: endDate, safety: String(safetyPct) });
@@ -125,7 +130,7 @@ export function InboundPlannerView() {
         const fc = await fcResp.json();
 
         if (fc.error) {
-          setError(`${sku}: ${fc.error}`);
+          failures.push(`${sku}: ${fc.error}`);
           continue;
         }
 
@@ -175,6 +180,9 @@ export function InboundPlannerView() {
       }
 
       setPlans(results);
+      if (failures.length) {
+        setError(`${failures.length} of ${skus.length} SKUs failed: ${failures.join(" · ")}`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

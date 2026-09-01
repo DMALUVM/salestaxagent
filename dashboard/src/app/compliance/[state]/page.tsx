@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getSupabase } from "@/lib/supabase";
+import { isRegistered } from "@/lib/compliance-status";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -344,7 +345,7 @@ export default function StateGuidePage() {
               <div>
                 <p className="text-[10px] text-muted-foreground">Registered</p>
                 <p className="font-medium">
-                  {nexus?.is_registered ? "Yes" : "No"}
+                  {isRegistered(nexus?.is_registered) ? "Yes" : "No"}
                 </p>
               </div>
               <div>
@@ -516,10 +517,10 @@ export default function StateGuidePage() {
         <CardContent>
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/triage"
+              href="/registrations"
               className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs hover:bg-muted"
             >
-              Registration Triage
+              Nexus &amp; Registrations
               <ArrowLeft className="h-3 w-3 rotate-180" />
             </Link>
             <a

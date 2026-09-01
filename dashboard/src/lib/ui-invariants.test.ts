@@ -214,7 +214,63 @@ describe("pallet planner ship view", () => {
       /fba_on_hand = fulfillable \+ reserved \+ researching \+ unfulfillable_qty[\s\S]*formatSkuQty\(r\.fba_on_hand\)/,
     );
   });
+});
 
+describe("dashboard control labels match handlers", () => {
+  test("plan SKU 3PL checkbox changes FBA supply", () => {
+    const page = src("src/app/inventory/plan/page.tsx");
+    assert.match(page, /include3pl \? tplOh/);
+    assert.match(page, /setInclude3pl\(e\.target\.checked\); setRan\(false\)/);
+  });
+
+  test("inventory save stays open on failure and sync/export labels are honest", () => {
+    const page = src("src/app/inventory/page.tsx");
+    assert.match(page, /setSettingsError/);
+    assert.match(page, /Queue sync/);
+    assert.match(page, /Export filtered CSV/);
+    assert.doesNotMatch(page, /setShowSettings\(false\);\s*\}\s*finally/);
+  });
+
+  test("calendar mark/undo refreshes nexus and recomputes filed-through", () => {
+    const page = src("src/app/calendar/page.tsx");
+    assert.match(page, /syncLastFiledThrough/);
+    assert.match(page, /refreshAll/);
+    assert.match(page, /onRefetch=\{refreshAll\}/);
+    assert.match(page, /Due window \(Upcoming\)/);
+  });
+
+  test("overview channel filter drives the 30-day chart and deadline links", () => {
+    const page = src("src/app/page.tsx");
+    assert.match(page, /function dayGross/);
+    assert.match(page, /href: \"\/calendar\"/);
+    assert.doesNotMatch(
+      page,
+      /filings due within 14d`, href: \"\/liability\"/,
+    );
+    assert.doesNotMatch(page, />today</);
+  });
+
+  test("nav badge lives on Nexus & Registrations and uses countNeedsRegistration", () => {
+    const nav = src("src/components/nav.tsx");
+    assert.match(nav, /countNeedsRegistration/);
+    assert.match(nav, /item\.href === \"\/registrations\" && complianceCount > 0/);
+    assert.doesNotMatch(nav, /item\.href === \"\/compliance\" && complianceCount > 0/);
+  });
+
+  test("orphan /filings redirects to calendar", () => {
+    const page = src("src/app/filings/page.tsx");
+    assert.match(page, /redirect\(\"\/calendar\"\)/);
+  });
+
+  test("costs Last Updated uses max updated_at and CSV-only upload", () => {
+    const page = src("src/app/costs/page.tsx");
+    assert.match(page, /Math\.max\(\.\.\.stamps\)/);
+    assert.match(page, /accept=\"\.csv\"/);
+    assert.match(page, /gross − referral − FBA − ads − COGS/);
+  });
+});
+
+describe("owned Total helper", () => {
   test("owned Total helper has no lip-family or named-SKU special case", () => {
     const owned = src("src/lib/inventory-owned-total.ts");
     const sc = src("src/lib/inventory-sc-on-hand.ts");

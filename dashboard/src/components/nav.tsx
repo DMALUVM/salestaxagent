@@ -28,6 +28,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import { useEffect, useState } from "react";
 import { getSupabase, isConfigured } from "@/lib/supabase";
+import { countNeedsRegistration } from "@/lib/compliance-status";
 
 interface NavItem {
   href: string;
@@ -82,25 +83,17 @@ function useComplianceCount() {
     async function load() {
       try {
         const sb = getSupabase();
-        // Try with compliance columns first
-        const { count: c, error } = await sb
+        const { data, error } = await sb
           .from("nexus_status")
-          .select("state_code", { count: "exact", head: true })
-          .or("has_physical_nexus.eq.true,has_economic_nexus.eq.true")
-          .eq("is_registered", false)
-          .or("compliance_resolved.is.null,compliance_resolved.eq.false");
-
-        if (!error && typeof c === "number") {
-          setCount(c);
+          .select("has_physical_nexus,has_economic_nexus,is_registered,compliance_resolved,compliance_hidden");
+        if (!error && data) {
+          setCount(countNeedsRegistration(data));
           return;
         }
-        // Fallback: columns may not exist yet
-        const { count: c2 } = await sb
+        const { data: fallback } = await sb
           .from("nexus_status")
-          .select("state_code", { count: "exact", head: true })
-          .or("has_physical_nexus.eq.true,has_economic_nexus.eq.true")
-          .eq("is_registered", false);
-        if (typeof c2 === "number") setCount(c2);
+          .select("has_physical_nexus,has_economic_nexus,is_registered");
+        if (fallback) setCount(countNeedsRegistration(fallback));
       } catch {
         // ignore
       }
@@ -125,7 +118,7 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
   function renderLink(item: NavItem, nested = false) {
     const active = isActive(item.href);
     const Icon = item.icon;
-    const showBadge = item.href === "/compliance" && complianceCount > 0;
+    const showBadge = item.href === "/registrations" && complianceCount > 0;
     return (
       <div key={item.href}>
         <Link

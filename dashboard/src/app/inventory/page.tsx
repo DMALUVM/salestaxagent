@@ -155,6 +155,7 @@ export default function InventoryPage() {
   const [selected, setSelected] = useState<ComputedRow | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
@@ -601,18 +602,21 @@ export default function InventoryPage() {
   async function saveSettings() {
     if (!localSettings) return;
     setSaving(true);
+    setSettingsError(null);
     try {
-      await fetch("/api/inventory", {
+      const resp = await fetch("/api/inventory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(localSettings),
       });
-      refetch();
-    } catch {
-      /* ignore */
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(body.error ?? `Save failed (${resp.status})`);
+      await refetch();
+      setShowSettings(false);
+    } catch (e) {
+      setSettingsError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
-      setShowSettings(false);
     }
   }
 
@@ -629,7 +633,7 @@ export default function InventoryPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `reorder_plan_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `inventory_filtered_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -714,11 +718,12 @@ export default function InventoryPage() {
             }}
           >
             <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
-            Sync
+            {syncing ? "Queuing…" : "Queue sync"}
           </Button>
-          <Button variant="outline" size="sm" onClick={exportCSV}>
+          <Button variant="outline" size="sm" onClick={exportCSV}
+            title={`Exports the ${filtered.length} SKUs currently on screen (search, chips, zero-stock)`}>
             <Download className="mr-1.5 h-3.5 w-3.5" />
-            Export CSV
+            Export filtered CSV
           </Button>
         </div>
       </div>
@@ -1360,6 +1365,9 @@ export default function InventoryPage() {
                 />
                 Include 3PL (Ship Sidekick) in on-hand
               </label>
+              {settingsError && (
+                <p className="text-xs text-red-600 dark:text-red-400">{settingsError}</p>
+              )}
               <Button onClick={saveSettings} disabled={saving} className="w-full">
                 {saving ? "Saving..." : "Save Settings"}
               </Button>

@@ -94,17 +94,23 @@ function ObligationCard({
           );
     if (reason === null) return;
     setBusy(true);
-    const sb = getSupabase();
-    await sb
-      .from("compliance_obligations")
-      .update({
-        status,
-        user_notes: reason.trim() || null,
-        ...(status === "filed" ? { filed_date: today } : {}),
-      })
-      .eq("id", row.id);
-    setBusy(false);
-    onChanged();
+    try {
+      const sb = getSupabase();
+      const { error } = await sb
+        .from("compliance_obligations")
+        .update({
+          status,
+          user_notes: reason.trim() || null,
+          ...(status === "filed" ? { filed_date: today } : {}),
+        })
+        .eq("id", row.id);
+      if (error) throw new Error(error.message);
+      onChanged();
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (

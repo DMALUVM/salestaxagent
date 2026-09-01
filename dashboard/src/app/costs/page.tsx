@@ -33,13 +33,19 @@ export default function CostsPage() {
   const [addName, setAddName] = useState("");
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function load() {
     try {
       const resp = await fetch("/api/costs");
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error ?? `Load failed (${resp.status})`);
       setCosts(data.costs ?? []);
-    } catch { /* ok */ }
+      setLoadError(null);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+    }
     setLoading(false);
   }
 
@@ -47,20 +53,35 @@ export default function CostsPage() {
 
   async function saveCost(sku: string, cogs: number, name?: string) {
     setSaving(true);
-    await fetch("/api/costs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sku, cogs_per_unit: cogs, product_name: name }),
-    });
-    setEditing(null);
-    await load();
-    setSaving(false);
+    setActionError(null);
+    try {
+      const resp = await fetch("/api/costs", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku, cogs_per_unit: cogs, product_name: name }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || json.error) throw new Error(json.error ?? `Save failed (${resp.status})`);
+      setEditing(null);
+      await load();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function deleteCost(sku: string) {
     if (!confirm(`Delete COGS for ${sku}?`)) return;
-    await fetch(`/api/costs?sku=${encodeURIComponent(sku)}`, { method: "DELETE" });
-    await load();
+    setActionError(null);
+    try {
+      const resp = await fetch(`/api/costs?sku=${encodeURIComponent(sku)}`, { method: "DELETE" });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok || json.error) throw new Error(json.error ?? `Delete failed (${resp.status})`);
+      await load();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   async function addCostSubmit() {
@@ -150,13 +171,18 @@ export default function CostsPage() {
             <span className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted transition-colors">
               <Upload className="mr-1.5 h-3.5 w-3.5" /> Upload CSV
             </span>
-            <input type="file" accept=".csv,.xlsx" className="hidden" onChange={handleUpload} />
+            <input type="file" accept=".csv" className="hidden" onChange={handleUpload} />
           </label>
         </div>
       </div>
 
       {uploadMsg && (
         <div className="rounded-lg border p-3 text-sm text-muted-foreground">{uploadMsg}</div>
+      )}
+      {(loadError || actionError) && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          {actionError ?? loadError}
+        </div>
       )}
 
       {/* Summary */}
@@ -177,7 +203,12 @@ export default function CostsPage() {
           <CardContent className="p-4">
             <p className="text-[10px] text-muted-foreground uppercase">Last Updated</p>
             <p className="text-lg font-semibold">
-              {costs[0]?.updated_at ? new Date(costs[0].updated_at).toLocaleDateString() : "—"}
+              {(() => {
+                const stamps = costs.map((c) => Date.parse(c.updated_at)).filter((n) => !Number.isNaN(n));
+                return stamps.length
+                  ? new Date(Math.max(...stamps)).toLocaleDateString()
+                  : "—";
+              })()}
             </p>
           </CardContent>
         </Card>
@@ -191,7 +222,7 @@ export default function CostsPage() {
       </div>
 
       {/* Table */}
-      {!costs.length ? (
+      {!costs.length && !loadError ? (
         <Card>
           <CardContent className="py-12 text-center">
             <DollarSign className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
@@ -281,7 +312,7 @@ export default function CostsPage() {
       <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
         <span>
           COGS are seller-provided unit costs. Amazon Finances API does not supply COGS.
-          Next pnl-sync will use these costs for Contribution = Payout - COGS - Ads.
+          Next pnl-sync will use these costs for Contribution = gross − referral − FBA − ads − COGS.
           For xlsx import, use CLI: <code>python -m src.main costs-import path/to/file.xlsx</code>
         </span>
       </div>

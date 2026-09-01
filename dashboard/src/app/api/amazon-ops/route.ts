@@ -81,6 +81,9 @@ export async function GET() {
 
     return Response.json({ traffic, asinTraffic, reimbursements, snsSeller, snsOffers });
   } catch (e) {
-    return Response.json({ traffic: [], asinTraffic: [], reimbursements: [], snsSeller: [], snsOffers: [] });
+    return Response.json(
+      { error: e instanceof Error ? e.message : "amazon-ops failed" },
+      { status: 500 },
+    );
   }
 }

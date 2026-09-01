@@ -141,9 +141,13 @@ export default function ProfitPage() {
       <SectionNav
         items={[
           { id: "customers", label: "Customer LTV" },
-          { id: "windows", label: "Windows" },
-          { id: "waterfall", label: "Waterfall" },
-          { id: "daily", label: "P&L table" },
+          ...(data.length > 0
+            ? [
+                { id: "windows", label: "Windows" },
+                { id: "waterfall", label: "Waterfall" },
+              ]
+            : []),
+          ...(hasData ? [{ id: "daily", label: "P&L table" }] : []),
         ]}
       />
 

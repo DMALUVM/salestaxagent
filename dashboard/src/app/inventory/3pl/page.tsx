@@ -61,13 +61,20 @@ export default function TplCostsPage() {
   const [filterMonth, setFilterMonth] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isConfigured()) { setLoading(false); return; }
-    fetch("/api/3pl-costs").then((r) => r.json()).then((d) => {
+    fetch("/api/3pl-costs").then(async (r) => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) throw new Error(d.error ?? `Load failed (${r.status})`);
       setData(d);
+      setLoadError(null);
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch((e) => {
+      setLoadError(e instanceof Error ? e.message : String(e));
+      setLoading(false);
+    });
   }, []);
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -182,11 +189,11 @@ export default function TplCostsPage() {
         </div>
         <div className="flex gap-2">
           <Link href="/inventory"><Button variant="outline" size="sm">← Inventory</Button></Link>
-          <label className="cursor-pointer">
+          <label className={`cursor-pointer ${uploading ? "pointer-events-none opacity-50" : ""}`}>
             <span className="inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted transition-colors">
-              <Upload className="mr-1.5 h-3.5 w-3.5" /> Upload CSV
+              <Upload className="mr-1.5 h-3.5 w-3.5" /> {uploading ? "Uploading…" : "Upload CSV"}
             </span>
-            <input type="file" accept=".csv" className="hidden" onChange={handleUpload} />
+            <input type="file" accept=".csv" className="hidden" disabled={uploading} onChange={handleUpload} />
           </label>
         </div>
       </div>
@@ -195,7 +202,14 @@ export default function TplCostsPage() {
         <div className="rounded-lg border p-3 text-sm text-muted-foreground">{uploadMsg}</div>
       )}
 
-      {!monthly.length ? (
+      {loadError ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-sm font-medium">Couldn&apos;t load 3PL costs</p>
+            <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+          </CardContent>
+        </Card>
+      ) : !monthly.length ? (
         <Card>
           <CardContent className="py-12 text-center">
             <Package className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
