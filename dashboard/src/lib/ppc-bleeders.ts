@@ -1,9 +1,10 @@
 /**
  * Bleeder classifier library — not this week's /ppc execute list.
  *
- * GET /api/ppc must not auto-ship this as the execute table. 60d math
- * refuses (empty rows + coverage flag) when stored search-term dates are
- * shorter than BLEEDER_MIN_WINDOW_DAYS. Do not rank a 24d window as 60d.
+ * GET /api/ppc must not auto-ship this as the execute table. This week
+ * ships Blake's 63d ranked list via buildBlake63dList. 60d math refuses
+ * (empty rows + coverage flag) when stored search-term dates are shorter
+ * than BLEEDER_MIN_WINDOW_DAYS. Do not rank a short window as 60d.
  *
  * Nothing here writes to Amazon.
  */

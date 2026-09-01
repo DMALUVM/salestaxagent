@@ -115,15 +115,19 @@ export function PpcBleeders({
   }
 
   async function copyPrompt() {
-    const text = data?.grok_prompt ?? grokPromptFor(data?.execute_list ?? "empty");
+    const text = data?.execute_list === "blake_63d"
+      ? grokPromptFor("blake_63d")
+      : (data?.grok_prompt ?? grokPromptFor(data?.execute_list ?? "empty"));
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       onNotice?.({
         kind: "success",
-        text: data?.execute_ready
-          ? "Standing prompt copied. 90d window present — execute list stays empty until ranked. Nothing writes to Amazon."
-          : "Standing prompt copied. Wait for 90d min/max on ads_search_terms_daily. Do not use the stored 24d window as an execute list. Nothing writes to Amazon.",
+        text: data?.execute_list === "blake_63d"
+          ? "63d execute prompt copied. This week CSV is the execute list. Window 2026-06-30..08-31. Nothing writes to Amazon."
+          : data?.execute_ready
+            ? "Standing prompt copied. 90d window present — execute list stays empty until ranked. Nothing writes to Amazon."
+            : "Standing prompt copied. Wait for 90d min/max on ads_search_terms_daily. Do not use a short stored window as an execute list. Nothing writes to Amazon.",
       });
     } catch (e) {
       onNotice?.({
@@ -144,7 +148,7 @@ export function PpcBleeders({
   }
 
   const waiting = data.execute_list === "empty" && !data.execute_ready;
-  const blakeReady = data.execute_list === "blake_24d";
+  const blakeReady = data.execute_list === "blake_63d";
 
   return (
     <div className="space-y-3">
@@ -153,7 +157,7 @@ export function PpcBleeders({
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <p className="text-sm font-semibold text-foreground">
-                {blakeReady ? "This week — 24d Blake-ranked list" : "This week — empty until 90d search terms"}
+                {blakeReady ? "This week — 63d Blake-ranked list" : "This week — empty until 90d search terms"}
               </p>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 {data.window_chip ? <Badge variant="outline">{data.window_chip}</Badge> : null}
@@ -179,7 +183,7 @@ export function PpcBleeders({
           </div>
           <p className="text-sm text-foreground">
             {blakeReady
-              ? "24d Blake-ranked list for 2026-08-06..08-29. Mark Done or Skipped after Seller Central. 90d backfill continues for next Monday. Nothing writes to Amazon."
+              ? "63d Blake-ranked list for 2026-06-30..08-31 (23 days with rows, SP-only). Mark Done or Skipped after Seller Central. Nothing writes to Amazon."
               : waiting
                 ? "No execute list this week. Wait for Dana's new min/max on ads_search_terms_daily after the Sunday 90d pull. Blake ranks then."
                 : "90d search-term window is present. Execute list stays empty until Blake ranks. No auto-seed."}
