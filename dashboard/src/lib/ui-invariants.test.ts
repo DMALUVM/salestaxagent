@@ -69,6 +69,18 @@ describe("pallet planner ship view", () => {
     assert.doesNotMatch(model, /aim end of August if Marpac can/);
     assert.match(model, /FIRST_WAVE_AWD_TARGET_CAP = 61_425/);
     assert.match(ship, /FBA cap vs on-hand/);
+    assert.match(ship, /SC_FBA_CAP_MONTHS/);
+    assert.match(ship, /Inbound room/);
+    assert.match(ship, /fits in the new room/);
+    assert.match(ship, /NEXT_3PL_FBA_AFTER_TULSA_UNITS/);
+    assert.match(ship + "\n" + model, /128\.93/);
+    assert.match(model, /SC_FBA_CAP_SEP_UNITS = 51_500/);
+    assert.match(model, /SC_FBA_CAP_OCT_UNITS = 56_000/);
+    assert.match(model, /SC_FBA_CAP_NOV_UNITS = 73_800/);
+    assert.match(model, /NEXT_3PL_FBA_AFTER_TULSA_UNITS = 10_800/);
+    assert.match(model, /SC_FBA_INBOUND_ROOM_UNITS = 12_500/);
+    assert.doesNotMatch(ship, /familyFbaCapForMonth\(/);
+    assert.doesNotMatch(ship, /Oct–Dec ~/);
     assert.match(ship, /Marpac→Tulsa/);
     assert.match(model, /Marpac→Tulsa/);
     assert.doesNotMatch(ship, /mix TBD/);
@@ -92,6 +104,8 @@ describe("pallet planner ship view", () => {
   test("inventory holiday view drops logistics / 90d / reorder chrome", () => {
     const page = src("src/app/inventory/page.tsx");
     assert.match(page, /HolidayShipPlan/);
+    assert.match(page, /mergeScFbaCapacityLimits/);
+    assert.match(page, /SC_FBA_CAP_MONTHS/);
     assert.doesNotMatch(page, /Today&apos;s logistics/);
     assert.doesNotMatch(page, /Rate & lead-time calibration/);
     assert.doesNotMatch(page, /FBA &lt;60d/);

@@ -15,23 +15,26 @@ import type {
 import {
   AUGUST_HOP_DESTINATION,
   AUGUST_HOP_LABEL,
-  FAMILY_FBA_CAP_OCT_DEC,
-  FAMILY_FBA_CAP_PEAK,
   LIP_BALM_SKUS,
   FIRST_WAVE_AWD_TARGETS,
   FIRST_WAVE_AWD_TARGET_CAP,
   LOCKED_AUGUST_MARPAC_TULSA_DATE,
   LOCKED_AUGUST_MARPAC_TULSA_TOTAL,
+  NEXT_3PL_FBA_AFTER_TULSA_UNITS,
   OPTIMISTIC_AWD_ON_HAND_TARGETS,
   OPTIMISTIC_AWD_TARGET_CAP,
   PALLET_MAX_UNITS,
+  SC_FBA_CAP_MONTHS,
+  SC_FBA_INBOUND_ROOM_FT3,
+  SC_FBA_INBOUND_ROOM_UNITS,
+  SC_FBA_USED_PCT,
   palletPartialMinUnits,
   buildMonthViewEntries,
   buildSeptemberPlan,
-  familyFbaCapForMonth,
   fbaCoverUnits,
   inboundInTransit,
   latestRowPerSku,
+  next3plFbaFitsSeptRoom,
   plannerPolicy,
   productionHorizonMonths,
   stampDate,
@@ -126,10 +129,9 @@ export function HolidayShipPlan({
   const fbaAsOf = stampDate(snapshots.find((s) => s.snapshot_at)?.snapshot_at);
   const awdAsOf = stampDate(awdList.find((a) => a.pulled_at)?.pulled_at);
   const tplAsOf = stampDate(latestTpl.find((t) => t.pulled_at)?.pulled_at);
-  const afterTonight = sept.firstAction.fbaAfterSendTotal;
   const tulsaHold = sept.firstAction.tulsaHoldTotal;
   const sendTotal = sept.firstAction.tplToFbaTotal;
-  const overCap = afterTonight > FAMILY_FBA_CAP_PEAK;
+  const nextAfterTulsaFits = next3plFbaFitsSeptRoom();
 
   const firstAction = (
     <Card className="border-blue-500/50 bg-blue-500/5">
@@ -167,16 +169,23 @@ export function HolidayShipPlan({
         <CardTitle className="text-sm font-medium">FBA cap vs on-hand + inbound</CardTitle>
       </CardHeader>
       <CardContent className="space-y-1 text-sm">
-        <p className="tabular-nums">
-          Sep {fmt(familyFbaCapForMonth("2026-09"))} · on-hand+inbound {fmt(fbaPlusInbound)}
-          {" · after tonight "}{fmt(afterTonight)}
+        {SC_FBA_CAP_MONTHS.map((m) => (
+          <p key={m.month} className="tabular-nums">
+            {m.label}: {m.limit_ft3.toFixed(2)} ft³ {m.source === "confirmed" ? "confirmed" : "estimate"}
+            {" (~"}{fmt(m.units)}{")"}
+            {m.used_ft3 != null
+              ? ` · usage ${m.used_ft3.toFixed(2)} / ${m.limit_ft3.toFixed(2)} (${SC_FBA_USED_PCT}%)`
+              : ""}
+          </p>
+        ))}
+        <p className="tabular-nums text-muted-foreground">
+          Inbound room ~{fmt(SC_FBA_INBOUND_ROOM_UNITS)} / {SC_FBA_INBOUND_ROOM_FT3.toFixed(2)} ft³
+          {" · on-hand+inbound "}{fmt(fbaPlusInbound)}
         </p>
         <p className="tabular-nums text-muted-foreground">
-          Oct–Dec ~{fmt(FAMILY_FBA_CAP_OCT_DEC)} · never over cap
+          Next 3PL→FBA after Tulsa receive {fmt(NEXT_3PL_FBA_AFTER_TULSA_UNITS)}
+          {nextAfterTulsaFits ? " — fits in the new room" : " — does not fit"}
         </p>
-        {overCap && (
-          <p className="text-xs text-red-500">After tonight exceeds the Sep cap — do not add more FBA.</p>
-        )}
       </CardContent>
     </Card>
   );
