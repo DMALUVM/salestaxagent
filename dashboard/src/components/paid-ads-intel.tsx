@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,99 @@ import type {
 } from "@/lib/paid-intel/types";
 import { INTEL_FILTERS, INTEL_RANGES } from "@/lib/paid-intel/types";
 import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
   ClipboardCopy, Download, Megaphone, Upload, AlertTriangle, CheckCircle2, Undo2, X,
-  PencilLine,
+  PencilLine, CircleHelp,
 } from "lucide-react";
+
+const GOOGLE_ADS_CSV_URL =
+  "https://ads.google.com/aw/reporteditor/view?ocid=1485260312&reportId=933344634";
+const META_ADS_CSV_URL =
+  "https://adsmanager.facebook.com/adsmanager/reporting?act=156983680801147&business_id=1028304628604309";
+const GSC_PERFORMANCE_URL = "https://search.google.com/search-console";
+
+function HowtoLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="break-all font-medium text-foreground underline underline-offset-2 hover:text-foreground"
+    >
+      {children}
+    </a>
+  );
+}
+
+/** Manual CSV pull steps for /paid-ads. Download + Dashboard Upload only. */
+function PaidAdsCsvHowto({
+  open, onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[min(85vh,40rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>How-to: pull CSVs</DialogTitle>
+          <DialogDescription>
+            Last 7 days unless you pick another range. Download each CSV, then Upload on this Dashboard page.
+          </DialogDescription>
+        </DialogHeader>
+        <ol className="list-decimal space-y-3 pl-4 text-[13px] leading-snug">
+          <li>
+            <p className="font-medium">Google Ads</p>
+            <p>
+              Open saved report Tallowbourn Ads Ops Daily:{" "}
+              <HowtoLink href={GOOGLE_ADS_CSV_URL}>{GOOGLE_ADS_CSV_URL}</HowtoLink>
+            </p>
+            <p>
+              Date Last 7 days → Download CSV. Campaign × Day (Campaign + Cost/Impr./Clicks/Conv. value,
+              or typed Search/PMax/Shopping cost columns).
+            </p>
+          </li>
+          <li>
+            <p className="font-medium">Meta</p>
+            <p>
+              Ads Manager reporting (act=156983680801147, business_id=1028304628604309):{" "}
+              <HowtoLink href={META_ADS_CSV_URL}>{META_ADS_CSV_URL}</HowtoLink>
+            </p>
+            <p>
+              Saved report: Tallowbourn Meta Ads Ops Daily → Last 7 → Export CSV.
+              Must include Campaign name + Amount spent (USD). Purchases conversion value if present.
+              Campaign or ad-set level is OK (parser sums).
+            </p>
+          </li>
+          <li>
+            <p className="font-medium">Search Console</p>
+            <p>
+              tallowbourn.com Performance (Search results) → Last 7 → Export → Download CSV.
+              Keep Queries.csv + Pages.csv + Chart.csv (zip of those is fine).
+            </p>
+            <p>
+              <HowtoLink href={GSC_PERFORMANCE_URL}>Search Console Performance</HowtoLink>
+            </p>
+          </li>
+          <li>
+            <p className="font-medium">GA4 Explore</p>
+            <p>
+              Save an Explore with these columns, then Export CSV (skip # comments / Grand total):
+              Date, Session default channel group, Landing page, Device category, Sessions, Active users,
+              Key events, Total revenue.
+            </p>
+          </li>
+        </ol>
+        <p className="text-[13px] leading-snug">
+          Then on Dashboard: /paid-ads → Upload → select ALL files at once (parser IDs by header).
+          Matching days overwrite; older days stay.
+        </p>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 async function copyText(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
@@ -593,18 +683,24 @@ function DataStatus({
   rangeLabel: string;
   onUpload: () => void;
 }) {
+  const [howtoOpen, setHowtoOpen] = useState(false);
   if (!freshness) return null;
   const sources = freshness.sources ?? [];
   const missing = sources.filter((s) => s.rows === 0);
   const thin = sources.filter((s) => s.dated && s.rows > 0 && (s.coverage ?? 1) < 0.8);
   return (
     <Card>
+      <PaidAdsCsvHowto open={howtoOpen} onOpenChange={setHowtoOpen} />
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 border-b">
         <CardTitle className="text-sm">What data is loaded</CardTitle>
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-muted-foreground">
             Today {freshness.today} · window {rangeLabel}
           </span>
+          <Button variant="outline" size="sm" onClick={() => setHowtoOpen(true)}>
+            <CircleHelp className="mr-1.5 h-3.5 w-3.5" />
+            How-to
+          </Button>
           <Button variant="outline" size="sm" onClick={onUpload}>
             <Upload className="mr-1.5 h-3.5 w-3.5" />
             Upload
@@ -645,7 +741,13 @@ function DataStatus({
                   ) : !s.dated ? (
                     <span className="text-muted-foreground">replaced each upload</span>
                   ) : s.stale ? (
-                    <span className="text-amber-700 dark:text-amber-400">{s.days_behind}d — re-export</span>
+                    <button
+                      type="button"
+                      onClick={() => setHowtoOpen(true)}
+                      className="text-amber-700 underline-offset-2 hover:underline dark:text-amber-400"
+                    >
+                      {s.days_behind}d — re-export
+                    </button>
                   ) : (
                     <span className="text-muted-foreground">{s.days_behind}d</span>
                   )}
