@@ -131,7 +131,10 @@ describe("Blake 24d execute list", () => {
     assert.equal(terms[0], "deodorant men");
     assert.equal(terms[8], "organic lip balm");
     assert.equal(terms[9], "lip balm organic");
-    assert.ok(list.rows.some((r) => r.term === "B07XXPHQZK" && r.action === "bid_down"));
+    const pt = list.rows.find((r) => r.term === "B07XXPHQZK");
+    assert.equal(pt?.action, "bid_down");
+    assert.ok((pt?.sales ?? 0) > 0);
+    assert.ok((pt?.acos ?? 0) > 0);
     assert.ok(list.rows.some((r) => r.term === "B00EXPRM7C" && r.action === "bid_down"));
     const harvest = list.rows.filter((r) => r.action === "harvest_exact");
     assert.equal(harvest.at(-1)?.term, "non toxic organic chapstick");

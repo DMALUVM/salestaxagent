@@ -489,7 +489,9 @@ function fillFromLookup(spec: BlakeSpec, lookup: BlakeLookup): {
   }
   const outClicks = spec.clicks ?? clicks;
   const outSpend = spec.spend ?? spend;
-  const outSales = spec.sales ?? salesFrom(outSpend, spec.acos ?? null, spec.sales);
+  const outSales = spec.sales ?? (spec.acos != null
+    ? salesFrom(outSpend, spec.acos, spec.sales)
+    : sales);
   const acos = spec.acos != null ? spec.acos : (outSales > 0 ? Math.round((outSpend / outSales) * 1000) / 10 : null);
   const termCvr = spec.term_cvr != null
     ? spec.term_cvr
