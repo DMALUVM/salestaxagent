@@ -311,6 +311,66 @@ export interface GrokSnapshot {
   ga4Channels: Array<{ channel: string; sessions: number; revenue: number; key_events: number }>;
 }
 
+export interface WebInsightsWindow {
+  start: string | null;
+  end: string | null;
+  /** Dated span, or "Last-7 undated" when page/query dates are blank. */
+  label: string;
+}
+
+export interface WebInsightsLanding {
+  page: string;
+  sessions: number;
+  key_events: number;
+  revenue: number;
+}
+
+export interface WebInsightsGscPage {
+  url: string;
+  path: string;
+  clicks: number;
+  impressions: number;
+  ctr: number | null;
+  position: number | null;
+}
+
+export interface WebInsightsGscQuery {
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number | null;
+  position: number | null;
+  kind: "off_page_1" | "branded_pos1_zero_clicks";
+}
+
+export interface WebInsightsChannelGap {
+  platform: PaidPlatform;
+  spend: number;
+  ga_channel: "Paid Search" | "Paid Social";
+  sessions: number | null;
+  key_events: number | null;
+  revenue: number | null;
+}
+
+/** Always-on site half of a /paid-ads upload. Not ranked with Ads Ops cards. */
+export interface WebInsights {
+  present: boolean;
+  windows: {
+    ga4: WebInsightsWindow | null;
+    campaigns: WebInsightsWindow | null;
+    gsc_pages: WebInsightsWindow | null;
+    gsc_queries: WebInsightsWindow | null;
+    gsc_chart: WebInsightsWindow | null;
+  };
+  gaps: string[];
+  converting_landings: WebInsightsLanding[];
+  ad_landings: WebInsightsLanding[];
+  low_ctr_pages: WebInsightsGscPage[];
+  money_queries: WebInsightsGscQuery[];
+  channel_gaps: WebInsightsChannelGap[];
+  site_vs_ad: string;
+}
+
 export interface IntelBundle {
   as_of: string | null;
   range_days: number;
@@ -325,6 +385,8 @@ export interface IntelBundle {
   cards: IntelCard[];
   /** Applied / dismissed cards for this as-of week. Never counted as recommendations. */
   log: IntelCard[];
+  /** Site half — appears from uploads, not from Ads Ops ranking. */
+  web_insights: WebInsights;
   wins: WinLoseRow[];
   losses: WinLoseRow[];
   daily: DailyPoint[];

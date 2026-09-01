@@ -24,7 +24,7 @@ export default function PaidAdsError({
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Paid Ads (Shopify)</h1>
         <p className="text-sm text-muted-foreground">
-          Tallowbourn ads Intel — CSV warehouse, not a live Ads Manager scrape.
+          Tallowbourn ads Intel — CSV on Dashboard, not a live Ads Manager scrape.
         </p>
       </div>
 

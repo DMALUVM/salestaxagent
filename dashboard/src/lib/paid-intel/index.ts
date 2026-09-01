@@ -6,3 +6,4 @@ export * from "./window";
 export * from "./intel";
 export * from "./grok";
 export * from "./outcome";
+export * from "./web-insights";
