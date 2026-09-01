@@ -624,6 +624,68 @@ def spapi_inventory(start_str, end_str, dry_run):
     _print_spapi_result("SP-API Inventory Ledger", result)
 
 
+@cli.command("spapi-ledger-summary")
+@click.option("--start", "start_str", default=None,
+              help="Start date (YYYY-MM-DD). Default: latest complete Amazon day.")
+@click.option("--end", "end_str", default=None,
+              help="End date (YYYY-MM-DD, default: latest complete Amazon day)")
+@click.option("--dry-run", is_flag=True,
+              help="Parse and display without writing to database")
+def spapi_ledger_summary(start_str, end_str, dry_run):
+    """Fetch GET_LEDGER_SUMMARY_VIEW_DATA (DAILY/FC) into tax inventory $."""
+    from datetime import date
+    from src.rules import amazon_as_of
+    from src.amazon_sp.ledger_summary import fetch_ledger_summary
+
+    end = date.fromisoformat(end_str) if end_str else amazon_as_of()
+    start = date.fromisoformat(start_str) if start_str else end
+    if end > amazon_as_of():
+        end = amazon_as_of()
+    if start > end:
+        start = end
+
+    if dry_run:
+        click.echo("DRY RUN — no data will be written.\n")
+
+    click.echo(f"Requesting ledger summary (DAILY/FC): {start} to {end}")
+
+    def _on_poll(status, elapsed):
+        click.echo(f"  [{elapsed}s] Report status: {status}")
+
+    result = fetch_ledger_summary(start, end, dry_run=dry_run, on_poll=_on_poll)
+    _print_spapi_result("SP-API Ledger Summary", result)
+
+
+@cli.command("backfill-ledger-summary")
+@click.option("--start", "start_str", default="2026-01-01",
+              help="Start date (YYYY-MM-DD). Default: 2026-01-01")
+@click.option("--end", "end_str", default=None,
+              help="End date (YYYY-MM-DD, default: latest complete Amazon day)")
+@click.option("--dry-run", is_flag=True,
+              help="Parse and display without writing to database")
+def backfill_ledger_summary(start_str, end_str, dry_run):
+    """Backfill daily ledger-summary COGS, chunked ≤30d like other SP-API reports."""
+    from datetime import date
+    from src.rules import amazon_as_of
+    from src.amazon_sp.ledger_summary import fetch_ledger_summary
+
+    start = date.fromisoformat(start_str)
+    end = date.fromisoformat(end_str) if end_str else amazon_as_of()
+    if end > amazon_as_of():
+        end = amazon_as_of()
+
+    if dry_run:
+        click.echo("DRY RUN — no data will be written.\n")
+
+    click.echo(f"Backfilling ledger summary (DAILY/FC): {start} to {end}")
+
+    def _on_poll(status, elapsed):
+        click.echo(f"  [{elapsed}s] Report status: {status}")
+
+    result = fetch_ledger_summary(start, end, dry_run=dry_run, on_poll=_on_poll)
+    _print_spapi_result("SP-API Ledger Summary backfill", result)
+
+
 @cli.command("sync-daily")
 @click.option("--days", default=7, help="Days back to sync")
 def sync_daily_cmd(days):
@@ -3136,6 +3198,7 @@ def spapi_probe_cmd():
     reports = [
         ("GET_FLAT_FILE_ALL_ORDERS_DATA_BY_ORDER_DATE_GENERAL", "All Orders"),
         ("GET_LEDGER_DETAIL_VIEW_DATA", "Inventory Ledger"),
+        ("GET_LEDGER_SUMMARY_VIEW_DATA", "Ledger Summary (tax)"),
         ("GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA", "FBA Customer Returns"),
         ("GET_FBA_STORAGE_FEE_CHARGES_DATA", "FBA Storage Fees"),
         ("GET_FBA_REIMBURSEMENTS_DATA", "FBA Reimbursements"),
@@ -3447,6 +3510,12 @@ def _print_spapi_result(label: str, result: dict):
         click.echo(f"  States found:  {result['states_found']}")
     if result.get("unknown_fcs"):
         click.echo(f"  Unknown FCs:   {result['unknown_fcs']}")
+    if result.get("total_cogs") is not None and result.get("report_type") == "ledger_summary":
+        click.echo(f"  COGS value:    ${result['total_cogs']:,.2f}")
+        click.echo(f"  Units:         {result.get('total_units', 0):,}")
+    if result.get("missing_cost_skus"):
+        click.echo(f"  Missing cost:  {len(result['missing_cost_skus'])} SKUs, "
+                   f"{result.get('missing_cost_units', 0)} units excluded from $")
     for w in result.get("warnings", []):
         click.echo(f"  Warning: {w}")
 
@@ -4840,6 +4909,18 @@ def run():
             )
             click.echo("[Scheduler] Inventory sync daily at 06:30")
 
+            scheduler.add_job(
+                _run_ledger_summary,
+                "cron",
+                hour=6,
+                minute=40,
+                id="ledger_summary_daily",
+                misfire_grace_time=3600,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo("[Scheduler] Ledger summary (tax inventory $) daily at 06:40")
+
         # 3PL sync daily at 06:35
         scheduler.add_job(
             _run_3pl_sync,
@@ -5668,6 +5749,38 @@ def _run_inventory_ledger_backfill():
     if unknown:
         msg += f", {len(unknown)} unmapped FC"
     print(f"[Inventory Ledger] {msg}")
+    job_finish(run_id, "success", msg)
+
+
+def _run_ledger_summary():
+    """Nightly GET_LEDGER_SUMMARY_VIEW_DATA for tax inventory $ at COGS.
+
+    Amazon's summary report lags 1–3 days; amazon_as_of() is the newest
+    closed Amazon day. Pull that single complete day (upsert-only).
+    """
+    from src.db import job_start, job_finish
+    from src.amazon_sp.ledger_summary import fetch_ledger_summary
+    from src.rules import amazon_as_of
+
+    run_id = job_start("ledger_summary_daily")
+    end = amazon_as_of()
+    start = end
+    try:
+        r = fetch_ledger_summary(start, end)
+    except Exception as e:
+        print(f"[Ledger Summary] failed: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        return
+
+    msg = (
+        f"{start}: {r.get('rows_inserted', 0)} rows, "
+        f"${r.get('total_cogs', 0):,.2f} COGS, "
+        f"{len(r.get('states_found') or [])} states"
+    )
+    unknown = r.get("unknown_fcs") or []
+    if unknown:
+        msg += f", {len(unknown)} unmapped FC"
+    print(f"[Ledger Summary] {msg}")
     job_finish(run_id, "success", msg)
 
 
