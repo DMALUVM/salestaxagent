@@ -342,6 +342,37 @@ describe("page / API invariants", () => {
     assert.match(howto, /Tallowbourn Meta Ads Ops Daily/);
   });
 
+  test("How-to Meta step requires Day / Campaign × Day and warns on range summaries", () => {
+    const howto = intelUi.slice(
+      intelUi.indexOf("const GOOGLE_ADS_CSV_URL"),
+      intelUi.indexOf("async function copyText("),
+    );
+    const metaStart = howto.indexOf("<p className=\"font-medium\">Meta</p>");
+    const metaEnd = howto.indexOf("<p className=\"font-medium\">Search Console</p>");
+    assert.ok(metaStart >= 0 && metaEnd > metaStart);
+    const meta = howto.slice(metaStart, metaEnd);
+    assert.match(meta, /Tallowbourn Meta Ads Ops Daily/);
+    assert.match(meta, /breakdown Day/);
+    assert.match(meta, /Campaign × Day/);
+    assert.match(meta, /same bar as Google Ads Daily/);
+    assert.match(meta, /Reporting starts/);
+    assert.match(meta, /no Day column/);
+    assert.match(meta, /lands as one day/);
+    assert.match(meta, /will not fill the week/);
+    assert.match(meta, /href=\{META_ADS_CSV_URL\}/);
+    assert.match(
+      howto,
+      /const META_ADS_CSV_URL =\n  "https:\/\/adsmanager\.facebook\.com\/adsmanager\/reporting\?act=156983680801147&business_id=1028304628604309"/,
+    );
+    assert.match(
+      howto,
+      /const GOOGLE_ADS_CSV_URL =\n  "https:\/\/ads\.google\.com\/aw\/reporteditor\/view\?ocid=1485260312&reportId=933344634"/,
+    );
+    assert.doesNotMatch(meta, /schedule/i);
+    assert.doesNotMatch(meta, /e-?mail/i);
+    assert.doesNotMatch(meta, /\/ppc|\/inventory/);
+  });
+
   test("How-to lists GA4 columns and does not invent an Explore name", () => {
     const howto = intelUi.slice(
       intelUi.indexOf("const GOOGLE_ADS_CSV_URL"),
