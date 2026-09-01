@@ -29,6 +29,22 @@ import {
   FAMILY_FBA_CAP_OCT_DEC,
   FAMILY_FBA_CAP_PEAK,
   familyFbaCapForMonth,
+  mergeScFbaCapacityLimits,
+  NEXT_3PL_FBA_AFTER_TULSA_UNITS,
+  PRIOR_SC_FBA_CAP_FT3,
+  PRIOR_SC_FBA_CAP_UNITS,
+  SC_FBA_CAP_MONTHS,
+  SC_FBA_CAP_NOV_FT3,
+  SC_FBA_CAP_NOV_UNITS,
+  SC_FBA_CAP_OCT_FT3,
+  SC_FBA_CAP_OCT_UNITS,
+  SC_FBA_CAP_SEP_FT3,
+  SC_FBA_CAP_SEP_UNITS,
+  SC_FBA_INBOUND_ROOM_FT3,
+  SC_FBA_INBOUND_ROOM_UNITS,
+  SC_FBA_USED_FT3,
+  SC_FBA_USED_PCT,
+  next3plFbaFitsSeptRoom,
   SEPT_FBA_ON_HAND_TARGETS,
   SEPT_FBA_TARGET_CAP,
   buildSeptemberPlan,
@@ -376,6 +392,44 @@ describe("pallet planner model", () => {
     assert.equal(familyFbaCapForMonth("2026-11"), 49_400);
     assert.equal(familyFbaCapForMonth("2026-12"), 49_400);
     assert.equal(SEPT_FBA_TARGET_CAP, 55_600);
+  });
+
+  test("Seller Central FBA card is 128.93 / 51,500 Sept, not 139.08 / 55,600", () => {
+    assert.equal(PRIOR_SC_FBA_CAP_FT3, 139.08);
+    assert.equal(PRIOR_SC_FBA_CAP_UNITS, 55_600);
+    assert.equal(SC_FBA_CAP_SEP_FT3, 128.93);
+    assert.equal(SC_FBA_CAP_SEP_UNITS, 51_500);
+    assert.equal(SC_FBA_CAP_OCT_FT3, 140.23);
+    assert.equal(SC_FBA_CAP_OCT_UNITS, 56_000);
+    assert.equal(SC_FBA_CAP_NOV_FT3, 184.57);
+    assert.equal(SC_FBA_CAP_NOV_UNITS, 73_800);
+    assert.equal(SC_FBA_USED_FT3, 97.72);
+    assert.equal(SC_FBA_USED_PCT, 75.8);
+    assert.equal(SC_FBA_INBOUND_ROOM_FT3, 31.21);
+    assert.equal(SC_FBA_INBOUND_ROOM_UNITS, 12_500);
+    assert.ok(Math.abs(SC_FBA_CAP_SEP_FT3 - SC_FBA_USED_FT3 - SC_FBA_INBOUND_ROOM_FT3) < 0.01);
+    assert.ok(Math.abs(SC_FBA_USED_FT3 / SC_FBA_CAP_SEP_FT3 * 100 - SC_FBA_USED_PCT) < 0.05);
+    assert.ok(
+      Math.abs(SC_FBA_CAP_SEP_FT3 * PRIOR_SC_FBA_CAP_UNITS / PRIOR_SC_FBA_CAP_FT3 - 51_500) < 50,
+    );
+    assert.notEqual(SC_FBA_CAP_SEP_UNITS, FAMILY_FBA_CAP_PEAK);
+    assert.equal(NEXT_3PL_FBA_AFTER_TULSA_UNITS, 10_800);
+    assert.equal(next3plFbaFitsSeptRoom(), true);
+    assert.equal(next3plFbaFitsSeptRoom(12_500), true);
+    assert.equal(next3plFbaFitsSeptRoom(12_501), false);
+    assert.equal(SC_FBA_CAP_MONTHS.length, 3);
+    assert.equal(SC_FBA_CAP_MONTHS[0].source, "confirmed");
+    assert.equal(SC_FBA_CAP_MONTHS[1].source, "estimate");
+    assert.equal(SC_FBA_CAP_MONTHS[2].source, "estimate");
+    const merged = mergeScFbaCapacityLimits([
+      { month: "2026-09", limit_ft3: 139.08, used_ft3: 90, source: "estimate" },
+    ]);
+    const sept = merged.find((r) => r.month === "2026-09");
+    assert.equal(sept?.limit_ft3, 128.93);
+    assert.equal(sept?.used_ft3, 97.72);
+    assert.equal(sept?.source, "confirmed");
+    assert.ok(merged.some((r) => r.month === "2026-10" && r.limit_ft3 === 140.23));
+    assert.ok(merged.some((r) => r.month === "2026-11" && r.limit_ft3 === 184.57));
   });
 
   test("August Marpac→Tulsa lock is 6480 / 3240 / 3240, no peppermint", () => {

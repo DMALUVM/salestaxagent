@@ -45,7 +45,11 @@ import {
 import Link from "next/link";
 import { HolidayShipPlan } from "@/components/inventory/HolidayShipPlan";
 import { displayTitle, rawTitle } from "@/lib/display-title";
-import { latestRowPerSku } from "@/lib/pallet-planner-model";
+import {
+  latestRowPerSku,
+  mergeScFbaCapacityLimits,
+  SC_FBA_CAP_MONTHS,
+} from "@/lib/pallet-planner-model";
 import {
   formatOwnedAsOf,
   latestOwnedSources,
@@ -218,7 +222,9 @@ export default function InventoryPage() {
   const signalRows = (raw?.signals ?? []) as InventorySkuSignals[];
   const leadtime = (raw?.leadtime ?? null) as InventoryLeadtimeSummary | null;
   const modelStateRows = (raw?.modelState ?? []) as Array<{ sku: string; weights: unknown; seasonal_factors: unknown; model_version: string }>;
-  const capacityLimits = (raw?.capacity ?? []) as { month: string; limit_ft3: number; used_ft3: number; source: string }[];
+  const capacityLimits = mergeScFbaCapacityLimits(
+    (raw?.capacity ?? []) as { month: string; limit_ft3: number; used_ft3: number; source: string }[],
+  );
 
   const [localSettings, setLocalSettings] = useState<InventorySettings | null>(
     null,
@@ -743,9 +749,10 @@ export default function InventoryPage() {
               {capacityLimits.map((c) => {
                 const headroom = c.limit_ft3 - c.used_ft3;
                 const pct = c.limit_ft3 > 0 ? Math.round((c.used_ft3 / c.limit_ft3) * 100) : 0;
+                const sc = SC_FBA_CAP_MONTHS.find((m) => m.month === c.month);
                 return (
                   <div key={c.month} className="text-center">
-                    <p className="text-xs text-muted-foreground">{c.month}</p>
+                    <p className="text-xs text-muted-foreground">{sc?.label ?? c.month}</p>
                     <div className="mt-1 h-2 w-full rounded-full bg-muted overflow-hidden">
                       <div
                         className={`h-full rounded-full ${pct > 85 ? "bg-red-500" : pct > 60 ? "bg-amber-500" : "bg-emerald-500"}`}
@@ -754,9 +761,10 @@ export default function InventoryPage() {
                     </div>
                     <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
                       {headroom.toFixed(1)} ft³ free
+                      {sc ? ` · ~${sc.units.toLocaleString()}` : ""}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      {c.used_ft3.toFixed(1)}/{c.limit_ft3.toFixed(1)}
+                      {c.used_ft3.toFixed(2)}/{c.limit_ft3.toFixed(2)}
                       <span className="ml-1">({c.source === "confirmed" ? "✓" : "est"})</span>
                     </p>
                   </div>

@@ -51,6 +51,86 @@ export function familyFbaCapForMonth(month?: string | null): number {
   if (mo === 10 || mo === 11 || mo === 12) return FAMILY_FBA_CAP_OCT_DEC;
   return FAMILY_FBA_CAP_PEAK;
 }
+
+/** Prior Seller Central Sept cap used to convert ft³ → lip 3pks. Card display only. */
+export const PRIOR_SC_FBA_CAP_FT3 = 139.08;
+export const PRIOR_SC_FBA_CAP_UNITS = 55_600;
+
+/**
+ * Seller Central FBA cube — dashboard card only.
+ * Holt via Dave 2026-09-01. Units use 55,600 / 139.08.
+ * Do not drive mix, AWD pallets, or 3PL→FBA lock qty.
+ */
+export const SC_FBA_CAP_SEP_FT3 = 128.93;
+export const SC_FBA_CAP_SEP_UNITS = 51_500;
+export const SC_FBA_CAP_OCT_FT3 = 140.23;
+export const SC_FBA_CAP_OCT_UNITS = 56_000;
+export const SC_FBA_CAP_NOV_FT3 = 184.57;
+export const SC_FBA_CAP_NOV_UNITS = 73_800;
+export const SC_FBA_USED_FT3 = 97.72;
+export const SC_FBA_USED_PCT = 75.8;
+export const SC_FBA_INBOUND_ROOM_FT3 = 31.21;
+export const SC_FBA_INBOUND_ROOM_UNITS = 12_500;
+/** Next 3PL→FBA after Tulsa receive. Fits in Sept inbound room. Not the August 12,960 lock. */
+export const NEXT_3PL_FBA_AFTER_TULSA_UNITS = 10_800;
+
+export type ScFbaCapMonth = {
+  month: string;
+  label: string;
+  limit_ft3: number;
+  units: number;
+  used_ft3: number | null;
+  source: "confirmed" | "estimate";
+};
+
+export const SC_FBA_CAP_MONTHS: readonly ScFbaCapMonth[] = [
+  {
+    month: "2026-09",
+    label: "Sep 1–30",
+    limit_ft3: SC_FBA_CAP_SEP_FT3,
+    units: SC_FBA_CAP_SEP_UNITS,
+    used_ft3: SC_FBA_USED_FT3,
+    source: "confirmed",
+  },
+  {
+    month: "2026-10",
+    label: "Oct 1–31",
+    limit_ft3: SC_FBA_CAP_OCT_FT3,
+    units: SC_FBA_CAP_OCT_UNITS,
+    used_ft3: null,
+    source: "estimate",
+  },
+  {
+    month: "2026-11",
+    label: "Nov 1–30",
+    limit_ft3: SC_FBA_CAP_NOV_FT3,
+    units: SC_FBA_CAP_NOV_UNITS,
+    used_ft3: null,
+    source: "estimate",
+  },
+];
+
+export function next3plFbaFitsSeptRoom(
+  qty: number = NEXT_3PL_FBA_AFTER_TULSA_UNITS,
+): boolean {
+  return qty <= SC_FBA_INBOUND_ROOM_UNITS;
+}
+
+/** Overlay Seller Central cube on DB rows so the dashboard card matches SC. */
+export function mergeScFbaCapacityLimits(
+  rows: { month: string; limit_ft3: number; used_ft3: number; source: string }[],
+): { month: string; limit_ft3: number; used_ft3: number; source: string }[] {
+  const byMonth = new Map(rows.map((r) => [r.month, r]));
+  for (const sc of SC_FBA_CAP_MONTHS) {
+    byMonth.set(sc.month, {
+      month: sc.month,
+      limit_ft3: sc.limit_ft3,
+      used_ft3: sc.used_ft3 ?? 0,
+      source: sc.source,
+    });
+  }
+  return [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
+}
 export const OPTIMISTIC_AWD_ON_HAND_TARGETS: Record<string, number> = {
   DDPE0001Shop: 17_803,
   DDPE0002Shop: 10_590,
