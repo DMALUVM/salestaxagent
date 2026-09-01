@@ -9,6 +9,9 @@ from src.inventory.pallet_planner import (
     AUGUST_HOP_DESTINATION,
     AUGUST_HOP_LABEL,
     LIP_BALM_SKUS,
+    LOCKED_AUGUST_MARPAC_TULSA_DATE,
+    LOCKED_AUGUST_MARPAC_TULSA_SEND,
+    LOCKED_AUGUST_MARPAC_TULSA_TOTAL,
     LOCKED_TONIGHT_3PL_FBA_SEND,
     LOCKED_TONIGHT_3PL_FBA_TOTAL,
     PALLET_MAX_UNITS,
@@ -27,6 +30,7 @@ from src.inventory.pallet_planner import (
     allocate_single_sku_awd_pallets,
     allocate_3pl_fba_send,
     apply_locked_tonight_3pl_fba_send,
+    locked_august_marpac_tulsa_mix,
     assign_awd_cards_to_months,
     awd_covers_off_fba_reserve,
     build_month_view_entries,
@@ -121,6 +125,24 @@ def test_allocator_still_2700_chunks():
     for sku, qty in send["tpl_to_fba"].items():
         assert qty == 0 or qty >= 2_700
         assert is_legal_inbound_qty(qty, 540)
+
+
+def test_august_marpac_tulsa_lock_is_6480_3240_3240_no_peppermint():
+    assert LOCKED_AUGUST_MARPAC_TULSA_SEND["DDPE0001Shop"] == 6_480
+    assert LOCKED_AUGUST_MARPAC_TULSA_SEND["DDPE0004Shop"] == 3_240
+    assert LOCKED_AUGUST_MARPAC_TULSA_SEND["DDPE0003Shop"] == 3_240
+    assert LOCKED_AUGUST_MARPAC_TULSA_SEND["DDPE0002Shop"] == 0
+    assert LOCKED_AUGUST_MARPAC_TULSA_TOTAL == 6_480 + 3_240 + 3_240 == 12_960
+    assert LOCKED_AUGUST_MARPAC_TULSA_DATE.isoformat() == "2026-08-31"
+    mix = locked_august_marpac_tulsa_mix()
+    assert mix == {
+        "DDPE0001Shop": 6_480,
+        "DDPE0004Shop": 3_240,
+        "DDPE0003Shop": 3_240,
+    }
+    assert "DDPE0002Shop" not in mix
+    # Not the 3PL→FBA lock, and not a cancelled prior same-total mix.
+    assert mix != {sku: qty for sku, qty in LOCKED_TONIGHT_3PL_FBA_SEND.items() if qty > 0}
 
 
 def test_august_3pl_fba_lock_is_5400_plus_4860_plus_2700():
@@ -321,7 +343,7 @@ def test_month_view_sept_not_empty_and_not_fba_only():
     assert all(e["single_sku"] for e in awd)
 
 
-def test_month_view_august_has_3pl_fba_12960_and_marpac_tbd():
+def test_month_view_august_has_3pl_fba_12960_and_marpac_lock():
     _plan, entries = _locked_month_view()
     aug = [e for e in entries if e["month"].endswith("-08")]
     assert aug, "August card missing"
@@ -330,9 +352,16 @@ def test_month_view_august_has_3pl_fba_12960_and_marpac_tbd():
     assert "3pl_fba" in dests
     marpac = next(e for e in aug if e["destination"] == AUGUST_HOP_DESTINATION)
     assert marpac["hop_label"] == AUGUST_HOP_LABEL == "Marpac→Tulsa"
-    assert marpac["awaiting_august_totals"] is True
-    assert marpac["units"] == 0
-    assert marpac["mix"] == {}
+    assert marpac["awaiting_august_totals"] is False
+    assert marpac["units"] == LOCKED_AUGUST_MARPAC_TULSA_TOTAL == 12_960
+    assert marpac["mix"]["DDPE0001Shop"] == 6_480
+    assert marpac["mix"]["DDPE0004Shop"] == 3_240
+    assert marpac["mix"]["DDPE0003Shop"] == 3_240
+    assert "DDPE0002Shop" not in marpac["mix"]
+    assert marpac["ship_by"] == LOCKED_AUGUST_MARPAC_TULSA_DATE.isoformat()
+    assert marpac["available_date"] == "2026-08-31"
+    assert marpac["in_transit"] is True
+    assert marpac["mix_locked"] is True
     fba = next(e for e in aug if e["destination"] == "3pl_fba")
     assert fba["mix"]["DDPE0004Shop"] == 5_400
     assert fba["mix"]["DDPE0003Shop"] == 4_860
@@ -417,9 +446,9 @@ def test_august_hop_is_marpac_tulsa_not_3pl():
     card = next(e for e in aug if e["destination"] == AUGUST_HOP_DESTINATION)
     assert card["destination"] == AUGUST_HOP_DESTINATION == "marpac_tulsa"
     assert card["hop_label"] == AUGUST_HOP_LABEL == "Marpac→Tulsa"
-    assert card["awaiting_august_totals"] is True
-    assert card["units"] == 0
-    assert card["mix"] == {}
+    assert card["awaiting_august_totals"] is False
+    assert card["units"] == 12_960
+    assert card["mix"] == locked_august_marpac_tulsa_mix()
     assert card["destination"] != "3pl_fba"
     assert card["hop_label"] != "3PL→FBA"
     assert "Marpac" in card["hop_label"]
@@ -435,9 +464,9 @@ def test_august_card_is_marpac_tulsa_not_first_wave():
     marpac = [e for e in aug if e["destination"] == AUGUST_HOP_DESTINATION]
     assert marpac
     assert all(e.get("hop_label") == "Marpac→Tulsa" for e in marpac)
-    assert all(e.get("awaiting_august_totals") is True for e in marpac)
-    assert all(e["units"] == 0 for e in marpac)
-    assert all(not (e.get("mix") or {}) for e in marpac)
+    assert all(e.get("awaiting_august_totals") is False for e in marpac)
+    assert all(e["units"] == 12_960 for e in marpac)
+    assert all(e["mix"].get("DDPE0002Shop", 0) == 0 for e in marpac)
 
 
 def test_sept_card_is_assorted_plus_orange():
@@ -477,6 +506,48 @@ def test_orange_fba_in_cap_uses_4054_not_3501():
     )
     assert old["DDPE0003Shop"]["fba"] == 3501
     assert old["DDPE0003Shop"]["fba_plus_inbound"] != gaps["DDPE0003Shop"]["fba_plus_inbound"]
+
+
+def test_marpac_lock_does_not_shrink_first_wave_awd():
+    plan, entries = _locked_month_view()
+    assert plan["august_tbd"] is True
+    assert all(qty == 0 for qty in plan["sku_august"].values())
+    assert plan["sku_manufacture"]["DDPE0004Shop"] == 17_550
+    assert plan["sku_manufacture"]["DDPE0003Shop"] == 17_550
+    assert plan["sku_manufacture"]["DDPE0001Shop"] == 17_550
+    assert plan["sku_manufacture"]["DDPE0002Shop"] == 8_775
+    sept_awd = [
+        e for e in entries
+        if e["month"] == "2026-09" and e["destination"] == "awd" and e["units"] > 0
+    ]
+    assert {next(iter(e["mix"])) for e in sept_awd} == {"DDPE0004Shop", "DDPE0003Shop"}
+    fba = next(e for e in entries if e["month"].endswith("-08") and e["destination"] == "3pl_fba")
+    assert fba["mix"]["DDPE0004Shop"] == 5_400
+    assert fba["mix"]["DDPE0003Shop"] == 4_860
+    assert fba["mix"]["DDPE0002Shop"] == 2_700
+    assert fba["units"] == 12_960
+
+
+def test_august_lock_stays_visible_after_september_1():
+    plan = build_september_plan(
+        CONTEXT_FBA, CONTEXT_INBOUND, CONTEXT_3PL,
+        sku_awd=CONTEXT_AWD,
+    )
+    horizon = production_horizon_months(
+        date(2026, 9, 1), AMAZON_IN_BY_DEFAULT, 35,
+        peak_end=PEAK_END_DEFAULT, refill_receive_days=35,
+    )
+    months = [h["month"] for h in horizon]
+    assert "2026-08" not in months
+    by_month = {h["month"]: h for h in horizon}
+    entries = build_month_view_entries(months, by_month, plan)
+    aug = [e for e in entries if e["month"] == "2026-08"]
+    assert aug, "August in-transit hop vanished after Sep 1"
+    marpac = next(e for e in aug if e["destination"] == AUGUST_HOP_DESTINATION)
+    assert marpac["units"] == 12_960
+    assert marpac["ship_by"] == "2026-08-31"
+    fba = next(e for e in aug if e["destination"] == "3pl_fba")
+    assert fba["units"] == 12_960
 
 
 def test_awd_allows_two_pallets_per_month_not_one():
