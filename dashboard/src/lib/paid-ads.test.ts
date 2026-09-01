@@ -322,7 +322,7 @@ describe("page / API invariants", () => {
 
   test("How-to has exact Google/Meta/GSC URLs and GSC file names", () => {
     const howto = intelUi.slice(
-      intelUi.indexOf("function PaidAdsCsvHowto("),
+      intelUi.indexOf("const GOOGLE_ADS_CSV_URL"),
       intelUi.indexOf("async function copyText("),
     );
     assert.match(
@@ -344,7 +344,7 @@ describe("page / API invariants", () => {
 
   test("How-to lists GA4 columns and does not invent an Explore name", () => {
     const howto = intelUi.slice(
-      intelUi.indexOf("function PaidAdsCsvHowto("),
+      intelUi.indexOf("const GOOGLE_ADS_CSV_URL"),
       intelUi.indexOf("async function copyText("),
     );
     for (const col of [
@@ -365,7 +365,7 @@ describe("page / API invariants", () => {
 
   test("How-to is Dashboard upload only — no schedule or email export copy", () => {
     const howto = intelUi.slice(
-      intelUi.indexOf("function PaidAdsCsvHowto("),
+      intelUi.indexOf("const GOOGLE_ADS_CSV_URL"),
       intelUi.indexOf("async function copyText("),
     );
     assert.match(howto, /Dashboard/);
