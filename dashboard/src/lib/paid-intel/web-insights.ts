@@ -171,7 +171,12 @@ function buildSiteVsAd(opts: {
       `protect ${top.page} (${fmtInt(top.sessions)} sess / ${fmtInt(top.key_events)} key ev / ${money(top.revenue)}) — ${LIVE_URL_GUARD}`,
     );
   }
-  if (top && paidTop && paidTop.page !== top.page) {
+  const otherPaid = opts.adLandings.filter((p) => p.page !== top?.page && p.sessions > 0);
+  if (top && otherPaid.length) {
+    site.push(
+      `paid GA4 also sends ${otherPaid.map((p) => `${p.page} (${fmtInt(p.sessions)} sess)`).join("; ")}; conversions happen on ${top.page} — do not 404 either live URL`,
+    );
+  } else if (top && paidTop && paidTop.page !== top.page) {
     site.push(
       `paid GA4 sends ${paidTop.page}; conversions happen on ${top.page} — do not 404 either live URL`,
     );
