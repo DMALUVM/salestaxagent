@@ -391,7 +391,7 @@ describe("pallet planner model", () => {
       DDPE0004Shop: 3_240,
       DDPE0003Shop: 3_240,
     });
-    assert.equal(mix.DDPE0002Shop, undefined);
+    assert.equal("DDPE0002Shop" in mix, false);
   });
 
   test("August 3PL→FBA lock is 5400 + 4860 + 2700 peppermint", () => {
