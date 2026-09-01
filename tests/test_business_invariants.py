@@ -354,7 +354,7 @@ class TestAdsSyncSplit:
         monkeypatch.setattr(reports, "fetch_campaigns_daily",
                             lambda s, e, **kw: called.append("campaigns") or {"rows": 1})
         monkeypatch.setattr(reports, "fetch_search_terms",
-                            lambda s, e, chunk_days=None: called.append("search_terms") or {"rows": 1})
+                            lambda s, e, **kw: called.append("search_terms") or {"rows": 1})
 
         result = reports.sync_ads(days=30, campaigns_only=True)
 
@@ -369,7 +369,7 @@ class TestAdsSyncSplit:
         monkeypatch.setattr(reports, "fetch_campaigns_daily",
                             lambda s, e, **kw: called.append("campaigns") or {"rows": 1})
         monkeypatch.setattr(reports, "fetch_search_terms",
-                            lambda s, e, chunk_days=None: called.append("search_terms") or {"rows": 1})
+                            lambda s, e, **kw: called.append("search_terms") or {"rows": 1})
 
         result = reports.sync_ads(days=7, search_terms_only=True)
 
@@ -434,7 +434,7 @@ class TestAdsEnqueuePayload:
         monkeypatch.setattr(reports, "fetch_campaigns_daily",
                             lambda s, e, **kw: called.append("campaigns") or {"rows": 1})
         monkeypatch.setattr(reports, "fetch_search_terms",
-                            lambda s, e, chunk_days=None: called.append("search_terms") or {"rows": 1})
+                            lambda s, e, **kw: called.append("search_terms") or {"rows": 1})
         monkeypatch.setattr(reports, "fetch_placements",
                             lambda s, e, **kw: called.append("placements") or {"rows": 1})
         result = reports.sync_ads(
@@ -899,12 +899,16 @@ class TestAdsPollResilience:
         from src.amazon_ads.reports import _is_transient_report_error
         import httpx
 
+        from src.amazon_ads.client import AdsReportSlotBusy
+
         assert _is_transient_report_error(TimeoutError("timed out after 900s"))
         assert _is_transient_report_error(RuntimeError("429 Too Many Requests"))
-        assert _is_transient_report_error(RuntimeError("425 Too Early"))
         assert _is_transient_report_error(httpx.ConnectError("connection reset"))
         assert not _is_transient_report_error(RuntimeError("400 bad column"))
         assert not _is_transient_report_error(PermissionError("Ads API auth failed (401)"))
+        # 425 on create is slot-busy — do not treat as a backoff-and-recreate.
+        assert not _is_transient_report_error(AdsReportSlotBusy("HTTP 425"))
+        assert not _is_transient_report_error(RuntimeError("425 Too Early"))
 
     def test_backoff_retries_timeout_then_succeeds(self, monkeypatch):
         import src.amazon_ads.reports as reports
@@ -1012,6 +1016,8 @@ class TestAdsPollResilience:
         bf = inspect.getsource(_run_ads_search_terms_backfill)
         assert "days=90" in bf
         assert "search_terms_only=True" in bf
+        assert "skip_existing_search_term_weeks=True" in bf
+        assert "newest_first_search_terms=True" in bf
         assert "days=7" not in bf
         daily = inspect.getsource(_run_ads_search_terms_sync)
         assert "days=7" in daily
@@ -1369,3 +1375,144 @@ class TestSearchTermSummaryDateStamp:
         assert 'upsert_rows(' in loop
         assert 'ads_search_terms_daily' in loop
         assert 'upsert_rows(' not in after
+
+
+class TestAdsSearchTermSlotStop:
+    """425 / timeout must STOP remaining search-term chunks. No wait-loop."""
+
+    def _term_row(self, term="tallow balm"):
+        return {
+            "searchTerm": term, "campaignId": "camp-1", "campaignName": "SP",
+            "adGroupId": "ag-1", "adGroupName": "AG", "keyword": "tallow",
+            "keywordId": "kw-1", "matchType": "EXACT",
+            "impressions": 100, "clicks": 10, "spend": 4.50,
+            "sales14d": 12.00, "purchases14d": 1,
+        }
+
+    def test_create_report_425_is_slot_busy(self, monkeypatch):
+        import src.amazon_ads.client as client
+
+        class Resp:
+            status_code = 425
+            text = "Too Early"
+
+            def json(self):
+                return {}
+
+            def raise_for_status(self):
+                raise AssertionError("425 must not fall through to raise_for_status")
+
+        monkeypatch.setattr(client, "ads_headers", lambda: {})
+        monkeypatch.setattr(client.httpx, "post", lambda *a, **k: Resp())
+        with pytest.raises(client.AdsReportSlotBusy, match="425"):
+            client.create_report({"configuration": {"reportTypeId": "spSearchTerm"}})
+
+    def test_backoff_does_not_retry_slot_busy(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from src.amazon_ads.client import AdsReportSlotBusy
+
+        calls = {"n": 0}
+
+        def boom(*a, **k):
+            calls["n"] += 1
+            raise AdsReportSlotBusy("HTTP 425")
+
+        monkeypatch.setattr(reports, "fetch_report", boom)
+        slept = []
+        import time as time_mod
+        monkeypatch.setattr(time_mod, "sleep", lambda s: slept.append(s))
+        with pytest.raises(AdsReportSlotBusy):
+            reports._fetch_report_with_backoff({"configuration": {}})
+        assert calls["n"] == 1
+        assert slept == []
+
+    def test_fetch_report_cancels_on_timeout(self, monkeypatch):
+        import src.amazon_ads.client as client
+
+        cancelled = []
+        monkeypatch.setattr(client, "create_report", lambda cfg: "rep-hung")
+        monkeypatch.setattr(client, "poll_report",
+                            lambda *a, **k: (_ for _ in ()).throw(TimeoutError("timed out")))
+        monkeypatch.setattr(client, "cancel_report",
+                            lambda rid: cancelled.append(rid) or True)
+        with pytest.raises(TimeoutError):
+            client.fetch_report({"configuration": {}})
+        assert cancelled == ["rep-hung"]
+
+    def test_search_terms_stop_on_425_do_not_continue(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from src.amazon_ads.client import AdsReportSlotBusy
+        from datetime import date
+
+        written = []
+        calls = []
+
+        def fake_chunk(cs, ce):
+            calls.append(ce)
+            if len(calls) >= 2:
+                raise AdsReportSlotBusy("HTTP 425")
+            return [self._term_row()]
+
+        monkeypatch.setattr(reports, "_fetch_search_terms_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows",
+                            lambda t, rows, on_conflict=None: written.extend(rows) or len(rows))
+
+        result = reports.fetch_search_terms(
+            date(2026, 8, 1), date(2026, 8, 21), chunk_days=7)
+        assert result["stopped"] == "slot_busy"
+        assert len(calls) == 2  # third week never requested
+        assert len(written) == 1
+        assert written[0]["date"] == "2026-08-07"
+
+    def test_skip_existing_skips_present_chunk_end(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        calls = []
+        monkeypatch.setattr(reports, "_search_term_chunk_present",
+                            lambda end: end == date(2026, 8, 14))
+        monkeypatch.setattr(reports, "_fetch_search_terms_chunk",
+                            lambda cs, ce: calls.append(ce) or [self._term_row()])
+        monkeypatch.setattr(reports, "upsert_rows",
+                            lambda t, rows, on_conflict=None: len(rows))
+
+        result = reports.fetch_search_terms(
+            date(2026, 8, 8), date(2026, 8, 21), chunk_days=7,
+            skip_existing=True)
+        assert calls == [date(2026, 8, 21)]
+        assert result["chunks_skipped_existing"] == 1
+        assert result["stopped"] is None
+
+    def test_newest_first_requests_recent_week_first(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        calls = []
+        monkeypatch.setattr(reports, "_fetch_search_terms_chunk",
+                            lambda cs, ce: calls.append(ce) or [self._term_row()])
+        monkeypatch.setattr(reports, "upsert_rows",
+                            lambda t, rows, on_conflict=None: len(rows))
+
+        reports.fetch_search_terms(
+            date(2026, 8, 8), date(2026, 8, 21), chunk_days=7,
+            newest_first=True)
+        assert calls == [date(2026, 8, 21), date(2026, 8, 14)]
+
+    def test_weekday_sync_still_7d_no_skip_existing(self):
+        import inspect
+        from src.main import _run_ads_search_terms_sync
+        src = inspect.getsource(_run_ads_search_terms_sync)
+        assert "days=7" in src
+        assert "days=90" not in src
+        assert "skip_existing_search_term_weeks" not in src
+
+    def test_one_shot_cli_is_search_terms_only_and_stops(self):
+        import inspect
+        from src.main import ads_search_terms_backfill_cmd
+        src = inspect.getsource(ads_search_terms_backfill_cmd)
+        assert "search_terms_only=True" in src
+        assert "skip_existing_search_term_weeks=True" in src
+        assert "newest_first_search_terms=True" in src
+        assert "AdsSyncBusy" in src
+        assert "Do not retry in a loop" in src
+        assert "cancel_report" in src
