@@ -1,10 +1,9 @@
 /**
  * Bleeder classifier library — not this week's /ppc execute list.
  *
- * GET /api/ppc must not call buildBleeders. The execute table stays empty
- * until ads_search_terms_daily min/max covers the Sunday 90d pull and Blake
- * ranks. Cut bar is term CVR below that row's lane account CVR (branded vs
- * non-branded). 10/$0 is R3 / a flag. Click floor follows GNO.
+ * GET /api/ppc must not call buildBleeders. This week ships Blake's 24d
+ * ranked list via buildBlake24dList. Cut bar is term CVR below that row's
+ * lane account CVR (branded vs non-branded). 10/$0 is R3 / a flag.
  *
  * Nothing here writes to Amazon.
  */

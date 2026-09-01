@@ -225,7 +225,7 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
     assert.match(src, /harvest_exact/);
     const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/route.ts"), "utf8");
     assert.doesNotMatch(route, /buildBleeders\s*\(/);
-    assert.match(route, /emptyWeeklyList/);
+    assert.match(route, /buildBlake24dList/);
   });
 });
 

@@ -1,9 +1,10 @@
 /**
  * This week's /ppc execute list.
  *
- * Ships EMPTY until ads_search_terms_daily min/max covers a 90d pull and
- * Blake ranks. Do not seed from the stored 24d window. Do not encode a
- * ranked 24d row set. Nothing here writes to Amazon.
+ * THIS WEEK: Blake ranked 2026-08-06..08-29 (24d). HOLD is lifted for that
+ * list only — see buildBlake24dList. emptyWeeklyList stays the 90d-empty
+ * helper for later Mondays. Do not auto-buildBleeders. Nothing writes to
+ * Amazon.
  *
  * When a row is later marked Done (applied) or Skipped (dismissed), the
  * same campaign+term+action stays locked for 7 days via applied_at /
@@ -86,6 +87,7 @@ export interface WeeklyRow {
 }
 
 export interface WeeklyLockDecision {
+  id?: string | null;
   campaign_id?: string | null;
   search_term?: string | null;
   action_type?: string | null;
@@ -96,7 +98,8 @@ export interface WeeklyLockDecision {
 
 export interface WeeklyPayload {
   execute_ready: boolean;
-  execute_list: "empty";
+  execute_list: "empty" | "blake_24d";
+  window_chip?: string;
   window: {
     search: WeeklyWindow;
     placement: WeeklyWindow | null;
@@ -262,10 +265,12 @@ export function shouldSkipRegeneration(
 
 export function applyWeeklyLocks<T extends {
   campaign_id: string;
+  campaign?: string;
   term?: string;
   action: string;
   sales: number;
   status: WeeklyStatus;
+  decision_id?: string | null;
 }>(
   rows: T[],
   decisions: WeeklyLockDecision[],
@@ -289,10 +294,15 @@ export function applyWeeklyLocks<T extends {
   }
 
   return rows.map((row) => {
-    const prior = byKey.get(weeklyLockKey(row.campaign_id, row.term ?? "", row.action));
+    const prior = byKey.get(weeklyLockKey(row.campaign_id, row.term ?? "", row.action))
+      ?? byKey.get(weeklyLockKey(row.campaign ?? "", row.term ?? "", row.action));
     if (!isWeeklyLocked(prior, now, row.sales)) return row;
     const skipped = String(prior?.status ?? "") === "dismissed";
-    return { ...row, status: skipped ? "skipped" : "done" };
+    return {
+      ...row,
+      status: (skipped ? "skipped" : "done") as T["status"],
+      decision_id: prior?.id ? String(prior.id) : row.decision_id ?? null,
+    };
   });
 }
 
