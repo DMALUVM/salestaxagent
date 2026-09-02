@@ -197,7 +197,7 @@ class TestParser:
     def test_2026_09_02_codes_are_not_unknown(self):
         rows = [_row("2026-08-30", "SKU-A", 1, fc) for fc in MAPPED_2026_09_02]
         parsed = parse_ledger_summary("\n".join([HEADERS, *rows]), costs={"SKU-A": 1.0})
-        assert parsed["unknown_fcs"] == []
+        assert not parsed["unknown_fcs"]
         for r in parsed["rows"]:
             assert r["state_code"] == MAPPED_2026_09_02[r["fc_code"]]
 
