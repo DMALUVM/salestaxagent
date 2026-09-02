@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useInventory } from "@/lib/hooks";
+import { isNotSellingSku, notSellingSkuSet } from "@/lib/inventory-sku-flags";
+import { NotSellingToggle } from "@/components/inventory/NotSellingToggle";
 import type {
+  InventorySkuFlag,
   InventorySnapshot,
   SkuVelocity,
   SeasonalityWeekly,
@@ -88,7 +91,7 @@ function localDate(d: Date): string {
 }
 
 export default function PlanSkuPage() {
-  const { data: raw, loading } = useInventory();
+  const { data: raw, loading, refetch } = useInventory();
   const [selectedSku, setSelectedSku] = useState(() => {
     if (typeof window === "undefined") return "";
     return new URLSearchParams(window.location.search).get("sku") ?? "";
@@ -337,6 +340,12 @@ export default function PlanSkuPage() {
   const settings = (raw as { settings?: InventorySettings | null } | null)?.settings ?? null;
   const leadtime = (raw as { leadtime?: InventoryLeadtimeSummary | null } | null)?.leadtime ?? null;
   const amazonLipSales = ((raw as { amazonLipSales?: AmazonMonthlySale[] } | null)?.amazonLipSales ?? []) as AmazonMonthlySale[];
+  const skuNotSelling = selectedSku
+    ? isNotSellingSku(
+        selectedSku,
+        notSellingSkuSet((raw as { skuFlags?: InventorySkuFlag[] } | null)?.skuFlags),
+      )
+    : false;
 
   const landingQty = plannedQty.trim() === "" ? null : Number(plannedQty);
   const landingDate = availableDate.trim() === "" ? null : availableDate;
@@ -584,6 +593,13 @@ export default function PlanSkuPage() {
               </label>
             </div>
           </div>
+          {selectedSku ? (
+            <NotSellingToggle
+              sku={selectedSku}
+              checked={skuNotSelling}
+              onChanged={() => refetch()}
+            />
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="text-xs font-medium text-muted-foreground">

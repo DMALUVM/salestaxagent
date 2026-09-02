@@ -296,6 +296,13 @@ export interface InventorySettings {
   peak_end_date: string | null;
 }
 
+export interface InventorySkuFlag {
+  sku: string;
+  not_selling: boolean;
+  updated_at?: string | null;
+  updated_by?: string | null;
+}
+
 export interface InventorySkuSignals {
   sku: string;
   as_of_date: string;

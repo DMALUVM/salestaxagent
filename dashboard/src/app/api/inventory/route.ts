@@ -93,7 +93,7 @@ export async function GET() {
   try {
     const sb = getServerSupabase();
 
-    const [snapshots, velocity, restock, planning, settings, seasonality, tpl, awd, capacity, forecast, signalsRaw, leadtime, replenRows, awdInRows] =
+    const [snapshots, velocity, restock, planning, settings, seasonality, tpl, awd, capacity, forecast, signalsRaw, leadtime, replenRows, awdInRows, skuFlags] =
       await Promise.all([
         sb.from("inventory_snapshots").select("*").then((r) => r.data ?? []),
         sb.from("sku_velocity").select("*").then((r) => r.data ?? []),
@@ -136,6 +136,11 @@ export async function GET() {
           .from("inventory_awd_inbound_shipments")
           .select("created_at,closed_at,shipment_status")
           .then((r) => r.data ?? []),
+        (async () => {
+          const r = await sb.from("inventory_sku_flags").select("sku,not_selling,updated_at");
+          if (r.error) return [];
+          return r.data ?? [];
+        })(),
       ]);
 
     // Amazon list payloads often collapse ship/receive onto the same updatedAt.
@@ -207,6 +212,7 @@ export async function GET() {
         modelState,
         signals,
         leadtime,
+        skuFlags,
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } },
     );

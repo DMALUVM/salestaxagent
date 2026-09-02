@@ -299,6 +299,69 @@ describe("overview inventory actions", () => {
     assert.match(row.detail, /14d lead/);
   });
 
+  test("tiny shopify drip + 0d cover is CRITICAL", () => {
+    const actions = buildInventoryActions(
+      {
+        velocity: [vel("DDPE0011Shop", { shopify: 0.03 })],
+        tpl: [{ sku: "DDPE0011Shop", available: 0, pulled_at: "2026-08-31T00:00:00Z" }],
+      },
+      20,
+    );
+    const row = actions.find((a) => a.sku === "DDPE0011Shop");
+    assert.ok(row);
+    assert.equal(row.severity, "critical");
+    assert.match(row.detail, /0d cover/);
+  });
+
+  test("not_selling hides CRITICAL, reorder, and rate-check for that SKU only", () => {
+    const raw = {
+      snapshots: [snap("KEEP-CRIT", 0), snap("RATE", 80)],
+      velocity: [
+        vel("DDPE0011Shop", { shopify: 0.03 }),
+        vel("KEEP-CRIT", { amazon: 2 }),
+        vel("KEEP-REORDER", { shopify: 1 }),
+        vel("RATE", { amazon: 1 }),
+      ],
+      tpl: [
+        { sku: "DDPE0011Shop", available: 0, pulled_at: "2026-08-31T00:00:00Z" },
+        { sku: "KEEP-REORDER", available: 58, pulled_at: "2026-08-31T00:00:00Z" },
+      ],
+      signals: [
+        signal("KEEP-CRIT"),
+        signal("RATE", { rate_agreement: "investigate", rate_divergence_pct: 42 }),
+      ],
+      skuFlags: [
+        { sku: "DDPE0011Shop", not_selling: true },
+        { sku: "RATE", not_selling: true },
+      ],
+    };
+    const actions = buildInventoryActions(raw, 20);
+    const summary = inventoryActionSummary(raw);
+
+    assert.equal(
+      actions.some((a) => a.sku === "DDPE0011Shop"),
+      false,
+      "not_selling SKU must drop off Overview actions",
+    );
+    assert.equal(
+      actions.some((a) => a.sku === "RATE"),
+      false,
+      "not_selling must also hide rate-check",
+    );
+
+    const stillCrit = actions.find((a) => a.sku === "KEEP-CRIT");
+    assert.ok(stillCrit);
+    assert.equal(stillCrit.severity, "critical");
+
+    const stillReorder = actions.find((a) => a.sku === "KEEP-REORDER");
+    assert.ok(stillReorder);
+    assert.equal(stillReorder.severity, "restock");
+
+    assert.equal(summary.investigate, 0);
+    assert.ok(summary.critical >= 1);
+    assert.ok(summary.restock >= 1);
+  });
+
   test("rate-check chips stay independent of cover status", () => {
     const raw = {
       snapshots: [snap("RATE", 80)],
