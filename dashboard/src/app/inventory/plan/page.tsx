@@ -535,6 +535,9 @@ export default function PlanSkuPage() {
                 <option value="">
                   {categoryMode ? "All in category" : "Select SKU..."}
                 </option>
+                {selectedSku && !skuOptions.includes(selectedSku) && (
+                  <option value={selectedSku}>{selectedSku}</option>
+                )}
                 {PLAN_CATEGORY_IDS.map((id) =>
                   groupedSkuOptions[id].length ? (
                     <optgroup key={id} label={PLAN_CATEGORY_LABELS[id]}>
