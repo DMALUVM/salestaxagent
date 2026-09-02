@@ -1,7 +1,7 @@
 {
   "_metadata": {
     "description": "Amazon Fulfillment Center codes mapped to US states. Covers FCs, sort centers, and delivery stations (S-prefix). Amazon opens/closes facilities regularly — keep updated.",
-    "last_updated": "2026-08-20",
+    "last_updated": "2026-09-02",
     "source": "Public records, seller community data, SP-API inventory ledger. Verify with Amazon if critical.",
     "how_to_add_unknown_codes": [
       "When `inventory-health` reports an unmapped FC code:",
@@ -34,7 +34,13 @@
       "SYS3": "[high] 1511 Robert C Jackson Dr, Maryville, TN 37801 — Global Specialty Fulfillment. List printed 'NC' but ZIP 37801 is Maryville TN; Apple Maps + operator confirm TN",
       "XCH2": "[medium] 2150 Dean Forest Rd, Garden City, GA 31408 — single directory source; ZIP 31408 = GA",
       "XMD5": "[medium] 15651 Greenmount Rd, Greencastle, PA 17225 — single directory source; ZIP 17225 = PA. NOTE: 'MD' in the code does NOT mean Maryland",
-      "ABE2/ABE3/ABE4": "[high] CORRECTED 2026-08-20 from NJ to PA. ABE2 705 Boulder Dr & ABE3 650 Boulder Dr, Breinigsville PA; ABE4 1610 Van Buren Rd, Easton PA. The whole ABE family had been mapped NJ because ABE8 (401 Independence Rd, Florence NJ) genuinely is New Jersey — ABE8 is unchanged."
+      "ABE2/ABE3/ABE4": "[high] CORRECTED 2026-08-20 from NJ to PA. ABE2 705 Boulder Dr & ABE3 650 Boulder Dr, Breinigsville PA; ABE4 1610 Van Buren Rd, Easton PA. The whole ABE family had been mapped NJ because ABE8 (401 Independence Rd, Florence NJ) genuinely is New Jersey — ABE8 is unchanged.",
+      "BDU2": "[high] 8350 Quintero St, Commerce City, CO 80022 — operator-verified street address; ZIP 80022 = CO",
+      "IGA3": "[high] 7001 Skipper Rd, Macon, GA 31216 — Regional DC; operator-verified; ZIP 31216 = GA",
+      "ILM1": "[high] 163 US-421 N, Rocky Point, NC 28435 — Wilmington/Rocky Point robotics FC; operator-verified; ZIP 28435 = NC. NOTE: letters are the ILM airport code, not Illinois",
+      "IMO1": "[high] 4001 E 149th St, Kansas City, MO 64147 — Liberty / KC metro bulky; operator-verified; ZIP 64147 = MO",
+      "ITX3": "[high] 8590 NE 24th Ave, Amarillo, TX 79108 — Regional DC; operator-verified; ZIP 79108 = TX",
+      "IWA6": "[high] 1202 S Road 40 E, Pasco, WA 99301 — Regional DC, formerly Project Pearl; operator-verified; ZIP 99301 = WA. NOTE: letters do NOT mean Iowa"
     }
   },
   "fc_codes": {
@@ -64,6 +70,7 @@
     "BDL1": "CT",
     "BDL2": "CT",
     "BDL3": "CT",
+    "BDU2": "CO",
     "BFI1": "WA",
     "BFI3": "WA",
     "BFI4": "WA",
@@ -151,13 +158,18 @@
     "IAH1": "TX",
     "IAH3": "TX",
     "ICT2": "KS",
+    "IGA3": "GA",
     "IGQ1": "IL",
+    "ILM1": "NC",
+    "IMO1": "MO",
     "IND1": "IN",
     "IND2": "IN",
     "IND3": "IN",
     "IND4": "IN",
     "IND5": "IN",
     "IND9": "IN",
+    "ITX3": "TX",
+    "IWA6": "WA",
     "JAN1": "MS",
     "JAX2": "FL",
     "JAX3": "FL",

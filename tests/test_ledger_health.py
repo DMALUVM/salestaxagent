@@ -199,6 +199,13 @@ class TestFCMappings:
         "XCH2": ("GA", "Garden City"),
         "XMD5": ("PA", "Greencastle"),
         "SBW1": ("MD", "Baltimore"),
+        # 2026-09-02 — operator-verified street addresses (not inferred from letters)
+        "BDU2": ("CO", "Commerce City"),
+        "IGA3": ("GA", "Macon"),
+        "ILM1": ("NC", "Rocky Point"),
+        "IMO1": ("MO", "Kansas City"),
+        "ITX3": ("TX", "Amarillo"),
+        "IWA6": ("WA", "Pasco"),
     }
 
     @pytest.mark.parametrize("code", sorted(MAPPED))
@@ -215,6 +222,8 @@ class TestFCMappings:
         from src.mappers.fc_to_state import fc_to_state
         assert fc_to_state("XMD5") == "PA"   # not MD
         assert fc_to_state("XCH2") == "GA"   # not IL/Chicago
+        assert fc_to_state("IWA6") == "WA"   # Pasco WA, not Iowa
+        assert fc_to_state("ILM1") == "NC"   # Rocky Point NC (ILM airport), not Illinois
 
     def test_abe_family_is_split_by_actual_address(self):
         """ABE2/3/4 are Pennsylvania; only ABE8 is New Jersey.
@@ -245,3 +254,17 @@ class TestFCMappings:
             (root / "dashboard" / "src" / "lib" / "parsers" / "fc-codes-data.json").read_text())
         ts = raw.get("fc_codes", raw)
         assert py == ts, "config/fc_codes.json and the TS mirror disagree"
+
+    def test_live_ts_hardcoded_map_has_the_2026_09_02_codes(self):
+        """fc-codes.ts is still the live dashboard parser; keep it in lockstep."""
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parents[1]
+               / "dashboard" / "src" / "lib" / "parsers" / "fc-codes.ts").read_text()
+        for code, (state, _city) in self.MAPPED.items():
+            if code in ("BDU2", "IGA3", "ILM1", "IMO1", "ITX3", "IWA6"):
+                assert f'{code}: "{state}"' in src, f"{code} missing from live TS map"
+
+    def test_awd_is_not_a_state(self):
+        from src.mappers.fc_to_state import fc_to_state
+        assert fc_to_state("AWD") is None

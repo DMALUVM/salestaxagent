@@ -49,6 +49,8 @@ describe("tax inventory peak YTD", () => {
   });
 
   test("unmapped FCs stay XX, not CA", () => {
+    // Stored rows keep a null state until `inventory-remap-fc --apply`.
+    // BDU2 is mapped CO as of 2026-09-02; this row is the pre-remap case.
     const peaks = peakByState(
       [
         row("2026-08-30", "CA", "ONT8", 10, 2),
