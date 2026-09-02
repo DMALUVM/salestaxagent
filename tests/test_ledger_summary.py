@@ -1,8 +1,8 @@
 """GET_LEDGER_SUMMARY_VIEW_DATA — tax inventory $ at COGS.
 
-Pins parser, FC→state (including the 2026-08-30 CA / unmapped set),
-missing-cost exclusion, peak-YTD (not latest-only), and that we never
-substitute the detail ledger report.
+Pins parser, FC→state (including the 2026-08-30 CA set and the 2026-09-02
+street-address mappings), missing-cost exclusion, peak-YTD (not latest-only),
+and that we never substitute the detail ledger report.
 """
 from datetime import date
 from pathlib import Path
@@ -26,7 +26,17 @@ CA_FCS_2026_08_30 = [
     "ONT6", "ONT8", "OXR1", "PSP1", "PSP3", "SAN3", "SAX1", "SAX2",
     "SAX6", "SAX7", "SBD6", "SCA4", "SCA7", "SCA9", "SCK6", "SMF1",
 ]
-UNMAPPED_2026_08_30 = ["BDU2", "IGA3", "ILM1", "IMO1", "IWA6"]
+# Verified 2026-09-02 from operator street addresses (not inferred from letters).
+MAPPED_2026_09_02 = {
+    "BDU2": "CO",  # 8350 Quintero St, Commerce City, CO 80022
+    "IGA3": "GA",  # 7001 Skipper Rd, Macon, GA 31216
+    "ILM1": "NC",  # 163 US-421 N, Rocky Point, NC 28435
+    "IMO1": "MO",  # 4001 E 149th St, Kansas City, MO 64147
+    "ITX3": "TX",  # 8590 NE 24th Ave, Amarillo, TX 79108
+    "IWA6": "WA",  # 1202 S Road 40 E, Pasco, WA 99301
+}
+# Still no published address — prefer omit over inventing.
+STILL_UNMAPPED = ["XSB3", "XIN5", "XPH6", "QBE1"]
 PREFIX_MAPPED_CA = ["LGB7", "SBD6", "SCA9", "SCK6"]
 
 HEADERS = (
@@ -63,8 +73,12 @@ class TestFCMapping:
         for fc in CA_FCS_2026_08_30:
             assert fc_to_state(fc) == "CA", f"{fc} should be CA"
 
-    def test_unmapped_that_day_stay_unknown(self):
-        for fc in UNMAPPED_2026_08_30:
+    def test_verified_2026_09_02_street_addresses(self):
+        for fc, state in MAPPED_2026_09_02.items():
+            assert fc_to_state(fc) == state, f"{fc} should be {state}"
+
+    def test_still_unmapped_stay_unknown(self):
+        for fc in STILL_UNMAPPED:
             assert fc_to_state(fc) is None, f"{fc} must not be invented"
 
     def test_prefix_mapped_ca(self):
@@ -91,15 +105,28 @@ class TestParser:
     def test_unmapped_fc_is_not_ca(self):
         content = _tsv([
             _row("2026-08-30", "SKU-A", 10, "ONT8"),
-            _row("2026-08-30", "SKU-A", 5, "BDU2"),
+            _row("2026-08-30", "SKU-A", 5, "XSB3"),
         ])
         parsed = parse_ledger_summary(content, costs={"SKU-A": 1.0})
         ca = summarize_state_day(parsed["rows"], "2026-08-30", "CA")
         unknown = summarize_state_day(parsed["rows"], "2026-08-30", "XX")
         assert ca["cogs_value"] == 10.0
         assert unknown["cogs_value"] == 5.0
-        assert "BDU2" in parsed["unknown_fcs"]
-        assert any(r["state_code"] is None and r["fc_code"] == "BDU2" for r in parsed["rows"])
+        assert "XSB3" in parsed["unknown_fcs"]
+        assert any(r["state_code"] is None and r["fc_code"] == "XSB3" for r in parsed["rows"])
+
+    def test_bdu2_now_maps_to_co_not_unknown(self):
+        content = _tsv([
+            _row("2026-08-30", "SKU-A", 10, "ONT8"),
+            _row("2026-08-30", "SKU-A", 5, "BDU2"),
+        ])
+        parsed = parse_ledger_summary(content, costs={"SKU-A": 1.0})
+        ca = summarize_state_day(parsed["rows"], "2026-08-30", "CA")
+        co = summarize_state_day(parsed["rows"], "2026-08-30", "CO")
+        assert ca["cogs_value"] == 10.0
+        assert co["cogs_value"] == 5.0
+        assert "BDU2" not in parsed["unknown_fcs"]
+        assert any(r["state_code"] == "CO" and r["fc_code"] == "BDU2" for r in parsed["rows"])
 
     def test_missing_cost_excluded_from_dollars(self):
         content = _tsv([
@@ -151,21 +178,28 @@ class TestParser:
         assert parsed["rows"][0]["state_code"] == "OK"
 
     def test_verified_ca_fc_set_rolls_up(self):
-        """24 CA FCs + 5 unmapped: CA $ excludes unmapped, FC count is 24."""
+        """24 CA FCs + still-unmapped codes: CA $ excludes unmapped, FC count is 24."""
         rows = [
             _row("2026-08-30", "SKU-A", 1, fc) for fc in CA_FCS_2026_08_30
         ] + [
-            _row("2026-08-30", "SKU-A", 10, fc) for fc in UNMAPPED_2026_08_30
+            _row("2026-08-30", "SKU-A", 10, fc) for fc in STILL_UNMAPPED
         ]
         parsed = parse_ledger_summary("\n".join([HEADERS, *rows]), costs={"SKU-A": 3.4028})
         ca = summarize_state_day(parsed["rows"], "2026-08-30", "CA")
         assert ca["fc_count"] == 24
         assert ca["units"] == 24
         assert sorted(ca["fcs"]) == sorted(CA_FCS_2026_08_30)
-        assert set(parsed["unknown_fcs"]) == set(UNMAPPED_2026_08_30)
+        assert set(parsed["unknown_fcs"]) == set(STILL_UNMAPPED)
         unknown = summarize_state_day(parsed["rows"], "2026-08-30", "XX")
-        assert unknown["units"] == 50
+        assert unknown["units"] == 40
         assert ca["cogs_value"] == pytest.approx(81.67, abs=0.02)
+
+    def test_2026_09_02_codes_are_not_unknown(self):
+        rows = [_row("2026-08-30", "SKU-A", 1, fc) for fc in MAPPED_2026_09_02]
+        parsed = parse_ledger_summary("\n".join([HEADERS, *rows]), costs={"SKU-A": 1.0})
+        assert parsed["unknown_fcs"] == []
+        for r in parsed["rows"]:
+            assert r["state_code"] == MAPPED_2026_09_02[r["fc_code"]]
 
 
 class TestPeakYTD:
@@ -248,6 +282,8 @@ class TestCLIAndScheduler:
         src = Path("src/main.py").read_text()
         assert '@cli.command("spapi-ledger-summary")' in src
         assert '@cli.command("backfill-ledger-summary")' in src
+        assert '@cli.command("inventory-remap-fc")' in src
+        assert "inventory_ledger_summary_daily" in src[src.index("def inventory_remap_fc_cmd"):src.index("def inventory_remap_fc_cmd") + 1800]
         assert "id=\"ledger_summary_daily\"" in src
         assert "def _run_ledger_summary" in src
         assert "fetch_ledger_summary" in src
