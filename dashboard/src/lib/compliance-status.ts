@@ -79,8 +79,8 @@ export function getQueueBucket(row: {
 }
 
 /**
- * Count states that need registration action (for nav badges).
- * Only nexus-detected + not registered + not resolved + not hidden.
+ * Count nexus-detected + not registered + not resolved + not hidden.
+ * Not the sidebar badge — that uses countRegisterNow in registration-model.
  */
 export function countNeedsRegistration(
   rows: Array<{

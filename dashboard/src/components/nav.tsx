@@ -26,9 +26,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import { useEffect, useState } from "react";
-import { getSupabase, isConfigured } from "@/lib/supabase";
-import { countNeedsRegistration } from "@/lib/compliance-status";
+import { useEffect, useMemo, useState } from "react";
+import { useSupabaseQuery } from "@/lib/hooks";
+import { countRegisterNow } from "@/lib/registration-model";
+import type { FranchiseTaxFlag, NexusStatus, SalesByState, StateRule } from "@/lib/types";
 
 interface NavItem {
   href: string;
@@ -76,36 +77,30 @@ const monitorLinks: NavItem[] = [
   { href: "/data", label: "Data & Export", icon: Database },
 ];
 
-function useComplianceCount() {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (!isConfigured()) return;
-    async function load() {
-      try {
-        const sb = getSupabase();
-        const { data, error } = await sb
-          .from("nexus_status")
-          .select("has_physical_nexus,has_economic_nexus,is_registered,compliance_resolved,compliance_hidden");
-        if (!error && data) {
-          setCount(countNeedsRegistration(data));
-          return;
-        }
-        const { data: fallback } = await sb
-          .from("nexus_status")
-          .select("has_physical_nexus,has_economic_nexus,is_registered");
-        if (fallback) setCount(countNeedsRegistration(fallback));
-      } catch {
-        // ignore
-      }
-    }
-    load();
-  }, []);
-  return count;
+function useRegisterNowCount() {
+  const { data: rules } = useSupabaseQuery<StateRule>("state_rules", {
+    orderBy: "state_code",
+    ascending: true,
+  });
+  const { data: nexus } = useSupabaseQuery<NexusStatus>("nexus_status");
+  const { data: sales } = useSupabaseQuery<SalesByState>("sales_by_state");
+  const { data: flags } = useSupabaseQuery<FranchiseTaxFlag>("franchise_tax_flags", {
+    filters: { status: "open" },
+  });
+  return useMemo(
+    () => countRegisterNow(
+      rules ?? [],
+      nexus ?? [],
+      sales ?? [],
+      (flags ?? []) as unknown as Array<{ state_code: string; [key: string]: unknown }>,
+    ),
+    [rules, nexus, sales, flags],
+  );
 }
 
 function NavLinks({ onClick }: { onClick?: () => void }) {
   const pathname = usePathname();
-  const complianceCount = useComplianceCount();
+  const registerNowCount = useRegisterNowCount();
 
   function isActive(href: string) {
     if (href === "/") return pathname === "/";
@@ -118,7 +113,7 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
   function renderLink(item: NavItem, nested = false) {
     const active = isActive(item.href);
     const Icon = item.icon;
-    const showBadge = item.href === "/registrations" && complianceCount > 0;
+    const showBadge = item.href === "/registrations" && registerNowCount > 0;
     return (
       <div key={item.href}>
         <Link
@@ -136,7 +131,7 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
           {item.label}
           {showBadge && (
             <span className="ml-auto inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-semibold text-white">
-              {complianceCount}
+              {registerNowCount}
             </span>
           )}
         </Link>

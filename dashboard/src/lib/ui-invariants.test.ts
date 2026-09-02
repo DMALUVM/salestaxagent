@@ -250,11 +250,12 @@ describe("dashboard control labels match handlers", () => {
     assert.doesNotMatch(page, />today</);
   });
 
-  test("nav badge lives on Nexus & Registrations and uses countNeedsRegistration", () => {
+  test("nav badge lives on Nexus & Registrations and uses Register Now count", () => {
     const nav = src("src/components/nav.tsx");
-    assert.match(nav, /countNeedsRegistration/);
-    assert.match(nav, /item\.href === \"\/registrations\" && complianceCount > 0/);
-    assert.doesNotMatch(nav, /item\.href === \"\/compliance\" && complianceCount > 0/);
+    assert.match(nav, /countRegisterNow/);
+    assert.match(nav, /item\.href === \"\/registrations\" && registerNowCount > 0/);
+    assert.doesNotMatch(nav, /item\.href === \"\/compliance\" && registerNowCount > 0/);
+    assert.doesNotMatch(nav, /countNeedsRegistration/);
   });
 
   test("orphan /filings redirects to calendar", () => {

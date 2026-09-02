@@ -186,3 +186,17 @@ export function buildRecommendations(
 
   return results;
 }
+
+/**
+ * Sidebar badge count. Must stay equal to the Register Now card on
+ * /registrations — never a raw unregistered-nexus row count.
+ */
+export function countRegisterNow(
+  rules: StateRule[],
+  nexus: NexusStatus[],
+  sales: SalesByState[],
+  flags: Array<{ state_code: string; [key: string]: unknown }> = [],
+): number {
+  return buildRecommendations(rules, nexus, sales, flags)
+    .filter((r) => r.recommendation === "REGISTER_NOW").length;
+}
