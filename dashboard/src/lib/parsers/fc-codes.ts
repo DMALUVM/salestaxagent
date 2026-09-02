@@ -1,6 +1,6 @@
 /** Amazon Fulfillment Center codes mapped to US states.
  *  Covers FCs, sort centers, and delivery stations (S-prefix).
- *  Last updated: 2026-08-14
+ *  Last updated: 2026-09-02
  */
 const FC_CODES: Record<string, string> = {
   ABE2: "NJ", ABE3: "NJ", ABE4: "NJ", ABE8: "NJ",
@@ -14,6 +14,7 @@ const FC_CODES: Record<string, string> = {
   AUS2: "TX", AUS3: "TX",
   AVP1: "PA", AVP2: "PA", AVP3: "PA", AVP6: "PA",
   BDL1: "CT", BDL2: "CT", BDL3: "CT",
+  BDU2: "CO",
   BFI1: "WA", BFI3: "WA", BFI4: "WA", BFI5: "WA",
   BFL1: "CA", BFL2: "CA",
   BHM1: "AL",
@@ -57,8 +58,13 @@ const FC_CODES: Record<string, string> = {
   IAD1: "VA",
   IAH1: "TX", IAH3: "TX",
   ICT2: "KS",
+  IGA3: "GA",
   IGQ1: "IL",
+  ILM1: "NC",
+  IMO1: "MO",
   IND1: "IN", IND2: "IN", IND3: "IN", IND4: "IN", IND5: "IN", IND9: "IN",
+  ITX3: "TX",
+  IWA6: "WA",
   JAN1: "MS",
   JAX2: "FL", JAX3: "FL", JAX5: "FL",
   JFK8: "NY",

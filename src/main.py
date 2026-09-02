@@ -1676,6 +1676,11 @@ def inventory_remap_fc_cmd(dry_run, recheck):
 
     Only fills in states that are currently missing; it never overwrites or
     deletes an existing mapping.
+
+    /tax-inventory unknown_fcs reads inventory_ledger_summary_daily (state_code
+    written at parse time). After adding codes, re-run the existing
+    `spapi-ledger-summary` / `backfill-ledger-summary` upsert so those rows
+    pick up the new map — do not invent a second remap command.
     """
     from src.db import get_client, log_audit
     from src.mappers.fc_to_state import fc_to_state
