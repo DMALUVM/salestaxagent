@@ -8,6 +8,7 @@
  */
 
 import { live3plSnapshots } from "./inventory-3pl";
+import { isNotSellingSku, notSellingSkuSet } from "./inventory-sku-flags";
 import type {
   InventoryLeadtimeSummary,
   InventoryRestock,
@@ -47,6 +48,7 @@ type RawLike = {
   settings?: InventorySettings | null;
   signals?: InventorySkuSignals[];
   leadtime?: InventoryLeadtimeSummary | null;
+  skuFlags?: Array<{ sku: string; not_selling?: boolean | null }>;
 };
 
 function effectiveLead(
@@ -99,6 +101,7 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
   const sigMap = new Map((raw.signals ?? []).map((s) => [s.sku, s]));
   const tplMap = new Map(live3plSnapshots(raw.tpl ?? []).map((t) => [t.sku, t]));
   const awdMap = new Map((raw.awd ?? []).map((a) => [a.sku, a]));
+  const hidden = notSellingSkuSet(raw.skuFlags);
 
   const allSkus = new Set([
     ...(raw.snapshots ?? []).map((s) => s.sku),
@@ -111,6 +114,7 @@ export function buildInventoryActions(raw: RawLike | null, limit = 8): Inventory
 
   for (const sku of allSkus) {
     if (sku === "UNKNOW" || sku === "UNKNOWN") continue;
+    if (isNotSellingSku(sku, hidden)) continue;
 
     const snap = snapMap.get(sku);
     const vel = velMap.get(sku);

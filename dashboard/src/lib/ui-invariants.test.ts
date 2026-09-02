@@ -38,6 +38,25 @@ describe("entity review cards", () => {
   });
 });
 
+describe("not-selling SKU flag", () => {
+  test("plan page and inventory drawer expose a persistable Not selling toggle", () => {
+    const plan = src("src/app/inventory/plan/page.tsx");
+    const inv = src("src/app/inventory/page.tsx");
+    const api = src("src/app/api/inventory/route.ts");
+    const write = src("src/app/api/inventory/sku-flags/route.ts");
+    const actions = src("src/lib/inventory-actions.ts");
+    assert.match(plan, /NotSellingToggle/);
+    assert.match(inv, /NotSellingToggle/);
+    assert.match(inv, /flag = "OFF"/);
+    assert.match(api, /skuFlags/);
+    assert.match(api, /inventory_sku_flags/);
+    assert.match(write, /not_selling/);
+    assert.match(write, /inventory_sku_flags/);
+    assert.match(actions, /isNotSellingSku/);
+    assert.match(actions, /skuFlags/);
+  });
+});
+
 describe("3pl sign color", () => {
   test("negative ad-hoc amounts are not styled emerald/positive", () => {
     const page = src("src/app/inventory/3pl/page.tsx");

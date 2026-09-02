@@ -13,7 +13,10 @@ import type {
   Inventory3plSnapshot,
   InventorySkuSignals,
   InventoryLeadtimeSummary,
+  InventorySkuFlag,
 } from "@/lib/types";
+import { isNotSellingSku, notSellingSkuSet } from "@/lib/inventory-sku-flags";
+import { NotSellingToggle } from "@/components/inventory/NotSellingToggle";
 import { LoadingState } from "@/components/loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -99,6 +102,8 @@ const FLAG_COLORS: Record<string, string> = {
   OK: "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800",
   OVERSTOCK:
     "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950 dark:text-blue-300 dark:border-blue-800",
+  OFF:
+    "bg-muted text-muted-foreground border-border",
 };
 
 interface ComputedRow {
@@ -137,6 +142,7 @@ interface ComputedRow {
   stockout_date: string | null;
   network_oos_date: string | null;
   flag: string;
+  not_selling: boolean;
   inventory_u_30: number | null;
   rate_divergence_pct: number | null;
   rate_agreement: string | null;
@@ -221,6 +227,7 @@ export default function InventoryPage() {
     synced_at?: string | null;
   }[]);
   const signalRows = (raw?.signals ?? []) as InventorySkuSignals[];
+  const skuFlags = (raw?.skuFlags ?? []) as InventorySkuFlag[];
   const leadtime = (raw?.leadtime ?? null) as InventoryLeadtimeSummary | null;
   const modelStateRows = (raw?.modelState ?? []) as Array<{ sku: string; weights: unknown; seasonal_factors: unknown; model_version: string }>;
   const capacityLimits = mergeScFbaCapacityLimits(
@@ -263,6 +270,7 @@ export default function InventoryPage() {
     const recMap = new Map(restockList.map((r) => [r.sku, r]));
     const signalMap = new Map(signalRows.map((r) => [r.sku, r]));
     const signalMapU = new Map(signalRows.map((r) => [r.sku.toUpperCase(), r]));
+    const hidden = notSellingSkuSet(skuFlags);
     const tplMap = new Map(tplSnapshots.map((t) => [t.sku, t]));
     const ownedSources = latestOwnedSources({
       snapshots,
@@ -481,6 +489,9 @@ export default function InventoryPage() {
         flag = dos < 60 && total_vel_30 > eps ? "CRITICAL" : our_reorder > 0 ? "RESTOCK" : "OK";
       }
 
+      const not_selling = isNotSellingSku(sku, hidden);
+      if (not_selling) flag = "OFF";
+
       const shopify_share = total_vel_30 > 0 ? Math.round((shopify_vel_30 / total_vel_30) * 100) : 0;
 
       result.push({
@@ -519,6 +530,7 @@ export default function InventoryPage() {
         stockout_date,
         network_oos_date,
         flag,
+        not_selling,
         inventory_u_30: sig?.inventory_u_30 != null ? Number(sig.inventory_u_30) : null,
         rate_divergence_pct: sig?.rate_divergence_pct != null ? Number(sig.rate_divergence_pct) : null,
         rate_agreement: sig?.rate_agreement ?? null,
@@ -541,7 +553,7 @@ export default function InventoryPage() {
     }
 
     return result;
-  }, [snapshots, velocities, restockList, planningList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, signalRows, leadtime, s]);
+  }, [snapshots, velocities, restockList, planningList, tplSnapshots, awdSnapshots, forecasts, seasonality, modelStateRows, signalRows, skuFlags, leadtime, s]);
 
   // Filter + sort
   const filtered = useMemo(() => {
@@ -1088,6 +1100,12 @@ export default function InventoryPage() {
                   ASIN: {selected.asin}
                 </p>
               )}
+
+              <NotSellingToggle
+                sku={selected.sku}
+                checked={selected.not_selling}
+                onChanged={() => refetch()}
+              />
 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="rounded-lg border p-3">

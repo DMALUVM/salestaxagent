@@ -67,7 +67,7 @@ export const SKU_TABLE_COLUMNS: SkuTableColumn[] = [
   { key: "our_reorder_qty", label: "Reorder", tip: "Units to transfer/produce to reach target cover" },
   { key: "stockout_date", label: "Out", tip: "FBA reaches 0 (Amazon) or warehouse reaches 0 (Shop) — uses forecast + seasonality" },
   { key: "network_oos_date", label: "OOS", tip: "All network stock (FBA+AWD+3PL+Inbound) reaches 0 — uses forecast + seasonality" },
-  { key: "flag", label: "Status", tip: "OK ≥ target cover; CRITICAL/LOW below; RESTOCK approaching" },
+  { key: "flag", label: "Status", tip: "OK ≥ target cover; CRITICAL/LOW below; RESTOCK approaching; OFF = not selling" },
 ];
 
 /** Default visible set. Total Amazon sits after Inbnd; Total follows it. */
