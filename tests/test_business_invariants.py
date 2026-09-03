@@ -54,11 +54,10 @@ class TestBusinessRulesConfig:
 
     def test_ads_sb_sd_timeouts_are_durable(self):
         ads = self.cfg["ads"]
-        assert ads["campaign_report_timeout_sb_seconds"] >= 900
-        assert ads["campaign_report_timeout_sd_seconds"] >= 900
-        # Still below the SP client default so SP remains the longer path.
-        assert ads["campaign_report_timeout_sb_seconds"] < 1800
-        assert ads["campaign_report_timeout_sd_seconds"] < 1800
+        # 1-day SB/SD chunks still sit PENDING past 15m on this account.
+        # Match SP's 1800s client default; do not go back to 900.
+        assert ads["campaign_report_timeout_sb_seconds"] == 1800
+        assert ads["campaign_report_timeout_sd_seconds"] == 1800
 
     def test_ads_campaign_chunk_days_avoid_30day_sb_timeout(self):
         ads = self.cfg["ads"]
@@ -153,10 +152,12 @@ class TestRulesModule:
             ADS_CAMPAIGN_TIMEOUT_SB_SECONDS,
             ADS_CAMPAIGN_TIMEOUT_SD_SECONDS,
         )
-        assert ADS_CAMPAIGN_TIMEOUT_SB_SECONDS >= 900
-        assert ADS_CAMPAIGN_TIMEOUT_SD_SECONDS >= 900
-        assert ADS_CAMPAIGN_TIMEOUT_SB_SECONDS < 1800
-        assert ADS_CAMPAIGN_TIMEOUT_SD_SECONDS < 1800
+        path = Path(__file__).resolve().parent.parent / "config" / "business_rules.json"
+        ads = json.loads(path.read_text())["ads"]
+        assert ADS_CAMPAIGN_TIMEOUT_SB_SECONDS == 1800
+        assert ADS_CAMPAIGN_TIMEOUT_SD_SECONDS == 1800
+        assert ADS_CAMPAIGN_TIMEOUT_SB_SECONDS == ads["campaign_report_timeout_sb_seconds"]
+        assert ADS_CAMPAIGN_TIMEOUT_SD_SECONDS == ads["campaign_report_timeout_sd_seconds"]
 
     def test_ads_campaign_chunks_are_smaller_than_the_api_cap(self):
         from src.rules import ADS_CAMPAIGN_CHUNK_DAYS, ADS_MAX_CHUNK_DAYS
@@ -799,8 +800,9 @@ class TestAdProductCoverage:
 
         Amazon's report queue goes through slow spells where even a one-day SP
         report sits PENDING for many minutes. SP feeds the KPI cards and P&L,
-        so it keeps the client default; only the additive products are capped,
-        and those caps come from business_rules.json (not a 300s hardcoded).
+        so it keeps the client default and is not listed in
+        CAMPAIGN_REPORT_TIMEOUT. SB/SD caps come from business_rules.json
+        and match that 1800s headroom (not a 300s/900s hardcoded).
         """
         from src.amazon_ads.reports import CAMPAIGN_REPORT_TIMEOUT
         from src.rules import (
@@ -810,10 +812,8 @@ class TestAdProductCoverage:
         assert "SP" not in CAMPAIGN_REPORT_TIMEOUT
         assert CAMPAIGN_REPORT_TIMEOUT["SB"] == ADS_CAMPAIGN_TIMEOUT_SB_SECONDS
         assert CAMPAIGN_REPORT_TIMEOUT["SD"] == ADS_CAMPAIGN_TIMEOUT_SD_SECONDS
-        assert CAMPAIGN_REPORT_TIMEOUT["SB"] >= 900
-        assert CAMPAIGN_REPORT_TIMEOUT["SD"] >= 900
-        assert CAMPAIGN_REPORT_TIMEOUT["SB"] < 1800
-        assert CAMPAIGN_REPORT_TIMEOUT["SD"] < 1800
+        assert CAMPAIGN_REPORT_TIMEOUT["SB"] == 1800
+        assert CAMPAIGN_REPORT_TIMEOUT["SD"] == 1800
 
     def test_thirty_day_window_uses_seven_day_chunks(self, monkeypatch):
         """Nightly 30d must not be one all-or-nothing SB/SD report."""
