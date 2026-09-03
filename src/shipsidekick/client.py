@@ -8,6 +8,9 @@ Auth:     Authorization: Bearer {SHIPSIDEKICK_API_KEY}
 Base URL: SHIPSIDEKICK_BASE_URL (default https://www.shipsidekick.com)
 
 Pagination is cursor-based: response has hasMore + nextCursor.
+Always send limit=100 (API maximum; 200 returns Zod too_big). The
+default page size is 10 and nextCursor is exclusive of the boundary id,
+so walking default pages silently drops rows.
 """
 from __future__ import annotations
 
@@ -21,6 +24,9 @@ from src.config import settings
 from src.db import fetch_all, upsert_rows, log_ingestion
 
 log = logging.getLogger(__name__)
+
+# GET /api/v1/inventory-levels and /products. Zod rejects 200 (too_big).
+PAGE_LIMIT = 100
 
 
 def _sku_key(sku: str | None) -> str:
@@ -60,15 +66,46 @@ def _headers() -> dict[str, str]:
     }
 
 
+def _row_identity(item: object) -> str | None:
+    """Stable id for a Sidekick list row. Level/product id when present."""
+    if not isinstance(item, dict):
+        return None
+    item_id = item.get("id")
+    if item_id is None or item_id == "":
+        return None
+    return str(item_id)
+
+
+def _unique_row_count(items: list) -> int:
+    """Unique level/product ids, plus any rows that have no id."""
+    ids: set[str] = set()
+    unidentified = 0
+    for item in items:
+        ident = _row_identity(item)
+        if ident is None:
+            unidentified += 1
+        else:
+            ids.add(ident)
+    return len(ids) + unidentified
+
+
 def _paginate(path: str, label: str) -> list[dict]:
-    """Cursor-paginate a Ship Sidekick list endpoint (hasMore + nextCursor)."""
+    """Cursor-paginate a Ship Sidekick list endpoint (hasMore + nextCursor).
+
+    Always sends limit=100. Do not rely on the default page size of 10:
+    nextCursor points at an id the next request treats as exclusive, so
+    page breaks drop that boundary row. When the response includes
+    totalCount and collected unique ids (or rows) fall short, raise —
+    never return a silent partial feed.
+    """
     base = _base_url()
     headers = _headers()
     all_items: list[dict] = []
     cursor: str | None = None
+    total_count: int | None = None
 
     while True:
-        params: dict[str, str] = {}
+        params: dict[str, str | int] = {"limit": PAGE_LIMIT}
         if cursor:
             params["cursor"] = cursor
 
@@ -85,6 +122,12 @@ def _paginate(path: str, label: str) -> list[dict]:
             )
 
         body = resp.json()
+        if total_count is None and body.get("totalCount") is not None:
+            try:
+                total_count = int(body["totalCount"])
+            except (TypeError, ValueError):
+                total_count = None
+
         items = body.get("data", [])
         if isinstance(items, list):
             all_items.extend(items)
@@ -95,6 +138,14 @@ def _paginate(path: str, label: str) -> list[dict]:
         if not cursor:
             break
 
+    collected = _unique_row_count(all_items)
+    if total_count is not None and collected < total_count:
+        kind = "ids" if any(_row_identity(i) for i in all_items) else "rows"
+        raise ShipSidekickError(
+            f"{label} shortfall: collected {collected} unique {kind} "
+            f"< totalCount {total_count}"
+        )
+
     return all_items
 
 
@@ -103,6 +154,9 @@ def get_inventory() -> list[dict]:
 
     Returns list of {sku, product_name, available, committed, reserved,
     incoming, damaged, warehouse, warehouse_id, raw}.
+
+    Always requests limit=100 and walks hasMore/nextCursor. Raises
+    ShipSidekickError if unique level ids (or rows) < totalCount.
 
     Filters out:
     - Items with no SKU

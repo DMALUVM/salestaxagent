@@ -4,13 +4,18 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from src.shipsidekick.client import (
+    PAGE_LIMIT,
+    ShipSidekickError,
     _3pl_sync_outcome,
     _carry_forward_missing_instock,
     _catalog_skus_from_products,
     _omitted_catalog_skus,
     _parse_inventory_items,
     _snapshot_rows,
+    get_inventory,
     live_3pl_snapshots,
     sync_3pl,
 )
@@ -177,42 +182,44 @@ def test_catalog_skus_from_flat_variant_row():
     assert skus == ["DDPE0003Shop"]
 
 
+class _FakeResp:
+    def __init__(self, body, status_code=200):
+        self.status_code = status_code
+        self.text = ""
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
 def test_get_catalog_skus_paginates_products(monkeypatch):
     from src.shipsidekick import client as sk
 
-    calls: list[str] = []
-
-    class FakeResp:
-        def __init__(self, body, status_code=200):
-            self.status_code = status_code
-            self.text = ""
-            self._body = body
-
-        def json(self):
-            return self._body
+    calls: list[tuple[str, dict]] = []
 
     pages = [
-        FakeResp({
+        _FakeResp({
             "data": [_product("DDPE0001Shop")],
             "hasMore": True,
             "nextCursor": "c2",
         }),
-        FakeResp({
+        _FakeResp({
             "data": [_product("DDPE0002Shop"), _product("GIFT", tracks=False)],
             "hasMore": False,
         }),
     ]
 
     def fake_get(url, headers=None, params=None, timeout=30):
-        calls.append(url)
+        calls.append((url, dict(params or {})))
         return pages.pop(0)
 
     monkeypatch.setattr(sk, "_headers", lambda: {"Authorization": "Bearer x"})
     monkeypatch.setattr(sk.httpx, "get", fake_get)
     skus = sk.get_catalog_skus()
     assert skus == ["DDPE0001Shop", "DDPE0002Shop"]
-    assert all("/api/v1/products" in u for u in calls)
+    assert all("/api/v1/products" in u for u, _ in calls)
     assert len(calls) == 2
+    assert all(int(p["limit"]) == PAGE_LIMIT for _, p in calls)
 
 
 def test_omitted_catalog_skus_are_feed_gaps():
@@ -338,3 +345,155 @@ def test_run_3pl_sync_records_partial_not_quiet_success(monkeypatch):
     assert finishes
     assert finishes[0][1] == "partial"
     assert "DDPE0001Shop (carried 1594)" in (finishes[0][2] or "")
+
+
+# Live-shaped inventory-levels: 56 rows, totalCount=56. Default limit=10
+# plus exclusive nextCursor drops 5 boundary rows (56 → 51), including
+# DDPE0001Shop at the first page break (index 10). limit=100 fits all.
+
+_LIVE_TOTAL = 56
+_BOUNDARY_INDEX = 10  # first exclusive-cursor victim at default page size 10
+
+
+def _level(sku: str, title: str, available: int, level_id: str) -> dict:
+    item = _api_item(sku, title, available)
+    item["id"] = level_id
+    return item
+
+
+def _live_shaped_catalog() -> list[dict]:
+    """56 inventory-levels; DDPE0001Shop 8023 sits on the first page break."""
+    catalog = []
+    for i in range(_LIVE_TOTAL):
+        if i == _BOUNDARY_INDEX:
+            catalog.append(_level(
+                "DDPE0001Shop", "3 Pack Unscented", 8023, f"il_{i:02d}",
+            ))
+        else:
+            catalog.append(_level(f"SKU-{i:02d}", f"Item {i:02d}", i + 1, f"il_{i:02d}"))
+    return catalog
+
+
+def _exclusive_cursor_walk(catalog: list[dict], limit: int) -> list[dict]:
+    """Reproduce Sidekick: nextCursor is the next id, then treated exclusive."""
+    collected: list[dict] = []
+    start = 0
+    while True:
+        page = catalog[start:start + limit]
+        collected.extend(page)
+        next_idx = start + limit
+        if next_idx >= len(catalog):
+            break
+        start = next_idx + 1
+    return collected
+
+
+def _sidekick_inventory_get(catalog: list[dict], *, honor_limit: bool = True):
+    """Live-shaped GET /inventory-levels: exclusive cursor, default limit=10."""
+    calls: list[dict] = []
+
+    def fake_get(url, headers=None, params=None, timeout=30):
+        params = dict(params or {})
+        calls.append(params)
+        if honor_limit and params.get("limit") is not None:
+            limit = int(params["limit"])
+        else:
+            limit = 10
+        cursor = params.get("cursor")
+        start = 0
+        if cursor:
+            idx = next(i for i, it in enumerate(catalog) if it["id"] == cursor)
+            start = idx + 1
+        page = catalog[start:start + limit]
+        next_idx = start + limit
+        has_more = next_idx < len(catalog)
+        next_cursor = catalog[next_idx]["id"] if has_more else None
+        return _FakeResp({
+            "data": page,
+            "hasMore": has_more,
+            "nextCursor": next_cursor,
+            "totalCount": len(catalog),
+        })
+
+    return fake_get, calls
+
+
+def test_default_page_size_drops_boundary_ddpe0001shop():
+    """Document the live 2026-09-03 failure: default-10 walk loses 8023."""
+    catalog = _live_shaped_catalog()
+    dropped = _exclusive_cursor_walk(catalog, limit=10)
+    dropped_skus = {row["productVariant"]["sku"] for row in dropped}
+    assert len(dropped) == 51
+    assert "DDPE0001Shop" not in dropped_skus
+
+    complete = _exclusive_cursor_walk(catalog, limit=100)
+    complete_skus = {row["productVariant"]["sku"] for row in complete}
+    assert len(complete) == _LIVE_TOTAL
+    assert complete_skus == {row["productVariant"]["sku"] for row in catalog}
+    unscented = next(r for r in complete if r["productVariant"]["sku"] == "DDPE0001Shop")
+    assert unscented["availableQuantity"] == 8023
+
+
+def test_get_inventory_limit_100_keeps_ddpe0001shop_8023(monkeypatch):
+    """limit=100 fits the 56-row catalog; boundary SKU is not dropped."""
+    from src.shipsidekick import client as sk
+
+    catalog = _live_shaped_catalog()
+    fake_get, calls = _sidekick_inventory_get(catalog, honor_limit=True)
+    monkeypatch.setattr(sk, "_headers", lambda: {"Authorization": "Bearer x"})
+    monkeypatch.setattr(sk.httpx, "get", fake_get)
+
+    items = get_inventory()
+    by_sku = {i["sku"]: i["available"] for i in items}
+
+    assert calls, "get_inventory must request inventory-levels"
+    assert all(int(p["limit"]) == PAGE_LIMIT == 100 for p in calls)
+    assert len(items) == _LIVE_TOTAL
+    assert by_sku["DDPE0001Shop"] == 8023
+    assert len(calls) == 1
+
+
+def test_get_inventory_shortfall_vs_totalcount_raises(monkeypatch):
+    """API still pages at default-10 (exclusive cursor) → hard fail, not 51."""
+    from src.shipsidekick import client as sk
+
+    catalog = _live_shaped_catalog()
+    fake_get, calls = _sidekick_inventory_get(catalog, honor_limit=False)
+    monkeypatch.setattr(sk, "_headers", lambda: {"Authorization": "Bearer x"})
+    monkeypatch.setattr(sk.httpx, "get", fake_get)
+
+    with pytest.raises(ShipSidekickError, match=r"shortfall: collected 51 unique ids < totalCount 56"):
+        get_inventory()
+    assert calls
+    assert all(int(p["limit"]) == PAGE_LIMIT for p in calls)
+
+
+def test_get_inventory_paginates_when_catalog_exceeds_100(monkeypatch):
+    """Catalogs larger than the API max still walk hasMore + nextCursor."""
+    from src.shipsidekick import client as sk
+
+    page1 = [_level(f"SKU-{i:03d}", f"Item {i}", 1, f"il_{i:03d}") for i in range(100)]
+    page2 = [_level(f"SKU-{i:03d}", f"Item {i}", 1, f"il_{i:03d}") for i in range(100, 150)]
+    pages = [
+        _FakeResp({
+            "data": page1, "hasMore": True, "nextCursor": "il_100",
+            "totalCount": 150,
+        }),
+        _FakeResp({
+            "data": page2, "hasMore": False, "totalCount": 150,
+        }),
+    ]
+    calls: list[dict] = []
+
+    def fake_get(url, headers=None, params=None, timeout=30):
+        calls.append(dict(params or {}))
+        return pages.pop(0)
+
+    monkeypatch.setattr(sk, "_headers", lambda: {"Authorization": "Bearer x"})
+    monkeypatch.setattr(sk.httpx, "get", fake_get)
+
+    items = get_inventory()
+    assert len(items) == 150
+    assert len(calls) == 2
+    assert all(int(p["limit"]) == PAGE_LIMIT for p in calls)
+    assert calls[1].get("cursor") == "il_100"
