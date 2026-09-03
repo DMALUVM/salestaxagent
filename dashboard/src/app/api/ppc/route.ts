@@ -13,6 +13,7 @@ import {
   BLAKE_63D_START,
   buildBlake63dList,
 } from "@/lib/ppc-weekly-blake-63d";
+import { buildBleeders10, emptyBleeders10 } from "@/lib/ppc-bleeders-10";
 import type { WeeklyCampaignRef, WeeklyPlacementRef, WeeklyTermRef } from "@/lib/ppc-weekly-blake-63d";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
@@ -701,7 +702,7 @@ export async function GET() {
       const pageSize = 1000;
       while (true) {
         const r = await sb.from("ads_action_decisions")
-          .select("id,campaign_id,search_term,action_type,status,applied_at,dismissed_at")
+          .select("id,campaign_id,search_term,action_type,status,applied_at,dismissed_at,entity_name,rec_type")
           .gte("as_of_date", BLAKE_63D_START)
           .order("as_of_date", { ascending: false })
           .range(offset, offset + pageSize - 1);
@@ -722,6 +723,10 @@ export async function GET() {
       decisions,
       account_cvr: Math.round(accountCvr * 100) / 100,
     });
+
+    // Bleeders 1.0 — pasted 10. Locked until Monday. Not This week.
+    // Do not re-aggregate. Do not expand to 22. No 2.0.
+    const bleeders10 = buildBleeders10({ decisions });
 
     // ── Recommendations (paginated — a limit here would under-count the
     //    "Actions (N)" badge, which must match what is actually open) ──
@@ -817,6 +822,7 @@ export async function GET() {
       placementsByRange, placementsAvailable,
       searchTerms, searchTermsByRange, recommendations,
       bleeders,
+      bleeders10,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
       targetAcos, targetAcosAsOf,
     });
@@ -834,6 +840,7 @@ export async function GET() {
       strategy: null,
       searchTerms: [], searchTermsByRange: null, recommendations: [],
       bleeders: emptyWeeklyList(),
+      bleeders10: emptyBleeders10(),
       asOf: null, today: null, adsThrough: null,
       lastSyncJob: null, lastSyncStatus: null, lastActions: null,
       dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,
