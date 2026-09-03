@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Download } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +8,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  bleeders10ToCsv,
+  BLEEDERS_10_TITLE,
   recTypeOfBleeders10,
   type Bleeders10Payload,
   type Bleeders10Row,
@@ -47,25 +46,6 @@ export function PpcBleeders10({
   const doneCount = rows.filter((r) => (local[r.checklist_id] ?? r.status) === "done").length;
   const skippedCount = rows.filter((r) => (local[r.checklist_id] ?? r.status) === "skipped").length;
 
-  function exportCsv() {
-    if (!data) return;
-    const csv = bleeders10ToCsv(data);
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url;
-    const start = data.window.window_start || "empty";
-    const end = data.window.window_end || "empty";
-    a.download = `bleeders-1.0-${start}-to-${end}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    onNotice?.({
-      kind: "success",
-      text: `Downloaded ${a.download} — ${data.rows.length} flag(s) for Blake to rank. Not This week.`,
-    });
-  }
-
   async function mark(row: Bleeders10Row, next: Status) {
     const status = next === "done" ? "applied" : next === "skipped" ? "dismissed" : "open";
     setBusy(row.checklist_id);
@@ -77,7 +57,7 @@ export function PpcBleeders10({
           status,
           bleeder: {
             checklist_id: row.checklist_id,
-            as_of: data?.window.window_end ?? "",
+            as_of: data?.window.window_end ?? "2026-08-31",
             rec_type: recTypeOfBleeders10(row.action),
             action_type: row.action,
             campaign_id: row.campaign_id || row.campaign_name,
@@ -90,7 +70,6 @@ export function PpcBleeders10({
               spend: row.spend,
               sales: row.sales_14d,
               version: "1.0",
-              kind: "triage",
             },
             suggested_action: row.suggested_action,
           },
@@ -135,33 +114,22 @@ export function PpcBleeders10({
         <CardContent className="space-y-2 p-4 text-xs">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
-              <p className="text-sm font-semibold text-foreground">{data.title}</p>
+              <p className="text-sm font-semibold text-foreground">{BLEEDERS_10_TITLE}</p>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                <Badge variant="outline">1.0 triage</Badge>
+                <Badge variant="outline">1.0</Badge>
                 <Badge variant="outline">{data.window.label}</Badge>
-                <Badge variant="outline">account CVR {data.account_cvr}%</Badge>
-                {data.account_cvr_nonbranded != null ? (
-                  <Badge variant="outline">nonbrand ST CVR {data.account_cvr_nonbranded}%</Badge>
-                ) : null}
+                <Badge variant="outline">nonbrand ST CVR {data.account_cvr}%</Badge>
                 <Badge variant="outline">floor {data.click_floor}</Badge>
-                <Badge variant="outline">{rows.length} flags</Badge>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="tabular-nums text-muted-foreground">
-                Open <strong className="text-foreground">{openCount}</strong>
-              </span>
-              <Button variant="outline" size="sm" onClick={exportCsv} disabled={rows.length === 0}>
-                <Download className="mr-1 h-3 w-3" />
-                Export CSV
-              </Button>
-            </div>
+            <span className="tabular-nums text-muted-foreground">
+              Open <strong className="text-foreground">{openCount}</strong>
+            </span>
           </div>
           <p className="text-sm text-foreground">
-            Live triage flag list — clicks&gt;=6 AND sales=$0 on stored SP search
-            terms. Blake ranks this pull, then Dana loads This week. This is
-            not the execute list. Floor 6 (GNO 10/$0 not used here).
-            pause_keyword iff term = exact KW; else negative_exact. Nothing
+            Window 2026-06-30..08-31 (63d, SP search terms). Nonbrand search-term
+            CVR 25.79% (~1-in-4). Click floor 6 (1.5×). pause_keyword iff term =
+            exact KW; else negative_exact. Pasted 10 — not This week. Nothing
             writes to Amazon.
           </p>
           {data.notes.slice(0, 3).map((n) => (
@@ -192,16 +160,14 @@ export function PpcBleeders10({
         <CardContent className="p-0 overflow-x-auto">
           {shown.length === 0 ? (
             <p className="p-6 text-center text-sm text-muted-foreground">
-              {rows.length === 0
-                ? "No Bleeders 1.0 flags in stored search terms (clicks>=6 AND sales=$0)."
-                : "No rows in this filter."}
+              {rows.length === 0 ? "Bleeders 1.0 list did not load." : "No rows in this filter."}
             </p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-28">Done / Skipped</TableHead>
-                  <TableHead>Pull</TableHead>
+                  <TableHead>Rank</TableHead>
                   <TableHead>Action</TableHead>
                   <TableHead>Campaign</TableHead>
                   <TableHead>Ad group</TableHead>
