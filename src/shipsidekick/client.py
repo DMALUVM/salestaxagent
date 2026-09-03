@@ -1,6 +1,9 @@
 """Ship Sidekick API client.
 
-Endpoint: GET /api/v1/inventory-levels
+Endpoints:
+  GET /api/v1/inventory-levels  — live qty (may silently omit catalog SKUs)
+  GET /api/v1/products          — catalog; used to detect omitted tracked SKUs
+
 Auth:     Authorization: Bearer {SHIPSIDEKICK_API_KEY}
 Base URL: SHIPSIDEKICK_BASE_URL (default https://www.shipsidekick.com)
 
@@ -23,6 +26,14 @@ log = logging.getLogger(__name__)
 def _sku_key(sku: str | None) -> str:
     """Case-insensitive match key. Does not rewrite digits or collapse SKUs."""
     return (sku or "").strip().casefold()
+
+
+# Lip-balm 3-packs. inventory-levels has dropped these while /products
+# still lists them — never treat that gap as a healthy sync.
+LIP_BALM_3PACK_SKUS = frozenset({
+    "DDPE0001Shop", "DDPE0002Shop", "DDPE0003Shop", "DDPE0004Shop",
+})
+_LIP_BALM_3PACK_KEYS = frozenset(_sku_key(s) for s in LIP_BALM_3PACK_SKUS)
 
 
 class ShipSidekickError(Exception):
@@ -49,17 +60,8 @@ def _headers() -> dict[str, str]:
     }
 
 
-def get_inventory() -> list[dict]:
-    """Fetch all inventory levels from Ship Sidekick.
-
-    Returns list of {sku, product_name, available, committed, reserved,
-    incoming, damaged, warehouse, warehouse_id, raw}.
-
-    Filters out:
-    - Items with no SKU
-    - Digital products (requiresShipping=false) with no quantity
-    - Deduplicates by SKU (keeps highest available qty)
-    """
+def _paginate(path: str, label: str) -> list[dict]:
+    """Cursor-paginate a Ship Sidekick list endpoint (hasMore + nextCursor)."""
     base = _base_url()
     headers = _headers()
     all_items: list[dict] = []
@@ -71,7 +73,7 @@ def get_inventory() -> list[dict]:
             params["cursor"] = cursor
 
         resp = httpx.get(
-            f"{base}/api/v1/inventory-levels",
+            f"{base}{path}",
             headers=headers,
             params=params,
             timeout=30,
@@ -79,13 +81,13 @@ def get_inventory() -> list[dict]:
 
         if resp.status_code != 200:
             raise ShipSidekickError(
-                f"inventory-levels failed ({resp.status_code}): "
-                f"{resp.text[:500]}"
+                f"{label} failed ({resp.status_code}): {resp.text[:500]}"
             )
 
         body = resp.json()
         items = body.get("data", [])
-        all_items.extend(items)
+        if isinstance(items, list):
+            all_items.extend(items)
 
         if not body.get("hasMore"):
             break
@@ -93,7 +95,123 @@ def get_inventory() -> list[dict]:
         if not cursor:
             break
 
-    return _parse_inventory_items(all_items)
+    return all_items
+
+
+def get_inventory() -> list[dict]:
+    """Fetch all inventory levels from Ship Sidekick.
+
+    Returns list of {sku, product_name, available, committed, reserved,
+    incoming, damaged, warehouse, warehouse_id, raw}.
+
+    Filters out:
+    - Items with no SKU
+    - Digital products (requiresShipping=false) with no quantity
+    - Deduplicates by SKU (keeps highest available qty)
+    """
+    return _parse_inventory_items(
+        _paginate("/api/v1/inventory-levels", "inventory-levels")
+    )
+
+
+def get_catalog_skus() -> list[str]:
+    """Tracked catalog SKUs from GET /api/v1/products.
+
+    A variant is tracked when sku is non-empty and tracksInventory is
+    true or omitted (not explicitly false).
+    """
+    return _catalog_skus_from_products(
+        _paginate("/api/v1/products", "products")
+    )
+
+
+def _iter_product_variants(product: dict):
+    """Yield variant dicts from a /products row."""
+    variants = product.get("productVariants") or product.get("variants")
+    if isinstance(variants, list):
+        for variant in variants:
+            if isinstance(variant, dict):
+                yield variant
+        return
+    single = product.get("productVariant")
+    if isinstance(single, dict):
+        yield single
+        return
+    if product.get("sku"):
+        yield product
+
+
+def _catalog_skus_from_products(products: list[dict]) -> list[str]:
+    """Collect tracked SKUs from a /products payload (order-preserving)."""
+    seen: dict[str, str] = {}
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+        for variant in _iter_product_variants(product):
+            sku = (variant.get("sku") or "").strip()
+            if not sku:
+                continue
+            if variant.get("tracksInventory") is False:
+                continue
+            key = _sku_key(sku)
+            if key not in seen:
+                seen[key] = sku
+    return list(seen.values())
+
+
+def _omitted_catalog_skus(
+    feed_items: list[dict],
+    catalog_skus: list[str],
+) -> list[str]:
+    """Catalog SKUs with no row in the parsed inventory-levels feed."""
+    feed_keys = {_sku_key(i.get("sku")) for i in feed_items if i.get("sku")}
+    return [sku for sku in catalog_skus if _sku_key(sku) not in feed_keys]
+
+
+def _prior_by_sku(prior_rows: list[dict]) -> dict[str, dict]:
+    return {
+        _sku_key(row.get("sku")): row
+        for row in prior_rows
+        if row.get("sku")
+    }
+
+
+def _omission_is_material(sku: str, prior_row: dict | None) -> bool:
+    """True when an omitted catalog SKU must not look like a healthy sync."""
+    if _sku_key(sku) in _LIP_BALM_3PACK_KEYS:
+        return True
+    if not prior_row:
+        return False
+    return (
+        int(prior_row.get("available") or 0) > 0
+        or int(prior_row.get("incoming") or 0) > 0
+    )
+
+
+def _3pl_sync_outcome(
+    omitted_skus: list[str],
+    prior_rows: list[dict],
+    carried_qty: dict[str, int],
+) -> tuple[str, str]:
+    """Classify a 3PL pull: partial when a tracked in-stock / 3-pack SKU dropped.
+
+    Prefer partial over fail so other SKUs still write.
+    """
+    prior = _prior_by_sku(prior_rows)
+    material = [
+        sku for sku in omitted_skus
+        if _omission_is_material(sku, prior.get(_sku_key(sku)))
+    ]
+    if not material:
+        return "success", ""
+    parts = []
+    for sku in material:
+        qty = carried_qty.get(_sku_key(sku))
+        if qty is not None:
+            parts.append(f"{sku} (carried {qty})")
+        else:
+            parts.append(sku)
+    return "partial", "3PL omitted catalog SKUs: " + ", ".join(parts)
 
 
 def _parse_inventory_items(all_items: list[dict]) -> list[dict]:
@@ -257,18 +375,34 @@ def _snapshot_rows(items: list[dict], pulled_at: str | None = None) -> list[dict
 def sync_3pl(dry_run: bool = False) -> dict:
     """Fetch Ship Sidekick inventory and upsert to inventory_3pl_snapshots.
 
-    Returns summary dict.
+    Inventory-levels is the qty source. /products is the catalog: tracked
+    SKUs missing from the parsed feed are omitted_skus. Carry-forward may
+    still attach last known qty (never invented). A silent drop of an
+    in-stock or lip-balm 3-pack catalog SKU is partial, not success.
     """
     items = get_inventory()
+    catalog_skus = get_catalog_skus()
     prior: list[dict] = []
     try:
         prior = fetch_all("inventory_3pl_snapshots")
     except Exception as exc:
         log.warning("Could not load prior 3PL snapshots for carry-forward: %s", exc)
 
+    omitted_skus = _omitted_catalog_skus(items, catalog_skus)
     feed_keys = {_sku_key(i.get("sku")) for i in items if i.get("sku")}
     items = _carry_forward_missing_instock(items, prior)
     rows = _snapshot_rows(items)
+    carried_forward = [
+        i["sku"] for i in items if _sku_key(i.get("sku")) not in feed_keys
+    ]
+    carried_qty = {
+        _sku_key(i["sku"]): int(i.get("available") or 0)
+        for i in items
+        if _sku_key(i.get("sku")) not in feed_keys
+    }
+    status, omit_msg = _3pl_sync_outcome(omitted_skus, prior, carried_qty)
+    summary = f"{len(rows)} SKUs, 0 upserted"
+    message = f"{summary} — {omit_msg}" if omit_msg else summary
 
     result = {
         "source": "shipsidekick",
@@ -276,9 +410,10 @@ def sync_3pl(dry_run: bool = False) -> dict:
         "rows_inserted": 0,
         "dry_run": dry_run,
         "skus": [r["sku"] for r in rows],
-        "carried_forward": [
-            i["sku"] for i in items if _sku_key(i.get("sku")) not in feed_keys
-        ],
+        "carried_forward": carried_forward,
+        "omitted_skus": omitted_skus,
+        "status": status,
+        "message": message,
     }
 
     if not dry_run and rows:
@@ -291,5 +426,7 @@ def sync_3pl(dry_run: bool = False) -> dict:
             rows_total=len(rows),
             rows_inserted=result["rows_inserted"],
         )
+        summary = f"{len(rows)} SKUs, {result['rows_inserted']} upserted"
+        result["message"] = f"{summary} — {omit_msg}" if omit_msg else summary
 
     return result
