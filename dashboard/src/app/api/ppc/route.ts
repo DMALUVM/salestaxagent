@@ -13,7 +13,9 @@ import {
   BLAKE_63D_START,
   buildBlake63dList,
 } from "@/lib/ppc-weekly-blake-63d";
-import { buildBleeders10, emptyBleeders10 } from "@/lib/ppc-bleeders-10";
+import { emptyBleeders10 } from "@/lib/ppc-bleeders-10";
+import type { Bleeders10CampaignRow, Bleeders10TermRow } from "@/lib/ppc-bleeders-10";
+import { buildBleeders10 } from "@/lib/ppc-bleeders-10-live";
 import type { WeeklyCampaignRef, WeeklyPlacementRef, WeeklyTermRef } from "@/lib/ppc-weekly-blake-63d";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
@@ -702,7 +704,7 @@ export async function GET() {
       const pageSize = 1000;
       while (true) {
         const r = await sb.from("ads_action_decisions")
-          .select("id,campaign_id,search_term,action_type,status,applied_at,dismissed_at")
+          .select("id,campaign_id,search_term,action_type,status,applied_at,dismissed_at,entity_name,rec_type")
           .gte("as_of_date", BLAKE_63D_START)
           .order("as_of_date", { ascending: false })
           .range(offset, offset + pageSize - 1);
@@ -724,8 +726,14 @@ export async function GET() {
       account_cvr: Math.round(accountCvr * 100) / 100,
     });
 
-    // Bleeders 1.0 — pasted 10. Not This week. Do not re-aggregate.
-    const bleeders10 = buildBleeders10({ decisions });
+    // Bleeders 1.0 — live triage (clicks>=6 AND sales=$0). Blake ranks
+    // this pull; Dana loads This week. Not an execute list. No new
+    // Amazon pull — reuse the term/campaign rows already loaded.
+    const bleeders10 = buildBleeders10({
+      termRows: termRows as Bleeders10TermRow[],
+      campaignRows: allCampaignRows as Bleeders10CampaignRow[],
+      decisions,
+    });
 
     // ── Recommendations (paginated — a limit here would under-count the
     //    "Actions (N)" badge, which must match what is actually open) ──
