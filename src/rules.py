@@ -57,7 +57,7 @@ ADS_MAX_REPORT_DAYS: int = _RULES["ads"]["max_report_days"]
 ADS_MAX_CHUNK_DAYS: int = _RULES["ads"]["max_chunk_days"]
 ADS_MANDATORY_CHUNKING: bool = _RULES["ads"]["mandatory_chunking"]
 # Campaign reports default to 7-day chunks. A single 30-day SB/SD report on
-# this account sits PENDING past the 900s cap; the same window in 7-day
+# this account sits PENDING past a short poll cap; the same window in 7-day
 # chunks completes. Still clamped to ADS_MAX_CHUNK_DAYS at request time.
 ADS_CAMPAIGN_CHUNK_DAYS: int = int(_RULES["ads"].get("campaign_chunk_days", 7))
 # SB/SD campaign reports chunk smaller than SP. A 7-day SB request that
@@ -74,12 +74,12 @@ ADS_SB_SD_BACKFILL_DAYS: int = int(_RULES["ads"].get("campaign_sb_sd_backfill_da
 # smaller so a single request cannot sit past its poll timeout.
 ADS_SEARCH_TERM_CHUNK_DAYS: int = _RULES["ads"]["search_term_chunk_days"]
 ADS_SEARCH_TERM_TIMEOUT_SECONDS: int = _RULES["ads"]["search_term_timeout_seconds"]
-# SB/SD campaign reports on this account sit PENDING past 300s on slow nights.
-# SP keeps the Ads client default (1800s) and is not listed here.
+# SB/SD campaign reports on this account sit PENDING past 15m even in 1-day
+# chunks. Match SP's Ads client default (1800s). SP is not listed here.
 ADS_CAMPAIGN_TIMEOUT_SB_SECONDS: int = int(
-    _RULES["ads"].get("campaign_report_timeout_sb_seconds", 900))
+    _RULES["ads"].get("campaign_report_timeout_sb_seconds", 1800))
 ADS_CAMPAIGN_TIMEOUT_SD_SECONDS: int = int(
-    _RULES["ads"].get("campaign_report_timeout_sd_seconds", 900))
+    _RULES["ads"].get("campaign_report_timeout_sd_seconds", 1800))
 ADS_SKU_ECONOMICS_MIN_DATE: date = date.fromisoformat(
     str(_RULES["ads"].get("sku_economics_min_date", "2024-09-01")))
 

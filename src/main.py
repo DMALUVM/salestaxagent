@@ -740,7 +740,7 @@ def ads_test_cmd():
               help="Chunk size for search-term reports (default 7)")
 @click.option("--campaign-chunk-days", default=None, type=int,
               help="Chunk size for campaign reports (default 7, max 30). "
-                   "Smaller chunks keep SB/SD under the 900s poll cap.")
+                   "SB/SD stay on 1-day chunks; poll wait is 1800s.")
 @click.option("--ad-products", default=None,
               help="Comma-separated ad products for campaigns: SP,SB,SD "
                    "(default: all three). Search terms and placements are "

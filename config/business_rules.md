@@ -49,9 +49,9 @@ The same 30-day chunking applies to SP-API order reports
 
 SB/SD campaign-report poll timeouts are
 `ads.campaign_report_timeout_sb_seconds` and
-`ads.campaign_report_timeout_sd_seconds` (default 900 each). SP keeps the
-Ads client default (1800s) and has no override. Search-term reports use
-`ads.search_term_timeout_seconds` (5400).
+`ads.campaign_report_timeout_sd_seconds` (default 1800 each, matching SP).
+SP keeps the Ads client default (1800s) and has no override. Search-term
+reports use `ads.search_term_timeout_seconds` (5400).
 
 ## COGS & P&L
 
