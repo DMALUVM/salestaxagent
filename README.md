@@ -476,7 +476,7 @@ SB/SD reports on this account intermittently sit in PENDING; when they do, the
 sync soft-fails, SP data is kept, and the header note makes the omission
 visible rather than silent. Poll wait is
 `ads.campaign_report_timeout_{sb,sd}_seconds` in `config/business_rules.json`
-(900s each; SP stays on the 1800s client default).
+(1800s each, matching SP's client default).
 
 ### Report quota
 

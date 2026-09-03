@@ -154,9 +154,10 @@ DEFAULT_AD_PRODUCTS = ("SP", "SB", "SD")
 # SB and SD are fetched after SP is committed, so a hang cannot discard SP.
 # They still need a durable poll: a 300s cap produced nightly
 # `SB+SD FAILED, SP kept` partials when Brands/Display sat PENDING longer than
-# five minutes. Knobs live in config/business_rules.json
-# (`ads.campaign_report_timeout_{sb,sd}_seconds`); both default to 900s, still
-# below SP's 1800s client default.
+# five minutes, and 900s was still too short for 1-day chunks on this
+# account (2026-09-03 heal). Knobs live in config/business_rules.json
+# (`ads.campaign_report_timeout_{sb,sd}_seconds`); both match SP's 1800s
+# client default. SP is not listed here so its timeout is unchanged.
 CAMPAIGN_REPORT_TIMEOUT = {
     "SB": ADS_CAMPAIGN_TIMEOUT_SB_SECONDS,
     "SD": ADS_CAMPAIGN_TIMEOUT_SD_SECONDS,
@@ -421,9 +422,9 @@ def fetch_campaigns_daily(start: date, end: date,
     """
     products = tuple(ad_products or DEFAULT_AD_PRODUCTS)
     # Default is ADS_CAMPAIGN_CHUNK_DAYS (7), not 30. A single 30-day SB/SD
-    # report on this account sits PENDING past the 900s cap; the same 30-day
-    # window in 7-day chunks completed (2026-08-22 ops retry). Each chunk
-    # commits on its own, so a stall keeps the days already written.
+    # report on this account sits PENDING past a short poll cap; the same
+    # 30-day window in 7-day chunks completed (2026-08-22 ops retry). Each
+    # chunk commits on its own, so a stall keeps the days already written.
     size = CAMPAIGN_CHUNK_DAYS if chunk_days is None else chunk_days
     chunks = _date_chunks(start, end, size)
     say = on_progress or (lambda _msg: None)
