@@ -4174,7 +4174,13 @@ def inventory_3pl_sync_cmd(dry_run):
     """Pull 3PL inventory from Ship Sidekick."""
     from src.shipsidekick.client import sync_3pl
     r = sync_3pl(dry_run=dry_run)
-    click.echo(f"SKUs: {r['rows_total']}, inserted: {r['rows_inserted']}")
+    status = r.get("status") or "success"
+    msg = r.get("message") or (
+        f"{r['rows_total']} SKUs, {r['rows_inserted']} upserted"
+    )
+    click.echo(f"{status}: {msg}")
+    if r.get("omitted_skus") and status == "success":
+        click.echo("3PL omitted catalog SKUs: " + ", ".join(r["omitted_skus"]))
 
 
 @cli.command("plan-sku")
@@ -5978,8 +5984,12 @@ def _run_3pl_sync():
     try:
         from src.shipsidekick.client import sync_3pl
         r = sync_3pl()
-        print(f"[3PL] {r['rows_total']} SKUs, {r['rows_inserted']} upserted")
-        job_finish(run_id, "success", f"{r['rows_total']} SKUs, {r['rows_inserted']} upserted")
+        status = r.get("status") or "success"
+        msg = r.get("message") or (
+            f"{r['rows_total']} SKUs, {r['rows_inserted']} upserted"
+        )
+        print(f"[3PL] {status}: {msg}")
+        job_finish(run_id, status, msg)
     except Exception as e:
         print(f"[3PL] Error: {e}")
         job_finish(run_id, "fail", str(e)[:500])
