@@ -932,6 +932,7 @@ export default function PPCPage() {
           query errored sends the operator to re-run a sync that already worked,
           while the real fault stays invisible. */}
       {!hasData && (data?.fatalError || (data?.loadErrors?.length ?? 0) > 0) ? (
+        <div className="space-y-6">
         <Card className="border-red-200 dark:border-red-900">
           <CardContent className="py-8 text-center">
             <p className="text-sm font-medium text-red-700 dark:text-red-300">
@@ -950,6 +951,21 @@ export default function PPCPage() {
             </Button>
           </CardContent>
         </Card>
+        {(data?.bleeders10 || data?.bleeders) ? (
+          <div className="space-y-6">
+            <PpcBleeders10
+              data={data?.bleeders10}
+              onNotice={setNotice}
+              onMarked={() => setImpactRefresh((n) => n + 1)}
+            />
+            <PpcBleeders
+              data={data?.bleeders}
+              onNotice={setNotice}
+              onMarked={() => setImpactRefresh((n) => n + 1)}
+            />
+          </div>
+        ) : null}
+        </div>
       ) : !hasData ? (
         <Card>
           <CardContent className="py-12 text-center">
