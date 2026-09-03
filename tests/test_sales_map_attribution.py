@@ -7,6 +7,8 @@ from datetime import date
 from pathlib import Path
 
 from src.amazon_sp.reports import (
+    DEST_DAILY_CONFLICT,
+    _dedupe_dest_daily_on_conflict,
     merge_dest_daily,
     parse_orders_report,
     rollup_dest_daily_to_month,
@@ -173,3 +175,54 @@ def test_short_lookback_does_not_write_closed_months(monkeypatch):
     assert daily_writes
     assert all(r["sale_date"].startswith("2026-08-") for r in daily_writes[0][1])
     assert all(r["channel"] == "amazon" for r in daily_writes[0][1])
+
+
+def test_dest_daily_dedupe_last_write_wins():
+    rows = [
+        _day("CA", "2026-08-31", 80.00, 1),
+        _day("CA", "2026-08-31", 90.00, 2),
+        _day("TX", "2026-08-31", 40.00, 1),
+    ]
+    out = _dedupe_dest_daily_on_conflict(rows)
+    assert len(out) == 2
+    by_state = {r["state_code"]: r for r in out}
+    assert by_state["CA"]["gross_sales"] == 90.00
+    assert by_state["CA"]["order_count"] == 2
+    assert by_state["TX"]["gross_sales"] == 40.00
+
+
+def test_duplicate_orders_dest_daily_keys_upsert_once(monkeypatch):
+    """Same-batch dest-daily keys must not hit Postgres 21000."""
+    captured: dict = {"upserts": []}
+
+    def fake_upsert(table, rows, on_conflict=None):
+        captured["upserts"].append((table, list(rows), on_conflict))
+        return len(rows)
+
+    monkeypatch.setattr("src.amazon_sp.reports.upsert_rows", fake_upsert)
+    incoming = [
+        _day("CA", "2026-08-31", 80.00, 1),
+        _day("CA", "2026-08-31", 90.00, 2),
+        _day("TX", "2026-08-31", 40.00, 1),
+    ]
+    result = upsert_amazon_destination_sales(
+        incoming,
+        date(2026, 8, 1),
+        date(2026, 8, 31),
+        existing_daily=[],
+    )
+    daily_writes = [u for u in captured["upserts"] if u[0] == "sales_by_state_daily"]
+    assert len(daily_writes) == 1
+    daily_rows, conflict = daily_writes[0][1], daily_writes[0][2]
+    assert conflict == DEST_DAILY_CONFLICT
+    assert len(daily_rows) == 2
+    ca = [r for r in daily_rows if r["state_code"] == "CA"]
+    assert len(ca) == 1
+    assert ca[0]["gross_sales"] == 90.00
+    assert ca[0]["order_count"] == 2
+    assert result["daily_upserted"] == 2
+    monthly_writes = [u for u in captured["upserts"] if u[0] == "sales_by_state"]
+    assert monthly_writes
+    ca_month = [r for r in monthly_writes[0][1] if r["state_code"] == "CA"]
+    assert len(ca_month) == 1
+    assert ca_month[0]["gross_sales"] == 90.00
