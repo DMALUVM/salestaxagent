@@ -725,14 +725,7 @@ export async function GET() {
     });
 
     // Bleeders 1.0 — pasted 10. Not This week. Do not re-aggregate.
-    const bleeders10 = buildBleeders10({
-      lookup: {
-        campaigns: [...campaignById.values()],
-        terms: termLookup,
-        placements: placementLookup,
-      },
-      decisions,
-    });
+    const bleeders10 = buildBleeders10({ decisions });
 
     // ── Recommendations (paginated — a limit here would under-count the
     //    "Actions (N)" badge, which must match what is actually open) ──

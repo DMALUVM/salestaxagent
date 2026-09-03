@@ -7,10 +7,6 @@
  */
 
 import type { WeeklyLockDecision } from "./ppc-weekly";
-import {
-  resolveNamedCampaign,
-  type BlakeLookup,
-} from "./ppc-weekly-blake-24d";
 
 export const BLEEDERS_10_VERSION = "1.0";
 export const BLEEDERS_10_CLICK_FLOOR = 6;
@@ -308,14 +304,8 @@ export function emptyBleeders10(): Bleeders10Payload {
 }
 
 export function buildBleeders10(input: {
-  lookup?: BlakeLookup;
   decisions?: Array<Bleeders10Decision | WeeklyLockDecision>;
 } = {}): Bleeders10Payload {
-  const lookup: BlakeLookup = {
-    campaigns: input.lookup?.campaigns ?? [],
-    terms: input.lookup?.terms ?? [],
-    placements: input.lookup?.placements ?? [],
-  };
   const decisions = (input.decisions ?? []) as Bleeders10Decision[];
   const skip = new Set(BLEEDERS_10_SKIP_TERMS.map(norm));
 
@@ -323,12 +313,9 @@ export function buildBleeders10(input: {
     if (skip.has(norm(spec.term))) {
       throw new Error(`Bleeders 1.0 skip list leaked: ${spec.term}`);
     }
-    const resolved = lookup.campaigns.length || lookup.terms.length
-      ? resolveNamedCampaign(spec.campaign, lookup, spec.term)
-      : { campaign_id: "", campaign_name: spec.campaign, ad_group: "" };
-    const campaignName = resolved.campaign_id ? resolved.campaign_name : spec.campaign;
-    const campaignId = resolved.campaign_id;
-    const adGroup = spec.ad_group || resolved.ad_group || "";
+    const campaignName = spec.campaign;
+    const campaignId = spec.campaign;
+    const adGroup = spec.ad_group;
     const id = checklistId(spec, campaignId);
     const marked = decisionStatus(spec, campaignId, id, decisions);
     const keyword = spec.action === "pause_keyword" ? (spec.keyword || spec.term) : spec.keyword;

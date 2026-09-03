@@ -72,23 +72,12 @@ describe("Bleeders 1.0 is the pasted 10 — not a live scanner, not 22", () => {
   });
 
   test("does not re-aggregate — pasted spend/clicks stay put", () => {
-    const withLookup = buildBleeders10({
-      lookup: {
-        campaigns: [{ campaign_id: "c1", campaign_name: "GG - Deodorant - Exact - SQR - CST" }],
-        terms: [{
-          search_term: "deodorant men", campaign_id: "c1",
-          campaign_name: "GG - Deodorant - Exact - SQR - CST",
-          ad_group_name: "Exact", keyword: "deodorant men", match_type: "EXACT",
-          clicks: 999, spend: 9.99, sales: 50,
-        }],
-        placements: [],
-      },
-    });
-    const row = withLookup.rows[0];
+    const out2 = buildBleeders10();
+    const row = out2.rows[0];
     assert.equal(row.clicks, 96);
     assert.equal(row.spend, 113.18);
     assert.equal(row.sales_14d, 0);
-    assert.equal(row.campaign_id, "c1");
+    assert.equal(row.campaign_name, "GG - Deodorant - Exact - SQR - CST");
   });
 
   test("skips branded $0 and Monday increment rows", () => {
