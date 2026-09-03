@@ -13,6 +13,7 @@ import {
   BLAKE_63D_START,
   buildBlake63dList,
 } from "@/lib/ppc-weekly-blake-63d";
+import { buildBleeders10, emptyBleeders10 } from "@/lib/ppc-bleeders-10";
 import type { WeeklyCampaignRef, WeeklyPlacementRef, WeeklyTermRef } from "@/lib/ppc-weekly-blake-63d";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
@@ -723,6 +724,16 @@ export async function GET() {
       account_cvr: Math.round(accountCvr * 100) / 100,
     });
 
+    // Bleeders 1.0 — pasted 10. Not This week. Do not re-aggregate.
+    const bleeders10 = buildBleeders10({
+      lookup: {
+        campaigns: [...campaignById.values()],
+        terms: termLookup,
+        placements: placementLookup,
+      },
+      decisions,
+    });
+
     // ── Recommendations (paginated — a limit here would under-count the
     //    "Actions (N)" badge, which must match what is actually open) ──
     let recommendations: unknown[] = [];
@@ -817,6 +828,7 @@ export async function GET() {
       placementsByRange, placementsAvailable,
       searchTerms, searchTermsByRange, recommendations,
       bleeders,
+      bleeders10,
       lastSync, lastSyncJob, lastSyncStatus, lastActions,
       targetAcos, targetAcosAsOf,
     });
@@ -834,6 +846,7 @@ export async function GET() {
       strategy: null,
       searchTerms: [], searchTermsByRange: null, recommendations: [],
       bleeders: emptyWeeklyList(),
+      bleeders10: emptyBleeders10(),
       asOf: null, today: null, adsThrough: null,
       lastSyncJob: null, lastSyncStatus: null, lastActions: null,
       dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,

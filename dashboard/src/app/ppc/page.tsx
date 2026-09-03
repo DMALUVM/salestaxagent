@@ -16,8 +16,10 @@ import { BrandShare } from "@/components/brand-share";
 import { PpcPlaybook } from "@/components/ppc-playbook";
 import { PpcSkuAds } from "@/components/ppc-sku-ads";
 import { PpcBleeders } from "@/components/ppc-bleeders";
+import { PpcBleeders10 } from "@/components/ppc-bleeders-10";
 import { PpcReconcile } from "@/components/ppc-reconcile";
 import type { WeeklyPayload } from "@/lib/ppc-weekly";
+import type { Bleeders10Payload } from "@/lib/ppc-bleeders-10";
 import type { DailyReconcileSummary } from "@/lib/ads-reconcile";
 import { isConfigured } from "@/lib/supabase";
 import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy, Settings2 } from "lucide-react";
@@ -154,6 +156,7 @@ interface PPCData {
   searchTermsByRange: Record<Range, SearchTerm[]> | null;
   recommendations: Rec[];
   bleeders?: WeeklyPayload | null;
+  bleeders10?: Bleeders10Payload | null;
   /** Newest finished ads sync of any kind, plus which job and how it ended. */
   lastSync: string | null; lastSyncJob: string | null; lastSyncStatus: string | null;
   /** Last successful scheduled actions run — the queue refreshes on its own. */
@@ -558,7 +561,10 @@ export default function PPCPage() {
 
   useEffect(() => {
     const go = () => {
-      if (typeof window !== "undefined" && window.location.hash === "#ppc-bleeders") {
+      if (typeof window !== "undefined" && (
+        window.location.hash === "#ppc-bleeders" ||
+        window.location.hash === "#ppc-bleeders-10"
+      )) {
         setTab("bleeders");
       }
     };
@@ -906,6 +912,7 @@ export default function PPCPage() {
           { id: "ppc-sku-ads", label: "SKU ads" },
           { id: "ppc-budget", label: "Budget" },
           { id: "ppc-placement", label: "Placement" },
+          { id: "ppc-bleeders-10", label: "Bleeders 1.0" },
           { id: "ppc-bleeders", label: "This week" },
         ]}
       />
@@ -1581,11 +1588,18 @@ export default function PPCPage() {
           )}
 
           {tab === "bleeders" && (
-            <PpcBleeders
-              data={data?.bleeders}
-              onNotice={setNotice}
-              onMarked={() => setImpactRefresh((n) => n + 1)}
-            />
+            <div className="space-y-6">
+              <PpcBleeders10
+                data={data?.bleeders10}
+                onNotice={setNotice}
+                onMarked={() => setImpactRefresh((n) => n + 1)}
+              />
+              <PpcBleeders
+                data={data?.bleeders}
+                onNotice={setNotice}
+                onMarked={() => setImpactRefresh((n) => n + 1)}
+              />
+            </div>
           )}
 
           <details className="rounded-lg border border-dashed text-muted-foreground">
