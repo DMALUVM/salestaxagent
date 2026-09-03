@@ -862,6 +862,20 @@ def dest_daily_row_key(row: dict) -> tuple[str, str, str, str]:
     )
 
 
+def _dedupe_dest_daily_on_conflict(rows: list[dict]) -> list[dict]:
+    """Keep one row per sales_by_state_daily ON CONFLICT key.
+
+    Postgres 21000: ON CONFLICT DO UPDATE cannot affect a row twice in
+    one INSERT. fetch_orders concatenates monthly chunks; Amazon order-date
+    reports can emit the same dest-daily key on both sides of a month
+    boundary (timezone spillover). Last write wins, matching sqp_weekly.
+    """
+    seen: dict[tuple[str, str, str, str], dict] = {}
+    for row in rows:
+        seen[dest_daily_row_key(row)] = row
+    return list(seen.values())
+
+
 def is_amazon_spapi_dest_row(row: dict) -> bool:
     """True for Amazon ship-to dest rows from the live SP-API source."""
     channel = str(row.get("channel") or "").strip().lower() or AMAZON
@@ -1002,6 +1016,7 @@ def upsert_amazon_destination_sales(
             and _month_start(d).isoformat() in allowed
         )
     ]
+    incoming = _dedupe_dest_daily_on_conflict(incoming)
     empty = {
         "daily_upserted": 0,
         "monthly_upserted": 0,
