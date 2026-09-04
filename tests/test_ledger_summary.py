@@ -35,8 +35,14 @@ MAPPED_2026_09_02 = {
     "ITX3": "TX",  # 8590 NE 24th Ave, Amarillo, TX 79108
     "IWA6": "WA",  # 1202 S Road 40 E, Pasco, WA 99301
 }
+# 2026-09-04 — directory / street address / seller-forum (not inferred from letters).
+MAPPED_2026_09_04 = {
+    "XIN5": "IN",  # Avon, IN — ShipmentBot directory
+    "XSB3": "CA",  # 8140 Caliente Rd, Hesperia, CA 92344
+    "XPH6": "AZ",  # Phoenix, AZ 85043 — seller-forum / PHX metro
+}
 # Still no published address — prefer omit over inventing.
-STILL_UNMAPPED = ["XSB3", "XIN5", "XPH6", "QBE1"]
+STILL_UNMAPPED = ["QBE1"]
 PREFIX_MAPPED_CA = ["LGB7", "SBD6", "SCA9", "SCK6"]
 
 HEADERS = (
@@ -77,6 +83,10 @@ class TestFCMapping:
         for fc, state in MAPPED_2026_09_02.items():
             assert fc_to_state(fc) == state, f"{fc} should be {state}"
 
+    def test_verified_2026_09_04_fc_mappings(self):
+        for fc, state in MAPPED_2026_09_04.items():
+            assert fc_to_state(fc) == state, f"{fc} should be {state}"
+
     def test_still_unmapped_stay_unknown(self):
         for fc in STILL_UNMAPPED:
             assert fc_to_state(fc) is None, f"{fc} must not be invented"
@@ -105,15 +115,26 @@ class TestParser:
     def test_unmapped_fc_is_not_ca(self):
         content = _tsv([
             _row("2026-08-30", "SKU-A", 10, "ONT8"),
-            _row("2026-08-30", "SKU-A", 5, "XSB3"),
+            _row("2026-08-30", "SKU-A", 5, "QBE1"),
         ])
         parsed = parse_ledger_summary(content, costs={"SKU-A": 1.0})
         ca = summarize_state_day(parsed["rows"], "2026-08-30", "CA")
         unknown = summarize_state_day(parsed["rows"], "2026-08-30", "XX")
         assert ca["cogs_value"] == 10.0
         assert unknown["cogs_value"] == 5.0
-        assert "XSB3" in parsed["unknown_fcs"]
-        assert any(r["state_code"] is None and r["fc_code"] == "XSB3" for r in parsed["rows"])
+        assert "QBE1" in parsed["unknown_fcs"]
+        assert any(r["state_code"] is None and r["fc_code"] == "QBE1" for r in parsed["rows"])
+
+    def test_xsb3_now_maps_to_ca_not_unknown(self):
+        content = _tsv([
+            _row("2026-08-30", "SKU-A", 10, "ONT8"),
+            _row("2026-08-30", "SKU-A", 5, "XSB3"),
+        ])
+        parsed = parse_ledger_summary(content, costs={"SKU-A": 1.0})
+        ca = summarize_state_day(parsed["rows"], "2026-08-30", "CA")
+        assert ca["cogs_value"] == 15.0
+        assert "XSB3" not in parsed["unknown_fcs"]
+        assert any(r["state_code"] == "CA" and r["fc_code"] == "XSB3" for r in parsed["rows"])
 
     def test_bdu2_now_maps_to_co_not_unknown(self):
         content = _tsv([
@@ -191,7 +212,7 @@ class TestParser:
         assert sorted(ca["fcs"]) == sorted(CA_FCS_2026_08_30)
         assert set(parsed["unknown_fcs"]) == set(STILL_UNMAPPED)
         unknown = summarize_state_day(parsed["rows"], "2026-08-30", "XX")
-        assert unknown["units"] == 40
+        assert unknown["units"] == 10
         assert ca["cogs_value"] == pytest.approx(81.67, abs=0.02)
 
     def test_2026_09_02_codes_are_not_unknown(self):
@@ -200,6 +221,13 @@ class TestParser:
         assert not parsed["unknown_fcs"]
         for r in parsed["rows"]:
             assert r["state_code"] == MAPPED_2026_09_02[r["fc_code"]]
+
+    def test_2026_09_04_codes_are_not_unknown(self):
+        rows = [_row("2026-08-30", "SKU-A", 1, fc) for fc in MAPPED_2026_09_04]
+        parsed = parse_ledger_summary("\n".join([HEADERS, *rows]), costs={"SKU-A": 1.0})
+        assert not parsed["unknown_fcs"]
+        for r in parsed["rows"]:
+            assert r["state_code"] == MAPPED_2026_09_04[r["fc_code"]]
 
 
 class TestPeakYTD:
