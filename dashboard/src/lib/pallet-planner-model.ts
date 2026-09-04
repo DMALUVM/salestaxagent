@@ -24,7 +24,10 @@ export const FBA_INBOUND_PREFERRED = CARTON_20X16X14_UNITS * FBA_INBOUND_MIN_BOX
 export const FBA_INBOUND_MIN_FEE_FREE = CARTON_13X11X9_UNITS * FBA_INBOUND_MIN_BOXES;
 export const FBA_INBOUND_STEP_AFTER = CARTON_20X16X14_UNITS;
 export const DEFAULT_INBOUND_CARTON_UNITS = CARTON_20X16X14_UNITS;
-/** Holt via Dave — August 3PL→FBA today. Fee-safe on 270-unit / 13×11×9 boxes. */
+/**
+ * Holt via Dave — Sep 4 / September 3PL→FBA small-parcel send.
+ * Fee-safe on 270-unit / 13×11×9 boxes. Month card is 2026-09, not August.
+ */
 export const LOCKED_TONIGHT_3PL_FBA_SEND: Record<string, number> = {
   DDPE0001Shop: 5_400, // unscented — 20 boxes of 270
   DDPE0004Shop: 2_700, // assorted — 10 boxes of 270
@@ -33,8 +36,9 @@ export const LOCKED_TONIGHT_3PL_FBA_SEND: Record<string, number> = {
 };
 export const LOCKED_TONIGHT_3PL_FBA_TOTAL = 8_100;
 /**
- * Holt via Dave — August 3PL→AWD today, small parcel.
+ * Holt via Dave — Sep 4 / September 3PL→AWD, small parcel.
  * PALLET_PARTIAL_MIN_RATIO / AWD ≥50% pallet floor does NOT apply to this hop.
+ * Month card is 2026-09, not August.
  */
 export const LOCKED_TONIGHT_3PL_AWD_SEND: Record<string, number> = {
   DDPE0003Shop: 2_700, // orange — 10 boxes of 270, small parcel
@@ -44,6 +48,17 @@ export const LOCKED_TONIGHT_3PL_AWD_SEND: Record<string, number> = {
 };
 export const LOCKED_TONIGHT_3PL_AWD_TOTAL = 2_700;
 export const TONIGHT_AWD_HOP_DESTINATION = "3pl_awd";
+/**
+ * Earlier August 3PL→FBA that actually shipped in August (pre-PR72 mix).
+ * Historical August month card only — not tonight's Sep 4 send.
+ */
+export const LOCKED_AUGUST_3PL_FBA_SEND: Record<string, number> = {
+  DDPE0004Shop: 5_400, // assorted — 20 boxes of 270
+  DDPE0003Shop: 4_860, // orange — 18 boxes of 270
+  DDPE0002Shop: 2_700, // peppermint — 10 boxes of 270
+  DDPE0001Shop: 0, // unscented not in this send
+};
+export const LOCKED_AUGUST_3PL_FBA_TOTAL = 12_960;
 /** Holt via Dave, in transit 2026-08-31. Marpac → Tulsa 3PL only. Not AWD. Not 3PL→FBA. */
 export const LOCKED_AUGUST_MARPAC_TULSA_SEND: Record<string, number> = {
   DDPE0001Shop: 6_480, // unscented — 24 boxes of 270
@@ -54,6 +69,7 @@ export const LOCKED_AUGUST_MARPAC_TULSA_SEND: Record<string, number> = {
 export const LOCKED_AUGUST_MARPAC_TULSA_TOTAL = 12_960;
 export const LOCKED_AUGUST_MARPAC_TULSA_DATE = "2026-08-31";
 export const LOCKED_AUGUST_MONTH = "2026-08";
+export const LOCKED_SEPTEMBER_MONTH = "2026-09";
 export const FAMILY_FBA_CAP_PEAK = 55_600;
 export const FAMILY_FBA_CAP_OCT_DEC = 49_400;
 
@@ -70,8 +86,8 @@ export const PRIOR_SC_FBA_CAP_UNITS = 55_600;
 
 /**
  * Seller Central FBA cube — dashboard card only.
- * Holt via Dave 2026-09-01. Units use 55,600 / 139.08.
- * Do not drive mix, AWD pallets, or 3PL→FBA lock qty.
+ * Holt / SC 2026-09-04 11:53 EDT. Units use 55,600 / 139.08.
+ * Caps unchanged. Do not drive mix, AWD pallets, or 3PL→FBA lock qty.
  */
 export const SC_FBA_CAP_SEP_FT3 = 128.93;
 export const SC_FBA_CAP_SEP_UNITS = 51_500;
@@ -79,10 +95,10 @@ export const SC_FBA_CAP_OCT_FT3 = 140.23;
 export const SC_FBA_CAP_OCT_UNITS = 56_000;
 export const SC_FBA_CAP_NOV_FT3 = 184.57;
 export const SC_FBA_CAP_NOV_UNITS = 73_800;
-export const SC_FBA_USED_FT3 = 97.72;
-export const SC_FBA_USED_PCT = 75.8;
-export const SC_FBA_INBOUND_ROOM_FT3 = 31.21;
-export const SC_FBA_INBOUND_ROOM_UNITS = 12_500;
+export const SC_FBA_USED_FT3 = 114.21;
+export const SC_FBA_USED_PCT = 88.59;
+export const SC_FBA_INBOUND_ROOM_FT3 = 14.72;
+export const SC_FBA_INBOUND_ROOM_UNITS = 5_900;
 /** Next 3PL→FBA after Tulsa receive. Fits in Sept inbound room. Not tonight's 8,100 lock. */
 export const NEXT_3PL_FBA_AFTER_TULSA_UNITS = 10_800;
 
@@ -160,7 +176,8 @@ export const FIRST_WAVE_AWD_TARGETS: Record<string, number> = {
 export const FIRST_WAVE_AWD_TARGET_CAP = 61_425;
 /** Assorted + orange first — target end of September, then unscented + peppermint.
  *  August hops: locked Marpac→Tulsa 12,960 in transit 2026-08-31,
- *  locked 3PL→FBA 8,100 today, and locked 3PL→AWD 2,700 orange small parcel. */
+ *  and historical August 3PL→FBA 12,960. September hops: Sep 4 3PL→FBA
+ *  8,100 and 3PL→AWD 2,700 orange small parcel. */
 export const FIRST_WAVE_AWD_SHIP_ORDER = [
   "DDPE0004Shop",
   "DDPE0003Shop",
@@ -614,7 +631,7 @@ export function allocate3plFbaSend(
   };
 }
 
-/** August 3PL tonight: Holt/Dave FBA lock + orange AWD small parcel. Do not re-allocate. */
+/** Sep 4 / September 3PL: Holt/Dave FBA lock + orange AWD small parcel. Do not re-allocate. */
 export function applyLockedTonight3plFbaSend(
   sku3pl: Record<string, number>,
   gaps: Record<string, number> = {},
@@ -654,6 +671,16 @@ export function lockedAugustMarpacTulsaMix(skus: string[] = LIP_BALM_SKUS): Reco
   const mix: Record<string, number> = {};
   for (const sku of skus) {
     const qty = Number(LOCKED_AUGUST_MARPAC_TULSA_SEND[sku] || 0);
+    if (qty > 0) mix[sku] = qty;
+  }
+  return mix;
+}
+
+/** Historical August 3PL→FBA that shipped in August. Not tonight's Sep 4 send. */
+export function lockedAugust3plFbaMix(skus: string[] = LIP_BALM_SKUS): Record<string, number> {
+  const mix: Record<string, number> = {};
+  for (const sku of skus) {
+    const qty = Number(LOCKED_AUGUST_3PL_FBA_SEND[sku] || 0);
     if (qty > 0) mix[sku] = qty;
   }
   return mix;
@@ -1435,6 +1462,16 @@ export function buildMonthViewEntries(opts: {
         singleSku: false, track: "mixed_august",
         awaitingAugust: false,
       }));
+      // Historical August 3PL→FBA 12,960. Not tonight's Sep 4 send.
+      const augustFba = lockedAugust3plFbaMix(skus);
+      if (Object.values(augustFba).reduce((a, b) => a + b, 0) > 0) {
+        entries.push(entry(month, augustFba, "3pl_fba", {
+          singleSku: false, track: "3pl_fba_august",
+        }));
+      }
+      continue;
+    }
+    if (month.endsWith("-09")) {
       const sendTotal = Object.values(tplToFba).reduce((a, b) => a + b, 0);
       if (sendTotal > 0) {
         entries.push(entry(month, tplToFba, "3pl_fba", {
@@ -1447,9 +1484,6 @@ export function buildMonthViewEntries(opts: {
           singleSku: true, track: "3pl_awd", nextHop: true,
         }));
       }
-      continue;
-    }
-    if (month.endsWith("-09")) {
       const mixed: Record<string, number> = {};
       for (const sku of skus) if (mixedNeed[sku] > 0) mixed[sku] = mixedNeed[sku];
       if (Object.keys(mixed).length > 0) {

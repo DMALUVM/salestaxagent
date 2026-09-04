@@ -97,7 +97,9 @@ describe("pallet planner ship view", () => {
     assert.match(model, /SC_FBA_CAP_OCT_UNITS = 56_000/);
     assert.match(model, /SC_FBA_CAP_NOV_UNITS = 73_800/);
     assert.match(model, /NEXT_3PL_FBA_AFTER_TULSA_UNITS = 10_800/);
-    assert.match(model, /SC_FBA_INBOUND_ROOM_UNITS = 12_500/);
+    assert.match(model, /SC_FBA_INBOUND_ROOM_UNITS = 5_900/);
+    assert.match(model, /SC_FBA_USED_FT3 = 114\.21/);
+    assert.match(model, /SC_FBA_USED_PCT = 88\.59/);
     assert.doesNotMatch(ship, /familyFbaCapForMonth\(/);
     assert.doesNotMatch(ship, /Oct–Dec ~/);
     assert.match(ship, /Marpac→Tulsa/);
@@ -105,10 +107,13 @@ describe("pallet planner ship view", () => {
     assert.doesNotMatch(ship, /mix TBD/);
     assert.match(ship, /in transit/);
     assert.match(ship + "\n" + model, /2026-08-31/);
-    assert.match(page + "\n" + ship, /August 3PL→FBA 8,100/);
+    assert.match(page + "\n" + ship, /September 3PL→FBA 8,100/);
     assert.match(page + "\n" + ship, /3PL→AWD 2,700/);
-    assert.match(ship, /August · 3PL→FBA/);
+    assert.match(ship, /September · 3PL→FBA/);
+    assert.match(ship, /historical 3PL→FBA/);
     assert.match(ship, /small parcel; no 50% pallet floor/);
+    assert.doesNotMatch(ship, /August · 3PL→FBA/);
+    assert.doesNotMatch(page + "\n" + ship, /August 3PL→FBA 8,100/);
     assert.doesNotMatch(ship, /3PL→Marpac/);
     assert.doesNotMatch(model, /3PL→Marpac/);
     assert.doesNotMatch(both, /FBA Cover Alerts/);

@@ -18,6 +18,7 @@ import {
   LIP_BALM_SKUS,
   FIRST_WAVE_AWD_TARGETS,
   FIRST_WAVE_AWD_TARGET_CAP,
+  LOCKED_AUGUST_3PL_FBA_TOTAL,
   LOCKED_AUGUST_MARPAC_TULSA_DATE,
   LOCKED_AUGUST_MARPAC_TULSA_TOTAL,
   LOCKED_TONIGHT_3PL_AWD_TOTAL,
@@ -142,7 +143,7 @@ export function HolidayShipPlan({
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
           <Badge>NEXT HOP</Badge>
-          <CardTitle className="text-sm font-medium">August · 3PL→FBA {fmt(sendTotal)}</CardTitle>
+          <CardTitle className="text-sm font-medium">September · 3PL→FBA {fmt(sendTotal)}</CardTitle>
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -271,8 +272,9 @@ export function HolidayShipPlan({
           Not the {fmt(OPTIMISTIC_AWD_TARGET_CAP)} high water.
           Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
           {" "}August: Marpac→Tulsa {fmt(LOCKED_AUGUST_MARPAC_TULSA_TOTAL)} in transit {LOCKED_AUGUST_MARPAC_TULSA_DATE}
-          {", "}3PL→FBA {fmt(LOCKED_TONIGHT_3PL_FBA_TOTAL)} (5,400 unscented + 2,700 assorted)
-          {", and "}3PL→AWD {fmt(LOCKED_TONIGHT_3PL_AWD_TOTAL)} orange (small parcel; no 50% pallet floor).
+          {" + historical 3PL→FBA "}{fmt(LOCKED_AUGUST_3PL_FBA_TOTAL)}
+          {". September: 3PL→FBA "}{fmt(LOCKED_TONIGHT_3PL_FBA_TOTAL)}{" (5,400 unscented + 2,700 assorted)"}
+          {" + 3PL→AWD "}{fmt(LOCKED_TONIGHT_3PL_AWD_TOTAL)}{" orange (small parcel; no 50% pallet floor)."}
         </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {entries
