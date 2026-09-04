@@ -18,11 +18,11 @@ import {
   LIP_BALM_SKUS,
   FIRST_WAVE_AWD_TARGETS,
   FIRST_WAVE_AWD_TARGET_CAP,
+  LOCKED_AUGUST_3PL_FBA_TOTAL,
   LOCKED_AUGUST_MARPAC_TULSA_DATE,
   LOCKED_AUGUST_MARPAC_TULSA_TOTAL,
-  LOCKED_TONIGHT_3PL_AWD_TOTAL,
-  LOCKED_TONIGHT_3PL_FBA_TOTAL,
-  TONIGHT_AWD_HOP_DESTINATION,
+  LOCKED_SEPTEMBER_3PL_AWD_TOTAL,
+  LOCKED_SEPTEMBER_3PL_FBA_TOTAL,
   NEXT_3PL_FBA_AFTER_TULSA_UNITS,
   OPTIMISTIC_AWD_ON_HAND_TARGETS,
   OPTIMISTIC_AWD_TARGET_CAP,
@@ -142,24 +142,23 @@ export function HolidayShipPlan({
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
           <Badge>NEXT HOP</Badge>
-          <CardTitle className="text-sm font-medium">August · 3PL→FBA {fmt(sendTotal)}</CardTitle>
+          <CardTitle className="text-sm font-medium">September · 3PL→FBA {fmt(sendTotal)}</CardTitle>
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
         <p className="text-sm font-semibold tabular-nums">
-          3PL→FBA:{" "}
           {FIRST_ACTION_SKUS.filter((sku) => (sept.tplToFba[sku] ?? 0) > 0).map((sku, i) => {
             const qty = sept.tplToFba[sku] ?? 0;
             return (
               <span key={sku}>
-                {i > 0 ? " + " : ""}
+                {i > 0 ? " / " : ""}
                 {fmt(qty)} {SKU_SHORT[sku].toLowerCase()}
               </span>
             );
           })}
         </p>
         <p className="text-sm font-semibold tabular-nums">
-          3PL→AWD: {fmt(hopTotal)} orange (small parcel; no 50% pallet floor)
+          3PL→AWD {fmt(hopTotal)} orange — small parcel, no ≥50% floor
         </p>
         <p className="text-sm">
           Tulsa hold {fmt(tulsaHold)}. Inbound already counted — do not re-send.
@@ -206,13 +205,15 @@ export function HolidayShipPlan({
       <CardContent className="space-y-1 text-sm">
         <p>Locked after FBA is maxed. New Marpac single-SKU → AWD. Not from Tulsa after tonight.</p>
         <p className="tabular-nums">
-          Assorted {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0004Shop)}
-          {" · "}Orange {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0003Shop)}
-          {" · "}Unscented {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0001Shop)}
-          {" · "}Peppermint {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0002Shop)}
+          Late Sept: Assorted {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0004Shop)}
+          {" then "}Orange {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0003Shop)}
+        </p>
+        <p className="tabular-nums">
+          Mid-Oct: Unscented {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0001Shop)}
+          {" then "}Peppermint {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0002Shop)}
         </p>
         <p className="text-[11px] text-muted-foreground">
-          Assorted + orange target end of September (2 pallets/month max), then unscented + peppermint.
+          One SKU per pallet. Second wave is mid-October, not August.
         </p>
       </CardContent>
     </Card>
@@ -267,12 +268,11 @@ export function HolidayShipPlan({
       <div>
         <p className="text-sm font-medium mb-2">Month cards</p>
         <p className="text-[11px] text-muted-foreground mb-3">
-          First wave: assorted + orange end of September, then unscented + peppermint (2 AWD cards/month max).
+          First wave: assorted + orange late September, then unscented + peppermint mid-October (2 AWD cards/month max).
           Not the {fmt(OPTIMISTIC_AWD_TARGET_CAP)} high water.
           Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
-          {" "}August: Marpac→Tulsa {fmt(LOCKED_AUGUST_MARPAC_TULSA_TOTAL)} in transit {LOCKED_AUGUST_MARPAC_TULSA_DATE}
-          {", "}3PL→FBA {fmt(LOCKED_TONIGHT_3PL_FBA_TOTAL)} (5,400 unscented + 2,700 assorted)
-          {", and "}3PL→AWD {fmt(LOCKED_TONIGHT_3PL_AWD_TOTAL)} orange (small parcel; no 50% pallet floor).
+          {" "}August: Marpac→Tulsa {fmt(LOCKED_AUGUST_MARPAC_TULSA_TOTAL)} in transit {LOCKED_AUGUST_MARPAC_TULSA_DATE} and 3PL→FBA {fmt(LOCKED_AUGUST_3PL_FBA_TOTAL)}.
+          {" "}September: 3PL→FBA {fmt(LOCKED_SEPTEMBER_3PL_FBA_TOTAL)} + 3PL→AWD orange {fmt(LOCKED_SEPTEMBER_3PL_AWD_TOTAL)}.
         </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {entries
@@ -301,7 +301,7 @@ function MonthCard({
   const destLabel = entry.hopLabel
     || (entry.destination === "3pl_fba"
       ? "3PL→FBA"
-      : entry.destination === TONIGHT_AWD_HOP_DESTINATION
+      : entry.destination === "3pl_awd"
         ? "3PL→AWD"
       : entry.destination === "awd"
         ? "single-SKU AWD"
@@ -339,17 +339,13 @@ function MonthCard({
         <p className="text-xs text-muted-foreground py-2">
           {entry.destination === "awd" ? "No single-SKU AWD this month" : "No movement this month"}
         </p>
-      ) : entry.destination === "3pl_fba" ? (
-        <>
-          <p className="text-2xl font-semibold tabular-nums">{fmt(entry.units)}</p>
-          <p className="text-[10px] text-muted-foreground mb-2">3PL→FBA · not a Marpac pallet</p>
-          <SkuLines mix={entry.mix} />
-        </>
-      ) : entry.destination === TONIGHT_AWD_HOP_DESTINATION ? (
+      ) : entry.destination === "3pl_fba" || entry.destination === "3pl_awd" ? (
         <>
           <p className="text-2xl font-semibold tabular-nums">{fmt(entry.units)}</p>
           <p className="text-[10px] text-muted-foreground mb-2">
-            3PL→AWD · small parcel (no 50% pallet floor)
+            {entry.destination === "3pl_awd"
+              ? "3PL→AWD · small parcel · no ≥50% floor"
+              : "3PL→FBA · not a Marpac pallet"}
           </p>
           <SkuLines mix={entry.mix} />
         </>
