@@ -365,9 +365,11 @@ describe("production planner source lock", () => {
     assert.doesNotMatch(cols, /fba_unfulfillable/);
     const model = src("src/lib/pallet-planner-model.ts");
     assert.match(model, /LOCKED_TONIGHT_3PL_FBA_SEND/);
+    assert.match(model, /LOCKED_TONIGHT_3PL_AWD_SEND/);
     assert.match(model, /LOCKED_AUGUST_MARPAC_TULSA_SEND/);
-    assert.match(model, /DDPE0004Shop: 5_400/);
-    assert.match(model, /DDPE0003Shop: 4_860/);
+    assert.match(model, /DDPE0001Shop: 5_400/);
+    assert.match(model, /DDPE0004Shop: 2_700/);
+    assert.match(model, /DDPE0003Shop: 2_700/);
     assert.match(model, /DDPE0001Shop: 6_480/);
     assert.match(model, /FIRST_WAVE_AWD_TARGET_CAP = 61_425/);
   });

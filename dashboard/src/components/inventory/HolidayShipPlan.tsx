@@ -20,6 +20,9 @@ import {
   FIRST_WAVE_AWD_TARGET_CAP,
   LOCKED_AUGUST_MARPAC_TULSA_DATE,
   LOCKED_AUGUST_MARPAC_TULSA_TOTAL,
+  LOCKED_TONIGHT_3PL_AWD_TOTAL,
+  LOCKED_TONIGHT_3PL_FBA_TOTAL,
+  TONIGHT_AWD_HOP_DESTINATION,
   NEXT_3PL_FBA_AFTER_TULSA_UNITS,
   OPTIMISTIC_AWD_ON_HAND_TARGETS,
   OPTIMISTIC_AWD_TARGET_CAP,
@@ -47,7 +50,7 @@ const SKU_SHORT: Record<string, string> = {
   DDPE0003Shop: "Orange",
   DDPE0004Shop: "Assorted",
 };
-const FIRST_ACTION_SKUS = ["DDPE0004Shop", "DDPE0003Shop", "DDPE0002Shop", "DDPE0001Shop"] as const;
+const FIRST_ACTION_SKUS = ["DDPE0001Shop", "DDPE0004Shop", "DDPE0003Shop", "DDPE0002Shop"] as const;
 const MARPAC_TULSA_SKU_ORDER = ["DDPE0001Shop", "DDPE0004Shop", "DDPE0003Shop"] as const;
 
 function fmt(n: number) {
@@ -131,6 +134,7 @@ export function HolidayShipPlan({
   const tplAsOf = stampDate(latestTpl.find((t) => t.pulled_at)?.pulled_at);
   const tulsaHold = sept.firstAction.tulsaHoldTotal;
   const sendTotal = sept.firstAction.tplToFbaTotal;
+  const hopTotal = sept.firstAction.tplToAwdTotal;
   const nextAfterTulsaFits = next3plFbaFitsSeptRoom();
 
   const firstAction = (
@@ -143,15 +147,19 @@ export function HolidayShipPlan({
       </CardHeader>
       <CardContent className="space-y-2">
         <p className="text-sm font-semibold tabular-nums">
+          3PL→FBA:{" "}
           {FIRST_ACTION_SKUS.filter((sku) => (sept.tplToFba[sku] ?? 0) > 0).map((sku, i) => {
             const qty = sept.tplToFba[sku] ?? 0;
             return (
               <span key={sku}>
-                {i > 0 ? " / " : ""}
+                {i > 0 ? " + " : ""}
                 {fmt(qty)} {SKU_SHORT[sku].toLowerCase()}
               </span>
             );
           })}
+        </p>
+        <p className="text-sm font-semibold tabular-nums">
+          3PL→AWD: {fmt(hopTotal)} orange (small parcel; no 50% pallet floor)
         </p>
         <p className="text-sm">
           Tulsa hold {fmt(tulsaHold)}. Inbound already counted — do not re-send.
@@ -262,7 +270,9 @@ export function HolidayShipPlan({
           First wave: assorted + orange end of September, then unscented + peppermint (2 AWD cards/month max).
           Not the {fmt(OPTIMISTIC_AWD_TARGET_CAP)} high water.
           Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
-          {" "}August: Marpac→Tulsa {fmt(LOCKED_AUGUST_MARPAC_TULSA_TOTAL)} in transit {LOCKED_AUGUST_MARPAC_TULSA_DATE} and 3PL→FBA 12,960.
+          {" "}August: Marpac→Tulsa {fmt(LOCKED_AUGUST_MARPAC_TULSA_TOTAL)} in transit {LOCKED_AUGUST_MARPAC_TULSA_DATE}
+          {", "}3PL→FBA {fmt(LOCKED_TONIGHT_3PL_FBA_TOTAL)} (5,400 unscented + 2,700 assorted)
+          {", and "}3PL→AWD {fmt(LOCKED_TONIGHT_3PL_AWD_TOTAL)} orange (small parcel; no 50% pallet floor).
         </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {entries
@@ -291,6 +301,8 @@ function MonthCard({
   const destLabel = entry.hopLabel
     || (entry.destination === "3pl_fba"
       ? "3PL→FBA"
+      : entry.destination === TONIGHT_AWD_HOP_DESTINATION
+        ? "3PL→AWD"
       : entry.destination === "awd"
         ? "single-SKU AWD"
         : entry.destination === AUGUST_HOP_DESTINATION || entry.awaitingAugustTotals
@@ -331,6 +343,14 @@ function MonthCard({
         <>
           <p className="text-2xl font-semibold tabular-nums">{fmt(entry.units)}</p>
           <p className="text-[10px] text-muted-foreground mb-2">3PL→FBA · not a Marpac pallet</p>
+          <SkuLines mix={entry.mix} />
+        </>
+      ) : entry.destination === TONIGHT_AWD_HOP_DESTINATION ? (
+        <>
+          <p className="text-2xl font-semibold tabular-nums">{fmt(entry.units)}</p>
+          <p className="text-[10px] text-muted-foreground mb-2">
+            3PL→AWD · small parcel (no 50% pallet floor)
+          </p>
           <SkuLines mix={entry.mix} />
         </>
       ) : (
