@@ -1,7 +1,7 @@
 {
   "_metadata": {
     "description": "Amazon Fulfillment Center codes mapped to US states. Covers FCs, sort centers, and delivery stations (S-prefix). Amazon opens/closes facilities regularly — keep updated.",
-    "last_updated": "2026-09-02",
+    "last_updated": "2026-09-04",
     "source": "Public records, seller community data, SP-API inventory ledger. Verify with Amazon if critical.",
     "how_to_add_unknown_codes": [
       "When `inventory-health` reports an unmapped FC code:",
@@ -161,6 +161,7 @@
     "IGA3": "GA",
     "IGQ1": "IL",
     "ILM1": "NC",
+    "IMI1": "MI",
     "IMO1": "MO",
     "IND1": "IN",
     "IND2": "IN",

@@ -1,7 +1,7 @@
 {
   "_metadata": {
     "description": "Amazon Fulfillment Center codes mapped to US states. Covers FCs, sort centers, and delivery stations (S-prefix). Amazon opens/closes facilities regularly — keep updated.",
-    "last_updated": "2026-09-02",
+    "last_updated": "2026-09-04",
     "source": "Public records, seller community data, SP-API inventory ledger. Verify with Amazon if critical.",
     "evidence_notes": {
       "ABE2/ABE3/ABE4": "[high] CORRECTED 2026-08-20 from NJ to PA. ABE2 705 Boulder Dr & ABE3 650 Boulder Dr, Breinigsville PA; ABE4 1610 Van Buren Rd, Easton PA. The whole ABE family had been mapped NJ because ABE8 (401 Independence Rd, Florence NJ) genuinely is New Jersey — ABE8 is unchanged.",
@@ -131,6 +131,7 @@
     "IGA3": "GA",
     "IGQ1": "IL",
     "ILM1": "NC",
+    "IMI1": "MI",
     "IMO1": "MO",
     "IND1": "IN",
     "IND2": "IN",
