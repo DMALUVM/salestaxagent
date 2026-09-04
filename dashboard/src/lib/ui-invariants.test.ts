@@ -105,8 +105,10 @@ describe("pallet planner ship view", () => {
     assert.doesNotMatch(ship, /mix TBD/);
     assert.match(ship, /in transit/);
     assert.match(ship + "\n" + model, /2026-08-31/);
-    assert.match(page + "\n" + ship, /August 3PL→FBA 12,960/);
+    assert.match(page + "\n" + ship, /August 3PL→FBA 8,100/);
+    assert.match(page + "\n" + ship, /3PL→AWD 2,700/);
     assert.match(ship, /August · 3PL→FBA/);
+    assert.match(ship, /small parcel; no 50% pallet floor/);
     assert.doesNotMatch(ship, /3PL→Marpac/);
     assert.doesNotMatch(model, /3PL→Marpac/);
     assert.doesNotMatch(both, /FBA Cover Alerts/);
