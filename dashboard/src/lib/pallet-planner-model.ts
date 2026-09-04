@@ -24,26 +24,44 @@ export const FBA_INBOUND_PREFERRED = CARTON_20X16X14_UNITS * FBA_INBOUND_MIN_BOX
 export const FBA_INBOUND_MIN_FEE_FREE = CARTON_13X11X9_UNITS * FBA_INBOUND_MIN_BOXES;
 export const FBA_INBOUND_STEP_AFTER = CARTON_20X16X14_UNITS;
 export const DEFAULT_INBOUND_CARTON_UNITS = CARTON_20X16X14_UNITS;
-/** Holt via Dave — August 3PL→FBA today. Fee-safe on 270-unit / 13×11×9 boxes. */
-export const LOCKED_TONIGHT_3PL_FBA_SEND: Record<string, number> = {
+/**
+ * Historical August 3PL→FBA that already shipped in August (pre-Sep 4 mix).
+ * Assorted 5,400 + orange 4,860 + peppermint 2,700. Lives on the August card.
+ * Do not put Sep 4 qty here.
+ */
+export const LOCKED_AUGUST_3PL_FBA_SEND: Record<string, number> = {
+  DDPE0004Shop: 5_400, // assorted — 20 boxes of 270
+  DDPE0003Shop: 4_860, // orange — 18 boxes of 270
+  DDPE0002Shop: 2_700, // peppermint — 10 boxes of 270
+  DDPE0001Shop: 0, // unscented not in this send
+};
+export const LOCKED_AUGUST_3PL_FBA_TOTAL = 12_960;
+/**
+ * Sep 4 small-parcel 3PL→FBA. Lives on SEPTEMBER, not August.
+ * Unscented 5,400 + assorted 2,700. Fee-safe on 270-unit / 13×11×9 boxes.
+ */
+export const LOCKED_SEPTEMBER_3PL_FBA_SEND: Record<string, number> = {
   DDPE0001Shop: 5_400, // unscented — 20 boxes of 270
   DDPE0004Shop: 2_700, // assorted — 10 boxes of 270
-  DDPE0003Shop: 0, // orange is the 3PL→AWD small-parcel hop, not FBA
-  DDPE0002Shop: 0, // peppermint not in this send
+  DDPE0003Shop: 0,
+  DDPE0002Shop: 0,
 };
-export const LOCKED_TONIGHT_3PL_FBA_TOTAL = 8_100;
+export const LOCKED_SEPTEMBER_3PL_FBA_TOTAL = 8_100;
 /**
- * Holt via Dave — August 3PL→AWD today, small parcel.
- * PALLET_PARTIAL_MIN_RATIO / AWD ≥50% pallet floor does NOT apply to this hop.
+ * Sep 4 small-parcel 3PL→AWD orange. Lives on SEPTEMBER.
+ * PALLET_PARTIAL_MIN_RATIO / ≥50% AWD floor does NOT apply.
  */
-export const LOCKED_TONIGHT_3PL_AWD_SEND: Record<string, number> = {
-  DDPE0003Shop: 2_700, // orange — 10 boxes of 270, small parcel
+export const LOCKED_SEPTEMBER_3PL_AWD_SEND: Record<string, number> = {
+  DDPE0003Shop: 2_700, // orange — 10 boxes of 270
   DDPE0001Shop: 0,
   DDPE0002Shop: 0,
   DDPE0004Shop: 0,
 };
-export const LOCKED_TONIGHT_3PL_AWD_TOTAL = 2_700;
-export const TONIGHT_AWD_HOP_DESTINATION = "3pl_awd";
+export const LOCKED_SEPTEMBER_3PL_AWD_TOTAL = 2_700;
+export const SEPTEMBER_AWD_HOP_DESTINATION = "3pl_awd";
+/** @deprecated Use LOCKED_SEPTEMBER_3PL_FBA_SEND. Kept as the Sep 4 alias. */
+export const LOCKED_TONIGHT_3PL_FBA_SEND = LOCKED_SEPTEMBER_3PL_FBA_SEND;
+export const LOCKED_TONIGHT_3PL_FBA_TOTAL = LOCKED_SEPTEMBER_3PL_FBA_TOTAL;
 /** Holt via Dave, in transit 2026-08-31. Marpac → Tulsa 3PL only. Not AWD. Not 3PL→FBA. */
 export const LOCKED_AUGUST_MARPAC_TULSA_SEND: Record<string, number> = {
   DDPE0001Shop: 6_480, // unscented — 24 boxes of 270
@@ -79,11 +97,11 @@ export const SC_FBA_CAP_OCT_FT3 = 140.23;
 export const SC_FBA_CAP_OCT_UNITS = 56_000;
 export const SC_FBA_CAP_NOV_FT3 = 184.57;
 export const SC_FBA_CAP_NOV_UNITS = 73_800;
-export const SC_FBA_USED_FT3 = 97.72;
-export const SC_FBA_USED_PCT = 75.8;
-export const SC_FBA_INBOUND_ROOM_FT3 = 31.21;
-export const SC_FBA_INBOUND_ROOM_UNITS = 12_500;
-/** Next 3PL→FBA after Tulsa receive. Fits in Sept inbound room. Not tonight's 8,100 lock. */
+export const SC_FBA_USED_FT3 = 114.21;
+export const SC_FBA_USED_PCT = 88.59;
+export const SC_FBA_INBOUND_ROOM_FT3 = 14.72;
+export const SC_FBA_INBOUND_ROOM_UNITS = 5_900;
+/** Next 3PL→FBA after Tulsa receive. Not the August 12,960 lock. Room is now 5,900. */
 export const NEXT_3PL_FBA_AFTER_TULSA_UNITS = 10_800;
 
 export type ScFbaCapMonth = {
@@ -158,15 +176,24 @@ export const FIRST_WAVE_AWD_TARGETS: Record<string, number> = {
   DDPE0002Shop: 8_775,
 };
 export const FIRST_WAVE_AWD_TARGET_CAP = 61_425;
-/** Assorted + orange first — target end of September, then unscented + peppermint.
- *  August hops: locked Marpac→Tulsa 12,960 in transit 2026-08-31,
- *  locked 3PL→FBA 8,100 today, and locked 3PL→AWD 2,700 orange small parcel. */
+/**
+ * Late September: assorted then orange (one SKU per pallet).
+ * Mid-October: unscented then peppermint. Not August for the second wave.
+ * August hops are Marpac→Tulsa + historical August 3PL→FBA only.
+ */
 export const FIRST_WAVE_AWD_SHIP_ORDER = [
   "DDPE0004Shop",
   "DDPE0003Shop",
   "DDPE0001Shop",
   "DDPE0002Shop",
 ] as const;
+/** Pin first-wave cards: Sept = assorted+orange, Oct = unscented+peppermint. */
+export const FIRST_WAVE_AWD_MONTH_BY_SKU: Record<string, string> = {
+  DDPE0004Shop: "2026-09",
+  DDPE0003Shop: "2026-09",
+  DDPE0001Shop: "2026-10",
+  DDPE0002Shop: "2026-10",
+};
 export const SEPT_FBA_ON_HAND_TARGETS: Record<string, number> = {
   DDPE0001Shop: 12_800,
   DDPE0002Shop: 8_300,
@@ -614,8 +641,8 @@ export function allocate3plFbaSend(
   };
 }
 
-/** August 3PL tonight: Holt/Dave FBA lock + orange AWD small parcel. Do not re-allocate. */
-export function applyLockedTonight3plFbaSend(
+/** Sep 4 small-parcel hops: 3PL→FBA 8,100 + 3PL→AWD orange 2,700. Do not re-allocate. */
+export function applyLockedSeptember3plHops(
   sku3pl: Record<string, number>,
   gaps: Record<string, number> = {},
   opts?: { floor?: number; awdLoaded?: boolean; skus?: string[] },
@@ -630,8 +657,8 @@ export function applyLockedTonight3plFbaSend(
   for (const sku of skus) {
     onHand[sku] = Math.max(0, Number(sku3pl[sku] || 0));
     gap[sku] = Math.max(0, Number(gaps[sku] || 0));
-    send[sku] = Number(LOCKED_TONIGHT_3PL_FBA_SEND[sku] || 0);
-    hop[sku] = Number(LOCKED_TONIGHT_3PL_AWD_SEND[sku] || 0);
+    send[sku] = Number(LOCKED_SEPTEMBER_3PL_FBA_SEND[sku] || 0);
+    hop[sku] = Number(LOCKED_SEPTEMBER_3PL_AWD_SEND[sku] || 0);
     hold[sku] = Math.max(0, onHand[sku] - send[sku] - hop[sku]);
   }
   const floorNow = awdLoaded ? 0 : Math.max(0, opts?.floor ?? TULSA_LIP_FLOOR_UNITS);
@@ -645,18 +672,46 @@ export function applyLockedTonight3plFbaSend(
     holdTotal: skus.reduce((a, s) => a + hold[s], 0),
     hopTotal: skus.reduce((a, s) => a + hop[s], 0),
     locked: true,
-    waitsOnAugust: Object.fromEntries(skus.map((s) => [s, send[s] === 0 && hop[s] === 0 && gap[s] > 0 && onHand[s] > 0])),
+    waitsOnAugust: Object.fromEntries(skus.map((s) => [s, send[s] === 0 && gap[s] > 0 && onHand[s] > 0])),
   };
+}
+
+/** @deprecated Use applyLockedSeptember3plHops. */
+export function applyLockedTonight3plFbaSend(
+  sku3pl: Record<string, number>,
+  gaps: Record<string, number> = {},
+  opts?: { floor?: number; awdLoaded?: boolean; skus?: string[] },
+) {
+  return applyLockedSeptember3plHops(sku3pl, gaps, opts);
+}
+
+function lockedMixFrom(send: Record<string, number>, skus: string[] = LIP_BALM_SKUS): Record<string, number> {
+  const mix: Record<string, number> = {};
+  for (const sku of skus) {
+    const qty = Number(send[sku] || 0);
+    if (qty > 0) mix[sku] = qty;
+  }
+  return mix;
 }
 
 /** Dave's August Marpac→Tulsa hop. Display lock only — not FBA/AWD. */
 export function lockedAugustMarpacTulsaMix(skus: string[] = LIP_BALM_SKUS): Record<string, number> {
-  const mix: Record<string, number> = {};
-  for (const sku of skus) {
-    const qty = Number(LOCKED_AUGUST_MARPAC_TULSA_SEND[sku] || 0);
-    if (qty > 0) mix[sku] = qty;
-  }
-  return mix;
+  return lockedMixFrom(LOCKED_AUGUST_MARPAC_TULSA_SEND, skus);
+}
+
+/** Historical August 3PL→FBA that shipped in August. Not Sep 4. */
+export function lockedAugust3plFbaMix(skus: string[] = LIP_BALM_SKUS): Record<string, number> {
+  return lockedMixFrom(LOCKED_AUGUST_3PL_FBA_SEND, skus);
+}
+
+/** Sep 4 3PL→FBA. September card only. */
+export function lockedSeptember3plFbaMix(skus: string[] = LIP_BALM_SKUS): Record<string, number> {
+  return lockedMixFrom(LOCKED_SEPTEMBER_3PL_FBA_SEND, skus);
+}
+
+/** Sep 4 3PL→AWD orange small parcel. No ≥50% AWD floor. */
+export function lockedSeptember3plAwdMix(skus: string[] = LIP_BALM_SKUS): Record<string, number> {
+  return lockedMixFrom(LOCKED_SEPTEMBER_3PL_AWD_SEND, skus);
 }
 
 export function skuProductionBuild(
@@ -1137,7 +1192,7 @@ export function buildSeptemberPlan(
       : awdSurgeNeed(awdTgt[sku] ?? 0, skuAwd[sku] ?? 0, augustToAwd[sku]);
   }
   const awdLoaded = awdCoversOffFbaReserve(skuAwd);
-  const sendPlan = applyLockedTonight3plFbaSend(
+  const sendPlan = applyLockedSeptember3plHops(
     Object.fromEntries(skus.map((s) => [s, sku3pl[s] ?? 0])),
     gapAfterAug,
     { floor: tulsaFloor, awdLoaded, skus },
@@ -1152,8 +1207,7 @@ export function buildSeptemberPlan(
   for (const sku of skus) {
     fbaStillShort[sku] = Math.max(0, gapAfterAug[sku] - (tplToFba[sku] ?? 0));
     mixedNeed[sku] = 0;
-    // Tonight's locked 3PL→AWD is a small-parcel hop from Tulsa — it does
-    // not shrink the first-wave Marpac AWD buy (still 17,550 / 8,775).
+    // Sep 4 3PL→AWD is existing Tulsa stock, not a cut to first-wave Marpac pallets.
     skuManufacture[sku] = Math.max(0, awdNeedBefore[sku]);
     fbaAfterSend[sku] = (gaps[sku]?.fbaPlusInbound ?? 0) + (tplToFba[sku] ?? 0) + augustToFba[sku];
   }
@@ -1236,7 +1290,7 @@ function monthViewLabel(month: string): string {
 
 export function hopLabel(destination: string, awaitingAugust = false): string {
   if (destination === "3pl_fba") return "3PL→FBA";
-  if (destination === TONIGHT_AWD_HOP_DESTINATION) return "3PL→AWD";
+  if (destination === SEPTEMBER_AWD_HOP_DESTINATION) return "3PL→AWD";
   if (destination === "awd") return "single-SKU AWD";
   if (destination === AUGUST_HOP_DESTINATION || awaitingAugust) return AUGUST_HOP_LABEL;
   if (destination === "fba_then_awd") return "remaining FBA then AWD";
@@ -1257,21 +1311,32 @@ export function assignAwdCardsToMonths<T extends { sku?: string; mix?: Record<st
   if (months.length === 0) {
     months = productionMonths.filter((m) => !m.endsWith("-08") && m.slice(5, 7) >= "09") as typeof months;
   }
+  months = months.filter((m) => !String(m).endsWith("-08"));
   const ordered = [...cards].sort((a, b) => {
     const ra = awdCardShipRank(a);
     const rb = awdCardShipRank(b);
     return ra[0] - rb[0] || ra[1] - rb[1] || ra[2] - rb[2];
   });
   const out: Record<string, T[]> = Object.fromEntries(months.map((m) => [m, []]));
+  const leftover: T[] = [];
+  for (const card of ordered) {
+    const sku = card.sku || Object.keys(card.mix ?? {})[0] || "";
+    const pinned = FIRST_WAVE_AWD_MONTH_BY_SKU[sku];
+    if (pinned && months.includes(pinned) && (out[pinned]?.length ?? 0) < AWD_CARDS_PER_MONTH_MAX) {
+      out[pinned].push(card);
+    } else {
+      leftover.push(card);
+    }
+  }
   let i = 0;
   for (const month of months) {
-    while (i < ordered.length && (out[month]?.length ?? 0) < AWD_CARDS_PER_MONTH_MAX) {
-      out[month].push(ordered[i]);
+    while (i < leftover.length && (out[month]?.length ?? 0) < AWD_CARDS_PER_MONTH_MAX) {
+      out[month].push(leftover[i]);
       i += 1;
     }
   }
   const extras = months[months.length - 1];
-  if (extras && i < ordered.length) out[extras].push(...ordered.slice(i));
+  if (extras && i < leftover.length) out[extras].push(...leftover.slice(i));
   return out;
 }
 
@@ -1326,12 +1391,8 @@ export function buildMonthViewEntries(opts: {
   const productionMonths = opts.productionMonths.includes(LOCKED_AUGUST_MONTH)
     ? opts.productionMonths
     : [LOCKED_AUGUST_MONTH, ...opts.productionMonths];
-  const tplToFba: Record<string, number> = {};
-  const tplToAwd: Record<string, number> = {};
   const mixedNeed: Record<string, number> = {};
   for (const sku of skus) {
-    tplToFba[sku] = Math.max(0, Number(sept.tplToFba?.[sku] ?? 0));
-    tplToAwd[sku] = Math.max(0, Number(sept.tplToAwd?.[sku] ?? 0));
     mixedNeed[sku] = Math.max(0, Number(sept.mixedNeed?.[sku] ?? 0));
   }
   let awdCards = sept.awdPallets ?? [];
@@ -1350,7 +1411,7 @@ export function buildMonthViewEntries(opts: {
         inAmazon: LOCKED_AUGUST_MARPAC_TULSA_DATE,
       };
     }
-    if (destination === "3pl_fba" || destination === TONIGHT_AWD_HOP_DESTINATION) {
+    if (destination === "3pl_fba" || destination === SEPTEMBER_AWD_HOP_DESTINATION) {
       const shipBy = sept.shipBy || septFbaShipBy(recv);
       return {
         role: "gate" as const,
@@ -1393,7 +1454,7 @@ export function buildMonthViewEntries(opts: {
     }
     const total = Object.values(mix).reduce((a, b) => a + b, 0);
     const fill = palletFill(total, palletMax);
-    const is3pl = destination === "3pl_fba" || destination === TONIGHT_AWD_HOP_DESTINATION;
+    const is3pl = destination === "3pl_fba" || destination === SEPTEMBER_AWD_HOP_DESTINATION;
     return {
       month,
       label: monthViewLabel(month),
@@ -1435,21 +1496,27 @@ export function buildMonthViewEntries(opts: {
         singleSku: false, track: "mixed_august",
         awaitingAugust: false,
       }));
-      const sendTotal = Object.values(tplToFba).reduce((a, b) => a + b, 0);
-      if (sendTotal > 0) {
-        entries.push(entry(month, tplToFba, "3pl_fba", {
-          singleSku: false, track: "3pl_fba", nextHop: true,
-        }));
-      }
-      const hopTotal = Object.values(tplToAwd).reduce((a, b) => a + b, 0);
-      if (hopTotal > 0) {
-        entries.push(entry(month, tplToAwd, TONIGHT_AWD_HOP_DESTINATION, {
-          singleSku: true, track: "3pl_awd", nextHop: true,
+      const augustFba = lockedAugust3plFbaMix(skus);
+      if (Object.values(augustFba).reduce((a, b) => a + b, 0) > 0) {
+        entries.push(entry(month, augustFba, "3pl_fba", {
+          singleSku: false, track: "3pl_fba", nextHop: false,
         }));
       }
       continue;
     }
     if (month.endsWith("-09")) {
+      const septFba = lockedSeptember3plFbaMix(skus);
+      if (Object.values(septFba).reduce((a, b) => a + b, 0) > 0) {
+        entries.push(entry(month, septFba, "3pl_fba", {
+          singleSku: false, track: "3pl_fba", nextHop: true,
+        }));
+      }
+      const septAwdHop = lockedSeptember3plAwdMix(skus);
+      if (Object.values(septAwdHop).reduce((a, b) => a + b, 0) > 0) {
+        entries.push(entry(month, septAwdHop, SEPTEMBER_AWD_HOP_DESTINATION, {
+          singleSku: true, track: "3pl_awd", nextHop: true,
+        }));
+      }
       const mixed: Record<string, number> = {};
       for (const sku of skus) if (mixedNeed[sku] > 0) mixed[sku] = mixedNeed[sku];
       if (Object.keys(mixed).length > 0) {
