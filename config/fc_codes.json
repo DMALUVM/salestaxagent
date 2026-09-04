@@ -33,7 +33,10 @@
       "STW1": "[high] 29753 S Wixom Rd, Wixom, MI 48393 — youramazonguy NA FC address list 2026-04-22; ZIP 48393 = MI",
       "SYS3": "[high] 1511 Robert C Jackson Dr, Maryville, TN 37801 — Global Specialty Fulfillment. List printed 'NC' but ZIP 37801 is Maryville TN; Apple Maps + operator confirm TN",
       "XCH2": "[medium] 2150 Dean Forest Rd, Garden City, GA 31408 — single directory source; ZIP 31408 = GA",
+      "XIN5": "[high] Avon, IN — ShipmentBot directory",
       "XMD5": "[medium] 15651 Greenmount Rd, Greencastle, PA 17225 — single directory source; ZIP 17225 = PA. NOTE: 'MD' in the code does NOT mean Maryland",
+      "XPH6": "[medium] Phoenix, AZ 85043 — Seller Central forum consensus; same metro as PHX6 / 4750 W Mohave",
+      "XSB3": "[high] 8140 Caliente Rd, Hesperia, CA 92344 — ShipmentBot + youramazonguy FC list; XSB2 is same campus",
       "ABE2/ABE3/ABE4": "[high] CORRECTED 2026-08-20 from NJ to PA. ABE2 705 Boulder Dr & ABE3 650 Boulder Dr, Breinigsville PA; ABE4 1610 Van Buren Rd, Easton PA. The whole ABE family had been mapped NJ because ABE8 (401 Independence Rd, Florence NJ) genuinely is New Jersey — ABE8 is unchanged.",
       "BDU2": "[high] 8350 Quintero St, Commerce City, CO 80022 — operator-verified street address; ZIP 80022 = CO",
       "IGA3": "[high] 7001 Skipper Rd, Macon, GA 31216 — Regional DC; operator-verified; ZIP 31216 = GA",
@@ -411,6 +414,9 @@
     "VGT2": "NV",
     "WBW2": "NJ",
     "XCH2": "GA",
-    "XMD5": "PA"
+    "XIN5": "IN",
+    "XMD5": "PA",
+    "XPH6": "AZ",
+    "XSB3": "CA"
   }
 }
