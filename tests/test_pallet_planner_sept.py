@@ -12,8 +12,11 @@ from src.inventory.pallet_planner import (
     LOCKED_AUGUST_MARPAC_TULSA_DATE,
     LOCKED_AUGUST_MARPAC_TULSA_SEND,
     LOCKED_AUGUST_MARPAC_TULSA_TOTAL,
+    LOCKED_TONIGHT_3PL_AWD_SEND,
+    LOCKED_TONIGHT_3PL_AWD_TOTAL,
     LOCKED_TONIGHT_3PL_FBA_SEND,
     LOCKED_TONIGHT_3PL_FBA_TOTAL,
+    TONIGHT_AWD_HOP_DESTINATION,
     PALLET_MAX_UNITS,
     PEAK_END_DEFAULT,
     SEPT_FBA_ON_HAND_TARGETS,
@@ -145,18 +148,21 @@ def test_august_marpac_tulsa_lock_is_6480_3240_3240_no_peppermint():
     assert mix != {sku: qty for sku, qty in LOCKED_TONIGHT_3PL_FBA_SEND.items() if qty > 0}
 
 
-def test_august_3pl_fba_lock_is_5400_plus_4860_plus_2700():
-    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0004Shop"] == 5_400
-    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0003Shop"] == 4_860
-    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0002Shop"] == 2_700
-    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0001Shop"] == 0
-    assert LOCKED_TONIGHT_3PL_FBA_TOTAL == 5_400 + 4_860 + 2_700 == 12_960
-    assert is_legal_inbound_qty(4_860, 270)
+def test_august_3pl_lock_is_5400_unscented_2700_assorted_fba_and_2700_orange_awd():
+    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0001Shop"] == 5_400
+    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0004Shop"] == 2_700
+    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0003Shop"] == 0
+    assert LOCKED_TONIGHT_3PL_FBA_SEND["DDPE0002Shop"] == 0
+    assert LOCKED_TONIGHT_3PL_FBA_TOTAL == 5_400 + 2_700 == 8_100
+    assert LOCKED_TONIGHT_3PL_AWD_SEND["DDPE0003Shop"] == 2_700
+    assert LOCKED_TONIGHT_3PL_AWD_SEND["DDPE0001Shop"] == 0
+    assert LOCKED_TONIGHT_3PL_AWD_SEND["DDPE0002Shop"] == 0
+    assert LOCKED_TONIGHT_3PL_AWD_SEND["DDPE0004Shop"] == 0
+    assert LOCKED_TONIGHT_3PL_AWD_TOTAL == 2_700
+    assert is_legal_inbound_qty(5_400, 270)
     assert is_legal_inbound_qty(2_700, 270)
-    assert 4_860 % 270 == 0
     assert 2_700 % 270 == 0
     assert 2_700 == 10 * 270
-    assert 4_860 != 5_400
     gaps = sept_fba_gaps(CONTEXT_FBA, CONTEXT_INBOUND)
     locked = apply_locked_tonight_3pl_fba_send(
         CONTEXT_3PL,
@@ -164,27 +170,31 @@ def test_august_3pl_fba_lock_is_5400_plus_4860_plus_2700():
         awd_loaded=False,
         skus=LIP,
     )
-    assert locked["tpl_to_fba"]["DDPE0004Shop"] == 5_400
-    assert locked["tpl_to_fba"]["DDPE0003Shop"] == 4_860
-    assert locked["tpl_to_fba"]["DDPE0002Shop"] == 2_700
-    assert locked["tpl_to_fba"]["DDPE0001Shop"] == 0
-    assert locked["send_total"] == 12_960
+    assert locked["tpl_to_fba"]["DDPE0001Shop"] == 5_400
+    assert locked["tpl_to_fba"]["DDPE0004Shop"] == 2_700
+    assert locked["tpl_to_fba"]["DDPE0003Shop"] == 0
+    assert locked["tpl_to_fba"]["DDPE0002Shop"] == 0
+    assert locked["send_total"] == 8_100
     assert locked["locked"] is True
+    assert locked["tpl_to_awd"]["DDPE0003Shop"] == 2_700
     assert locked["tpl_to_awd"]["DDPE0002Shop"] == 0
-    assert locked["tulsa_hold"]["DDPE0004Shop"] == CONTEXT_3PL["DDPE0004Shop"] - 5_400
-    assert locked["tulsa_hold"]["DDPE0003Shop"] == CONTEXT_3PL["DDPE0003Shop"] - 4_860
-    assert locked["tulsa_hold"]["DDPE0002Shop"] == CONTEXT_3PL["DDPE0002Shop"] - 2_700
+    assert locked["hop_total"] == 2_700
+    assert locked["tulsa_hold"]["DDPE0004Shop"] == CONTEXT_3PL["DDPE0004Shop"] - 2_700
+    assert locked["tulsa_hold"]["DDPE0003Shop"] == CONTEXT_3PL["DDPE0003Shop"] - 2_700
+    assert locked["tulsa_hold"]["DDPE0002Shop"] == CONTEXT_3PL["DDPE0002Shop"]
     plan = build_september_plan(
         CONTEXT_FBA, CONTEXT_INBOUND, CONTEXT_3PL,
         sku_awd=CONTEXT_AWD,
     )
-    assert plan["tpl_to_fba"]["DDPE0004Shop"] == 5_400
-    assert plan["tpl_to_fba"]["DDPE0003Shop"] == 4_860
-    assert plan["tpl_to_fba"]["DDPE0002Shop"] == 2_700
-    assert plan["tpl_to_fba"]["DDPE0001Shop"] == 0
-    assert plan["first_action"]["tpl_to_fba_total"] == 12_960
+    assert plan["tpl_to_fba"]["DDPE0001Shop"] == 5_400
+    assert plan["tpl_to_fba"]["DDPE0004Shop"] == 2_700
+    assert plan["tpl_to_fba"]["DDPE0003Shop"] == 0
+    assert plan["tpl_to_fba"]["DDPE0002Shop"] == 0
+    assert plan["first_action"]["tpl_to_fba_total"] == 8_100
+    assert plan["tpl_to_awd"]["DDPE0003Shop"] == 2_700
+    assert plan["first_action"]["tpl_to_awd_total"] == 2_700
     assert {sku for sku, qty in plan["tpl_to_fba"].items() if qty > 0} == {
-        "DDPE0004Shop", "DDPE0003Shop", "DDPE0002Shop",
+        "DDPE0001Shop", "DDPE0004Shop",
     }
 
 
@@ -196,9 +206,11 @@ def test_live_awd_540_keeps_tulsa_floor_no_empty_out():
     )
     assert plan["awd_loaded"] is False
     assert plan["tulsa_floor_units"] == 5_000
-    assert plan["first_action"]["tpl_to_fba_total"] == 12_960
+    assert plan["first_action"]["tpl_to_fba_total"] == 8_100
     assert plan["tpl_to_fba"] == TONIGHT_SEND
+    assert plan["tpl_to_awd"]["DDPE0003Shop"] == 2_700
     assert plan["tpl_to_awd"]["DDPE0002Shop"] == 0
+    assert plan["first_action"]["tpl_to_awd_total"] == 2_700
     assert plan["first_action"]["tulsa_hold_total"] >= 5_000
     assert sum(plan["tpl_to_fba"].values()) != 16_200
     assert sum(plan["tpl_to_fba"].values()) != 18_488
@@ -343,13 +355,14 @@ def test_month_view_sept_not_empty_and_not_fba_only():
     assert all(e["single_sku"] for e in awd)
 
 
-def test_month_view_august_has_3pl_fba_12960_and_marpac_lock():
+def test_month_view_august_has_3pl_fba_8100_awd_2700_and_marpac_lock():
     _plan, entries = _locked_month_view()
     aug = [e for e in entries if e["month"].endswith("-08")]
     assert aug, "August card missing"
     dests = {e["destination"] for e in aug}
     assert AUGUST_HOP_DESTINATION in dests
     assert "3pl_fba" in dests
+    assert TONIGHT_AWD_HOP_DESTINATION in dests
     marpac = next(e for e in aug if e["destination"] == AUGUST_HOP_DESTINATION)
     assert marpac["hop_label"] == AUGUST_HOP_LABEL == "Marpac→Tulsa"
     assert marpac["awaiting_august_totals"] is False
@@ -363,13 +376,19 @@ def test_month_view_august_has_3pl_fba_12960_and_marpac_lock():
     assert marpac["in_transit"] is True
     assert marpac["mix_locked"] is True
     fba = next(e for e in aug if e["destination"] == "3pl_fba")
-    assert fba["mix"]["DDPE0004Shop"] == 5_400
-    assert fba["mix"]["DDPE0003Shop"] == 4_860
-    assert fba["mix"]["DDPE0002Shop"] == 2_700
-    assert fba["mix"].get("DDPE0001Shop", 0) == 0
-    assert "DDPE0001Shop" not in fba["mix"]
-    assert fba["units"] == 12_960
+    assert fba["mix"]["DDPE0001Shop"] == 5_400
+    assert fba["mix"]["DDPE0004Shop"] == 2_700
+    assert fba["mix"].get("DDPE0003Shop", 0) == 0
+    assert fba["mix"].get("DDPE0002Shop", 0) == 0
+    assert "DDPE0003Shop" not in fba["mix"]
+    assert fba["units"] == 8_100
     assert fba["next_hop"] is True
+    awd_hop = next(e for e in aug if e["destination"] == TONIGHT_AWD_HOP_DESTINATION)
+    assert awd_hop["mix"]["DDPE0003Shop"] == 2_700
+    assert awd_hop["units"] == 2_700
+    assert awd_hop["next_hop"] is True
+    assert awd_hop["hop_label"] == "3PL→AWD"
+    assert awd_hop["is_pallet_card"] is True
     sept = [e for e in entries if e["month"] == "2026-09"]
     assert all(e["destination"] != "3pl_fba" for e in sept)
     assert all(e["units"] != 12_960 or e["destination"] != "3pl_fba" for e in sept)
@@ -522,10 +541,17 @@ def test_marpac_lock_does_not_shrink_first_wave_awd():
     ]
     assert {next(iter(e["mix"])) for e in sept_awd} == {"DDPE0004Shop", "DDPE0003Shop"}
     fba = next(e for e in entries if e["month"].endswith("-08") and e["destination"] == "3pl_fba")
-    assert fba["mix"]["DDPE0004Shop"] == 5_400
-    assert fba["mix"]["DDPE0003Shop"] == 4_860
-    assert fba["mix"]["DDPE0002Shop"] == 2_700
-    assert fba["units"] == 12_960
+    assert fba["mix"]["DDPE0001Shop"] == 5_400
+    assert fba["mix"]["DDPE0004Shop"] == 2_700
+    assert fba["mix"].get("DDPE0003Shop", 0) == 0
+    assert fba["mix"].get("DDPE0002Shop", 0) == 0
+    assert fba["units"] == 8_100
+    awd_hop = next(
+        e for e in entries
+        if e["month"].endswith("-08") and e["destination"] == TONIGHT_AWD_HOP_DESTINATION
+    )
+    assert awd_hop["mix"]["DDPE0003Shop"] == 2_700
+    assert awd_hop["units"] == 2_700
 
 
 def test_august_lock_stays_visible_after_september_1():
@@ -547,7 +573,9 @@ def test_august_lock_stays_visible_after_september_1():
     assert marpac["units"] == 12_960
     assert marpac["ship_by"] == "2026-08-31"
     fba = next(e for e in aug if e["destination"] == "3pl_fba")
-    assert fba["units"] == 12_960
+    assert fba["units"] == 8_100
+    awd_hop = next(e for e in aug if e["destination"] == TONIGHT_AWD_HOP_DESTINATION)
+    assert awd_hop["units"] == 2_700
 
 
 def test_awd_allows_two_pallets_per_month_not_one():
