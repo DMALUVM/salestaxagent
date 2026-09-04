@@ -23,6 +23,7 @@
     ],
     "evidence_notes": {
       "MIT2": "[high] 5408 Express Ave, Shafter, CA 93263 — same list; ZIP 93263 = CA",
+      "QBE1": "[high] 4880 Haggerty Road, Belleville, MI 48111 — operator-provided address; ZIP 48111 = MI",
       "RMN3": "[high] 220 Centreport Pkwy, Fredericksburg, VA 22406 — same list; ZIP 22406 = VA",
       "SBW1": "[medium] Harbor Logistics Center Bldg 3, 1713 E Patapsco Ave, Baltimore, MD 21226 — single non-directory source; ZIP 21226 = Baltimore MD",
       "SNL1": "[high] 121 Airpark Center E, Nashville, TN 37217 — same list; ZIP 37217 = Nashville TN",
@@ -269,6 +270,7 @@
     "PSP1": "CA",
     "PSP3": "CA",
     "PVD2": "RI",
+    "QBE1": "MI",
     "RDG1": "PA",
     "RDU1": "NC",
     "RFD2": "IL",

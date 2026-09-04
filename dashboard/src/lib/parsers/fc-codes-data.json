@@ -11,6 +11,7 @@
       "IMO1": "[high] 4001 E 149th St, Kansas City, MO 64147 — Liberty / KC metro bulky; operator-verified; ZIP 64147 = MO",
       "ITX3": "[high] 8590 NE 24th Ave, Amarillo, TX 79108 — Regional DC; operator-verified; ZIP 79108 = TX",
       "IWA6": "[high] 1202 S Road 40 E, Pasco, WA 99301 — Regional DC, formerly Project Pearl; operator-verified; ZIP 99301 = WA. NOTE: letters do NOT mean Iowa",
+      "QBE1": "[high] 4880 Haggerty Road, Belleville, MI 48111 — operator-provided address; ZIP 48111 = MI",
       "XIN5": "[high] Avon, IN — ShipmentBot directory",
       "XPH6": "[medium] Phoenix, AZ 85043 — Seller Central forum consensus; same metro as PHX6 / 4750 W Mohave",
       "XSB3": "[high] 8140 Caliente Rd, Hesperia, CA 92344 — ShipmentBot + youramazonguy FC list; XSB2 is same campus"
@@ -239,6 +240,7 @@
     "PSP1": "CA",
     "PSP3": "CA",
     "PVD2": "RI",
+    "QBE1": "MI",
     "RDG1": "PA",
     "RDU1": "NC",
     "RFD2": "IL",
