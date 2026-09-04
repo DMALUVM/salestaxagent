@@ -206,10 +206,11 @@ class TestFCMappings:
         "IMO1": ("MO", "Kansas City"),
         "ITX3": ("TX", "Amarillo"),
         "IWA6": ("WA", "Pasco"),
-        # 2026-09-04 — ShipmentBot / address / seller-forum (QBE1 stays unmapped)
+        # 2026-09-04 — ShipmentBot / address / seller-forum / operator street address
         "XIN5": ("IN", "Avon"),
         "XSB3": ("CA", "Hesperia"),
         "XPH6": ("AZ", "Phoenix"),
+        "QBE1": ("MI", "Belleville"),
     }
 
     @pytest.mark.parametrize("code", sorted(MAPPED))
@@ -240,12 +241,6 @@ class TestFCMappings:
         assert fc_to_state("ABE3") == "PA"
         assert fc_to_state("ABE4") == "PA"
         assert fc_to_state("ABE8") == "NJ"
-
-    def test_unresolved_codes_stay_unmapped(self):
-        """Prefer omit over wrong: no published address was found for these."""
-        from src.mappers.fc_to_state import fc_to_state
-        for code in ("QBE1",):
-            assert fc_to_state(code) is None, f"{code} was mapped without evidence"
 
     def test_python_map_and_ts_mirror_agree(self):
         """The dashboard parser has its own copy; drift would split the data."""
