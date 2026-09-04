@@ -832,7 +832,7 @@ describe("pallet planner model", () => {
   });
 
   test("first-wave AWD pins unscented then peppermint to October, not August", () => {
-    const cards = [
+    const cards: { sku: string; mix: Record<string, number>; partial: boolean; totalUnits: number }[] = [
       { sku: "DDPE0002Shop", mix: { DDPE0002Shop: 8_775 }, partial: true, totalUnits: 8_775 },
       { sku: "DDPE0001Shop", mix: { DDPE0001Shop: 17_550 }, partial: false, totalUnits: 17_550 },
       { sku: "DDPE0003Shop", mix: { DDPE0003Shop: 17_550 }, partial: false, totalUnits: 17_550 },

@@ -1307,9 +1307,9 @@ export function assignAwdCardsToMonths<T extends { sku?: string; mix?: Record<st
   cards: T[],
   productionMonths: string[],
 ): Record<string, T[]> {
-  let months = AWD_SCHEDULE_MONTHS.filter((m) => productionMonths.includes(m));
+  let months: string[] = AWD_SCHEDULE_MONTHS.filter((m) => productionMonths.includes(m));
   if (months.length === 0) {
-    months = productionMonths.filter((m) => !m.endsWith("-08") && m.slice(5, 7) >= "09") as typeof months;
+    months = productionMonths.filter((m) => !m.endsWith("-08") && m.slice(5, 7) >= "09");
   }
   months = months.filter((m) => !String(m).endsWith("-08"));
   const ordered = [...cards].sort((a, b) => {
