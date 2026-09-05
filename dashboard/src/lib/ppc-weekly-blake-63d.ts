@@ -1,5 +1,6 @@
 /**
- * THIS WEEK only: Blake-ranked 63d execute list for 2026-06-30..08-31.
+ * Library: retired Blake-ranked 63d execute list for 2026-06-30..08-31.
+ * This week is buildBlakeRecovery0905List (66 rows).
  *
  * Stored ads_search_terms_daily: 63 calendar days inclusive, 23 days with
  * rows, SP-only. Jun/Jul mostly weekly samples; 8/30 missing; 8/31 in.

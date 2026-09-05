@@ -13,6 +13,7 @@ import {
   buildBleeders10,
   resolveBleeders10Action,
 } from "./ppc-bleeders-10";
+import { buildBlakeRecovery0905List } from "./ppc-weekly-blake-recovery-0905";
 import { buildBlake63dList } from "./ppc-weekly-blake-63d";
 
 const EXPECTED: Array<{
@@ -106,21 +107,25 @@ describe("Bleeders 1.0 is the pasted 10 — not a live scanner, not 22", () => {
   });
 });
 
-describe("This week 63d execute list is unchanged", () => {
-  test("buildBlake63dList is still This week and is not the 1.0 10", () => {
-    const week = buildBlake63dList();
-    assert.equal(week.execute_list, "blake_63d");
-    assert.ok(week.rows.length > 10, "63d execute list is larger than the 1.0 10");
-    assert.equal(week.click_floor, 10);
-    assert.ok(week.rows.some((r) => r.action === "bid_down"), "63d still has bid_down");
+describe("This week Recovery list is not the 1.0 10", () => {
+  test("buildBlakeRecovery0905List is This week and is not the 1.0 10", () => {
+    const week = buildBlakeRecovery0905List();
+    assert.equal(week.execute_list, "blake_recovery_0905");
+    assert.equal(week.rows.length, 66);
+    assert.equal(week.click_floor, 6);
+    assert.ok(week.rows.some((r) => r.action === "bid_down"));
+    const retired = buildBlake63dList();
+    assert.equal(retired.execute_list, "blake_63d");
+    assert.ok(retired.rows.length > 10);
   });
 
-  test("GET ships bleeders10 as the pasted 10 and bleeders as Blake 63d", () => {
+  test("GET ships bleeders10 as the pasted 10 and bleeders as Recovery 66", () => {
     const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/route.ts"), "utf8");
     const page = readFileSync(path.join(process.cwd(), "src/app/ppc/page.tsx"), "utf8");
     assert.match(route, /buildBleeders10\s*\(\s*\{/);
     assert.match(route, /bleeders10/);
-    assert.match(route, /buildBlake63dList/);
+    assert.match(route, /buildBlakeRecovery0905List/);
+    assert.doesNotMatch(route, /buildBlake63dList/);
     assert.doesNotMatch(route, /buildBleeders\s*\(/);
     assert.doesNotMatch(route, /from "@\/lib\/ppc-bleeders"/);
     assert.doesNotMatch(route, /Bleeders10TermRow|allCampaignRows as Bleeders10/);

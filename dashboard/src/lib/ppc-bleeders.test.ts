@@ -226,7 +226,7 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
     const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/route.ts"), "utf8");
     assert.doesNotMatch(route, /buildBleeders\s*\(/);
     assert.doesNotMatch(route, /buildBlake24dList/);
-    assert.match(route, /buildBlake63dList/);
+    assert.match(route, /buildBlakeRecovery0905List/);
   });
 
   test("default 60d gate refuses a 24d stored window — no fake 60d", () => {

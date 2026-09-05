@@ -10,6 +10,7 @@ import {
   WEEKLY_CSV_HEADERS,
   WEEKLY_GROK_PROMPT,
   WEEKLY_GROK_PROMPT_63D,
+  WEEKLY_GROK_PROMPT_RECOVERY_0905,
   STANDING_GROK_PROMPT,
   grokPromptFor,
   WEEKLY_HOLD,
@@ -40,7 +41,7 @@ import {
   buildBlake63dList,
 } from "./ppc-weekly-blake-63d";
 
-describe("90d helper still empty — this week is the 63d Blake list", () => {
+describe("90d helper still empty — this week is Recovery, 63d stays a library", () => {
   test("Jun 30–Aug 31 is 63d; 90d gate stays for later Mondays", () => {
     assert.equal(inclusiveDays("2026-06-30", "2026-08-31"), 63);
     assert.equal(inclusiveDays("2026-08-06", "2026-08-29"), 24);
@@ -62,16 +63,15 @@ describe("90d helper still empty — this week is the 63d Blake list", () => {
     assert.equal(short.grok_prompt, STANDING_GROK_PROMPT);
   });
 
-  test("GET /api/ppc ships Blake 63d and does not call buildBleeders", () => {
+  test("GET /api/ppc ships Recovery 66 and does not call buildBleeders", () => {
     const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/route.ts"), "utf8");
-    assert.match(route, /buildBlake63dList/);
-    assert.match(route, /BLAKE_63D_START/);
-    assert.match(route, /BLAKE_63D_END/);
+    assert.match(route, /buildBlakeRecovery0905List/);
+    assert.match(route, /BLAKE_RECOVERY_0905_START/);
+    assert.match(route, /BLAKE_RECOVERY_0905_END/);
+    assert.doesNotMatch(route, /buildBlake63dList/);
     assert.doesNotMatch(route, /buildBlake24dList/);
     assert.doesNotMatch(route, /buildBleeders\s*\(/);
     assert.doesNotMatch(route, /from "@\/lib\/ppc-bleeders"/);
-    assert.match(route, /2026-06-30/);
-    assert.match(route, /2026-08-31/);
   });
 });
 
@@ -522,6 +522,10 @@ describe("cadence + HOLD live in copy, not extra pages", () => {
     assert.equal(grokPromptFor("empty"), STANDING_GROK_PROMPT);
     assert.match(STANDING_GROK_PROMPT, /Wait for ads_search_terms_daily/);
     assert.equal(grokPromptFor("blake_63d"), WEEKLY_GROK_PROMPT_63D);
+    assert.equal(grokPromptFor("blake_recovery_0905"), WEEKLY_GROK_PROMPT_RECOVERY_0905);
+    assert.match(WEEKLY_GROK_PROMPT_RECOVERY_0905, /66 rows/);
+    assert.match(WEEKLY_GROK_PROMPT_RECOVERY_0905, /BE 37\.9%/);
+    assert.doesNotMatch(WEEKLY_GROK_PROMPT_RECOVERY_0905, /36 rows/);
     assert.match(WEEKLY_GROK_PROMPT_63D, /2026-06-30\.\.08-31 \(63d/);
     assert.match(WEEKLY_GROK_PROMPT_63D, /23 days with rows/);
     assert.match(WEEKLY_GROK_PROMPT_63D, /Do not call this 90d or 24d/);
@@ -547,7 +551,7 @@ describe("cadence + HOLD live in copy, not extra pages", () => {
   });
 });
 
-describe("/ppc This week tab — Blake 63d list, nightly 7d unchanged", () => {
+describe("/ppc This week tab — Recovery 66, nightly 7d unchanged", () => {
   const page = readFileSync(path.join(process.cwd(), "src/app/ppc/page.tsx"), "utf8");
   const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-bleeders.tsx"), "utf8");
   const main = readFileSync(path.join(process.cwd(), "..", "src", "main.py"), "utf8");
@@ -569,18 +573,19 @@ describe("/ppc This week tab — Blake 63d list, nightly 7d unchanged", () => {
     assert.doesNotMatch(page, /href="\/paid-ads"/);
   });
 
-  test("UI ships Done, Skipped, CSV, 63d Grok prompt", () => {
+  test("UI ships Done, Skipped, CSV, Recovery Grok prompt", () => {
     assert.match(ui, /Done/);
     assert.match(ui, /Skipped/);
     assert.match(ui, /weeklyToCsv/);
     assert.match(ui, /grok_prompt/);
-    assert.match(ui, /grokPromptFor\("blake_63d"\)/);
-    assert.match(ui, /63d execute prompt copied/);
+    assert.match(ui, /grokPromptFor\("blake_recovery_0905"\)/);
+    assert.match(ui, /Recovery execute prompt copied/);
     assert.match(ui, /"dismissed"/);
     assert.match(ui, /"applied"/);
     assert.match(ui, /window_chip/);
-    assert.match(ui, /63d Blake-ranked list/);
-    assert.match(ui, /2026-06-30\.\.08-31/);
+    assert.match(ui, /Recovery execute list/);
+    assert.match(ui, /66-row/);
+    assert.match(ui, /BE 37\.9%/);
     assert.match(ui, /Lane CVR/);
     assert.doesNotMatch(ui, /amazonads|auto-apply/i);
   });
