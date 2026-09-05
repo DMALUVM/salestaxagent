@@ -223,7 +223,7 @@ export function PpcBleeders({
       <Card>
         <CardContent className="space-y-2 p-4">
           <p className="text-xs font-medium text-foreground">
-            {blakeReady ? "This week's execute prompt" : "Standing Grok prompt"}
+            {recoveryReady ? "This week's execute prompt" : "Standing Grok prompt"}
           </p>
           <textarea
             readOnly
@@ -256,7 +256,7 @@ export function PpcBleeders({
           {shown.length === 0 ? (
             <p className="p-6 text-center text-sm text-muted-foreground">
               {rows.length === 0
-                ? (blakeReady
+                ? (recoveryReady
                   ? "This week's list loaded with zero rows — check the prompt and notes above."
                   : "Empty execute table. CSV headers and Done/Skipped wiring are ready.")
                 : filter === "open" ? "No open rows. Switch to All, Done, or Skipped." : "No rows in this filter."}
