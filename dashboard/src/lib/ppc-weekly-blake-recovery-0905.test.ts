@@ -76,12 +76,22 @@ describe("Recovery Sep 5 — exactly 66 execute rows", () => {
     assert.equal(list.rows[62].id, "recovery-0905-63");
     assert.equal(list.rows[62].rank, "R2");
     assert.equal(list.rows[62].term, "chapstick");
+    assert.equal(list.rows[63].id, "recovery-0905-64");
+    assert.equal(list.rows[63].rank, "HOLD");
+    assert.equal(list.rows[63].action, "hold_bid");
+    assert.equal(list.rows[63].term, "tallow lip balm");
+    assert.equal(list.rows[63].campaign, "SP - KW (TOS) - Exact - Tallow Lip Balm KW");
+    assert.equal(list.rows[63].new_bid, "DO NOT CHANGE — rank defense");
+    assert.match(list.rows[63].why, /Dave 2026-09-05 KEEP tallow lip balm rank defense/);
+    assert.doesNotMatch(list.rows[63].why, /Bid down on Exact owner/);
     assert.equal(list.rows[65].id, "recovery-0905-66");
     assert.equal(list.rows[65].term, "tallow deodorant");
     assert.ok(list.rows.slice(0, 32).every((r) => ["R1", "R2", "P1", "HOLD"].includes(r.rank)));
     assert.ok(list.rows.slice(32, 36).every((r) => ["SCALE", "DEFEND"].includes(r.rank)));
     assert.ok(list.rows.slice(36, 62).every((r) => r.rank === "GROW"));
-    assert.ok(list.rows.slice(62).every((r) => r.rank === "R2" && r.action === "bid_down"));
+    assert.equal(list.rows[62].action, "bid_down");
+    assert.equal(list.rows[64].action, "bid_down");
+    assert.equal(list.rows[65].action, "bid_down");
   });
 
   test("does not invent or alter CSV numbers", () => {
@@ -109,15 +119,17 @@ describe("Recovery Sep 5 — exactly 66 execute rows", () => {
     const count = (action: string) => list.rows.filter((r) => r.action === action).length;
     assert.equal(count("pause_keyword"), 2);
     assert.equal(count("negative_exact"), 13);
-    assert.equal(count("bid_down"), 14);
+    assert.equal(count("bid_down"), 13);
     assert.equal(count("cut_detail_page"), 6);
     assert.equal(count("hold_tos"), 1);
+    assert.equal(count("hold_bid"), 1);
     assert.equal(count("bid_up"), 10);
     assert.equal(count("brand_defense"), 1);
     assert.equal(count("harvest_exact"), 8);
     assert.equal(count("raise_tos"), 4);
     assert.equal(count("budget_up"), 7);
     assert.ok(WEEKLY_ACTIONS.includes("hold_tos"));
+    assert.ok(WEEKLY_ACTIONS.includes("hold_bid"));
     assert.ok(WEEKLY_ACTIONS.includes("budget_up"));
     assert.ok(WEEKLY_ACTIONS.includes("harvest_exact"));
     assert.ok(WEEKLY_ACTIONS.includes("raise_tos"));
@@ -125,14 +137,19 @@ describe("Recovery Sep 5 — exactly 66 execute rows", () => {
     assert.ok(WEEKLY_ACTIONS.includes("brand_defense"));
     assert.equal(recTypeOfWeekly("budget_up"), "WEEKLY_BUDGET_UP");
     assert.equal(recTypeOfWeekly("hold_tos"), "WEEKLY_HOLD_TOS");
+    assert.equal(recTypeOfWeekly("hold_bid"), "WEEKLY_HOLD_BID");
     for (const r of list.rows) {
       assert.ok(WEEKLY_ACTIONS.includes(r.action), r.action);
     }
   });
 
-  test("organic / lip balm organic stay bid_down; no Amazon writes", () => {
+  test("organic / lip balm organic stay bid_down; tallow lip balm id 64 is hold_bid; no Amazon writes", () => {
     assert.equal(list.rows.find((r) => r.term === "organic lip balm")?.action, "bid_down");
     assert.equal(list.rows.find((r) => r.term === "lip balm organic")?.action, "bid_down");
+    const tallow = list.rows.find((r) => r.id === "recovery-0905-64");
+    assert.equal(tallow?.action, "hold_bid");
+    assert.equal(tallow?.rank, "HOLD");
+    assert.notEqual(tallow?.action, "bid_down");
     assert.equal(
       list.rows.filter((r) => /organic lip balm|lip balm organic/i.test(r.term) && r.action === "pause_keyword").length,
       0,
