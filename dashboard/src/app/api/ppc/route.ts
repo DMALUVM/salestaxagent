@@ -9,12 +9,12 @@ import { buildDailyReconcile } from "@/lib/ads-reconcile";
 import { cvrPct, emptyWeeklyList } from "@/lib/ppc-weekly";
 import type { WeeklyLockDecision } from "@/lib/ppc-weekly";
 import {
-  BLAKE_63D_END,
-  BLAKE_63D_START,
-  buildBlake63dList,
-} from "@/lib/ppc-weekly-blake-63d";
+  BLAKE_RECOVERY_0905_END,
+  BLAKE_RECOVERY_0905_START,
+  buildBlakeRecovery0905List,
+} from "@/lib/ppc-weekly-blake-recovery-0905";
 import { buildBleeders10, emptyBleeders10 } from "@/lib/ppc-bleeders-10";
-import type { WeeklyCampaignRef, WeeklyPlacementRef, WeeklyTermRef } from "@/lib/ppc-weekly-blake-63d";
+import type { WeeklyCampaignRef, WeeklyPlacementRef, WeeklyTermRef } from "@/lib/ppc-weekly-blake-recovery-0905";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -654,10 +654,10 @@ export async function GET() {
     // Back-compat for any caller still reading the flat list.
     const searchTerms = searchTermsByRange["7d"];
 
-    // ── This week: Blake-ranked 63d list (2026-06-30..2026-08-31). HOLD lifted
-    //    for this pasted list only. Do not call buildBleeders. Do not wait
-    //    for 90d. Do not label this 90d or 24d. Nothing writes to Amazon. ──
-    const inBlake = (d: string) => d >= BLAKE_63D_START && d <= BLAKE_63D_END;
+    // ── This week: Blake Recovery Sep 5 (66 rows). ST ~60d through
+    //    2026-09-04. Do not call buildBleeders. Recommend-only — nothing
+    //    writes to Amazon. ──
+    const inBlake = (d: string) => d >= BLAKE_RECOVERY_0905_START && d <= BLAKE_RECOVERY_0905_END;
 
     const campaignById = new Map<string, WeeklyCampaignRef>();
     for (const r of allCampaignRows) {
@@ -724,7 +724,7 @@ export async function GET() {
       while (true) {
         const r = await sb.from("ads_action_decisions")
           .select("id,campaign_id,search_term,action_type,status,applied_at,dismissed_at,entity_name,rec_type")
-          .gte("as_of_date", BLAKE_63D_START)
+          .gte("as_of_date", BLAKE_RECOVERY_0905_START)
           .order("as_of_date", { ascending: false })
           .range(offset, offset + pageSize - 1);
         if (r.error) throw new Error(r.error.message);
@@ -735,7 +735,7 @@ export async function GET() {
       }
     } catch { /* learning table may be absent */ }
 
-    const bleeders = buildBlake63dList({
+    const bleeders = buildBlakeRecovery0905List({
       lookup: {
         campaigns: [...campaignById.values()],
         terms: termLookup,
@@ -745,7 +745,7 @@ export async function GET() {
       account_cvr: Math.round(accountCvr * 100) / 100,
     });
 
-    // Bleeders 1.0 — pasted 10. Locked until Monday. Not This week.
+    // Bleeders 1.0 — pasted 10. Secondary triage. Not This week.
     // Do not re-aggregate. Do not expand to 22. No 2.0.
     const bleeders10 = buildBleeders10({ decisions });
 

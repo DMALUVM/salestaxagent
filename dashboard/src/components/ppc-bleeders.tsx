@@ -120,16 +120,16 @@ export function PpcBleeders({
   }
 
   async function copyPrompt() {
-    const text = data?.execute_list === "blake_63d"
-      ? grokPromptFor("blake_63d")
+    const text = data?.execute_list === "blake_recovery_0905"
+      ? grokPromptFor("blake_recovery_0905")
       : (data?.grok_prompt ?? grokPromptFor(data?.execute_list ?? "empty"));
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       onNotice?.({
         kind: "success",
-        text: data?.execute_list === "blake_63d"
-          ? "63d execute prompt copied. This week CSV is the execute list. Window 2026-06-30..08-31. Nothing writes to Amazon."
+        text: data?.execute_list === "blake_recovery_0905"
+          ? "Recovery execute prompt copied. This week CSV is the 66-row list. BE 37.9%. Nothing writes to Amazon."
           : data?.execute_ready
             ? "Standing prompt copied. 90d window present — execute list stays empty until ranked. Nothing writes to Amazon."
             : "Standing prompt copied. Wait for 90d min/max on ads_search_terms_daily. Do not use a short stored window as an execute list. Nothing writes to Amazon.",
@@ -153,7 +153,7 @@ export function PpcBleeders({
   }
 
   const waiting = data.execute_list === "empty" && !data.execute_ready;
-  const blakeReady = data.execute_list === "blake_63d";
+  const recoveryReady = data.execute_list === "blake_recovery_0905";
 
   return (
     <div className="space-y-3">
@@ -162,11 +162,12 @@ export function PpcBleeders({
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <p className="text-sm font-semibold text-foreground">
-                {blakeReady ? "This week — 63d Blake-ranked list" : "This week — empty until 90d search terms"}
+                {recoveryReady ? "This week — Recovery execute list (Sep 5)" : "This week — empty until 90d search terms"}
               </p>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 {data.window_chip ? <Badge variant="outline">{data.window_chip}</Badge> : null}
                 <Badge variant="outline">{data.window.search.label}</Badge>
+                {recoveryReady ? <Badge variant="outline">L7 2026-08-29..09-04</Badge> : null}
               </div>
               {data.window.placement ? (
                 <p className="mt-0.5 text-muted-foreground">
@@ -186,8 +187,8 @@ export function PpcBleeders({
             </div>
           </div>
           <p className="text-sm text-foreground">
-            {blakeReady
-              ? "63d Blake-ranked list for 2026-06-30..08-31 (23 days with rows, SP-only). Mark Done or Skipped after Seller Central. Nothing writes to Amazon."
+            {recoveryReady
+              ? "Recovery Sep 5 — 66-row Blake-ranked execute list. Cuts first (R1 → R2 → P1 → HOLD), then SCALE/DEFEND, then GROW, then L7 head-term R2 surgery (ids 63–66). ST ~60d through 2026-09-04. L7 2026-08-29..09-04. Placement ~30d. BE 37.9%. Click floor 6. Recommend-only — mark Done or Skipped after Seller Central. Nothing writes to Amazon."
               : waiting
                 ? "No execute list this week. Wait for Dana's new min/max on ads_search_terms_daily after the Sunday 90d pull. Blake ranks then."
                 : "90d search-term window is present. Execute list stays empty until Blake ranks. No auto-seed."}
@@ -196,6 +197,9 @@ export function PpcBleeders({
             <span>Account CVR <strong className="text-foreground">{data.account_cvr}%</strong></span>
             <span>Branded lane <strong className="text-foreground">{data.account_cvr_branded ?? "—"}%</strong></span>
             <span>Non-branded lane <strong className="text-foreground">{data.account_cvr_nonbranded ?? "—"}%</strong></span>
+            {data.break_even_pct != null
+              ? <span>BE <strong className="text-foreground">{data.break_even_pct}%</strong></span>
+              : null}
             <span>Click floor <strong className="text-foreground">{data.click_floor}</strong></span>
             <span>Open <strong className="text-foreground">{openCount}</strong></span>
             <span>Done <strong className="text-emerald-700 dark:text-emerald-400">{doneCount}</strong></span>
@@ -314,14 +318,14 @@ export function PpcBleeders({
                       <TableCell className="text-xs max-w-[10rem] truncate">{r.ad_group || "—"}</TableCell>
                       <TableCell className="text-xs max-w-[10rem] truncate">{r.term || "—"}</TableCell>
                       <TableCell className="text-[10px] text-muted-foreground">{r.match_type || "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r.clicks}</TableCell>
+                      <TableCell className="text-right tabular-nums">{r.clicks == null ? "—" : r.clicks}</TableCell>
                       <TableCell className="text-right tabular-nums">${fmtD(r.spend)}</TableCell>
                       <TableCell className="text-right tabular-nums">${fmtD(r.sales)}</TableCell>
                       <TableCell className="text-right tabular-nums">{r.acos == null ? "—" : `${r.acos}%`}</TableCell>
                       <TableCell className="text-right tabular-nums">{r.term_cvr == null ? "—" : `${r.term_cvr.toFixed(1)}%`}</TableCell>
                       <TableCell className="text-right tabular-nums">{r.account_cvr_lane == null ? "—" : `${r.account_cvr_lane.toFixed(1)}%`}</TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">—</TableCell>
-                      <TableCell className="text-right tabular-nums">{r.new_bid == null ? "—" : `$${fmtD(r.new_bid)}`}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{r.current_bid == null || r.current_bid === "" ? "—" : String(r.current_bid)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{r.new_bid == null || r.new_bid === "" ? "—" : typeof r.new_bid === "number" ? `$${fmtD(r.new_bid)}` : r.new_bid}</TableCell>
                       <TableCell className="text-xs">{r.placement || "—"}</TableCell>
                       <TableCell className="text-[10px] text-muted-foreground whitespace-nowrap">{r.window}</TableCell>
                       <TableCell className="text-[11px] whitespace-normal max-w-[18rem]">{r.why}</TableCell>
