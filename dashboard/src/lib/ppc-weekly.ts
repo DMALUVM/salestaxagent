@@ -1,11 +1,12 @@
 /**
  * This week's /ppc execute list.
  *
- * THIS WEEK: Blake ranked 2026-06-30..08-31 (63d stored, 23 days with
- * rows, SP-only). HOLD is lifted for that pasted list — see
- * buildBlake63dList. emptyWeeklyList stays the 90d-empty helper for later
- * Mondays. buildBlake24dList stays a library. Do not auto-buildBleeders.
- * Nothing writes to Amazon.
+ * THIS WEEK: Blake Recovery Sep 5 — 66-row ranked execute list
+ * (ST ~60d through 2026-09-04, L7 overlay, placement ~30d). See
+ * buildBlakeRecovery0905List. buildBlake63dList and buildBlake24dList
+ * stay libraries. emptyWeeklyList stays the 90d-empty helper for later
+ * Mondays. Do not auto-buildBleeders. Recommend-only — nothing writes
+ * to Amazon.
  *
  * When a row is later marked Done (applied) or Skipped (dismissed), the
  * same campaign+term+action stays locked for 7 days via applied_at /
@@ -18,7 +19,10 @@ export const WEEKLY_ACTIONS = [
   "bid_down",
   "bid_up",
   "cut_detail_page",
+  "hold_tos",
+  "hold_bid",
   "raise_tos",
+  "budget_up",
   "cut_ros",
   "harvest_exact",
   "brand_defense",
@@ -32,7 +36,10 @@ export const WEEKLY_REC_TYPES: Record<WeeklyAction, string> = {
   bid_down: "WEEKLY_BID_DOWN",
   bid_up: "WEEKLY_BID_UP",
   cut_detail_page: "WEEKLY_CUT_DETAIL_PAGE",
+  hold_tos: "WEEKLY_HOLD_TOS",
+  hold_bid: "WEEKLY_HOLD_BID",
   raise_tos: "WEEKLY_RAISE_TOS",
+  budget_up: "WEEKLY_BUDGET_UP",
   cut_ros: "WEEKLY_CUT_ROS",
   harvest_exact: "WEEKLY_HARVEST_EXACT",
   brand_defense: "WEEKLY_BRAND_DEFENSE",
@@ -72,14 +79,15 @@ export interface WeeklyRow {
   ad_group: string;
   term: string;
   match_type: string;
-  clicks: number;
+  clicks: number | null;
   spend: number;
   sales: number;
   acos: number | null;
   term_cvr: number | null;
   account_cvr_lane: number | null;
-  current_bid: null;
-  new_bid: number | null;
+  current_bid: number | string | null;
+  /** Dollar bid when computed; Recovery ships Blake's formula string. */
+  new_bid: number | string | null;
   placement: string | null;
   window: string;
   why: string;
@@ -97,12 +105,14 @@ export interface WeeklyLockDecision {
   dismissed_at?: string | null;
 }
 
-export type ExecuteList = "empty" | "blake_24d" | "blake_63d";
+export type ExecuteList = "empty" | "blake_24d" | "blake_63d" | "blake_recovery_0905";
 
 export interface WeeklyPayload {
   execute_ready: boolean;
   execute_list: ExecuteList;
   window_chip?: string;
+  /** Shown when This week ships a pasted BE (Recovery = 37.9). */
+  break_even_pct?: number;
   window: {
     search: WeeklyWindow;
     placement: WeeklyWindow | null;
@@ -139,7 +149,7 @@ export const WEEKLY_HOLD = [
 ] as const;
 
 /** Empty-until-90d standing prompt. Copy Grok must not use this when
- *  execute_list is blake_63d or blake_24d — those are pasted execute lists. */
+ *  execute_list is a pasted Blake list (Recovery / 63d / 24d). */
 export const STANDING_GROK_PROMPT = [
   "You are ranking THIS WEEK's Amazon PPC execute list for Tallowbourn.",
   "Do not invent rows. Wait for ads_search_terms_daily min/max after the Sunday 90d search-term pull. Do not use the stored 24d window as an execute list.",
@@ -147,7 +157,7 @@ export const STANDING_GROK_PROMPT = [
   "Nothing writes to Amazon. Dave marks Done or Skipped after Campaign Manager.",
 ].join("\n");
 
-/** Library prompt for the retired 24d list. This week uses WEEKLY_GROK_PROMPT_63D. */
+/** Library prompt for the retired 24d list. This week uses WEEKLY_GROK_PROMPT_RECOVERY_0905. */
 export const WEEKLY_GROK_PROMPT = [
   "You are ranking THIS WEEK's Amazon PPC execute list for Tallowbourn.",
   "The pasted CSV from This week IS the execute list for this pass.",
@@ -178,8 +188,25 @@ export const WEEKLY_GROK_PROMPT_63D = [
   "CSV columns: id, rank, action, campaign, ad_group, term, match_type, clicks, spend, sales, acos, term_cvr, account_cvr_lane, current_bid, new_bid, placement, window, why.",
 ].join("\n");
 
-/** blake_63d is This week; blake_24d keeps the retired 24d execute prompt. */
+export const WEEKLY_GROK_PROMPT_RECOVERY_0905 = [
+  "You are ranking THIS WEEK's Amazon PPC execute list for Tallowbourn.",
+  "The pasted CSV from This week IS the execute list for this pass — Blake Recovery Sep 5, 66 rows. Do not invent or alter numbers.",
+  "Windows: ST ~60d through 2026-09-04 (2026-07-06..09-04). L7 overlay 2026-08-29..09-04. Placement ~30d 2026-08-06..09-04. BE 37.9%. Click floor 6.",
+  "Order: cuts first (R1 → R2 → P1 → HOLD), then SCALE/DEFEND, then GROW (harvest_exact, bid_up, raise_tos, budget_up), then L7 head-term R2 surgery (ids 63–66).",
+  "One row = one Amazon click in Seller Central. Then Dave marks Done or Skipped on the This week card.",
+  "Recommend-only. Nothing writes to Amazon.",
+  "HOLD: no TOS raise on Hero Exact / Auto Loose; no Aquaphor/Carpe harvest; organic lip balm / lip balm organic = bid_down not pause; SCALE bid_up after P0–P1; brand defense hold or +8% max — do not cut.",
+  "Actions allowed: pause_keyword, negative_exact, bid_down, bid_up, cut_detail_page, hold_tos, hold_bid, raise_tos, budget_up, cut_ros, harvest_exact, brand_defense.",
+  "No blanket kill on chapstick or tallow lip balm. Id 64 tallow lip balm is hold_bid — DO NOT CHANGE (rank defense).",
+  "new_bid down = live CPC × 0.38 / ACOS (BE 37.9%). new_bid up = +15% after P0–P1 unless the row says otherwise. Placement cuts are Detail Page only. Do not raise Hero Exact chapstick TOS or budget.",
+  "After Done or Skipped, do not re-open the same campaign+term+action for 7 days (applied_at / dismissed_at). Exception: still-$0 bleeders may reappear.",
+  "Search-term reports are SP-only. Do not invent a keyword or product-target daily table. Placement grain is campaign+placement from ads_placement_daily.",
+  "CSV columns: id, rank, action, campaign, ad_group, term, match_type, clicks, spend, sales, acos, term_cvr, account_cvr_lane, current_bid, new_bid, placement, window, why.",
+].join("\n");
+
+/** blake_recovery_0905 is This week; 63d and 24d keep retired execute prompts. */
 export function grokPromptFor(executeList: ExecuteList): string {
+  if (executeList === "blake_recovery_0905") return WEEKLY_GROK_PROMPT_RECOVERY_0905;
   if (executeList === "blake_63d") return WEEKLY_GROK_PROMPT_63D;
   if (executeList === "blake_24d") return WEEKLY_GROK_PROMPT;
   return STANDING_GROK_PROMPT;

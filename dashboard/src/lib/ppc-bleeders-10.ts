@@ -1,9 +1,10 @@
 /**
  * Bleeders 1.0 — pasted 10-row triage. Locked until Monday.
  *
- * GET /api/ppc ships this as `bleeders10`. This week stays
- * buildBlake63dList (63d execute). Do not re-aggregate. Do not expand
- * to 22. Cap 10. Increment not tonight. No 2.0. Nothing writes to Amazon.
+ * GET /api/ppc ships this as `bleeders10`. This week is Recovery
+ * (buildBlakeRecovery0905List, 66 rows). Do not re-aggregate. Do not
+ * expand to 22. Cap 10. Increment not tonight. No 2.0. Nothing writes
+ * to Amazon.
  */
 
 import type { WeeklyLockDecision } from "./ppc-weekly";
@@ -295,7 +296,7 @@ export function emptyBleeders10(): Bleeders10Payload {
     skipped_count: 0,
     search_term_coverage: "SP-only",
     notes: [
-      "Bleeders 1.0 — pasted 10. Not This week's Blake 63d execute list.",
+      "Bleeders 1.0 — pasted 10. Not This week's Recovery execute list.",
       BLEEDERS_10_WINDOW_LABEL,
       "Nonbrand search-term CVR 25.79% (~1-in-4). Click floor 6 (1.5×).",
     ],
@@ -374,7 +375,7 @@ export function buildBleeders10(input: {
     skipped_count,
     search_term_coverage: "SP-only",
     notes: [
-      "Bleeders 1.0 — pasted 10 tonight. Not This week's Blake 63d execute list. Cap 10. Do not expand to 22.",
+      "Bleeders 1.0 — pasted 10 tonight. Not This week's Recovery execute list. Cap 10. Do not expand to 22.",
       "Window 2026-06-30..08-31 (63d, SP search terms).",
       "Nonbrand search-term CVR 25.79% (~1-in-4). Click floor 6 (1.5×).",
       "pause_keyword iff term = exact KW; else negative_exact.",
