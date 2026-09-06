@@ -865,11 +865,13 @@ def _print_search_term_coverage() -> None:
 @click.option("--cancel-report-id", default=None,
               help="Cancel this PENDING report id, then STOP (no fetch).")
 def ads_search_terms_backfill_cmd(days, chunk_days, cancel_report_id):
-    """One-shot search-terms-only 90d backfill. Never writes to Amazon Ads.
+    """Gaps-only search-terms backfill. Never writes to Amazon Ads.
 
-    7-day chunks, upsert each week, skip weeks already stored, newest first.
-    If the reporting slot is busy (HTTP 425) or another ads pull holds the
-    lock: STOP. Do not retry in a loop. Do not run two of these at once.
+    Detect missing closed weeks in ads_search_terms_daily before requesting
+    Amazon reports. No gaps → success immediately (no ads lock). Gaps →
+    pull only those 7-day chunks, newest first. Never re-fetch weeks already
+    stored. If the reporting slot is busy (HTTP 425) or another ads pull
+    holds the lock: STOP. Do not retry in a loop.
 
     Weekday nightly ingest stays 7d. Sunday 03:30 is the scheduled twin of
     this command. Search-term reports are SP-only.
@@ -879,7 +881,9 @@ def ads_search_terms_backfill_cmd(days, chunk_days, cancel_report_id):
         click.echo("Amazon Ads not configured. Set AMAZON_ADS_* in .env")
         return
     from src.amazon_ads.client import cancel_report
-    from src.amazon_ads.reports import AdsSyncBusy, sync_ads
+    from src.amazon_ads.reports import (
+        AdsSyncBusy, missing_search_term_lookback, sync_ads,
+    )
     from src.db import job_start, job_finish
 
     if cancel_report_id:
@@ -890,10 +894,20 @@ def ads_search_terms_backfill_cmd(days, chunk_days, cancel_report_id):
         click.echo("STOP. Do not start a fetch from this command when cancelling.")
         return
 
-    click.echo(f"One-shot search-terms-only backfill: last {days}d in "
+    click.echo(f"Gaps-only search-terms backfill: last {days}d in "
                f"{chunk_days}d chunks, skip existing weeks, newest first. "
                f"SP-only. If 425: STOP.")
     _print_search_term_coverage()
+    gaps = missing_search_term_lookback(days=days, chunk_days=chunk_days)
+    if not gaps:
+        run_id = job_start("ads_search_terms_backfill")
+        msg = "no search-term gaps in lookback"
+        job_finish(run_id, "success", msg, stats={"no_gaps": True})
+        click.echo(f"  {msg}")
+        click.echo(f"  Job ads_search_terms_backfill: success — {msg}")
+        _print_search_term_coverage()
+        return
+    click.echo(f"  {len(gaps)} missing {chunk_days}d chunk(s) — pulling those only")
     run_id = job_start("ads_search_terms_backfill")
     try:
         result = sync_ads(
@@ -5120,7 +5134,7 @@ def run():
                 coalesce=True,
                 max_instances=1,
             )
-            click.echo("[Scheduler] Ads search terms backfill weekly Sunday 03:30 (90d, 7d chunks; weekday 7d unchanged)")
+            click.echo("[Scheduler] Ads search terms backfill weekly Sunday 03:30 (gaps-only 90d lookback, 7d chunks; weekday 7d unchanged)")
 
             # Placement performance at 05:15 — between campaigns and search
             # terms. Second spCampaigns report, so it is its own job rather
@@ -6110,6 +6124,10 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
         if job_name == "ads_campaigns_sync":
             _schedule_ads_retry(
                 lambda n=nxt: _run_ads_campaigns_sync(retry=n), retry, job_name)
+        elif job_name == "ads_search_terms_backfill":
+            _schedule_ads_retry(
+                lambda n=nxt: _run_ads_search_terms_backfill(retry=n),
+                retry, job_name)
         else:
             _schedule_ads_retry(
                 lambda n=nxt: _run_ads_sync_job(
@@ -6263,22 +6281,32 @@ def _run_ads_search_terms_sync():
                       label="search terms")
 
 
-def _run_ads_search_terms_backfill():
-    """Sunday 03:30 — 90 days of search terms in existing 7-day chunks.
+def _run_ads_search_terms_backfill(retry: int = 0):
+    """Sunday 03:30 — gaps-only 90d search-term backfill.
 
-    fetch_search_terms upserts each 7-day chunk as it returns so a later
-    chunk kill/timeout still leaves earlier weeks in ads_search_terms_daily.
-    Newest-first + skip weeks already stored so a STOP on 425 keeps recent
-    coverage and the next Sunday (or one-shot) resumes. Weekday
-    ads_search_terms_sync stays 7 closed days. This job is the scheduled
-    90d search-term pull — not chained from nightly campaigns, not a
-    campaigns-only retry, must not run in CI or on merge.
+    Detect missing closed weeks in ads_search_terms_daily before taking the
+    ads lock. No gaps → success immediately (no Amazon request). Gaps →
+    pull only those 7d chunks, newest first, never re-fetch weeks already
+    stored. Weekday ads_search_terms_sync stays 7 closed days. Not chained
+    from nightly campaigns, not a campaigns-only retry, must not run in CI
+    or on merge.
     """
+    from src.amazon_ads.reports import missing_search_term_lookback
+    from src.db import job_finish, job_start
+
+    gaps = missing_search_term_lookback(days=90)
+    if not gaps:
+        run_id = job_start("ads_search_terms_backfill")
+        msg = "no search-term gaps in lookback"
+        print(f"[Ads search terms 90d] {msg}")
+        job_finish(run_id, "success", msg, stats={"no_gaps": True})
+        return
+    print(f"[Ads search terms 90d] {len(gaps)} gap chunk(s) — pulling those only")
     _run_ads_sync_job(
         "ads_search_terms_backfill", days=90, search_terms_only=True,
         skip_existing_search_term_weeks=True,
         newest_first_search_terms=True,
-        label="search terms 90d")
+        label="search terms 90d", retry=retry)
 
 
 def _run_ads_campaigns_backfill():
