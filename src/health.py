@@ -174,6 +174,7 @@ def collect(cfg: dict | None = None, now: datetime | None = None) -> dict:
         except Exception:
             ADS_JOBS = ["ads_sync", "ads_campaigns_sync",
                         "ads_search_terms_sync", "ads_search_terms_backfill",
+                        "ads_search_terms_gap_fill",
                         "ads_placements_sync", "ads_campaigns_backfill"]
         try:
             # Partial is a real completed pull (SP committed, SB/SD missed).

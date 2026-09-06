@@ -76,6 +76,11 @@ class TestBusinessRulesConfig:
         assert ads["campaign_sb_sd_backfill_days"] == 7
         assert ads["campaign_sb_sd_chunk_days"] <= ads["campaign_chunk_days"]
 
+    def test_ads_lock_ttl_is_safe_hours(self):
+        ads = self.cfg["ads"]
+        assert 3 <= ads["lock_ttl_hours"] <= 4
+        assert 5 <= ads["lock_heartbeat_stale_minutes"] <= 30
+
     def test_spapi_chunk_limit(self):
         assert self.cfg["spapi"]["max_chunk_days"] <= 31
 
@@ -174,6 +179,14 @@ class TestRulesModule:
         assert ADS_SB_SD_BACKFILL_DAYS == 7
         assert ADS_SB_SD_CHUNK_DAYS == 1
         assert ADS_SB_SD_CHUNK_DAYS <= ADS_SB_SD_DAILY_DAYS
+
+    def test_ads_lock_ttl_from_config(self):
+        from src.rules import ADS_LOCK_HEARTBEAT_STALE_MINUTES, ADS_LOCK_TTL_HOURS
+        path = Path(__file__).resolve().parent.parent / "config" / "business_rules.json"
+        ads = json.loads(path.read_text())["ads"]
+        assert ADS_LOCK_TTL_HOURS == ads["lock_ttl_hours"]
+        assert ADS_LOCK_HEARTBEAT_STALE_MINUTES == ads["lock_heartbeat_stale_minutes"]
+        assert 3 <= ADS_LOCK_TTL_HOURS <= 4
 
     def test_spapi_chunk_size_within_limit(self):
         from src.rules import SPAPI_MAX_CHUNK_DAYS
@@ -981,7 +994,7 @@ class TestAdsPollResilience:
         assert "ADS_SB_SD_DAILY_DAYS" in src
         assert "_run_ads_placements_sync" in src
         assert "_run_ads_search_terms_sync" in src
-        assert 'status == "skipped"' in src
+        assert 'status in ("skipped", "deferred")' in src
 
     def test_partial_sb_sd_failure_schedules_heal(self):
         import inspect
@@ -1027,6 +1040,7 @@ class TestAdsPollResilience:
         nightly = inspect.getsource(_run_ads_campaigns_sync)
         assert "_run_ads_search_terms_sync" in nightly
         assert "_run_ads_search_terms_backfill" not in nightly
+        assert "_run_ads_search_terms_day_gaps" not in bf
         sched = inspect.getsource(main_mod)
         assert 'id="ads_search_terms_backfill"' in sched
         assert 'hour=3' in sched
@@ -1040,7 +1054,7 @@ class TestAdsPollResilience:
         src = inspect.getsource(_run_ads_sync_job)
         assert "AdsSyncBusy" in src
         assert "skipped" in src
-        assert "_schedule_ads_retry" in src
+        assert "_defer_ads_job" in src
         assert "_ads_alert" not in src.split("except AdsSyncBusy")[1].split("except Exception")[0]
 
     def test_busy_retry_window_covers_a_sunday_overrun(self):
@@ -1717,8 +1731,9 @@ class TestAdsSearchTermGapsOnly:
         from src.main import _run_ads_search_terms_sync
         src = inspect.getsource(_run_ads_search_terms_sync)
         assert "days=7" in src
-        assert "missing_search_term" not in src
+        assert "days=90" not in src
         assert "skip_existing_search_term_weeks" not in src
+        assert "_run_ads_search_terms_day_gaps" in src
 
     def test_weekday_search_terms_only_still_takes_lock(self, monkeypatch):
         """Daily 7d refresh must still acquire the lock and hit Amazon."""
