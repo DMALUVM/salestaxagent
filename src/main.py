@@ -750,6 +750,11 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
                  ad_products):
     """Sync Amazon Ads campaigns + search terms (auto-chunked).
 
+    Single-writer: only the scheduler and this CLI may pull. Parallel
+    `ads-sync` / dashboard / agent retries are rejected by the PID+heartbeat
+    lease (`AdsSyncBusy`). Do not start a second pull; wait or let the
+    scheduler's one deferred retry fire.
+
     Campaigns chunk at 7 days by default (≤30 max); search terms at 7.
     A single 30-day SB/SD report times out on this account.
 
@@ -764,7 +769,9 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
     if sum(bool(f) for f in (campaigns_only, search_terms_only, placements_only)) > 1:
         raise click.UsageError("--campaigns-only, --search-terms-only and "
                                "--placements-only are mutually exclusive")
-    from src.amazon_ads.reports import sync_ads, SEARCH_TERM_CHUNK_DAYS, AD_PRODUCTS
+    from src.amazon_ads.reports import (
+        AdsSyncBusy, sync_ads, SEARCH_TERM_CHUNK_DAYS, AD_PRODUCTS,
+    )
     from src.db import job_start, job_finish
 
     products = None
@@ -790,14 +797,20 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
     camp_chunk = campaign_chunk_days or ADS_CAMPAIGN_CHUNK_DAYS
     click.echo(f"Syncing last {days} days of Ads data ({scope}; "
                f"campaigns {camp_chunk}d chunks, search terms {st_chunk}d chunks)...")
-    result = sync_ads(days=days, campaigns_only=campaigns_only,
-                      search_terms_only=search_terms_only,
-                      placements_only=placements_only,
-                      with_placements=with_placements,
-                      search_term_chunk_days=search_term_chunk_days,
-                      ad_products=products,
-                      campaign_chunk_days=campaign_chunk_days,
-                      on_progress=click.echo)
+    try:
+        result = sync_ads(days=days, campaigns_only=campaigns_only,
+                          search_terms_only=search_terms_only,
+                          placements_only=placements_only,
+                          with_placements=with_placements,
+                          search_term_chunk_days=search_term_chunk_days,
+                          ad_products=products,
+                          campaign_chunk_days=campaign_chunk_days,
+                          on_progress=click.echo)
+    except AdsSyncBusy as e:
+        job_finish(run_id, "skipped", str(e)[:500])
+        click.echo(f"STOP: {e}")
+        click.echo("Do not start a second ads-sync. Wait until the slot is free.")
+        return
     errors = []
 
     camp = result.get("campaigns")
@@ -4821,6 +4834,15 @@ def run():
         from src.health import CONFIG as _HEALTH, write_heartbeat
 
         write_heartbeat()                      # stamp immediately on startup
+        try:
+            from src.amazon_ads.sync_lock import fail_stale_ads_job_runs
+            stale = fail_stale_ads_job_runs()
+            if stale:
+                click.echo(
+                    f"[Ads] {len(stale)} stale running row(s) auto-failed "
+                    f"(no heartbeat)")
+        except Exception as e:
+            click.echo(f"[Ads] Stale-row sweep skipped: {e}")
         scheduler.add_job(
             write_heartbeat,
             "interval",
@@ -6037,7 +6059,11 @@ _ADS_RETRY_SECONDS = 20 * 60
 
 
 def _schedule_ads_retry(fn, retry: int, job_id: str) -> None:
-    """Re-run a skipped ads job after the lock holder finishes."""
+    """Re-run a skipped ads job after the lock holder finishes.
+
+    One deferred date-trigger per job_id (replace_existing). Never a
+    wait-loop, never a second parallel sync while one is alive.
+    """
     if _SCHEDULER is None or retry >= _ADS_RETRY_MAX:
         return
     from datetime import datetime, timedelta
@@ -6051,6 +6077,43 @@ def _schedule_ads_retry(fn, retry: int, job_id: str) -> None:
         print(f"[Ads] Scheduled {rid} at {when.isoformat(timespec='minutes')}")
     except Exception as e:
         print(f"[Ads] Could not schedule {rid}: {e}")
+
+
+def _defer_ads_job(job_name: str, retry: int, **job_kwargs) -> bool:
+    """Enqueue one deferred retry for AdsSyncBusy or HTTP 425. Not a poll.
+
+    Search-term 425 / weekday ST busy after a slot stop schedules the
+    one-shot day gap-fill, not another 7d rewrite. Caps at _ADS_RETRY_MAX.
+    Returns True when a retry was scheduled (or skipped because the
+    scheduler is down / cap hit).
+    """
+    nxt = retry + 1
+    if job_name == "ads_campaigns_sync":
+        _schedule_ads_retry(
+            lambda n=nxt: _run_ads_campaigns_sync(retry=n), retry, job_name)
+        return True
+    if job_name == "ads_search_terms_backfill":
+        _schedule_ads_retry(
+            lambda n=nxt: _run_ads_search_terms_backfill(retry=n),
+            retry, job_name)
+        return True
+    if job_name in ("ads_search_terms_sync", "ads_search_terms_gap_fill"):
+        _schedule_ads_retry(
+            lambda n=nxt: _run_ads_search_terms_day_gaps(retry=n),
+            retry, "ads_search_terms_gap_fill")
+        return True
+    if job_name == "ads_placements_sync":
+        _schedule_ads_retry(
+            lambda n=nxt: _run_ads_placements_sync(retry=n), retry, job_name)
+        return True
+    if job_name == "ads_sb_sd_heal":
+        _schedule_ads_retry(_run_ads_sb_sd_heal, retry, job_name)
+        return True
+    _schedule_ads_retry(
+        lambda n=nxt: _run_ads_sync_job(
+            job_name, retry=n, **job_kwargs),
+        retry, job_name)
+    return True
 
 
 def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
@@ -6094,6 +6157,19 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
         job_finish(run_id, status, message,
                    stats=result.get("campaigns") or result.get("search_terms"))
         finished = True
+        from src.amazon_ads.reports import ads_slot_busy_in_result
+        slot_busy = ads_slot_busy_in_result(result)
+        if slot_busy:
+            print(f"[Ads {label}] Slot busy (HTTP 425) — one deferred retry")
+            _defer_ads_job(
+                job_name, retry,
+                days=days, campaigns_only=campaigns_only,
+                search_terms_only=search_terms_only,
+                placements_only=placements_only, label=label,
+                sb_sd_days=sb_sd_days,
+                skip_existing_search_term_weeks=skip_existing_search_term_weeks,
+                newest_first_search_terms=newest_first_search_terms)
+            return "deferred"
         # A chunk that timed out and will be re-fetched tomorrow is routine and
         # stays in the log. Two things do get a push: a total failure, and an ad
         # product that dropped out entirely — the latter under-reports account
@@ -6120,25 +6196,14 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
         status = "skipped"
         job_finish(run_id, status, str(e)[:500])
         finished = True
-        nxt = retry + 1
-        if job_name == "ads_campaigns_sync":
-            _schedule_ads_retry(
-                lambda n=nxt: _run_ads_campaigns_sync(retry=n), retry, job_name)
-        elif job_name == "ads_search_terms_backfill":
-            _schedule_ads_retry(
-                lambda n=nxt: _run_ads_search_terms_backfill(retry=n),
-                retry, job_name)
-        else:
-            _schedule_ads_retry(
-                lambda n=nxt: _run_ads_sync_job(
-                    job_name, days=days, campaigns_only=campaigns_only,
-                    search_terms_only=search_terms_only,
-                    placements_only=placements_only, label=label,
-                    sb_sd_days=sb_sd_days,
-                    skip_existing_search_term_weeks=skip_existing_search_term_weeks,
-                    newest_first_search_terms=newest_first_search_terms,
-                    retry=n),
-                retry, job_name)
+        _defer_ads_job(
+            job_name, retry,
+            days=days, campaigns_only=campaigns_only,
+            search_terms_only=search_terms_only,
+            placements_only=placements_only, label=label,
+            sb_sd_days=sb_sd_days,
+            skip_existing_search_term_weeks=skip_existing_search_term_weeks,
+            newest_first_search_terms=newest_first_search_terms)
         return status
     except Exception as e:
         print(f"[Ads {label}] Failed: {e}")
@@ -6222,10 +6287,10 @@ def _run_ads_campaigns_sync(retry: int = 0):
     status = _run_ads_sync_job(
         "ads_campaigns_sync", days=7, campaigns_only=True,
         label="campaigns", sb_sd_days=ADS_SB_SD_DAILY_DAYS, retry=retry)
-    # A skipped run is Sunday-backfill (or a late leftover) still holding
-    # the lock. Chaining here would just skip twice more. The retry of
+    # A skipped/deferred run is lock-busy or HTTP 425. Chaining here would
+    # just skip twice more or stack another 425. The deferred retry of
     # this wrapper re-chains once campaigns actually run.
-    if status == "skipped":
+    if status in ("skipped", "deferred"):
         return
     _run_ads_placements_sync()
     _run_ads_search_terms_sync()
@@ -6248,7 +6313,7 @@ def _run_ads_sb_sd_heal():
     except AdsSyncBusy as e:
         print(f"[Ads heal] Skipped: {e}")
         job_finish(run_id, "skipped", str(e)[:500])
-        _schedule_ads_retry(_run_ads_sb_sd_heal, 0, "ads_sb_sd_heal")
+        _defer_ads_job("ads_sb_sd_heal", 0)
         return
     except Exception as e:
         print(f"[Ads heal] Failed: {e}")
@@ -6275,10 +6340,63 @@ def _run_ads_sb_sd_heal():
     job_finish(run_id, status, msg, stats=camp if isinstance(camp, dict) else None)
 
 
-def _run_ads_search_terms_sync():
-    """05:30 — 7 days of search terms in 7-day chunks (one chunk, 90-min cap)."""
-    _run_ads_sync_job("ads_search_terms_sync", days=7, search_terms_only=True,
-                      label="search terms")
+def _run_ads_search_terms_sync(retry: int = 0):
+    """05:30 — 7 days of search terms in 7-day chunks (one chunk, 90-min cap).
+
+    After success/partial (not 425 / lock-busy), fill missing calendar days
+    in the same 7d lookback as 1-day chunks. Sunday 90d stays gaps-only
+    week chunks (#76).
+    """
+    status = _run_ads_sync_job(
+        "ads_search_terms_sync", days=7, search_terms_only=True,
+        label="search terms", retry=retry)
+    if status in ("skipped", "deferred"):
+        return status
+    _run_ads_search_terms_day_gaps()
+    return status
+
+
+def _run_ads_search_terms_day_gaps(retry: int = 0) -> str:
+    """One-shot 1-day pull of closed days that have ST neighbors but no row.
+
+    Exit immediately when the lookback has no gaps — no ads lock, no Amazon
+    request. HTTP 425 STOPs remaining days and schedules one deferred retry.
+    """
+    from src.amazon_ads.reports import (
+        AdsSyncBusy, ads_slot_busy_in_result, detect_missing_search_term_days,
+        sync_search_term_gap_days,
+    )
+    from src.db import job_finish, job_start
+
+    gaps = detect_missing_search_term_days(days=7)
+    if not gaps:
+        print("[Ads search terms days] no search-term day gaps in lookback")
+        return "success"
+    print(f"[Ads search terms days] {len(gaps)} missing day(s) — "
+          f"1-day chunks only")
+    run_id = job_start("ads_search_terms_gap_fill")
+    try:
+        result = sync_search_term_gap_days(lookback_days=7, gap_days=gaps)
+    except AdsSyncBusy as e:
+        print(f"[Ads search terms days] Skipped: {e}")
+        job_finish(run_id, "skipped", str(e)[:500])
+        _defer_ads_job("ads_search_terms_gap_fill", retry)
+        return "skipped"
+    except Exception as e:
+        print(f"[Ads search terms days] Failed: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        return "fail"
+
+    st = result.get("search_terms") or {}
+    status, message = _ads_sync_outcome(result, 7)
+    job_finish(run_id, status, message,
+               stats=st if isinstance(st, dict) else None)
+    print(f"[Ads search terms days] {status}: {message}")
+    if ads_slot_busy_in_result(result):
+        print("[Ads search terms days] Slot busy (HTTP 425) — one deferred retry")
+        _defer_ads_job("ads_search_terms_gap_fill", retry)
+        return "deferred"
+    return status
 
 
 def _run_ads_search_terms_backfill(retry: int = 0):
@@ -6320,14 +6438,14 @@ def _run_ads_campaigns_backfill():
                       label="campaigns 90d", sb_sd_days=ADS_SB_SD_BACKFILL_DAYS)
 
 
-def _run_ads_placements_sync():
+def _run_ads_placements_sync(retry: int = 0):
     """05:15 — placement (Top of Search / Detail Page / Other) performance.
 
     No-ops with a clear message until supabase/migration_ads_placement.sql has
     been run, so it never alerts nightly for a setup step.
     """
     _run_ads_sync_job("ads_placements_sync", days=14, placements_only=True,
-                      label="placements")
+                      label="placements", retry=retry)
 
 
 def _run_ads_actions():

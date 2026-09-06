@@ -325,7 +325,7 @@ def _score_cfg() -> dict:
 
 
 ADS_JOBS = ["ads_sync", "ads_campaigns_sync", "ads_search_terms_sync",
-            "ads_search_terms_backfill",
+            "ads_search_terms_backfill", "ads_search_terms_gap_fill",
             "ads_placements_sync", "ads_campaigns_backfill"]
 
 

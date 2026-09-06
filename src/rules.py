@@ -74,6 +74,10 @@ ADS_SB_SD_BACKFILL_DAYS: int = int(_RULES["ads"].get("campaign_sb_sd_backfill_da
 # smaller so a single request cannot sit past its poll timeout.
 ADS_SEARCH_TERM_CHUNK_DAYS: int = _RULES["ads"]["search_term_chunk_days"]
 ADS_SEARCH_TERM_TIMEOUT_SECONDS: int = _RULES["ads"]["search_term_timeout_seconds"]
+# Durable ads pull lease. job_runs.status=running is an audit row, not the lock.
+ADS_LOCK_TTL_HOURS: int = int(_RULES["ads"].get("lock_ttl_hours", 4))
+ADS_LOCK_HEARTBEAT_STALE_MINUTES: int = int(
+    _RULES["ads"].get("lock_heartbeat_stale_minutes", 15))
 # SB/SD campaign reports on this account sit PENDING past 15m even in 1-day
 # chunks. Match SP's Ads client default (1800s). SP is not listed here.
 ADS_CAMPAIGN_TIMEOUT_SB_SECONDS: int = int(
