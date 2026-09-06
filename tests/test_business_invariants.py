@@ -1018,6 +1018,8 @@ class TestAdsPollResilience:
         assert "search_terms_only=True" in bf
         assert "skip_existing_search_term_weeks=True" in bf
         assert "newest_first_search_terms=True" in bf
+        assert "missing_search_term_lookback" in bf
+        assert "no search-term gaps in lookback" in bf
         assert "days=7" not in bf
         daily = inspect.getsource(_run_ads_search_terms_sync)
         assert "days=7" in daily
@@ -1030,6 +1032,7 @@ class TestAdsPollResilience:
         assert 'hour=3' in sched
         assert 'minute=30' in sched
         assert 'day_of_week="sun"' in sched
+        assert "gaps-only" in sched
 
     def test_busy_ads_job_is_skipped_not_failed(self):
         import inspect
@@ -1470,7 +1473,7 @@ class TestAdsSearchTermSlotStop:
 
         calls = []
         monkeypatch.setattr(reports, "_search_term_chunk_present",
-                            lambda end: end == date(2026, 8, 14))
+                            lambda end, start=None: end == date(2026, 8, 14))
         monkeypatch.setattr(reports, "_fetch_search_terms_chunk",
                             lambda cs, ce: calls.append(ce) or [self._term_row()])
         monkeypatch.setattr(reports, "upsert_rows",
@@ -1515,6 +1518,217 @@ class TestAdsSearchTermSlotStop:
         assert "search_terms_only=True" in body
         assert "skip_existing_search_term_weeks=True" in body
         assert "newest_first_search_terms=True" in body
+        assert "missing_search_term_lookback" in body
+        assert "no search-term gaps in lookback" in body
         assert "AdsSyncBusy" in body
         assert "Do not retry in a loop" in body
         assert "cancel_report" in body
+
+
+class TestAdsSearchTermGapsOnly:
+    """Sunday / one-shot backfill is gaps-only: no Amazon request when the
+    lookback is already covered, and a mid-week SUMMARY stamp covers the week.
+    """
+
+    def _term_row(self, term="tallow balm"):
+        return {
+            "searchTerm": term, "campaignId": "camp-1", "campaignName": "SP",
+            "adGroupId": "ag-1", "adGroupName": "AG", "keyword": "tallow",
+            "keywordId": "kw-1", "matchType": "EXACT",
+            "impressions": 100, "clicks": 10, "spend": 4.50,
+            "sales14d": 12.00, "purchases14d": 1,
+        }
+
+    def test_chunk_present_uses_window_not_exact_end(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        class Result:
+            def __init__(self, data):
+                self.data = data
+
+        class Query:
+            def __init__(self):
+                self.filters = {}
+
+            def select(self, *a, **k):
+                return self
+
+            def eq(self, k, v):
+                self.filters["eq"] = v
+                return self
+
+            def gte(self, k, v):
+                self.filters["gte"] = v
+                return self
+
+            def lte(self, k, v):
+                self.filters["lte"] = v
+                return self
+
+            def limit(self, n):
+                return self
+
+            def execute(self):
+                if (self.filters.get("gte") == "2026-08-24"
+                        and self.filters.get("lte") == "2026-08-30"):
+                    return Result([{"date": "2026-08-29"}])
+                return Result([])
+
+        class Client:
+            def table(self, name):
+                return Query()
+
+        monkeypatch.setattr("src.db.get_client", lambda: Client())
+        assert reports._search_term_chunk_present(
+            date(2026, 8, 30), start=date(2026, 8, 24)) is True
+        assert reports._search_term_chunk_present(date(2026, 8, 30)) is False
+
+    def test_missing_lookback_returns_only_uncovered_chunks(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        monkeypatch.setattr(
+            reports, "_search_term_chunk_present",
+            lambda end, start=None: (
+                (start or end) <= date(2026, 8, 14) <= end
+            ))
+        gaps = reports.missing_search_term_lookback(
+            days=14, chunk_days=7, as_of=date(2026, 8, 21))
+        assert gaps == [(date(2026, 8, 15), date(2026, 8, 21))]
+
+    def test_missing_lookback_empty_when_every_week_has_a_row(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        monkeypatch.setattr(
+            reports, "_search_term_chunk_present",
+            lambda end, start=None: True)
+        assert reports.missing_search_term_lookback(
+            days=90, chunk_days=7, as_of=date(2026, 9, 5)) == []
+
+    def test_skip_existing_treats_midweek_date_as_covered(self, monkeypatch):
+        """Nightly 7d stamps a different END than Sunday's shifted 90d chunk."""
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        calls = []
+        monkeypatch.setattr(
+            reports, "_search_term_chunk_present",
+            lambda end, start=None: (start or end) <= date(2026, 8, 29) <= end)
+        monkeypatch.setattr(
+            reports, "_fetch_search_terms_chunk",
+            lambda cs, ce: calls.append(ce) or [self._term_row()])
+        monkeypatch.setattr(
+            reports, "upsert_rows",
+            lambda t, rows, on_conflict=None: len(rows))
+
+        result = reports.fetch_search_terms(
+            date(2026, 8, 24), date(2026, 8, 30), chunk_days=7,
+            skip_existing=True)
+        assert calls == []
+        assert result["chunks_skipped_existing"] == 1
+        assert result["stopped"] is None
+
+    def test_sync_ads_skips_lock_when_no_search_term_gaps(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        lock_calls = []
+        amazon_calls = []
+        monkeypatch.setattr(reports, "amazon_as_of", lambda: date(2026, 9, 5))
+        monkeypatch.setattr(
+            reports, "missing_search_term_chunks",
+            lambda start, end, chunk_days=None: [])
+        monkeypatch.setattr(
+            reports._SYNC_LOCK, "acquire",
+            lambda timeout=None: lock_calls.append(timeout) or True)
+        monkeypatch.setattr(
+            reports, "fetch_search_terms",
+            lambda *a, **k: amazon_calls.append((a, k)) or {"rows": 1})
+
+        result = reports.sync_ads(
+            days=90, search_terms_only=True,
+            skip_existing_search_term_weeks=True)
+        assert lock_calls == []
+        assert amazon_calls == []
+        assert result["search_terms"]["no_gaps"] is True
+        n_chunks = len(reports._date_chunks(
+            date(2026, 6, 8), date(2026, 9, 5), 7))
+        assert result["search_terms"]["chunks_skipped_existing"] == n_chunks
+
+    def test_sunday_backfill_exits_without_sync_when_no_gaps(self, monkeypatch):
+        from src import main as main_mod
+        import src.amazon_ads.reports as reports
+
+        sync_calls = []
+        jobs = []
+        monkeypatch.setattr(reports, "missing_search_term_lookback",
+                            lambda **k: [])
+        monkeypatch.setattr(main_mod, "_run_ads_sync_job",
+                            lambda *a, **k: sync_calls.append((a, k)))
+
+        def fake_start(name):
+            jobs.append(("start", name))
+            return "run-1"
+
+        def fake_finish(run_id, status, message, stats=None):
+            jobs.append(("finish", status, message, stats))
+
+        monkeypatch.setattr("src.db.job_start", fake_start)
+        monkeypatch.setattr("src.db.job_finish", fake_finish)
+
+        main_mod._run_ads_search_terms_backfill()
+        assert sync_calls == []
+        assert jobs[0] == ("start", "ads_search_terms_backfill")
+        assert jobs[1][0] == "finish"
+        assert jobs[1][1] == "success"
+        assert jobs[1][2] == "no search-term gaps in lookback"
+
+    def test_sunday_backfill_pulls_only_when_gaps_exist(self, monkeypatch):
+        from datetime import date
+        from src import main as main_mod
+        import src.amazon_ads.reports as reports
+
+        sync_calls = []
+        monkeypatch.setattr(
+            reports, "missing_search_term_lookback",
+            lambda **k: [(date(2026, 6, 8), date(2026, 6, 14))])
+        monkeypatch.setattr(
+            main_mod, "_run_ads_sync_job",
+            lambda *a, **k: sync_calls.append(k) or "success")
+
+        main_mod._run_ads_search_terms_backfill()
+        assert len(sync_calls) == 1
+        assert sync_calls[0]["days"] == 90
+        assert sync_calls[0]["search_terms_only"] is True
+        assert sync_calls[0]["skip_existing_search_term_weeks"] is True
+        assert sync_calls[0]["newest_first_search_terms"] is True
+
+    def test_weekday_sync_source_unchanged(self):
+        import inspect
+        from src.main import _run_ads_search_terms_sync
+        src = inspect.getsource(_run_ads_search_terms_sync)
+        assert "days=7" in src
+        assert "missing_search_term" not in src
+        assert "skip_existing_search_term_weeks" not in src
+
+    def test_weekday_search_terms_only_still_takes_lock(self, monkeypatch):
+        """Daily 7d refresh must still acquire the lock and hit Amazon."""
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        lock_calls = []
+        amazon_calls = []
+        monkeypatch.setattr(reports, "amazon_as_of", lambda: date(2026, 9, 5))
+        monkeypatch.setattr(
+            reports._SYNC_LOCK, "acquire",
+            lambda timeout=None: lock_calls.append(timeout) or True)
+        monkeypatch.setattr(reports._SYNC_LOCK, "release", lambda: None)
+        monkeypatch.setattr(
+            reports, "fetch_search_terms",
+            lambda *a, **k: amazon_calls.append(1) or {"rows": 1})
+
+        reports.sync_ads(days=7, search_terms_only=True)
+        assert lock_calls
+        assert amazon_calls

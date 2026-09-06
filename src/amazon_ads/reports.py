@@ -547,20 +547,56 @@ def fetch_campaigns_daily(start: date, end: date,
     }
 
 
-def _search_term_chunk_present(end: date) -> bool:
-    """True when ads_search_terms_daily already has a SUMMARY row stamped `end`.
+def _search_term_chunk_present(end: date, start: date | None = None) -> bool:
+    """True when ads_search_terms_daily already has a SUMMARY date in the chunk.
 
-    Used to resume a 90d one-shot without re-requesting weeks that landed.
-    A lookup miss must return False (fetch, do not skip) so a DB hiccup
-    cannot invent "already covered" and drop a week.
+    Search-term rows use timeUnit=SUMMARY and stamp the chunk END. Nightly 7d
+    and a shifted 90d lookback land different ENDs for the same closed week,
+    so an exact-`end` match incorrectly treats a covered week as a gap and
+    re-requests Amazon. Any stored date in [start, end] means the week is
+    already stored — do not re-pull.
+
+    When `start` is omitted, keep the exact-`end` lookup (callers that only
+    know the stamp).
+
+    A lookup miss / error returns False (fetch, do not skip) so a DB hiccup
+    cannot invent coverage and drop a week.
     """
     try:
-        from src.db import fetch_one
-        return fetch_one("ads_search_terms_daily", {"date": end.isoformat()}) is not None
+        from src.db import get_client
+        client = get_client()
+        q = client.table("ads_search_terms_daily").select("date")
+        if start is None:
+            q = q.eq("date", end.isoformat())
+        else:
+            q = q.gte("date", start.isoformat()).lte("date", end.isoformat())
+        return bool((q.limit(1).execute().data) or [])
     except Exception as e:
-        log.warning("Could not check existing search-term date %s: %s — will fetch",
-                    end, e)
+        log.warning("Could not check existing search-term dates %s→%s: %s — will fetch",
+                    start or end, end, e)
         return False
+
+
+def missing_search_term_chunks(start: date, end: date,
+                               chunk_days: int | None = None
+                               ) -> list[tuple[date, date]]:
+    """Closed 7d chunks in [start, end] with no ads_search_terms_daily row.
+
+    DB-only. Does not take the ads lock or request Amazon reports.
+    """
+    chunks = _date_chunks(start, end, chunk_days or SEARCH_TERM_CHUNK_DAYS)
+    return [(cs, ce) for cs, ce in chunks
+            if not _search_term_chunk_present(ce, start=cs)]
+
+
+def missing_search_term_lookback(days: int = 90,
+                                 chunk_days: int | None = None,
+                                 as_of: date | None = None
+                                 ) -> list[tuple[date, date]]:
+    """Missing closed search-term chunks in the last `days` Amazon days."""
+    end = as_of or amazon_as_of()
+    start = end - timedelta(days=days - 1)
+    return missing_search_term_chunks(start, end, chunk_days)
 
 
 def fetch_search_terms(start: date, end: date,
@@ -582,9 +618,9 @@ def fetch_search_terms(start: date, end: date,
     chunks. Do not continue to the next week — that create would 425
     immediately. 429 / other chunk errors still skip that week only.
 
-    skip_existing: skip a chunk whose END date is already stored (resume
-    a 90d one-shot). Weekday 7d must leave this False so the last week
-    still refreshes.
+    skip_existing: skip a chunk that already has any stored SUMMARY date
+    in [chunk_start, chunk_end] (resume a gaps-only 90d). Weekday 7d must
+    leave this False so the last week still refreshes.
     newest_first: request recent weeks first so a stop still lands
     freshness. Sunday 90d / one-shot use this; nightly 7d does not care.
 
@@ -603,7 +639,7 @@ def fetch_search_terms(start: date, end: date,
     stopped: str | None = None
 
     for i, (cs, ce) in enumerate(chunks, 1):
-        if skip_existing and _search_term_chunk_present(ce):
+        if skip_existing and _search_term_chunk_present(ce, start=cs):
             log.info("Search terms chunk %d/%d: %s → %s — skip, already stored",
                      i, len(chunks), cs, ce)
             skipped_existing.append(ce.isoformat())
@@ -713,6 +749,31 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
     if sum(bool(f) for f in only_flags) > 1:
         raise ValueError("campaigns_only, search_terms_only and placements_only "
                          "are mutually exclusive")
+
+    # Gaps-only search-term backfill: if every closed week is already stored,
+    # return before taking the ads lock so Sunday cannot block morning jobs.
+    if search_terms_only and skip_existing_search_term_weeks:
+        end = amazon_as_of()
+        start = end - timedelta(days=days - 1)
+        gaps = missing_search_term_chunks(start, end, search_term_chunk_days)
+        if not gaps:
+            n_chunks = len(_date_chunks(
+                start, end, search_term_chunk_days or SEARCH_TERM_CHUNK_DAYS))
+            log.info("Ads sync: no search-term gaps in lookback %s → %s",
+                     start, end)
+            return {
+                "start": start.isoformat(), "end": end.isoformat(), "days": days,
+                "ran": ["search_terms"],
+                "search_terms": {
+                    "rows": 0, "inserted": 0, "chunks": n_chunks,
+                    "chunk_days": search_term_chunk_days or SEARCH_TERM_CHUNK_DAYS,
+                    "chunks_ok": 0,
+                    "chunks_skipped_existing": n_chunks,
+                    "stopped": None, "errors": [],
+                    "coverage": "SP-only",
+                    "no_gaps": True,
+                },
+            }
 
     acquired = _SYNC_LOCK.acquire(timeout=_SYNC_LOCK_TIMEOUT)
     if not acquired:
