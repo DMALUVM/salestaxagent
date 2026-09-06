@@ -185,13 +185,15 @@ def test_fail_stale_source_is_quiet():
     src = inspect.getsource(fail_stale_ads_job_runs)
     assert "send_telegram" not in src
     assert "_ads_alert" not in src
-    assert "stale running row auto-failed (no heartbeat)" in src
+    from src.amazon_ads.sync_lock import STALE_RUNNING_MESSAGE
+    assert STALE_RUNNING_MESSAGE == "stale running row auto-failed (no heartbeat)"
+    assert "STALE_RUNNING_MESSAGE" in src
 
 
 def test_scheduler_start_sweeps_stale_rows():
     import inspect
     from src import main as main_mod
-    src = inspect.getsource(main_mod.run)
+    src = inspect.getsource(main_mod.run.callback)
     assert "fail_stale_ads_job_runs" in src
     assert "stale running row" in src
 
