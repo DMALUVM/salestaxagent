@@ -1636,13 +1636,20 @@ class TestAdsSearchTermGapsOnly:
 
         lock_calls = []
         amazon_calls = []
+
+        class FakeLock:
+            def acquire(self, timeout=None):
+                lock_calls.append(timeout)
+                return True
+
+            def release(self):
+                return None
+
         monkeypatch.setattr(reports, "amazon_as_of", lambda: date(2026, 9, 5))
         monkeypatch.setattr(
             reports, "missing_search_term_chunks",
             lambda start, end, chunk_days=None: [])
-        monkeypatch.setattr(
-            reports._SYNC_LOCK, "acquire",
-            lambda timeout=None: lock_calls.append(timeout) or True)
+        monkeypatch.setattr(reports, "_SYNC_LOCK", FakeLock())
         monkeypatch.setattr(
             reports, "fetch_search_terms",
             lambda *a, **k: amazon_calls.append((a, k)) or {"rows": 1})
@@ -1720,11 +1727,17 @@ class TestAdsSearchTermGapsOnly:
 
         lock_calls = []
         amazon_calls = []
+
+        class FakeLock:
+            def acquire(self, timeout=None):
+                lock_calls.append(timeout)
+                return True
+
+            def release(self):
+                return None
+
         monkeypatch.setattr(reports, "amazon_as_of", lambda: date(2026, 9, 5))
-        monkeypatch.setattr(
-            reports._SYNC_LOCK, "acquire",
-            lambda timeout=None: lock_calls.append(timeout) or True)
-        monkeypatch.setattr(reports._SYNC_LOCK, "release", lambda: None)
+        monkeypatch.setattr(reports, "_SYNC_LOCK", FakeLock())
         monkeypatch.setattr(
             reports, "fetch_search_terms",
             lambda *a, **k: amazon_calls.append(1) or {"rows": 1})
