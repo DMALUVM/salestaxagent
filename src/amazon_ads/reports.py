@@ -6,7 +6,6 @@ All requests chunked to ≤30 days (API max is 31).
 from __future__ import annotations
 
 import logging
-import threading
 from datetime import date, timedelta
 
 import httpx
@@ -15,6 +14,14 @@ from src.amazon_ads.client import (
     AdsReportSlotBusy,
     fetch_report,
     SEARCH_TERM_TIMEOUT,
+)
+from src.amazon_ads.sync_lock import (
+    LOCK_WAIT_SECONDS,
+    THREAD_LOCK,
+    beat_ads_lease,
+    claim_ads_lease,
+    fail_stale_ads_job_runs,
+    release_ads_lease,
 )
 from src.db import upsert_rows
 from src.rules import (
@@ -38,8 +45,11 @@ CAMPAIGN_CHUNK_DAYS = ADS_CAMPAIGN_CHUNK_DAYS
 # campaigns held this lock for 231 minutes, and placements/search terms
 # waited 180 minutes then Telegram'd a failure. A short wait + skip lets
 # the scheduler retry after campaigns release the lock.
-_SYNC_LOCK = threading.Lock()
-_SYNC_LOCK_TIMEOUT = 45  # seconds — then skip, do not page
+#
+# The in-process mutex is paired with a PID+heartbeat file lease
+# (sync_lock.py). job_runs.status=running is an audit row, not the lock.
+_SYNC_LOCK = THREAD_LOCK
+_SYNC_LOCK_TIMEOUT = LOCK_WAIT_SECONDS  # seconds — then skip, do not page
 
 
 class AdsSyncBusy(RuntimeError):
@@ -599,6 +609,217 @@ def missing_search_term_lookback(days: int = 90,
     return missing_search_term_chunks(start, end, chunk_days)
 
 
+def missing_search_term_days(
+    start: date,
+    end: date,
+    st_dates: set[date],
+    spend_dates: set[date] | None = None,
+) -> list[date]:
+    """Closed days with zero ST rows that should have a nightly stamp.
+
+    Pure. A day is a gap when it has no search-term row and either:
+    - an interior hole: some stored ST date before it and some after it
+      (the 2026-09-03 case — neighbors exist, SUMMARY stamped chunk END);
+    - a trailing miss: after the newest ST date through `end` (failed
+      last night). When `spend_dates` is provided, trailing days without
+      SP campaign spend are skipped so a no-ads day is not invented.
+
+    A successful 7d SUMMARY that only stamps yesterday is not a cascade:
+    the six earlier days have no ST-before-and-after pair. Covered days
+    (already in `st_dates`) are never returned.
+    """
+    spend_dates = spend_dates or set()
+    st_dates = set(st_dates)
+    if not st_dates:
+        return []
+    newest_st = max(st_dates)
+    gaps: list[date] = []
+    cursor = start
+    while cursor <= end:
+        if cursor in st_dates:
+            cursor += timedelta(days=1)
+            continue
+        before = any(s < cursor for s in st_dates)
+        after = any(s > cursor for s in st_dates)
+        interior = before and after
+        trailing = cursor > newest_st
+        if trailing and spend_dates and cursor not in spend_dates:
+            trailing = False
+        if interior or trailing:
+            gaps.append(cursor)
+        cursor += timedelta(days=1)
+    return gaps
+
+
+def _dates_from_table(table: str, start: date, end: date,
+                      extra_eq: dict | None = None) -> set[date]:
+    """Distinct dates in [start, end]. Lookup miss → empty (do not invent)."""
+    try:
+        from src.db import get_client
+        q = (get_client().table(table).select("date")
+             .gte("date", start.isoformat())
+             .lte("date", end.isoformat()))
+        for key, val in (extra_eq or {}).items():
+            q = q.eq(key, val)
+        rows = (q.limit(2000).execute().data) or []
+    except Exception as e:
+        log.warning("Could not read %s dates %s→%s: %s", table, start, end, e)
+        return set()
+    out: set[date] = set()
+    for row in rows:
+        raw = row.get("date")
+        if not raw:
+            continue
+        try:
+            out.add(date.fromisoformat(str(raw)[:10]))
+        except ValueError:
+            continue
+    return out
+
+
+def detect_missing_search_term_days(
+    days: int = 7,
+    as_of: date | None = None,
+) -> list[date]:
+    """DB-backed day gaps in the last `days` closed Amazon days.
+
+    Pads one day on each side so a neighbor just outside the lookback
+    still counts. Does not take the ads lock or request Amazon reports.
+    """
+    end = as_of or amazon_as_of()
+    start = end - timedelta(days=days - 1)
+    pad_start = start - timedelta(days=1)
+    pad_end = end + timedelta(days=1)
+    st_dates = set()
+    cursor = pad_start
+    while cursor <= pad_end:
+        if _search_term_chunk_present(cursor, start=cursor):
+            st_dates.add(cursor)
+        cursor += timedelta(days=1)
+    spend_rows = _dates_from_table(
+        "ads_campaigns_daily", start, end, extra_eq={"campaign_type": "SP"})
+    return missing_search_term_days(start, end, st_dates, spend_rows)
+
+
+def fetch_search_term_gap_days(gap_days: list[date]) -> dict:
+    """Pull only the given dates as 1-day SUMMARY chunks. Skip covered.
+
+    HTTP 425 / timeout STOP remaining days — schedule a later one-shot,
+    do not poll. Covered dates are not requested.
+    """
+    unique = sorted({d for d in gap_days})
+    errors: list[str] = []
+    skipped_existing: list[str] = []
+    inserted = 0
+    rows_n = 0
+    stopped: str | None = None
+    requested = 0
+
+    for i, day in enumerate(unique, 1):
+        if _search_term_chunk_present(day, start=day):
+            log.info("Search terms gap day %d/%d: %s — skip, already stored",
+                     i, len(unique), day)
+            skipped_existing.append(day.isoformat())
+            continue
+        beat_ads_lease()
+        log.info("Search terms gap day %d/%d: %s (1-day chunk)",
+                 i, len(unique), day)
+        requested += 1
+        part = fetch_search_terms(day, day, chunk_days=1)
+        inserted += int(part.get("inserted") or 0)
+        rows_n += int(part.get("rows") or 0)
+        errors.extend(part.get("errors") or [])
+        if part.get("stopped"):
+            stopped = part["stopped"]
+            break
+
+    return {
+        "rows": rows_n, "inserted": inserted,
+        "chunks": requested, "chunk_days": 1,
+        "chunks_ok": requested - len(errors),
+        "chunks_skipped_existing": len(skipped_existing),
+        "stopped": stopped, "errors": errors,
+        "coverage": "SP-only",
+        "gap_days": [d.isoformat() for d in unique],
+    }
+
+
+def sync_search_term_gap_days(
+    lookback_days: int = 7,
+    as_of: date | None = None,
+    gap_days: list[date] | None = None,
+    on_progress=None,
+) -> dict:
+    """Detect missing ST calendar days and pull only those as 1-day chunks.
+
+    Single-writer (same lease as sync_ads). No gaps → return before taking
+    the lock so a covered lookback cannot block morning jobs.
+    """
+    if gap_days is None:
+        gap_days = detect_missing_search_term_days(
+            days=lookback_days, as_of=as_of)
+    end = as_of or amazon_as_of()
+    start = end - timedelta(days=lookback_days - 1)
+    if not gap_days:
+        log.info("Ads sync: no search-term day gaps in lookback %s → %s",
+                 start, end)
+        return {
+            "start": start.isoformat(), "end": end.isoformat(),
+            "days": lookback_days, "ran": ["search_terms"],
+            "search_terms": {
+                "rows": 0, "inserted": 0, "chunks": 0, "chunk_days": 1,
+                "chunks_ok": 0, "chunks_skipped_existing": 0,
+                "stopped": None, "errors": [], "coverage": "SP-only",
+                "no_gaps": True, "gap_days": [],
+            },
+        }
+
+    fail_stale_ads_job_runs()
+    acquired = _SYNC_LOCK.acquire(timeout=_SYNC_LOCK_TIMEOUT)
+    if not acquired:
+        raise AdsSyncBusy(
+            "another ads pull is running — skipped so this job does not "
+            "wait hours and page Telegram")
+    try:
+        if not claim_ads_lease("ads_search_terms_gap_fill"):
+            raise AdsSyncBusy(
+                "another ads pull is running — skipped so this job does not "
+                "wait hours and page Telegram")
+        try:
+            if on_progress:
+                on_progress(f"search-term day gaps: {len(gap_days)} day(s)")
+            result = fetch_search_term_gap_days(gap_days)
+            return {
+                "start": start.isoformat(), "end": end.isoformat(),
+                "days": lookback_days, "ran": ["search_terms"],
+                "search_terms": result,
+            }
+        finally:
+            release_ads_lease()
+    finally:
+        _SYNC_LOCK.release()
+
+
+def ads_slot_busy_in_result(result: dict | None) -> bool:
+    """True when a pull stopped or errored on HTTP 425 / slot busy."""
+    if not isinstance(result, dict):
+        return False
+    markers = ("425", "adsreportslotbusy", "slot busy")
+    for key in ("campaigns", "search_terms", "placements"):
+        val = result.get(key)
+        if not isinstance(val, dict):
+            continue
+        if val.get("stopped") == "slot_busy":
+            return True
+        blob = " ".join(
+            [str(val.get("error") or "")]
+            + [str(x) for x in (val.get("errors") or [])]
+        ).lower()
+        if any(m in blob for m in markers):
+            return True
+    return False
+
+
 def fetch_search_terms(start: date, end: date,
                        chunk_days: int | None = None,
                        skip_existing: bool = False,
@@ -730,6 +951,12 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
              on_progress=None) -> dict:
     """Ads sync: campaigns and/or search terms, auto-chunked.
 
+    Single-writer: only the scheduler and the explicit `ads-sync` CLI may
+    pull (Sunday/one-shot `ads-search-terms-backfill` uses this same lease).
+    The process lock is a PID+heartbeat file lease, not a leftover
+    `job_runs.status=running` row. Stale running ads pull rows are
+    auto-failed before the lease is taken.
+
     Campaign ranges are chunked to `campaign_chunk_days` (default 7, max 30);
     search-term ranges to `search_term_chunk_days` (default 7). A single
     30-day SB/SD report times out on this account. Safe to call with days=90
@@ -775,25 +1002,41 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
                 },
             }
 
+    fail_stale_ads_job_runs()
     acquired = _SYNC_LOCK.acquire(timeout=_SYNC_LOCK_TIMEOUT)
     if not acquired:
         raise AdsSyncBusy(
             "another ads pull is running — skipped so this job does not "
             "wait hours and page Telegram")
     try:
-        return _sync_ads_body(
-            days=days,
-            search_term_chunk_days=search_term_chunk_days,
-            ad_products=ad_products,
-            campaign_chunk_days=campaign_chunk_days,
-            sb_sd_days=sb_sd_days,
-            skip_existing_search_term_weeks=skip_existing_search_term_weeks,
-            newest_first_search_terms=newest_first_search_terms,
-            on_progress=on_progress,
-            do_campaigns=campaigns_only or not any(only_flags),
-            do_search_terms=search_terms_only or not any(only_flags),
-            do_placements=placements_only or (with_placements and not any(only_flags)),
-        )
+        if not claim_ads_lease(
+            "ads_campaigns_sync" if campaigns_only else
+            "ads_search_terms_sync" if search_terms_only else
+            "ads_placements_sync" if placements_only else "ads_sync"
+        ):
+            raise AdsSyncBusy(
+                "another ads pull is running — skipped so this job does not "
+                "wait hours and page Telegram")
+        try:
+            def _progress(msg):
+                beat_ads_lease()
+                if on_progress:
+                    on_progress(msg)
+            return _sync_ads_body(
+                days=days,
+                search_term_chunk_days=search_term_chunk_days,
+                ad_products=ad_products,
+                campaign_chunk_days=campaign_chunk_days,
+                sb_sd_days=sb_sd_days,
+                skip_existing_search_term_weeks=skip_existing_search_term_weeks,
+                newest_first_search_terms=newest_first_search_terms,
+                on_progress=_progress,
+                do_campaigns=campaigns_only or not any(only_flags),
+                do_search_terms=search_terms_only or not any(only_flags),
+                do_placements=placements_only or (with_placements and not any(only_flags)),
+            )
+        finally:
+            release_ads_lease()
     finally:
         _SYNC_LOCK.release()
 
