@@ -30,10 +30,12 @@ def test_cheap_p0s_keeper_and_budget():
     ]
     p0s = cheap_p0s_from_campaigns(rows)
     codes = {p["code"] for p in p0s}
-    assert "KEEPER_MISSING" in codes
+    assert "KEEPER_MISSING" not in codes
     assert "KEEPER_NOT_ENABLED" in codes
     assert "AUTO_LOOSE_BUDGET" in codes
     assert GNO_AUTO_LOOSE_BUDGET == 303
+    missing_only = cheap_p0s_from_campaigns([])
+    assert missing_only == []
 
 
 def test_acked_p0_does_not_reping_until_new():
@@ -50,7 +52,7 @@ def test_ping_reasons_p0_and_review_not_digest():
         now=now,
         next_review_at=GNO_NEXT_REVIEW_AT,
         last_export_at=None,
-        p0s=[{"code": "KEEPER_MISSING", "campaign_name": "X", "search_term": ""}],
+        p0s=[{"code": "KEEPER_NOT_ENABLED", "campaign_name": "X", "search_term": ""}],
         acked_p0_keys=[],
     )
     assert reasons == ["P0", "REVIEW"]

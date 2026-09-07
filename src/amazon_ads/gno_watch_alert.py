@@ -74,7 +74,11 @@ def cheap_p0s_from_campaigns(
     auto_loose_name: str | None = None,
     auto_loose_budget: float = GNO_AUTO_LOOSE_BUDGET,
 ) -> list[dict[str, str]]:
-    """Keeper missing / not enabled / Auto Loose budget — campaign rows only."""
+    """Explicit not-enabled / Auto Loose budget only.
+
+    KEEP-ALIVE missing from a short spend lookback is not a P0 — Ads omits
+    $0 days. Matches dashboard keeperMissingPriority (always P2).
+    """
     latest: dict[str, dict[str, Any]] = {}
     for r in rows:
         key = normalize_name(r.get("campaign_name"))
@@ -89,7 +93,6 @@ def cheap_p0s_from_campaigns(
     for name in keep_alive:
         row = latest.get(normalize_name(name))
         if row is None:
-            out.append({"code": "KEEPER_MISSING", "campaign_name": name, "search_term": ""})
             continue
         status = str(row.get("campaign_status") or "").strip().lower()
         if status and status not in ("enabled", "enable"):

@@ -4,6 +4,7 @@ import { zipStore } from "@/lib/zip-store";
 import {
   buildGnoPack,
   evaluateGnoAlerts,
+  GNO_DESK_SPEND_LOOKBACK_DAYS,
   GNO_NEXT_REVIEW_AT,
   type CampaignDailyRow,
   type PlacementRow,
@@ -81,6 +82,7 @@ export async function GET() {
     const now = new Date();
     const alerts = evaluateGnoAlerts({
       asOf, today, now, campaigns: campRows, searchTerms: termRows, placements: placeRows,
+      lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
       ledger,
     });
     const p0 = alerts.filter((a) => a.priority === "P0");
