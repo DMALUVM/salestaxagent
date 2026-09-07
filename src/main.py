@@ -6099,25 +6099,32 @@ def _ads_alert(subject: str, detail: str) -> None:
 
 
 _SCHEDULER = None
-# HTTP 425 (Amazon slot busy) still uses a capped date-trigger. Lease-busy
-# uses one after-release retry. A same-process release flushes immediately;
-# a *other*-process holder (CLI ads-sync on the Mini) is detected by polling
-# the lease file until PID/heartbeat is dead. The waiter writes no job_runs.
-_ADS_RETRY_MAX = 18
+# HTTP 425 (Amazon slot busy): one replaceable date-trigger.
+# Lease-busy: one after-release retry. Same-process release flushes
+# immediately; other-process holders (CLI ads-sync on the Mini) are
+# detected by polling the lease file until PID/heartbeat is dead. The
+# waiter writes no job_runs. Lease-poll window stays long enough to
+# cover a Sunday campaigns overrun (~6h); the 425 date-trigger does not.
+_ADS_RETRY_MAX = 1
 _ADS_RETRY_SECONDS = 20 * 60
 _ADS_AFTER_LEASE_DELAY_SECONDS = 15
 _ADS_LEASE_POLL_SECONDS = 60
+_ADS_LEASE_WAIT_SECONDS = 6 * 3600
 _PENDING_AFTER_LEASE: dict[str, object] = {}
 
 
-def _schedule_ads_retry(fn, retry: int, job_id: str) -> None:
+def _schedule_ads_retry(fn, retry: int, job_id: str) -> bool:
     """Re-run a skipped ads job after the lock holder finishes.
 
     One deferred date-trigger per job_id (replace_existing). Never a
     wait-loop, never a second parallel sync while one is alive.
+    Returns True when a retry was actually scheduled.
     """
     if _SCHEDULER is None or retry >= _ADS_RETRY_MAX:
-        return
+        if retry >= _ADS_RETRY_MAX:
+            print(f"[Ads] No further deferred retry for {job_id} "
+                  f"(already used {_ADS_RETRY_MAX})")
+        return False
     from datetime import datetime, timedelta
     from src.rules import AGENT_TZ
     when = datetime.now(AGENT_TZ) + timedelta(seconds=_ADS_RETRY_SECONDS)
@@ -6127,8 +6134,10 @@ def _schedule_ads_retry(fn, retry: int, job_id: str) -> None:
             fn, "date", run_date=when, id=rid,
             misfire_grace_time=3600, replace_existing=True)
         print(f"[Ads] Scheduled {rid} at {when.isoformat(timespec='minutes')}")
+        return True
     except Exception as e:
         print(f"[Ads] Could not schedule {rid}: {e}")
+        return False
 
 
 def _enqueue_ads_after_lease(job_id: str, fn) -> bool:
@@ -6149,8 +6158,8 @@ def _enqueue_ads_after_lease(job_id: str, fn) -> bool:
 
 
 def _ads_lease_wait_cap() -> int:
-    """How many quiet lease polls cover the same 6h window as 425 retries."""
-    return max(1, (_ADS_RETRY_MAX * _ADS_RETRY_SECONDS) // _ADS_LEASE_POLL_SECONDS)
+    """Quiet lease polls covering a Sunday campaigns overrun (~6h)."""
+    return max(1, _ADS_LEASE_WAIT_SECONDS // _ADS_LEASE_POLL_SECONDS)
 
 
 def _arm_ads_lease_waiter(job_id: str, fn, attempt: int = 0) -> None:
@@ -6263,15 +6272,14 @@ def _defer_ads_job(job_name: str, retry: int, *,
     gone or its heartbeat is dead. Not N timed skip rows.
     HTTP 425: one replaceable date-trigger (Amazon slot, not our lease).
     Search-term 425 / weekday ST busy schedules the one-shot day gap-fill,
-    not another 7d rewrite. Caps at _ADS_RETRY_MAX.
+    not another 7d rewrite. Caps at _ADS_RETRY_MAX (one).
     Returns True when this call newly queued a retry (caller may write
-    one skip/deferred row). False if already queued — no extra row.
+    one skip/deferred row). False if already queued / cap hit — no extra row.
     """
     fn, job_id = _ads_retry_fn(job_name, retry, **job_kwargs)
     if after_lease:
         return _enqueue_ads_after_lease(job_id, fn)
-    _schedule_ads_retry(fn, retry, job_id)
-    return True
+    return _schedule_ads_retry(fn, retry, job_id)
 
 
 def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
