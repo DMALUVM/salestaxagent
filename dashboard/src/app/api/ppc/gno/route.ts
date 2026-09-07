@@ -78,16 +78,38 @@ export async function GET() {
     const searchTerms = term.rows as unknown as SearchTermRow[];
     const placements = place.rows as unknown as PlacementRow[];
 
-    let sqp: { available: boolean; newestAsOf: string | null; stale: boolean; keywords: number } = {
-      available: false, newestAsOf: null, stale: true, keywords: 0,
+    let sqp: {
+      available: boolean;
+      newestAsOf: string | null;
+      stale: boolean;
+      keywords: number;
+      source: "sqp_weekly" | "keyword_organic_rank" | null;
+    } = {
+      available: false, newestAsOf: null, stale: true, keywords: 0, source: null,
     };
     try {
-      const r = await sb.from("keyword_organic_rank")
-        .select("as_of")
-        .order("as_of", { ascending: false })
+      // Prefer Brand Analytics / SP-API week_end from sqp_weekly — that is what
+      // the upload banner tracks. Fall back to keyword_organic_rank.as_of.
+      const weekly = await sb.from("sqp_weekly")
+        .select("week_end")
+        .order("week_end", { ascending: false })
         .limit(1);
-      if (!r.error) {
-        const newest = r.data?.[0]?.as_of ? String(r.data[0].as_of) : null;
+      let newest: string | null = null;
+      let source: "sqp_weekly" | "keyword_organic_rank" | null = null;
+      if (!weekly.error && weekly.data?.[0]?.week_end) {
+        newest = String(weekly.data[0].week_end);
+        source = "sqp_weekly";
+      } else {
+        const r = await sb.from("keyword_organic_rank")
+          .select("as_of")
+          .order("as_of", { ascending: false })
+          .limit(1);
+        if (!r.error && r.data?.[0]?.as_of) {
+          newest = String(r.data[0].as_of);
+          source = "keyword_organic_rank";
+        }
+      }
+      if (newest || source) {
         const age = newest
           ? Math.round((Date.now() - Date.parse(`${newest}T00:00:00Z`)) / 86_400_000)
           : null;
@@ -96,6 +118,7 @@ export async function GET() {
           newestAsOf: newest,
           stale: age == null || age > 21,
           keywords: 0,
+          source,
         };
       }
     } catch {

@@ -77,7 +77,7 @@ interface GnoData {
   harvestQueue?: HarvestRow[];
   junkQueue?: HarvestRow[];
   sbL7?: Array<{ campaign_name: string; spend: number; sales: number; orders: number; acos: number | null }>;
-  sqp?: { available: boolean; newestAsOf: string | null; stale: boolean };
+  sqp?: { available: boolean; newestAsOf: string | null; stale: boolean; source?: string | null };
   lastSync?: { at: string | null; job: string | null; status: string | null };
   gaps?: string[];
   loadErrors?: string[];
@@ -120,6 +120,7 @@ export function PpcGnoWatch() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sqpNotice, setSqpNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [queued, setQueued] = useState<string[]>([]);
   const [sqpBusy, setSqpBusy] = useState(false);
 
@@ -172,6 +173,7 @@ export function PpcGnoWatch() {
 
   async function uploadSqp(file: File) {
     setSqpBusy(true);
+    setSqpNotice(null);
     setNotice(null);
     try {
       const body = new FormData();
@@ -180,13 +182,25 @@ export function PpcGnoWatch() {
       const ct = res.headers.get("content-type") ?? "";
       const d = ct.includes("json") ? await res.json() : {};
       if (!res.ok || d.ok === false) {
-        setNotice(d.error ?? d.hint ?? "SQP upload failed. Shares are never invented.");
+        setSqpNotice({
+          ok: false,
+          text: d.error ?? d.hint ?? "SQP upload failed. Shares are never invented.",
+        });
         return;
       }
-      setNotice(`SQP stored ${d.written} keyword row(s). ${d.skipped ?? 0} skipped (no rank/share).`);
+      const week = d.week_end ? `week ending ${d.week_end}` : "week unknown";
+      const weeklyN = d.sqpWeeklyWritten ?? 0;
+      const rankN = d.keywordRankWritten ?? 0;
+      setSqpNotice({
+        ok: true,
+        text: `Stored ${week}: ${weeklyN} sqp_weekly row(s), ${rankN} keyword rank row(s).`,
+      });
       await load();
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : "SQP upload failed.");
+      setSqpNotice({
+        ok: false,
+        text: e instanceof Error ? e.message : "SQP upload failed.",
+      });
     } finally {
       setSqpBusy(false);
     }
@@ -403,21 +417,40 @@ export function PpcGnoWatch() {
           <p className="text-[11px] text-muted-foreground">
             Brand Analytics is not in the Ads API. Drop the official SQP CSV.
             Impression / purchase share is never invented.
-            {data?.sqp?.newestAsOf ? ` Newest stored week: ${data.sqp.newestAsOf}.` : " No SQP rows stored."}
+            {data?.sqp?.newestAsOf
+              ? ` Newest stored week: ${data.sqp.newestAsOf}.`
+              : " No SQP rows stored."}
           </p>
         </CardHeader>
-        <CardContent>
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            disabled={sqpBusy}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) uploadSqp(f);
-              e.target.value = "";
-            }}
-            className="text-xs"
-          />
+        <CardContent className="space-y-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              disabled={sqpBusy}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadSqp(f);
+                e.target.value = "";
+              }}
+              className="text-xs"
+            />
+            {sqpBusy && (
+              <span className="text-xs text-muted-foreground">Uploading…</span>
+            )}
+            {sqpNotice && (
+              <span
+                role="status"
+                className={`rounded-md border px-2.5 py-1.5 text-xs ${
+                  sqpNotice.ok
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+                    : "border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
+                }`}
+              >
+                {sqpNotice.text}
+              </span>
+            )}
+          </div>
         </CardContent>
       </Card>
 
