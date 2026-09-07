@@ -1062,6 +1062,7 @@ class TestAdsPollResilience:
         assert "AdsSyncBusy" in src
         assert "skipped" in src
         assert "_defer_ads_job" in src
+        assert "after_lease=True" in src
         assert "_ads_alert" not in src.split("except AdsSyncBusy")[1].split("except Exception")[0]
 
     def test_busy_retry_window_covers_a_sunday_overrun(self):
