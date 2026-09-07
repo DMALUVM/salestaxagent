@@ -37,6 +37,9 @@ class TestBusinessRulesConfig:
     def test_shopify_timezone_is_eastern(self):
         assert self.cfg["shopify"]["timezone"] == "America/New_York"
 
+    def test_shopify_outbound_ship_cost_is_an_estimate(self):
+        assert self.cfg["shopify"]["estimated_outbound_ship_cost"] == 5.50
+
     def test_amazon_date_field(self):
         assert self.cfg["amazon"]["date_field"] == "purchase-date"
 
@@ -105,6 +108,10 @@ class TestRulesModule:
     def test_shopify_tz_is_eastern(self):
         from src.rules import SHOPIFY_TZ_NAME
         assert SHOPIFY_TZ_NAME == "America/New_York"
+
+    def test_shopify_outbound_ship_cost_comes_from_config(self):
+        from src.rules import SHOPIFY_EST_OUTBOUND_SHIP_COST
+        assert SHOPIFY_EST_OUTBOUND_SHIP_COST == 5.50
 
     def test_pending_is_included(self):
         from src.rules import AMAZON_INCLUDE_STATUSES

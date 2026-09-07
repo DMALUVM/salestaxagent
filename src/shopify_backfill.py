@@ -41,11 +41,20 @@ PAGE_SIZE = 250
 
 # Everything needed for AOV/LTV/repeat/cohort plus the fields the existing
 # aggregates key on, so this table can be reconciled against sales_by_state.
+# shipping_lines / tags / line_items feed shipping_price + is_subscription
+# (selling-plan detection). No PII beyond the email already gated by
+# --with-email; line_items are used in memory and not stored.
 ORDER_FIELDS = (
     "id,name,created_at,processed_at,customer,email,currency,"
     "subtotal_price,total_price,total_discounts,total_tax,"
-    "financial_status,cancelled_at,test,source_name,shipping_address,refunds"
+    "financial_status,cancelled_at,test,source_name,shipping_address,refunds,"
+    "shipping_lines,tags,line_items"
 )
+
+# How shipping_price was produced. shipping_lines is API truth;
+# provisional_residual is the SQL/ingest fallback until a re-pull.
+SHIPPING_SOURCE_LINES = "shipping_lines"
+SHIPPING_SOURCE_RESIDUAL = "provisional_residual"
 
 
 def email_hash(email: str | None) -> str | None:
@@ -89,6 +98,56 @@ def _refunded(order: dict) -> float:
     return round(total, 2)
 
 
+def shipping_price_of(order: dict) -> tuple[float, str]:
+    """Customer-charged shipping and how it was produced.
+
+    Prefer the sum of shipping_lines[].price when the API field is present
+    (including an empty list = $0 charged). Otherwise fall back to
+    greatest(0, total − subtotal − tax) and mark it provisional_residual —
+    that residual also absorbs tips, duties, and rounding, so it is not
+    shipping-lines truth.
+    """
+    if "shipping_lines" in order:
+        total = 0.0
+        for line in order.get("shipping_lines") or []:
+            total += _num(line.get("price"))
+        return round(total, 2), SHIPPING_SOURCE_LINES
+    residual = max(
+        0.0,
+        _num(order.get("total_price"))
+        - _num(order.get("subtotal_price"))
+        - _num(order.get("total_tax")),
+    )
+    return round(residual, 2), SHIPPING_SOURCE_RESIDUAL
+
+
+def is_subscription_order(order: dict) -> bool:
+    """Subscription vs one-time. Documented rule used by sync and tests.
+
+    True when any of:
+      1. source_name contains "subscription" (covers subscription_contract*)
+      2. tags contain "subscription" (REST tags are a comma-separated string)
+      3. any line_item has selling_plan_allocation or selling_plan_id
+    SQL residual backfill can only apply (1); a re-pull applies the full rule.
+    """
+    source = str(order.get("source_name") or "")
+    if "subscription" in source.lower():
+        return True
+
+    tags = order.get("tags")
+    if isinstance(tags, (list, tuple)):
+        tag_text = " ".join(str(t) for t in tags)
+    else:
+        tag_text = str(tags or "")
+    if "subscription" in tag_text.lower():
+        return True
+
+    for li in order.get("line_items") or []:
+        if li.get("selling_plan_allocation") or li.get("selling_plan_id"):
+            return True
+    return False
+
+
 def _local_date(iso: str | None) -> date | None:
     """Calendar day in the Shopify store timezone.
 
@@ -126,6 +185,9 @@ def to_row(order: dict, with_email: bool = False) -> dict | None:
     except Exception:
         channel = "shopify"
 
+    ship_price, ship_source = shipping_price_of(order)
+    is_sub = is_subscription_order(order)
+
     row = {
         "order_id": int(oid),
         "order_name": order.get("name"),
@@ -145,6 +207,9 @@ def to_row(order: dict, with_email: bool = False) -> dict | None:
         "cancelled_at": order.get("cancelled_at"),
         "is_test": bool(order.get("test")),
         "source_name": source,
+        "shipping_price": ship_price,
+        "is_subscription": is_sub,
+        "shipping_source": ship_source,
         "channel": channel,
         "state_code": (addr.get("province_code") or "").upper() or None,
         "country_code": (addr.get("country_code") or "").upper() or None,
@@ -220,6 +285,10 @@ def backfill(since: date | None = None, with_email: bool = False,
                 upsert_rows("shopify_orders", rows, on_conflict="order_id")
             except Exception as e:
                 msg = str(e)
+                if "shipping_price" in msg or "is_subscription" in msg or "shipping_source" in msg:
+                    return {"error": "shopify_orders is missing shipping columns — run "
+                                     "supabase/migration_shopify_shipping.sql.",
+                            "pages": pages, "written": written}
                 if "shopify_orders" in msg:
                     return {"error": "Table shopify_orders is missing — run "
                                      "supabase/migration_shopify_orders.sql.",
