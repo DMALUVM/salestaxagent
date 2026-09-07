@@ -191,8 +191,10 @@ export function PpcGnoWatch() {
   const [logging, setLogging] = useState(false);
 
   const load = useCallback(async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8_000);
     try {
-      const res = await fetch("/api/ppc/gno");
+      const res = await fetch("/api/ppc/gno", { signal: ctrl.signal });
       const ct = res.headers.get("content-type") ?? "";
       if (!ct.includes("application/json")) {
         throw new Error(`Unexpected ${res.status} response from /api/ppc/gno.`);
@@ -201,9 +203,14 @@ export function PpcGnoWatch() {
       setData(d);
       setError(d.error ?? null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load GNO Watch.");
+      const aborted = e instanceof DOMException && e.name === "AbortError";
+      setError(aborted
+        ? "GNO Watch timed out loading ads. Banner still shows whether a pack is due."
+        : (e instanceof Error ? e.message : "Could not load GNO Watch."));
+    } finally {
+      clearTimeout(timer);
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
