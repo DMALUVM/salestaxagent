@@ -6100,11 +6100,13 @@ def _ads_alert(subject: str, detail: str) -> None:
 
 _SCHEDULER = None
 # HTTP 425 (Amazon slot busy) still uses a capped date-trigger. Lease-busy
-# uses one after-release retry instead — 20-minute polls wrote a skip row
-# every cycle while campaigns held the lock for hours.
+# uses one after-release retry. A same-process release flushes immediately;
+# a *other*-process holder (CLI ads-sync on the Mini) is detected by polling
+# the lease file until PID/heartbeat is dead. The waiter writes no job_runs.
 _ADS_RETRY_MAX = 18
 _ADS_RETRY_SECONDS = 20 * 60
 _ADS_AFTER_LEASE_DELAY_SECONDS = 15
+_ADS_LEASE_POLL_SECONDS = 60
 _PENDING_AFTER_LEASE: dict[str, object] = {}
 
 
@@ -6132,20 +6134,67 @@ def _schedule_ads_retry(fn, retry: int, job_id: str) -> None:
 def _enqueue_ads_after_lease(job_id: str, fn) -> bool:
     """Remember at most one retry per job, fired when the lease drops.
 
-    Returns True on the first enqueue (caller may write one skip row).
-    Returns False when this job is already queued — do not write another
-    skip/deferred job_runs row.
+    Arms a quiet lease-file waiter immediately so a *other-process*
+    holder (CLI ads-sync) is visible when its heartbeat dies. Returns
+    True on the first enqueue (caller may write one skip row). False
+    when already queued — do not write another skip/deferred row.
     """
     if job_id in _PENDING_AFTER_LEASE:
         print(f"[Ads] {job_id} already queued after lease — not another skip")
         return False
     _PENDING_AFTER_LEASE[job_id] = fn
     print(f"[Ads] Queued {job_id} once — retry after lease release")
+    _arm_ads_lease_waiter(job_id, fn, attempt=0)
     return True
 
 
+def _ads_lease_wait_cap() -> int:
+    """How many quiet lease polls cover the same 6h window as 425 retries."""
+    return max(1, (_ADS_RETRY_MAX * _ADS_RETRY_SECONDS) // _ADS_LEASE_POLL_SECONDS)
+
+
+def _arm_ads_lease_waiter(job_id: str, fn, attempt: int = 0) -> None:
+    """One replaceable date-trigger that checks the lease file. Not a skip."""
+    if _SCHEDULER is None:
+        return
+    from datetime import datetime, timedelta
+    from src.rules import AGENT_TZ
+    when = datetime.now(AGENT_TZ) + timedelta(seconds=_ADS_LEASE_POLL_SECONDS)
+    rid = f"{job_id}_after_lease"
+    try:
+        _SCHEDULER.add_job(
+            lambda: _wait_ads_lease_then(job_id, fn, attempt),
+            "date", run_date=when, id=rid,
+            misfire_grace_time=3600, replace_existing=True)
+        print(f"[Ads] Watching lease for {rid} at "
+              f"{when.isoformat(timespec='minutes')} (no skip row)")
+    except Exception as e:
+        print(f"[Ads] Could not watch lease for {rid}: {e}")
+
+
+def _wait_ads_lease_then(job_id: str, fn, attempt: int = 0) -> None:
+    """If the lease file/heartbeat is still live, re-arm. Else run once.
+
+    Writes no job_runs row during the wait — that is the skip storm.
+    Cross-process holders (Mini CLI ads-sync) drop the file or die;
+    lease_is_live then goes False and this fires the one deferred job.
+    """
+    from src.amazon_ads.sync_lock import lease_is_live, read_lease
+    if lease_is_live(read_lease()):
+        if attempt + 1 >= _ads_lease_wait_cap():
+            print(f"[Ads] Gave up waiting for lease: {job_id}")
+            _PENDING_AFTER_LEASE.pop(job_id, None)
+            return
+        print(f"[Ads] Lease still live — {job_id} waits (no skip row)")
+        _arm_ads_lease_waiter(job_id, fn, attempt + 1)
+        return
+    _PENDING_AFTER_LEASE.pop(job_id, None)
+    print(f"[Ads] Lease free — running {job_id}")
+    fn()
+
+
 def _flush_ads_after_lease() -> None:
-    """Schedule each pending after-lease retry. One date-trigger per job."""
+    """Same-process release: replace the waiter with the real job now."""
     if not _PENDING_AFTER_LEASE:
         return
     pending = list(_PENDING_AFTER_LEASE.items())
@@ -6208,9 +6257,10 @@ def _ads_retry_fn(job_name: str, retry: int, **job_kwargs):
 
 def _defer_ads_job(job_name: str, retry: int, *,
                    after_lease: bool = False, **job_kwargs) -> bool:
-    """Enqueue one deferred retry for AdsSyncBusy or HTTP 425. Not a poll.
+    """Enqueue one deferred retry for AdsSyncBusy or HTTP 425.
 
-    Lease-busy (`after_lease=True`): one retry when the holder releases.
+    Lease-busy (`after_lease=True`): one retry after the lease file is
+    gone or its heartbeat is dead. Not N timed skip rows.
     HTTP 425: one replaceable date-trigger (Amazon slot, not our lease).
     Search-term 425 / weekday ST busy schedules the one-shot day gap-fill,
     not another 7d rewrite. Caps at _ADS_RETRY_MAX.
