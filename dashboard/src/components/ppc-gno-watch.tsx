@@ -645,7 +645,7 @@ export function PpcGnoWatch() {
           </Table>
           <div className="space-y-2 border-t p-3">
             <p className="text-[11px] font-medium">Log Grok outcome</p>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-foreground/80">
               Paste one line per call. Must not auto-negate.
               Examples: <code>tallow lip balm organic skip</code>,
               {" "}<code>cheap chapstick approve_harvest_neg</code>,
