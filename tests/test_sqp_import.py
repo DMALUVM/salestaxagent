@@ -131,3 +131,44 @@ class TestJoinIntegration:
         # The PPC side holds the raw, differently-cased term.
         info = lookup(ranks, "  tallow   LIP  balm ", "A1", cfg, AS_OF)
         assert info.effective_rank == 2
+
+
+class TestBrandAnalyticsPreamble:
+    CSV = (
+        'Brand=["Tallowbourn"],Reporting Range=["Weekly"],'
+        'Select week=["Week 35 | 2026-08-23 - 2026-08-29 2026"]\n'
+        "Search Query,Search Query Volume,"
+        "Impressions: Total Count,Impressions: Brand Count,Impressions: Brand Share %,"
+        "Clicks: Total Count,Clicks: Brand Count,Clicks: Brand Share %,"
+        "Purchases: Total Count,Purchases: Brand Count,Purchases: Brand Share %,"
+        "Reporting Date\n"
+        "tallowbourn lip balm,1200,10000,4000,40%,500,250,50%,40,20,50%,2026-08-29\n"
+        "beef tallow balm,800,5000,500,10%,200,20,10%,20,2,10%,2026-08-29\n"
+        "mystery,100,1000,,,50,,,2,,,2026-08-29\n"
+    )
+
+    def test_preamble_week_and_brand_share(self):
+        r = parse_sqp(self.CSV, as_of=AS_OF)
+        assert r["week_start"] == "2026-08-23"
+        assert r["week_end"] == "2026-08-29"
+        by = {x["keyword_normalized"]: x for x in r["rows"]}
+        assert by["tallowbourn lip balm"]["organic_rank"] == 1
+        assert by["tallowbourn lip balm"]["impression_share_organic"] == pytest.approx(0.5)
+        assert "mystery" not in by
+
+    def test_weekly_rows_use_brand_csv_source_and_reported_shares_only(self):
+        r = parse_sqp(self.CSV, as_of=AS_OF)
+        assert len(r["weekly"]) == 3
+        top = next(x for x in r["weekly"] if x["query_normalized"] == "tallowbourn lip balm")
+        assert top["source"] == "sqp_brand_csv"
+        assert top["asin"] == ""
+        assert top["click_share"] == pytest.approx(0.5)
+        assert top["impression_share"] == pytest.approx(0.4)
+        assert top["purchase_share"] == pytest.approx(0.5)
+        assert top["asin_clicks"] == 250
+        assert top["total_clicks"] == 500
+        mystery = next(x for x in r["weekly"] if x["query_normalized"] == "mystery")
+        assert mystery["click_share"] is None
+        assert mystery["impression_share"] is None
+        assert mystery["purchase_share"] is None
+        assert mystery["total_impressions"] == 1000
