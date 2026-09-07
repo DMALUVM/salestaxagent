@@ -15,6 +15,8 @@ import {
   type PlacementRow,
   type SearchTermRow,
 } from "@/lib/gno-ppc-watch";
+import { evaluateExportNeed } from "@/lib/gno-export-state";
+import { loadGnoExportState, loadGnoLedger } from "@/lib/gno-store";
 
 /**
  * GET /api/ppc/gno — GNO PPC Watch payload from stored Ads tables.
@@ -161,13 +163,30 @@ export async function GET() {
     } catch { /* table optional until migration_gno_alert_acks.sql */ }
 
     const now = new Date();
+    const [ledger, exportState] = await Promise.all([
+      loadGnoLedger(sb),
+      loadGnoExportState(sb),
+    ]);
     const alerts = evaluateGnoAlerts({
       asOf, today, now, campaigns, searchTerms, placements,
       negativesAvailable: false,
       bidsKnown: false,
       lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
+      ledger,
     });
-    const harvest = harvestQueue(searchTerms, campaigns, asOf);
+    const harvest = harvestQueue(searchTerms, campaigns, asOf, ledger);
+    const p0 = alerts.filter((a) => a.priority === "P0");
+    const p1 = alerts.filter((a) => a.priority === "P1");
+    const exportBanner = evaluateExportNeed({
+      now,
+      nextReviewAt: GNO_NEXT_REVIEW_AT,
+      p0,
+      p1,
+      lastExportAt: exportState?.last_export_at,
+      lastExportReason: exportState?.last_export_reason,
+      ackedP0Keys: exportState?.acked_p0_keys,
+      ackedP1Keys: exportState?.acked_p1_keys,
+    });
     const sbL7 = campaigns.filter((c) => {
       const t = String(c.campaign_type ?? "SP").toUpperCase();
       return t === "SB" && c.date >= windowStart(asOf, 7) && c.date <= asOf;
@@ -192,10 +211,13 @@ export async function GET() {
       hoursSinceLaunch: hoursSinceLaunch(now),
       autoLooseName: AUTO_LOOSE_NAME,
       alerts,
-      p0: alerts.filter((a) => a.priority === "P0"),
-      p1: alerts.filter((a) => a.priority === "P1"),
+      p0,
+      p1,
       p2: alerts.filter((a) => a.priority === "P2"),
-      newExact: newExactTiles(campaigns, asOf, now),
+      newExact: newExactTiles(campaigns, asOf, now, ledger),
+      exportBanner,
+      lastExportAt: exportState?.last_export_at ?? null,
+      lastExportReason: exportState?.last_export_reason ?? null,
       keepers: keeperHeartbeats(campaigns, asOf),
       harvestQueue: harvest.filter((t) => t.proposed_tag === "HARVEST_CANDIDATE"),
       junkQueue: harvest.filter((t) => t.proposed_tag === "JUNK_CANDIDATE"),

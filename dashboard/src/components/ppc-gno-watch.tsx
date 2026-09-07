@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, Check, Download, RefreshCw, Shield } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { AlertTriangle, Check, CheckCircle, Download, RefreshCw, Shield } from "lucide-react";
 import {
   gnoAlertKey,
   loadLocalDoneKeys,
@@ -40,6 +41,7 @@ interface Tile {
   acos: number | null;
   zero_impr_after_24h: boolean;
   over_shell_budget: boolean;
+  last_call?: "hold" | "bid_down" | "bid_up" | null;
 }
 
 interface Heartbeat {
@@ -67,6 +69,7 @@ interface HarvestRow {
   cvr: number | null;
   has_enabled_exact_elsewhere: boolean;
   proposed_tag: string;
+  learning_note?: string;
 }
 
 interface GnoData {
@@ -86,6 +89,20 @@ interface GnoData {
   sbL7?: Array<{ campaign_name: string; spend: number; sales: number; orders: number; acos: number | null }>;
   sqp?: { available: boolean; newestAsOf: string | null; stale: boolean; source?: string | null };
   lastSync?: { at: string | null; job: string | null; status: string | null };
+  exportBanner?: {
+    state: "EXPORT_NEEDED" | "QUIET";
+    reasons: Array<"P0" | "REVIEW" | "DIGEST">;
+    headline: string;
+    lastExportAt: string | null;
+    lastExportReason: string | null;
+    nextReviewAt: string;
+    nextReviewLabel: string;
+    hoursSinceExport: number | null;
+    reviewDue: boolean;
+    digestWindow: boolean;
+  };
+  lastExportAt?: string | null;
+  lastExportReason?: string | null;
   gaps?: string[];
   acks?: string[];
   lookbackDays?: number;
@@ -168,6 +185,8 @@ export function PpcGnoWatch() {
   const [sqpBusy, setSqpBusy] = useState(false);
   const [localDone, setLocalDone] = useState<string[]>([]);
   const [showDone, setShowDone] = useState(false);
+  const [paste, setPaste] = useState("");
+  const [logging, setLogging] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -229,6 +248,7 @@ export function PpcGnoWatch() {
       a.remove();
       URL.revokeObjectURL(url);
       setNotice(`Downloaded ${name} — observe only. Drop it in Grok. Nothing writes to Amazon.`);
+      await load();
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Export failed.");
     } finally {
@@ -271,6 +291,38 @@ export function PpcGnoWatch() {
     }
   }
 
+  async function logOutcomes(payload: {
+    paste?: string;
+    entries?: Array<{
+      dave_action: string;
+      campaign_name?: string;
+      search_term?: string;
+      proposed_tag?: string;
+    }>;
+  }) {
+    setLogging(true);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/ppc/gno-outcome", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const d = await res.json() as { ok?: boolean; written?: number; error?: string; hint?: string };
+      if (!res.ok || d.ok === false) {
+        setNotice(d.error ?? d.hint ?? "Could not log outcome.");
+        return;
+      }
+      setNotice(`Logged ${d.written ?? 0} outcome(s). Observe only — nothing wrote to Amazon.`);
+      if (payload.paste) setPaste("");
+      await load();
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Could not log outcome.");
+    } finally {
+      setLogging(false);
+    }
+  }
+
   if (loading) {
     return <p className="text-sm text-muted-foreground">Loading GNO PPC Watch…</p>;
   }
@@ -297,6 +349,8 @@ export function PpcGnoWatch() {
   const keepers = data?.keepers ?? [];
   const harvest = data?.harvestQueue ?? [];
   const doneCount = p0Done.length + p1Done.length + lookbackNotes.done.length;
+  const banner = data?.exportBanner;
+  const exportDue = banner?.state === "EXPORT_NEEDED";
 
   return (
     <div className="space-y-6">
@@ -318,12 +372,47 @@ export function PpcGnoWatch() {
         </div>
       </div>
 
-      <p className="rounded-lg border border-amber-500/40 bg-amber-50 p-2.5 text-[11px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-        <strong>Observe only.</strong> This desk never pauses, never adds negatives,
-        never raises bids or budgets. Harvest clicks queue the next Grok pack.
-        Next human review: {data?.nextReviewAt ?? "Wed 9 Sep evening"}.
-        {" "}<Link href="/ppc" className="underline">Back to Recovery / This week</Link>
-      </p>
+      <div
+        role="status"
+        data-export-state={banner?.state ?? "QUIET"}
+        className={`rounded-lg border p-3 text-sm ${
+          exportDue
+            ? "border-amber-500/60 bg-amber-50 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100"
+            : "border-emerald-400/40 bg-emerald-50/70 text-emerald-950 dark:bg-emerald-950/30 dark:text-emerald-100"
+        }`}
+      >
+        <p className="flex items-center gap-2 font-semibold">
+          {exportDue
+            ? <AlertTriangle className="h-4 w-4 shrink-0" />
+            : <CheckCircle className="h-4 w-4 shrink-0" />}
+          {exportDue ? "EXPORT NEEDED" : "Up to date"}
+        </p>
+        <p className="mt-1 text-xs">
+          {banner?.headline ?? "Up to date. No pack due."}
+          {banner?.reasons?.length ? ` · ${banner.reasons.join(" + ")}` : ""}
+        </p>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Next human review: <strong className="text-foreground">{banner?.nextReviewLabel ?? data?.nextReviewAt ?? "—"}</strong>
+          {banner?.lastExportReason ? ` · last export reason ${banner.lastExportReason}` : ""}
+          {" · "}<Link href="/ppc" className="underline">Back to Recovery / This week</Link>
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-amber-500/30 bg-amber-50/60 p-3 text-[11px] text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+        <p className="font-semibold">When to Export GNO pack</p>
+        <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+          <li><strong>Anytime a P0 fires</strong> — download the zip, drop it in Grok immediately.</li>
+          <li>
+            <strong>Wed evening ~48h review</strong>
+            {" "}({data?.exportBanner?.nextReviewLabel ?? data?.nextReviewAt ?? "date from nextReviewAt"})
+            {" "}— export even if quiet; that is the scheduled hold / bid / harvest pass.
+          </li>
+          <li><strong>Optional daily</strong> — if you want a P1 digest reviewed; otherwise watch the page alerts.</li>
+        </ol>
+        <p className="mt-2 text-muted-foreground">
+          Observe only — export never writes to Amazon. One change per campaign per day still Dave/Grok.
+        </p>
+      </div>
 
       {notice && (
         <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs">{notice}</p>
@@ -386,9 +475,31 @@ export function PpcGnoWatch() {
                 <p className="text-xs tabular-nums">Orders {t.orders}</p>
                 <p className="text-xs tabular-nums">ACOS {t.acos == null ? "—" : `${t.acos.toFixed(0)}%`}</p>
                 <p className="text-[10px] text-muted-foreground">{t.hours_since_launch.toFixed(0)}h since launch</p>
+                {t.last_call && (
+                  <p className="text-[10px] font-medium">last call: {t.last_call.replace("_", " ")}</p>
+                )}
                 {t.zero_impr_after_24h && (
                   <Badge variant="outline" className="text-[9px] text-red-700 border-red-300">0 impr after 24h</Badge>
                 )}
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  {(["hold", "bid_down", "bid_up"] as const).map((action) => (
+                    <button
+                      key={action}
+                      type="button"
+                      disabled={logging}
+                      onClick={() => logOutcomes({
+                        entries: [{
+                          dave_action: action,
+                          campaign_name: t.campaign_name,
+                          proposed_tag: "NEW_EXACT",
+                        }],
+                      })}
+                      className="rounded border px-1 py-0.5 text-[9px] text-muted-foreground hover:bg-muted"
+                    >
+                      {action.replace("_", " ")}
+                    </button>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -427,6 +538,7 @@ export function PpcGnoWatch() {
           <p className="text-[11px] text-muted-foreground">
             Clicking a row does <strong>not</strong> negate. It adds the term to
             the next Grok pack selection ({queued.length} queued). Tags only.
+            Log Grok outcome stores Dave&apos;s call — still no Amazon write.
           </p>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
@@ -439,12 +551,13 @@ export function PpcGnoWatch() {
                 <TableHead className="text-right">ACOS</TableHead>
                 <TableHead>Exact home</TableHead>
                 <TableHead>Tag</TableHead>
+                <TableHead>Log Grok outcome</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {harvest.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-xs text-muted-foreground">
+                  <TableCell colSpan={7} className="text-xs text-muted-foreground">
                     No HARVEST_CANDIDATE terms on Auto Loose for L7.
                   </TableCell>
                 </TableRow>
@@ -467,12 +580,79 @@ export function PpcGnoWatch() {
                     <TableCell className="text-xs">{t.has_enabled_exact_elsewhere ? "yes" : "no"}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-[9px]">{on ? "IN PACK" : t.proposed_tag}</Badge>
+                      {t.learning_note && (
+                        <p className="mt-0.5 text-[9px] text-muted-foreground">{t.learning_note}</p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          disabled={logging}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            logOutcomes({
+                              entries: [{
+                                dave_action: "skip",
+                                campaign_name: t.campaign_name,
+                                search_term: t.customer_search_term,
+                                proposed_tag: t.proposed_tag,
+                              }],
+                            });
+                          }}
+                          className="rounded border px-1.5 py-0.5 text-[9px] hover:bg-muted"
+                        >
+                          Skip
+                        </button>
+                        <button
+                          type="button"
+                          disabled={logging}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            logOutcomes({
+                              entries: [{
+                                dave_action: "approve_harvest_neg",
+                                campaign_name: t.campaign_name,
+                                search_term: t.customer_search_term,
+                                proposed_tag: t.proposed_tag,
+                              }],
+                            });
+                          }}
+                          className="rounded border px-1.5 py-0.5 text-[9px] hover:bg-muted"
+                        >
+                          Approve neg
+                        </button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
               })}
             </TableBody>
           </Table>
+          <div className="space-y-2 border-t p-3">
+            <p className="text-[11px] font-medium">Log Grok outcome</p>
+            <p className="text-[10px] text-muted-foreground">
+              Paste one line per call. Must not auto-negate.
+              Examples: <code>tallow lip balm organic skip</code>,
+              {" "}<code>cheap chapstick approve_harvest_neg</code>,
+              {" "}<code>hold SP | TBL | B0CLHVCPL5 | EX | tallow lip balm | TOS</code>
+            </p>
+            <Textarea
+              value={paste}
+              onChange={(e) => setPaste(e.target.value)}
+              rows={3}
+              placeholder="one outcome per line"
+              className="text-xs"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={logging || !paste.trim()}
+              onClick={() => logOutcomes({ paste })}
+            >
+              {logging ? "Saving…" : "Save outcomes"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

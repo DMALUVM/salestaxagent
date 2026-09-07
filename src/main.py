@@ -6467,6 +6467,12 @@ def _run_ads_gno_campaigns_sync(retry: int = 0):
     _run_ads_sync_job(
         "ads_gno_campaigns_sync", days=3, campaigns_only=True,
         label="gno-campaigns", ad_products=("SP",), retry=retry)
+    # Cheap one-liner on P0 or 48h review-due only. Never spam; never waits.
+    try:
+        from src.amazon_ads.gno_watch_alert import maybe_send_gno_export_alert
+        maybe_send_gno_export_alert()
+    except Exception as e:
+        print(f"[GNO] export-due ping skipped: {e}")
 
 
 def _run_ads_campaigns_sync(retry: int = 0):
