@@ -193,6 +193,15 @@ export const CORE_NEGATIVES = spec.core_negatives as readonly string[];
 export const GNO_LAUNCHED_AT = spec.launched_at;
 export const GNO_NEXT_REVIEW_AT = spec.next_human_review_at;
 
+/**
+ * Desk + nightly campaign windows are short spend lookbacks.
+ * The 4h GNO snapshot writes 3 closed days; nightly SP writes 7; the
+ * /api/ppc/gno desk reads 14. Ads campaign reports omit $0-spend days,
+ * so a KEEP-ALIVE with no row in these windows is a data gap — never a P0.
+ */
+export const GNO_DESK_SPEND_LOOKBACK_DAYS = 14;
+export const SHORT_SPEND_LOOKBACK_DAYS = 14;
+
 export function normalizeName(name: string | null | undefined): string {
   return String(name ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -266,6 +275,32 @@ export function hoursSinceLaunch(now: Date = new Date(), launchedAt = GNO_LAUNCH
   const start = Date.parse(launchedAt);
   if (!Number.isFinite(start)) return 0;
   return Math.max(0, (now.getTime() - start) / 3_600_000);
+}
+
+/** Inclusive closed-day span of the campaign rows, or the declared desk window. */
+export function spendLookbackDays(
+  campaigns: CampaignDailyRow[],
+  asOf: string,
+  declaredDays?: number,
+): number {
+  if (declaredDays != null && Number.isFinite(declaredDays) && declaredDays > 0) {
+    return Math.trunc(declaredDays);
+  }
+  const dates = campaigns.map((r) => r.date).filter(Boolean).sort();
+  if (!dates.length) return 0;
+  const startMs = Date.parse(`${dates[0]}T12:00:00Z`);
+  const asOfMs = Date.parse(`${asOf}T12:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(asOfMs)) return 0;
+  return Math.max(0, Math.round((asOfMs - startMs) / 86_400_000) + 1);
+}
+
+/**
+ * Absence from ads_campaigns_daily is not evidence a KEEP-ALIVE is paused.
+ * Always P2 — even a 90-day spend report omits $0 days. True P0 is
+ * KEEPER_NOT_ENABLED when a stored row says the state is not Enabled.
+ */
+export function keeperMissingPriority(_lookbackDays: number): AlertPriority {
+  return "P2";
 }
 
 export function n(v: unknown): number {
@@ -492,6 +527,8 @@ export function evaluateGnoAlerts(input: {
   negatives?: NegativeRow[] | null;
   negativesAvailable?: boolean;
   bidsKnown?: boolean;
+  /** Declared spend window (desk = 14). Absence inside this is never P0. */
+  lookbackDays?: number;
 }): GnoAlert[] {
   const { asOf, today, campaigns, searchTerms, placements } = input;
   const now = input.now ?? new Date();
@@ -499,13 +536,19 @@ export function evaluateGnoAlerts(input: {
   const latest = latestByCampaign(campaigns);
   const l7start = windowStart(asOf, 7);
   const trailStart = windowStart(shiftDays(asOf, -1), 7);
+  const lookback = spendLookbackDays(campaigns, asOf, input.lookbackDays);
   const alerts: GnoAlert[] = [];
 
   for (const name of KEEP_ALIVE) {
-    // Spend reports omit zero-impression ENABLED campaigns. A missing
-    // as-of row (or a blank status on a later spend day) is not "down".
+    // Spend reports omit $0 / zero-impression ENABLED campaigns. A missing
+    // as-of row (or a blank status on a later spend day) is not a P0.
     const statusRow = lastExplicitStatusRow(campaigns, name);
     if (!statusRow) {
+      const pri = keeperMissingPriority(lookback);
+      alerts.push(alert(pri, "KEEPER_MISSING",
+        "KEEP-ALIVE not in spend lookback (not a P0)",
+        `${name} has no ads_campaigns_daily status row in the ${lookback || "loaded"}-day spend window through ${asOf}. Ads campaign reports omit $0-spend days — this is not a pause or a delete. Confirm in Ads console if needed. Observe only.`,
+        { campaign_name: name }));
       continue;
     }
     if (!isEnabledStatus(statusRow.campaign_status)) {

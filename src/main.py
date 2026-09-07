@@ -6462,6 +6462,8 @@ def _run_ads_gno_campaigns_sync(retry: int = 0):
     pause / negate / raise bids or budgets. Lock-busy and HTTP 425 skip
     via the shared job wrapper (one deferred retry, no wait-loop).
     """
+    # 3 closed days is a short spend lookback. Ads campaign reports omit
+    # $0 days, so a KEEP-ALIVE missing from this snapshot is never a P0.
     _run_ads_sync_job(
         "ads_gno_campaigns_sync", days=3, campaigns_only=True,
         label="gno-campaigns", ad_products=("SP",), retry=retry)

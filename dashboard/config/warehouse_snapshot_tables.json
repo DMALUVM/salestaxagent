@@ -28,6 +28,7 @@
     { "name": "ads_recommendations", "on_conflict": "type,entity_name,campaign_id", "restore_order": 55 },
     { "name": "ads_action_decisions", "on_conflict": "as_of_date,rec_type,entity_name,campaign_id", "restore_order": 56 },
     { "name": "ads_action_outcomes", "on_conflict": "decision_id,horizon_days", "restore_order": 57 },
+    { "name": "gno_alert_acks", "on_conflict": "alert_key", "restore_order": 58 },
     { "name": "pnl_daily", "on_conflict": "date,grain,sku,channel", "restore_order": 60 },
     { "name": "filing_calendar", "on_conflict": "state_code,period_type,period_label", "restore_order": 60 },
     { "name": "compliance_obligations", "on_conflict": "state_code,obligation_type,period_label", "restore_order": 60 },
