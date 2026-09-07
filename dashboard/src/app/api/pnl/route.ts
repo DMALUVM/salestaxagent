@@ -1,11 +1,12 @@
 import { getServerSupabase } from "@/lib/supabase-server";
-import { amazonAsOf, amazonToday } from "@/lib/as-of";
+import { agentToday, amazonAsOf, amazonToday, shiftDays } from "@/lib/as-of";
 import { buildAmazonMonthlyPnl } from "@/lib/sku-monthly-pnl";
 import {
   attachDayReimbursements,
   attachMonthReimbursements,
   sumReimbursementsByDay,
 } from "@/lib/fba-reimbursements";
+import type { ShopifyPnlRow } from "@/lib/shopify-pnl";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 interface PnlRow {
@@ -54,7 +55,8 @@ async function paginate<T>(
  * more complete than sales_by_sku — closed July included. Settlement
  * amazon_net_proceeds is not Month contribution. SKU Economics is a
  * check, not an ingest. Incomplete daily windows stay on sales_by_sku.
- * Shopify is never folded into Amazon contribution.
+ * Shopify is never folded into Amazon contribution. Shopify lives on
+ * channel='shopify' and is returned separately as shopifyDaily.
  */
 export async function GET() {
   try {
@@ -64,10 +66,21 @@ export async function GET() {
     try {
       daily = await paginate((from, to) =>
         sb.from("pnl_daily").select("*").eq("grain", "account")
+          .eq("channel", "amazon")
           .order("date", { ascending: false })
           .range(from, to),
       );
     } catch { /* table may not exist */ }
+
+    let shopifyRaw: PnlRow[] = [];
+    try {
+      shopifyRaw = await paginate((from, to) =>
+        sb.from("pnl_daily").select("*").eq("grain", "account")
+          .eq("channel", "shopify")
+          .order("date", { ascending: false })
+          .range(from, to),
+      );
+    } catch { /* shopify channel may be empty */ }
 
     daily = daily.filter((r) => !(Number(r.units) > 0 && Number(r.gross_sales) <= 0));
 
@@ -160,6 +173,10 @@ export async function GET() {
       adsLagging: Boolean(adsDateMax && adsDateMax < asOf),
       timezone: "America/Los_Angeles",
       formula: "gross_sales - referral - fba - ad_spend - cogs",
+      shopifyDaily: shopifyDailyRows(shopifyRaw),
+      shopifyAsOf: shiftDays(agentToday(), -1),
+      shopifyTimezone: "America/New_York",
+      shopifyFormula: "merchandise + shipping_charged - est_outbound_ship - cogs",
       adsSource: adsByMonth.length
         ? "ads_monthly_spend (import) then ads_campaigns_daily.spend"
         : "ads_campaigns_daily.spend",
@@ -172,8 +189,42 @@ export async function GET() {
       salesDateMax: null, adsDateMax: null,
       asOf: null, today: null, latestClosed: null, adsLagging: false,
       formula: "gross_sales - referral - fba - ad_spend - cogs",
+      shopifyDaily: [],
+      shopifyAsOf: null,
     });
   }
+}
+
+function shopifyDailyRows(raw: PnlRow[]): ShopifyPnlRow[] {
+  return raw.map((r) => {
+    const meta = (() => {
+      const m = r.meta;
+      if (!m) return {};
+      if (typeof m === "object") return m as Record<string, unknown>;
+      try { return JSON.parse(m) as Record<string, unknown>; } catch { return {}; }
+    })();
+    const num = (k: string): number | undefined =>
+      typeof meta[k] === "number" ? (meta[k] as number) : undefined;
+    return {
+      date: r.date,
+      gross_sales: Number(r.gross_sales) || 0,
+      units: Number(r.units) || 0,
+      est_fba_fees: Number(r.est_fba_fees) || 0,
+      est_cogs: Number(r.est_cogs) || 0,
+      est_contribution: Number(r.est_contribution) || 0,
+      net_after_ads: Number(r.net_after_ads) || 0,
+      merchandise: num("merchandise"),
+      shipping_charged: num("shipping_charged"),
+      est_outbound_ship: num("est_outbound_ship"),
+      order_count: num("order_count"),
+      subscription_orders: num("subscription_orders"),
+      one_time_orders: num("one_time_orders"),
+      provisional_shipping_orders: num("provisional_shipping_orders"),
+      outbound_per_order: num("outbound_per_order"),
+      outbound_basis: typeof meta.outbound_basis === "string" ? meta.outbound_basis : undefined,
+      cogs_basis: typeof meta.cogs_basis === "string" ? meta.cogs_basis : undefined,
+    };
+  });
 }
 
 async function loadMonthly(
