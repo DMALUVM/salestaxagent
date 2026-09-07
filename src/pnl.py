@@ -420,7 +420,9 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
              .eq("date", d).eq("channel", "amazon").execute())
 
     if not account_rows:
-        return {"rows": 0, "inserted": 0, "days": 0, "skipped_days": skipped_days}
+        result = {"rows": 0, "inserted": 0, "days": 0, "skipped_days": skipped_days}
+        result["shopify"] = _safe_shopify_pnl(days)
+        return result
 
     inserted = upsert_rows("pnl_daily", account_rows, on_conflict="date,grain,sku,channel")
     sku_inserted = 0
@@ -465,4 +467,15 @@ def compute_pnl(days: int = 30, with_skus: bool = True,
         "excluded_zero_revenue_units": sum(excluded_units.values()),
         "referral_pct": DEFAULT_REFERRAL_PCT,
         "fba_per_unit": DEFAULT_FBA_FEE_PER_UNIT,
+        "shopify": _safe_shopify_pnl(days),
     }
+
+
+def _safe_shopify_pnl(days: int) -> dict:
+    """Shopify contribution sibling. Failures never roll back Amazon rows."""
+    try:
+        from src.pnl_shopify import compute_shopify_pnl
+        return compute_shopify_pnl(days=days)
+    except Exception:
+        log.exception("Shopify P&L failed; Amazon rows unchanged")
+        return {"rows": 0, "inserted": 0, "skipped": True, "error": "shopify_pnl_failed"}

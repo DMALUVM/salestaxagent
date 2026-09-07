@@ -11,6 +11,8 @@ import { AdsMonthlyUpload } from "@/components/ads-monthly-upload";
 import { isConfigured } from "@/lib/supabase";
 import type { PnlRow } from "@/lib/pnl-periods";
 import type { MonthlySkuLine } from "@/lib/sku-monthly-pnl";
+import type { ShopifyPnlRow } from "@/lib/shopify-pnl";
+import { emptyShopifyWindow, summarizeShopifyWindow } from "@/lib/shopify-pnl";
 import { Shield, DollarSign, AlertTriangle } from "lucide-react";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
@@ -29,6 +31,8 @@ export default function ProfitPage() {
   const [todayLA, setTodayLA] = useState<string | null>(null);
   const [latestClosed, setLatestClosed] = useState<string | null>(null);
   const [adsLagging, setAdsLagging] = useState(false);
+  const [shopifyDaily, setShopifyDaily] = useState<ShopifyPnlRow[]>([]);
+  const [shopifyAsOf, setShopifyAsOf] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,6 +59,8 @@ export default function ProfitPage() {
         setTodayLA(d.today ?? null);
         setLatestClosed(d.latestClosed ?? null);
         setAdsLagging(Boolean(d.adsLagging));
+        setShopifyDaily(d.shopifyDaily ?? []);
+        setShopifyAsOf(d.shopifyAsOf ?? null);
         setLoading(false);
       })
       .catch((e) => {
@@ -111,6 +117,15 @@ export default function ProfitPage() {
     };
   }, [data, asOf, latestClosed]);
 
+  const shopify7 = useMemo(
+    () => (shopifyAsOf ? summarizeShopifyWindow(shopifyDaily, shopifyAsOf, 7) : emptyShopifyWindow()),
+    [shopifyDaily, shopifyAsOf],
+  );
+  const shopify30 = useMemo(
+    () => (shopifyAsOf ? summarizeShopifyWindow(shopifyDaily, shopifyAsOf, 30) : emptyShopifyWindow()),
+    [shopifyDaily, shopifyAsOf],
+  );
+
   if (!isConfigured()) return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
       <Shield className="mb-4 h-12 w-12 text-muted-foreground/30" />
@@ -141,6 +156,9 @@ export default function ProfitPage() {
       <SectionNav
         items={[
           { id: "customers", label: "Customer LTV" },
+          ...(shopifyDaily.length > 0 && shopifyAsOf
+            ? [{ id: "shopify-contribution", label: "Shopify (est.)" }]
+            : []),
           ...(data.length > 0
             ? [
                 { id: "windows", label: "Windows" },
@@ -159,6 +177,55 @@ export default function ProfitPage() {
       <div id="customers" className="scroll-mt-14">
         <ShopifyCustomers />
       </div>
+
+      {shopifyDaily.length > 0 && shopifyAsOf && (
+        <Card id="shopify-contribution" className="scroll-mt-14">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Shopify contribution (est.)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase">Net (7d)</p>
+                <p className={`text-2xl font-semibold tabular-nums ${shopify7.contribution >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                  ${fmtD(shopify7.contribution)}
+                </p>
+                <p className="text-xs text-muted-foreground">{shopify7.days}d · {shopify7.orders} orders</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase">Net (30d)</p>
+                <p className={`text-2xl font-semibold tabular-nums ${shopify30.contribution >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                  ${fmtD(shopify30.contribution)}
+                </p>
+                <p className="text-xs text-muted-foreground">{shopify30.days}d · {shopify30.orders} orders</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase">Ship charged (30d)</p>
+                <p className="text-2xl font-semibold tabular-nums">${fmt(Math.round(shopify30.shippingCharged))}</p>
+                <p className="text-xs text-muted-foreground">
+                  vs ${fmt(Math.round(shopify30.estOutbound))} est. outbound
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase">Sub vs one-time (30d)</p>
+                <p className="text-2xl font-semibold tabular-nums">{shopify30.subOrders} / {shopify30.oneTimeOrders}</p>
+                <p className="text-xs text-muted-foreground">subscription / one-time orders</p>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              As of {shopifyAsOf} (America/New_York). Contribution = merchandise + shipping charged
+              − estimated outbound (${fmtD(shopifyDaily[0]?.outbound_per_order ?? 5.5)}/order from
+              config, not a 3PL invoice) − COGS from sku_costs. Amazon P&amp;L below is unchanged.
+              {shopify30.provisionalOrders > 0 && (
+                <span className="ml-1 text-amber-600 dark:text-amber-400">
+                  {shopify30.provisionalOrders} order(s) still use residual shipping (total−subtotal−tax)
+                  until a 90-day re-pull.
+                </span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {!hasData ? (
         <Card>

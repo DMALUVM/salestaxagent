@@ -19,13 +19,13 @@ export async function GET(request: NextRequest) {
     const sb = getServerSupabase();
 
     const { data: acctRows } = await sb.from("pnl_daily").select("*")
-      .eq("grain", "account").eq("date", date).limit(1);
+      .eq("grain", "account").eq("channel", "amazon").eq("date", date).limit(1);
     const account = acctRows?.[0] ?? null;
 
     // SKU-grain rows for the day, if pnl-sync stored them.
     const { data: skuRows } = await sb.from("pnl_daily")
       .select("sku,gross_sales,units,ad_spend,est_referral_fees,est_fba_fees,est_cogs,est_contribution")
-      .eq("grain", "sku").eq("date", date)
+      .eq("grain", "sku").eq("channel", "amazon").eq("date", date)
       .order("est_contribution", { ascending: false })
       .limit(200);
 
