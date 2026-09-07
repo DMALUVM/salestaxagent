@@ -22,7 +22,9 @@ import {
   isAutoLoose,
   isEnabledStatus,
   keeperHeartbeats,
+  keeperMissingPriority,
   newExactTiles,
+  spendLookbackDays,
   normalizeName,
   tagAutoLooseTerm,
   watchCampaignsCsv,
@@ -165,9 +167,38 @@ describe("rules engine P0/P1", () => {
       campaigns: [],
       searchTerms: [],
       placements: [],
+      lookbackDays: 3,
     });
     assert.ok(alerts.every((a) => a.auto_action === false));
-    assert.ok(alerts.some((a) => a.code === "KEEPER_MISSING"));
+    const missing = alerts.filter((a) => a.code === "KEEPER_MISSING");
+    assert.ok(missing.length >= 1);
+    assert.ok(missing.every((a) => a.priority === "P2"));
+    assert.equal(alerts.filter((a) => a.priority === "P0").length, 0);
+    assert.equal(keeperMissingPriority(3), "P2");
+    assert.equal(keeperMissingPriority(90), "P2");
+  });
+
+  test("KEEP-ALIVE absent from a 3-day / 14-day spend lookback is not a P0", () => {
+    const present = KEEP_ALIVE.slice(0, 3).map((name) =>
+      camp(name, { date: "2026-09-06", budget: 303, spend: 4 }));
+    const threeDay = evaluateGnoAlerts({
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns: present, searchTerms: [], placements: [],
+      lookbackDays: 3,
+    });
+    const fourteen = evaluateGnoAlerts({
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns: present, searchTerms: [], placements: [],
+      lookbackDays: 14,
+    });
+    for (const alerts of [threeDay, fourteen]) {
+      const missing = alerts.filter((a) => a.code === "KEEPER_MISSING");
+      assert.ok(missing.length >= KEEP_ALIVE.length - 3);
+      assert.ok(missing.every((a) => a.priority === "P2"));
+      assert.equal(alerts.some((a) => a.code === "KEEPER_MISSING" && a.priority === "P0"), false);
+    }
+    assert.equal(spendLookbackDays(present, "2026-09-06", 3), 3);
+    assert.equal(spendLookbackDays(present, "2026-09-06", 14), 14);
   });
 
   test("P0 keeper not enabled", () => {
@@ -362,10 +393,13 @@ describe("widgets + safety rails", () => {
     const page = readFileSync(path.join(process.cwd(), "src/app/ppc/gno/page.tsx"), "utf8");
     const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-gno-watch.tsx"), "utf8");
     const api = readFileSync(path.join(process.cwd(), "src/app/api/ppc/gno-export/route.ts"), "utf8");
-    for (const src of [lib, page, ui, api]) {
+    const ack = readFileSync(path.join(process.cwd(), "src/app/api/ppc/gno-ack/route.ts"), "utf8");
+    for (const src of [lib, page, ui, api, ack]) {
       assert.doesNotMatch(src, /amazonads|autoPause\(|auto_pause\s*=\s*true/i);
       assert.match(src, /observe/i);
     }
+    assert.match(ui, /Mark Done/);
+    assert.doesNotMatch(lib, /alert\("P0", "KEEPER_MISSING"/);
   });
 
   test("/ppc tab union still defaults to This week", () => {
@@ -381,6 +415,7 @@ describe("widgets + safety rails", () => {
     assert.equal(existsSync(path.join(process.cwd(), "src/app/ppc/gno/error.tsx")), true);
     assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno/route.ts")), true);
     assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno-export/route.ts")), true);
+    assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno-ack/route.ts")), true);
   });
 
   test("GNO API pages with a date + campaign_id order", () => {

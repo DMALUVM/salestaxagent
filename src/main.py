@@ -2164,6 +2164,9 @@ def sqp_import_cmd(path, asin, as_of, dry_run):
     SQP is the official Amazon signal. It reports click SHARE, not SERP
     position, so rows without an explicit rank column get a coarse rank BAND
     derived from share — recorded as a band, never as a measured position.
+
+    Brand View CSVs (Seller Central preamble + Brand Share % columns) also
+    land in sqp_weekly with source=sqp_brand_csv.
     """
     from datetime import date as _date
 
@@ -2177,18 +2180,21 @@ def sqp_import_cmd(path, asin, as_of, dry_run):
 
     click.echo(f"{'DRY RUN — ' if dry_run else ''}SQP import: {path}")
     click.echo(f"  columns matched : {r.get('columns')}")
+    click.echo(f"  week            : {r.get('week_start')} → {r.get('week_end')}")
     click.echo(f"  parsed          : {r['parsed']}")
     click.echo(f"  skipped         : {r['skipped']} (no query or no rank evidence)")
     click.echo(f"  unique keywords : {len(r['rows'])}")
+    click.echo(f"  sqp_weekly rows : {len(r.get('weekly') or [])}")
     if not dry_run:
-        click.echo(f"  written         : {r.get('written', 0)}")
+        click.echo(f"  written ranks   : {r.get('written', 0)}")
+        click.echo(f"  written weekly  : {r.get('sqp_weekly_written', 0)}")
     for w in r.get("warnings", []):
         click.echo(f"  ⚠ {w}")
     for row in r["rows"][:10]:
         share = row.get("impression_share_organic")
         click.echo(f"    {row['keyword_normalized'][:44]:<45} rank={row['organic_rank']}"
                    + (f"  share={share:.0%}" if share is not None else ""))
-    if dry_run and r["rows"]:
+    if dry_run and (r["rows"] or r.get("weekly")):
         click.echo("\n  Re-run with --apply to write.")
 
 
@@ -6330,6 +6336,8 @@ def _run_ads_gno_campaigns_sync(retry: int = 0):
     pause / negate / raise bids or budgets. Lock-busy and HTTP 425 skip
     via the shared job wrapper (one deferred retry, no wait-loop).
     """
+    # 3 closed days is a short spend lookback. Ads campaign reports omit
+    # $0 days, so a KEEP-ALIVE missing from this snapshot is never a P0.
     _run_ads_sync_job(
         "ads_gno_campaigns_sync", days=3, campaigns_only=True,
         label="gno-campaigns", ad_products=("SP",), retry=retry)

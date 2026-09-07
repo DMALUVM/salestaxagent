@@ -2,6 +2,7 @@ import { getServerSupabase } from "@/lib/supabase-server";
 import { amazonAsOf, amazonToday, windowStart } from "@/lib/as-of";
 import {
   AUTO_LOOSE_NAME,
+  GNO_DESK_SPEND_LOOKBACK_DAYS,
   GNO_LAUNCHED_AT,
   GNO_NEXT_REVIEW_AT,
   GNO_OBSERVE_ONLY,
@@ -63,7 +64,7 @@ export async function GET() {
   try {
     const asOf = amazonAsOf();
     const today = amazonToday();
-    const start = windowStart(asOf, 14);
+    const start = windowStart(asOf, GNO_DESK_SPEND_LOOKBACK_DAYS);
     const sb = getServerSupabase();
     const loadErrors: string[] = [];
 
@@ -78,16 +79,38 @@ export async function GET() {
     const searchTerms = term.rows as unknown as SearchTermRow[];
     const placements = place.rows as unknown as PlacementRow[];
 
-    let sqp: { available: boolean; newestAsOf: string | null; stale: boolean; keywords: number } = {
-      available: false, newestAsOf: null, stale: true, keywords: 0,
+    let sqp: {
+      available: boolean;
+      newestAsOf: string | null;
+      stale: boolean;
+      keywords: number;
+      source: "sqp_weekly" | "keyword_organic_rank" | null;
+    } = {
+      available: false, newestAsOf: null, stale: true, keywords: 0, source: null,
     };
     try {
-      const r = await sb.from("keyword_organic_rank")
-        .select("as_of")
-        .order("as_of", { ascending: false })
+      // Prefer Brand Analytics / SP-API week_end from sqp_weekly — that is what
+      // the upload banner tracks. Fall back to keyword_organic_rank.as_of.
+      const weekly = await sb.from("sqp_weekly")
+        .select("week_end")
+        .order("week_end", { ascending: false })
         .limit(1);
-      if (!r.error) {
-        const newest = r.data?.[0]?.as_of ? String(r.data[0].as_of) : null;
+      let newest: string | null = null;
+      let source: "sqp_weekly" | "keyword_organic_rank" | null = null;
+      if (!weekly.error && weekly.data?.[0]?.week_end) {
+        newest = String(weekly.data[0].week_end);
+        source = "sqp_weekly";
+      } else {
+        const r = await sb.from("keyword_organic_rank")
+          .select("as_of")
+          .order("as_of", { ascending: false })
+          .limit(1);
+        if (!r.error && r.data?.[0]?.as_of) {
+          newest = String(r.data[0].as_of);
+          source = "keyword_organic_rank";
+        }
+      }
+      if (newest || source) {
         const age = newest
           ? Math.round((Date.now() - Date.parse(`${newest}T00:00:00Z`)) / 86_400_000)
           : null;
@@ -96,6 +119,7 @@ export async function GET() {
           newestAsOf: newest,
           stale: age == null || age > 21,
           keywords: 0,
+          source,
         };
       }
     } catch {
@@ -124,11 +148,24 @@ export async function GET() {
       }
     } catch { /* optional */ }
 
+    let acks: string[] = [];
+    try {
+      const r = await sb.from("gno_alert_acks")
+        .select("alert_key,status")
+        .eq("status", "done");
+      if (!r.error) {
+        acks = (r.data ?? [])
+          .map((row) => String((row as { alert_key?: string }).alert_key ?? ""))
+          .filter(Boolean);
+      }
+    } catch { /* table optional until migration_gno_alert_acks.sql */ }
+
     const now = new Date();
     const alerts = evaluateGnoAlerts({
       asOf, today, now, campaigns, searchTerms, placements,
       negativesAvailable: false,
       bidsKnown: false,
+      lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
     });
     const harvest = harvestQueue(searchTerms, campaigns, asOf);
     const sbL7 = campaigns.filter((c) => {
@@ -163,6 +200,8 @@ export async function GET() {
       harvestQueue: harvest.filter((t) => t.proposed_tag === "HARVEST_CANDIDATE"),
       junkQueue: harvest.filter((t) => t.proposed_tag === "JUNK_CANDIDATE"),
       harvestAll: harvest,
+      acks,
+      lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
       sbL7: [...sbByName.entries()].map(([campaign_name, m]) => ({
         campaign_name, ...m,
         acos: m.sales > 0 ? (m.spend / m.sales) * 100 : null,

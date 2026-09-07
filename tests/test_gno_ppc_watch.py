@@ -74,8 +74,19 @@ def test_gno_dashboard_never_auto_writes_amazon():
     ui = (ROOT / "dashboard" / "src" / "components" / "ppc-gno-watch.tsx").read_text()
     lib = (ROOT / "dashboard" / "src" / "lib" / "gno-ppc-watch.ts").read_text()
     api = (ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno" / "route.ts").read_text()
-    for src in (ui, lib, api):
+    ack = (ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno-ack" / "route.ts").read_text()
+    for src in (ui, lib, api, ack):
         assert "observe" in src.lower()
         assert "amazonads" not in src.lower()
         assert "autoPause(" not in src
         assert "auto_pause = true" not in src.lower()
+    assert "Mark Done" in ui
+    assert 'alert("P0", "KEEPER_MISSING"' not in lib
+    assert "not a P0" in lib
+
+
+def test_keeper_missing_from_short_spend_lookback_is_not_p0():
+    lib = (ROOT / "dashboard" / "src" / "lib" / "gno-ppc-watch.ts").read_text()
+    assert "SHORT_SPEND_LOOKBACK_DAYS" in lib
+    assert "keeperMissingPriority" in lib
+    assert 'days=3' in (ROOT / "src" / "main.py").read_text()
