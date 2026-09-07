@@ -243,11 +243,14 @@ def test_search_term_425_defers_gap_fill_not_7d_rewrite(monkeypatch):
             added.append(id)
 
     monkeypatch.setattr(main_mod, "_SCHEDULER", Sched())
-    main_mod._defer_ads_job("ads_search_terms_sync", 2)
-    assert added == ["ads_search_terms_gap_fill_retry_3"]
+    assert main_mod._defer_ads_job("ads_search_terms_sync", 0) is True
+    assert added == ["ads_search_terms_gap_fill_retry_1"]
+    # Cap=1: second 425 defer must not schedule another date-trigger.
+    assert main_mod._defer_ads_job("ads_search_terms_sync", 1) is False
+    assert added == ["ads_search_terms_gap_fill_retry_1"]
 
 
-def test_defer_caps_and_is_not_a_wait_loop():
+def test_defer_caps_at_one_and_is_not_a_wait_loop():
     import inspect
     from src import main as main_mod
     src = inspect.getsource(main_mod._defer_ads_job)
@@ -256,7 +259,27 @@ def test_defer_caps_and_is_not_a_wait_loop():
     assert "sleep" not in src
     sched = inspect.getsource(main_mod._schedule_ads_retry)
     assert "replace_existing=True" in sched
-    assert main_mod._ADS_RETRY_MAX >= 1
+    assert main_mod._ADS_RETRY_MAX == 1
+
+
+def test_placements_stop_on_425(monkeypatch):
+    import src.amazon_ads.reports as reports
+    from datetime import date
+    from src.amazon_ads.client import AdsReportSlotBusy
+
+    calls = []
+
+    def fake(cs, ce):
+        calls.append((cs, ce))
+        if len(calls) == 1:
+            raise AdsReportSlotBusy("HTTP 425")
+        return []
+
+    monkeypatch.setattr(reports, "_fetch_placements_chunk", fake)
+    r = reports.fetch_placements(date(2026, 8, 1), date(2026, 9, 5))
+    assert len(calls) == 1
+    assert r["stopped"] == "slot_busy"
+    assert reports.ads_slot_busy_in_result({"placements": r})
 
 
 def test_lease_busy_queues_one_retry_not_a_poll(monkeypatch):
