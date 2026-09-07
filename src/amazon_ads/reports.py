@@ -228,6 +228,22 @@ def _transient_label(e: Exception) -> str:
     return "transient error"
 
 
+def _sb_sd_should_release_lock(e: Exception) -> bool:
+    """True when remaining SB/SD days will just hold the lock for hours.
+
+    A timed-out or 425 Brands/Display chunk used to `continue` through the
+    rest of the 1-day window (up to 1800s each). Search terms and
+    placements then skipped every retry while campaigns stayed partial.
+    Stop the remaining SB/SD days; ads-heal retries them later.
+    """
+    if isinstance(e, AdsReportSlotBusy):
+        return True
+    if isinstance(e, TimeoutError):
+        return True
+    msg = str(e).lower()
+    return "425" in msg or "timed out" in msg or "slot busy" in msg
+
+
 def _fetch_report_with_backoff(config: dict, attempts: int = 3,
                                base_sleep: float = 45.0,
                                timeout: int | None = None) -> list[dict]:
@@ -442,10 +458,24 @@ def fetch_campaigns_daily(start: date, end: date,
     errors: list[str] = []
     by_type: dict[str, dict] = {}
     inserted = 0
+    # After a SB/SD timeout/425, skip remaining Brands/Display so the
+    # nightly lock is released and ST/placements can run.
+    sb_sd_stop = False
 
     for product in products:
         if product not in AD_PRODUCTS:
             log.warning("Unknown ad product %r — skipping", product)
+            continue
+        if product in ("SB", "SD") and sb_sd_stop:
+            skip_msg = (
+                f"{product} skipped — earlier SB/SD stopped so search terms "
+                "and placements can take the lock")
+            log.warning("Campaign %s", skip_msg)
+            by_type[product] = {
+                "rows": 0, "inserted": 0, "spend": 0.0, "clicks": 0,
+                "errors": [skip_msg], "ok": False,
+            }
+            errors.append(skip_msg)
             continue
 
         parsed: list[dict] = []
@@ -474,6 +504,13 @@ def fetch_campaigns_daily(start: date, end: date,
                 log.warning("Campaign %s", msg)
                 product_errors.append(msg)
                 say(f"    {product} chunk {i}/{len(product_chunks)} {cs}→{ce}: FAILED — {str(e)[:80]}")
+                if product in ("SB", "SD") and _sb_sd_should_release_lock(e):
+                    log.warning(
+                        "STOP remaining %s days after %s — release ads lock "
+                        "so search terms and placements can run",
+                        product, _transient_label(e))
+                    sb_sd_stop = True
+                    break
                 continue
 
             chunk_rows = []

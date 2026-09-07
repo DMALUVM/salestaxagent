@@ -174,6 +174,7 @@ describe("rules engine P0/P1", () => {
     assert.ok(missing.length >= 1);
     assert.ok(missing.every((a) => a.priority === "P2"));
     assert.equal(alerts.filter((a) => a.priority === "P0").length, 0);
+    assert.ok(!alerts.some((a) => a.priority === "P0" && a.code.startsWith("KEEPER_")));
     assert.equal(keeperMissingPriority(3), "P2");
     assert.equal(keeperMissingPriority(90), "P2");
   });
@@ -199,6 +200,36 @@ describe("rules engine P0/P1", () => {
     }
     assert.equal(spendLookbackDays(present, "2026-09-06", 3), 3);
     assert.equal(spendLookbackDays(present, "2026-09-06", 14), 14);
+  });
+
+  test("omitted zero-impression ENABLED keeper is not a P0", () => {
+    const campaigns = KEEP_ALIVE.map((name) =>
+      camp(name, { date: "2026-09-04", campaign_status: "enabled", budget: 303, impressions: 12 }));
+    const alerts = evaluateGnoAlerts({
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns, searchTerms: [], placements: [],
+    });
+    assert.ok(!alerts.some((a) => a.code === "KEEPER_MISSING"));
+    assert.ok(!alerts.some((a) => a.code === "KEEPER_NOT_ENABLED"));
+    const auto = keeperHeartbeats(campaigns, "2026-09-06").find((k) => k.role === "auto_loose");
+    assert.equal(auto?.enabled, true);
+    assert.equal(auto?.state, "enabled");
+  });
+
+  test("blank status on a later spend row does not override last ENABLED", () => {
+    const name = AUTO_LOOSE_NAME;
+    const campaigns = [
+      camp(name, { date: "2026-09-04", campaign_status: "enabled", budget: 303 }),
+      camp(name, { date: "2026-09-06", campaign_status: "", budget: 303, impressions: 0 }),
+      ...KEEP_ALIVE.filter((n) => n !== name).map((n) =>
+        camp(n, { campaign_status: "enabled", budget: 25 })),
+    ];
+    const alerts = evaluateGnoAlerts({
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns, searchTerms: [], placements: [],
+    });
+    assert.ok(!alerts.some((a) => a.code === "KEEPER_NOT_ENABLED"));
+    assert.ok(!alerts.some((a) => a.code === "AUTO_LOOSE_NOT_ENABLED"));
   });
 
   test("P0 keeper not enabled", () => {

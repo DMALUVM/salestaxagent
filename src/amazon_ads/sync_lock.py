@@ -47,6 +47,16 @@ _LOCK_PATH_OVERRIDE: Path | None = None
 _beat_stop = threading.Event()
 _beat_thread: threading.Thread | None = None
 _BEAT_INTERVAL_SECONDS = 60
+_release_hooks: list = []
+
+
+def on_ads_lease_released(fn) -> None:
+    """Register a callback fired after this process drops the ads lease.
+
+    Used to queue one deferred ads retry — not a poll. Idempotent.
+    """
+    if fn not in _release_hooks:
+        _release_hooks.append(fn)
 
 
 def ads_lock_path() -> Path:
@@ -203,6 +213,11 @@ def release_ads_lease() -> None:
         tmp.unlink(missing_ok=True)
     except Exception:
         pass
+    for hook in list(_release_hooks):
+        try:
+            hook()
+        except Exception as e:
+            log.warning("Ads lock release hook failed: %s", e)
 
 
 def is_ads_pull_job(job_name: str) -> bool:

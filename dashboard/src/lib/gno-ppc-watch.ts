@@ -369,6 +369,20 @@ function latestByCampaign(rows: CampaignDailyRow[]): Map<string, CampaignDailyRo
   return out;
 }
 
+/** Last stored row with a non-blank campaign_status (spend reports omit 0-impr). */
+export function lastExplicitStatusRow(
+  rows: CampaignDailyRow[],
+  name: string,
+): CampaignDailyRow | null {
+  let best: CampaignDailyRow | null = null;
+  for (const r of rowsForName(rows, name)) {
+    const status = String(r.campaign_status ?? "").trim();
+    if (!status) continue;
+    if (!best || r.date > best.date) best = r;
+  }
+  return best;
+}
+
 function rowsForName(rows: CampaignDailyRow[], name: string): CampaignDailyRow[] {
   return rows.filter((r) => namesEqual(r.campaign_name, name));
 }
@@ -526,27 +540,30 @@ export function evaluateGnoAlerts(input: {
   const alerts: GnoAlert[] = [];
 
   for (const name of KEEP_ALIVE) {
-    const row = latest.get(normalizeName(name));
-    if (!row) {
+    // Spend reports omit $0 / zero-impression ENABLED campaigns. A missing
+    // as-of row (or a blank status on a later spend day) is not a P0.
+    const statusRow = lastExplicitStatusRow(campaigns, name);
+    if (!statusRow) {
       const pri = keeperMissingPriority(lookback);
       alerts.push(alert(pri, "KEEPER_MISSING",
         "KEEP-ALIVE not in spend lookback (not a P0)",
-        `${name} has no ads_campaigns_daily row in the ${lookback || "loaded"}-day spend window through ${asOf}. Ads campaign reports omit $0-spend days — this is not a pause or a delete. Confirm in Ads console if needed. Observe only.`,
+        `${name} has no ads_campaigns_daily status row in the ${lookback || "loaded"}-day spend window through ${asOf}. Ads campaign reports omit $0-spend days — this is not a pause or a delete. Confirm in Ads console if needed. Observe only.`,
         { campaign_name: name }));
       continue;
     }
-    if (!isEnabledStatus(row.campaign_status)) {
+    if (!isEnabledStatus(statusRow.campaign_status)) {
       alerts.push(alert("P0", "KEEPER_NOT_ENABLED", "KEEP-ALIVE state ≠ Enabled",
-        `${name} latest status is ${row.campaign_status || "(blank)"} on ${row.date}. Never auto-pause; re-enable only after Dave confirms.`,
+        `${name} latest status is ${statusRow.campaign_status || "(blank)"} on ${statusRow.date}. Never auto-pause; re-enable only after Dave confirms.`,
         { campaign_name: name }));
     }
   }
 
-  const auto = latest.get(normalizeName(AUTO_LOOSE_NAME));
+  const autoStatus = lastExplicitStatusRow(campaigns, AUTO_LOOSE_NAME);
+  const auto = autoStatus ?? latest.get(normalizeName(AUTO_LOOSE_NAME));
   if (auto) {
-    if (!isEnabledStatus(auto.campaign_status)) {
+    if (autoStatus && !isEnabledStatus(autoStatus.campaign_status)) {
       alerts.push(alert("P0", "AUTO_LOOSE_NOT_ENABLED", "Auto Loose state ≠ Enabled",
-        `Auto Loose status is ${auto.campaign_status || "(blank)"}. Do not auto-enable.`,
+        `Auto Loose status is ${autoStatus.campaign_status || "(blank)"}. Do not auto-enable.`,
         { campaign_name: AUTO_LOOSE_NAME }));
     }
     if (auto.budget != null && Number(auto.budget) !== AUTO_LOOSE_BUDGET) {
@@ -667,7 +684,8 @@ export function newExactTiles(
   return NEW_EXACT.map((name) => {
     const rows = rowsForName(campaigns, name);
     const m = sumMetrics(inWindow(rows, start, asOf));
-    const snap = latest.get(normalizeName(name));
+    const snap = lastExplicitStatusRow(campaigns, name)
+      ?? latest.get(normalizeName(name));
     const budget = snap?.budget != null ? Number(snap.budget) : null;
     return {
       campaign_name: name,
@@ -704,7 +722,8 @@ export function keeperHeartbeats(
     const rows = rowsForName(campaigns, name);
     const l7 = sumMetrics(inWindow(rows, start, asOf));
     const todayM = sumMetrics(inWindow(rows, asOf, asOf));
-    const snap = latest.get(normalizeName(name));
+    const snap = lastExplicitStatusRow(campaigns, name)
+      ?? latest.get(normalizeName(name));
     return {
       campaign_name: name,
       role,
