@@ -177,6 +177,35 @@ def test_to_row_maps_an_api_order_without_a_store():
     assert r["refunded_amount"] == pytest.approx(5.00), "failed refunds don't count"
     assert r["state_code"] == "NC" and r["country_code"] == "US"
     assert r["order_date"] == "2026-08-21"
+    # No shipping_lines on this fixture → residual = 28.15 − 20.39 − 1.81
+    assert r["shipping_price"] == pytest.approx(5.95)
+    assert r["shipping_source"] == "provisional_residual"
+    assert r["is_subscription"] is False
+
+
+def test_to_row_sums_shipping_lines_and_detects_subscription():
+    from src.shopify_backfill import is_subscription_order, shipping_price_of
+
+    api = {
+        "id": 9, "created_at": "2026-08-21T12:00:00-04:00",
+        "subtotal_price": "40.00", "total_price": "48.00", "total_tax": "3.00",
+        "source_name": "subscription_contract",
+        "shipping_lines": [{"price": "4.50"}, {"price": "1.00"}],
+        "tags": "Subscription, Recurring",
+        "line_items": [{"sku": "AA", "quantity": 1,
+                        "selling_plan_allocation": {"selling_plan_id": 11}}],
+    }
+    r = to_row(api)
+    assert r["shipping_price"] == pytest.approx(5.50)
+    assert r["shipping_source"] == "shipping_lines"
+    assert r["is_subscription"] is True
+    assert shipping_price_of({"shipping_lines": []}) == (0.0, "shipping_lines")
+    assert is_subscription_order({"source_name": "web", "tags": "VIP"}) is False
+    assert is_subscription_order({"source_name": "web", "tags": "Subscription"}) is True
+    assert is_subscription_order({
+        "source_name": "web",
+        "line_items": [{"selling_plan_id": 99}],
+    }) is True
 
 
 def test_to_row_does_not_store_raw_email_by_default():

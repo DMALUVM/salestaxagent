@@ -15,7 +15,9 @@
     "price_field": "item-price"
   },
   "shopify": {
-    "timezone": "America/New_York"
+    "timezone": "America/New_York",
+    "estimated_outbound_ship_cost": 5.50,
+    "//estimated_outbound_ship_cost": "Config estimate of 3PL outbound $/parcel for Shopify contribution. Not carrier invoice truth. TODO: replace with real 3PL $/parcel when invoices are parsed."
   },
   "spapi": {
     "max_chunk_days": 30,

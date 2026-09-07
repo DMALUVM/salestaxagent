@@ -2294,6 +2294,11 @@ def ads_mark_cmd(rec_ids, priority, rec_type, status, dry_run):
 def shopify_backfill_cmd(since, with_email, max_pages):
     """Store every Shopify order so AOV / LTV / repeat / cohorts become possible.
 
+    Also writes shipping_price (sum of shipping_lines) and is_subscription
+    (source_name / tags / selling plan). Use --since for a 90-day shipping
+    re-pull after migration_shopify_shipping.sql; nightly pnl_sync does that
+    window automatically.
+
     Idempotent: each page is upserted on order_id as it arrives, so re-running
     is safe and a interrupted run resumes by simply being run again.
     """
@@ -3160,42 +3165,62 @@ def pnl_sync_cmd(days, no_skus):
 
     click.echo(f"Computing P&L for last {days} days...")
     result = compute_pnl(days=days, with_skus=not no_skus)
-    if not result.get("rows"):
+    shop = result.get("shopify") or {}
+    if not result.get("rows") and not shop.get("rows"):
         click.echo("No data in that window.")
         return
-    click.echo(f"Days: {result['days']}, Rows: {result['rows']} account "
-               f"+ {result.get('sku_rows', 0)} SKU, Inserted: {result['inserted']}")
-    click.echo(f"  Sales        ${result['total_sales']:>12,.2f}")
-    click.echo(f"  - Fees       ${result['total_fees']:>12,.2f}")
-    click.echo(f"  - Ad spend   ${result['total_ads']:>12,.2f}")
-    click.echo(f"  - COGS       ${result['total_cogs']:>12,.2f}")
-    click.echo(f"  = Contribution ${result['total_contribution']:>10,.2f}")
-    click.echo(f"Fee basis: {result['settled_days']} settled day(s), "
-               f"{result['estimated_days']} estimated "
-               f"(referral {result['referral_pct']*100:.0f}%, FBA ${result['fba_per_unit']:.2f}/unit)")
-    click.echo(f"COGS: {'sku_costs x daily units' if result['has_cogs'] else 'not configured (set sku_costs table)'}")
-    if result.get("missing_cost_skus"):
-        click.echo(f"  ⚠ no sku_costs entry for {len(result['missing_cost_skus'])} SKU(s), "
-                   f"used average unit cost: {', '.join(result['missing_cost_skus'][:5])}")
-    if result.get("excluded_zero_revenue_units"):
-        click.echo(f"  ⚠ excluded {result['excluded_zero_revenue_units']} unit(s) on order lines "
-                   f"with no item-price (kept units on the same basis as gross_sales)")
-    flagged = result.get("flagged_days") or []
-    if flagged:
-        click.echo(click.style(f"  ⚠ {len(flagged)} day(s) failed the sanity check "
-                               f"— stored, but the inputs disagree:", fg="yellow"))
-        for f in flagged[:10]:
-            click.echo(f"      {f['date']}  sales ${f['sales']:,.2f}  units {f['units']}  "
-                       f"contribution ${f['contribution']:,.2f}  — {'; '.join(f['issues'])}")
+    if not result.get("rows"):
+        click.echo("Amazon: no data in that window.")
     else:
-        click.echo("  Sanity check: all days within expected fee % and revenue/unit bands")
-    skipped = result.get("skipped_days") or []
-    if skipped:
-        click.echo(click.style(
-            f"  ⚠ skipped {len(skipped)} day(s) with units but $0 sales "
-            f"(not stored): {', '.join(skipped[:12])}",
-            fg="yellow",
-        ))
+        click.echo(f"Days: {result['days']}, Rows: {result['rows']} account "
+                   f"+ {result.get('sku_rows', 0)} SKU, Inserted: {result['inserted']}")
+        click.echo(f"  Sales        ${result['total_sales']:>12,.2f}")
+        click.echo(f"  - Fees       ${result['total_fees']:>12,.2f}")
+        click.echo(f"  - Ad spend   ${result['total_ads']:>12,.2f}")
+        click.echo(f"  - COGS       ${result['total_cogs']:>12,.2f}")
+        click.echo(f"  = Contribution ${result['total_contribution']:>10,.2f}")
+        click.echo(f"Fee basis: {result['settled_days']} settled day(s), "
+                   f"{result['estimated_days']} estimated "
+                   f"(referral {result['referral_pct']*100:.0f}%, FBA ${result['fba_per_unit']:.2f}/unit)")
+        click.echo(f"COGS: {'sku_costs x daily units' if result['has_cogs'] else 'not configured (set sku_costs table)'}")
+        if result.get("missing_cost_skus"):
+            click.echo(f"  ⚠ no sku_costs entry for {len(result['missing_cost_skus'])} SKU(s), "
+                       f"used average unit cost: {', '.join(result['missing_cost_skus'][:5])}")
+        if result.get("excluded_zero_revenue_units"):
+            click.echo(f"  ⚠ excluded {result['excluded_zero_revenue_units']} unit(s) on order lines "
+                       f"with no item-price (kept units on the same basis as gross_sales)")
+        flagged = result.get("flagged_days") or []
+        if flagged:
+            click.echo(click.style(f"  ⚠ {len(flagged)} day(s) failed the sanity check "
+                                   f"— stored, but the inputs disagree:", fg="yellow"))
+            for f in flagged[:10]:
+                click.echo(f"      {f['date']}  sales ${f['sales']:,.2f}  units {f['units']}  "
+                           f"contribution ${f['contribution']:,.2f}  — {'; '.join(f['issues'])}")
+        else:
+            click.echo("  Sanity check: all days within expected fee % and revenue/unit bands")
+        skipped = result.get("skipped_days") or []
+        if skipped:
+            click.echo(click.style(
+                f"  ⚠ skipped {len(skipped)} day(s) with units but $0 sales "
+                f"(not stored): {', '.join(skipped[:12])}",
+                fg="yellow",
+            ))
+    if shop.get("skipped"):
+        click.echo(f"Shopify: skipped ({shop.get('error', 'unavailable')})")
+    elif shop.get("rows"):
+        click.echo(f"Shopify (est.): {shop['days']}d  sales ${shop['total_sales']:,.2f} "
+                   f"(ship charged ${shop.get('total_shipping_charged', 0):,.2f}) "
+                   f"- outbound ${shop.get('total_outbound_est', 0):,.2f} "
+                   f"- COGS ${shop.get('total_cogs', 0):,.2f} "
+                   f"= ${shop.get('total_contribution', 0):,.2f}")
+        click.echo(f"  outbound ${shop.get('outbound_per_order', 0):.2f}/order "
+                   f"(config estimate, not 3PL invoices)")
+        if shop.get("provisional_shipping_orders"):
+            click.echo(f"  ⚠ {shop['provisional_shipping_orders']} order(s) still on "
+                       f"provisional shipping (total−subtotal−tax). "
+                       f"Re-pull: shopify-backfill --since <90d>")
+    else:
+        click.echo("Shopify: no countable orders in the window.")
 
 
 @cli.command("pnl-monthly-sync")
@@ -6541,6 +6566,25 @@ def _run_pnl_sync():
 
     run_id = job_start("pnl_sync")
     try:
+        # 90-day Shopify order re-pull so shipping_lines + the full
+        # subscription rule overwrite the SQL residual backfill. Cheap
+        # (a few REST pages). Failures do not block Amazon P&L.
+        try:
+            from datetime import timedelta as _td
+            from src.config import settings as _settings
+            from src.rules import agent_today as _agent_today
+            if _settings.shopify_enabled:
+                from src.shopify_backfill import backfill
+                since = _agent_today() - _td(days=90)
+                br = backfill(since=since, progress=lambda _m: None)
+                if br.get("error"):
+                    print(f"[P&L] Shopify 90d order refresh skipped: {br['error'][:160]}")
+                else:
+                    print(f"[P&L] Shopify 90d order refresh: {br.get('written', 0)} row(s) "
+                          f"{br.get('first_date')} → {br.get('last_date')}")
+        except Exception as e:
+            print(f"[P&L] Shopify 90d order refresh failed (Amazon unchanged): {e}")
+
         # 90 days covers the ads_campaigns_daily span this account actually
         # has. The profit table now reads every stored day (week / month /
         # year rollups), so the writer has to keep more than a month or the
@@ -6555,7 +6599,8 @@ def _run_pnl_sync():
         _ads_alert("Contribution P&L sync failed", str(e))
         return
 
-    if not r.get("rows") and not monthly.get("month_count"):
+    shop = r.get("shopify") or {}
+    if not r.get("rows") and not monthly.get("month_count") and not shop.get("rows"):
         job_finish(run_id, "success", "no data in window")
         return
 
@@ -6568,6 +6613,9 @@ def _run_pnl_sync():
     if monthly.get("month_count"):
         msg += (f"; monthly {monthly['coverage_min']}→{monthly['coverage_max']} "
                 f"${monthly['total_contribution']:,.0f}")
+    if shop.get("rows"):
+        msg += (f"; shopify ${shop.get('total_contribution', 0):,.0f} est. "
+                f"({shop.get('days', 0)}d)")
     settled = r.get("settled_days", 0)
     estimated = r.get("estimated_days", 0)
     print(f"[P&L] {msg} ({settled} settled, {estimated} estimated)")
@@ -6578,6 +6626,8 @@ def _run_pnl_sync():
         "contribution": r.get("total_contribution", 0),
         "settled_days": settled,
         "monthly_months": monthly.get("month_count", 0),
+        "shopify_contribution": shop.get("total_contribution", 0),
+        "shopify_days": shop.get("days", 0),
     })
 
 

@@ -35,6 +35,10 @@ AMAZON_PRICE_FIELD: str = _RULES["amazon"]["price_field"]
 # ── Shopify ───────────────────────────────────────────────
 SHOPIFY_TZ_NAME: str = _RULES["shopify"]["timezone"]
 SHOPIFY_TZ: ZoneInfo = ZoneInfo(SHOPIFY_TZ_NAME)
+# Config estimate of outbound $/parcel for Shopify contribution.
+# Not a 3PL invoice. TODO: replace with real $/parcel when invoices land.
+SHOPIFY_EST_OUTBOUND_SHIP_COST: float = float(
+    _RULES["shopify"].get("estimated_outbound_ship_cost", 5.50))
 
 # ── SP-API ────────────────────────────────────────────────
 SPAPI_MAX_CHUNK_DAYS: int = _RULES["spapi"]["max_chunk_days"]
