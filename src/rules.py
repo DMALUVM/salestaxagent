@@ -105,6 +105,8 @@ GNO_DEO_BE_ACOS: float = float(_GNO["family_break_even_acos"]["deo"])
 GNO_BALM_BE_ACOS: float = float(_GNO["family_break_even_acos"]["balm"])
 GNO_FORBIDDEN_AUTO_ACTIONS: frozenset[str] = frozenset(
     _GNO.get("forbidden_auto_actions") or ("pause", "negate", "raise_budget", "raise_bid"))
+GNO_NEXT_REVIEW_AT: str = str(_GNO.get("next_human_review_at") or "")
+GNO_EXPORT_REVIEW_LEAD_HOURS: int = int(_GNO.get("export_review_lead_hours", 6))
 
 # ── Agent scheduler ───────────────────────────────────────
 # Every cron job in `python -m src.main run` fires on this zone, regardless of

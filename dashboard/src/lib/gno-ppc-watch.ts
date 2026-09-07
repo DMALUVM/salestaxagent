@@ -8,6 +8,11 @@
 
 import spec from "../../config/gno_ppc_watch.json";
 import { shiftDays, windowStart } from "./as-of";
+import {
+  applyHarvestLearning,
+  lastCallForCampaign,
+  type GnoLedgerRow,
+} from "./gno-learning";
 
 export const GNO_OBSERVE_ONLY = true as const;
 
@@ -125,6 +130,8 @@ export interface NewExactTile {
   acos: number | null;
   zero_impr_after_24h: boolean;
   over_shell_budget: boolean;
+  /** Last Dave/Grok bid call from the ledger. Observe only. */
+  last_call?: "hold" | "bid_down" | "bid_up" | null;
 }
 
 export interface KeeperHeartbeat {
@@ -153,6 +160,8 @@ export interface HarvestTerm {
   cvr: number | null;
   has_enabled_exact_elsewhere: boolean;
   proposed_tag: ProposedTag;
+  /** UI-only. Not a CSV column. */
+  learning_note?: string;
 }
 
 export interface WatchCampaignExportRow {
@@ -468,6 +477,7 @@ export function harvestQueue(
   termRows: SearchTermRow[],
   campaignRows: CampaignDailyRow[],
   asOf: string,
+  ledger: GnoLedgerRow[] = [],
 ): HarvestTerm[] {
   const start = windowStart(asOf, 7);
   const enabled = enabledExactKeywords(campaignRows, termRows, asOf);
@@ -485,9 +495,14 @@ export function harvestQueue(
     const m = sumMetrics(group);
     const term = group[0].search_term;
     const hasExact = enabled.has(normalizeTerm(term));
-    const tag = tagAutoLooseTerm(
+    const base = tagAutoLooseTerm(
       { orders: m.orders, spend: m.spend, sales: m.sales, search_term: term },
       hasExact,
+    );
+    const learned = applyHarvestLearning(
+      base,
+      { orders: m.orders, spend: m.spend, search_term: term },
+      ledger,
     );
     out.push({
       campaign_name: group[0].campaign_name || AUTO_LOOSE_NAME,
@@ -501,7 +516,8 @@ export function harvestQueue(
       acos: m.acos,
       cvr: m.cvr,
       has_enabled_exact_elsewhere: hasExact,
-      proposed_tag: tag,
+      proposed_tag: learned.tag,
+      learning_note: learned.note,
     });
   }
   return out.sort((a, b) => b.spend - a.spend);
@@ -529,6 +545,7 @@ export function evaluateGnoAlerts(input: {
   bidsKnown?: boolean;
   /** Declared spend window (desk = 14). Absence inside this is never P0. */
   lookbackDays?: number;
+  ledger?: GnoLedgerRow[];
 }): GnoAlert[] {
   const { asOf, today, campaigns, searchTerms, placements } = input;
   const now = input.now ?? new Date();
@@ -622,7 +639,7 @@ export function evaluateGnoAlerts(input: {
     }
   }
 
-  const harvest = harvestQueue(searchTerms, campaigns, asOf);
+  const harvest = harvestQueue(searchTerms, campaigns, asOf, input.ledger);
   for (const name of NEW_EXACT) {
     const m = sumMetrics(inWindow(rowsForName(campaigns, name), l7start, asOf));
     alerts.push(alert("P1", "NEW_EXACT_DIGEST", "NEW EXACT L7",
@@ -677,6 +694,7 @@ export function newExactTiles(
   campaigns: CampaignDailyRow[],
   asOf: string,
   now: Date = new Date(),
+  ledger: GnoLedgerRow[] = [],
 ): NewExactTile[] {
   const hours = hoursSinceLaunch(now);
   const latest = latestByCampaign(campaigns);
@@ -703,6 +721,7 @@ export function newExactTiles(
       acos: m.acos,
       zero_impr_after_24h: hours >= 24 && m.impressions === 0,
       over_shell_budget: budget != null && budget > SHELL_DAILY_BUDGET_CAP,
+      last_call: lastCallForCampaign(ledger, name),
     };
   });
 }
@@ -857,9 +876,10 @@ export function buildGnoPack(input: {
   searchTerms: SearchTermRow[];
   placements: PlacementRow[];
   negatives?: NegativeRow[] | null;
+  ledger?: GnoLedgerRow[];
 }): { files: { name: string; body: string }[]; filename: string } {
   const watch = watchCampaignExportRows(input);
-  const terms = harvestQueue(input.searchTerms, input.campaigns, input.asOf);
+  const terms = harvestQueue(input.searchTerms, input.campaigns, input.asOf, input.ledger);
   const files = [
     { name: "watch_campaigns.csv", body: watchCampaignsCsv(watch) },
     { name: "auto_loose_search_terms.csv", body: autoLooseSearchTermsCsv(terms) },
