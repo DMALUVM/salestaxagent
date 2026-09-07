@@ -254,13 +254,18 @@ def test_defer_caps_and_is_not_a_wait_loop():
     assert "AwaitShell" not in src
     assert "while " not in src
     assert "sleep" not in src
+    waiter = inspect.getsource(main_mod._wait_ads_lease_then)
+    assert "while " not in waiter
+    assert "sleep" not in waiter
+    assert "job_start" not in waiter
     sched = inspect.getsource(main_mod._schedule_ads_retry)
     assert "replace_existing=True" in sched
     assert main_mod._ADS_RETRY_MAX >= 1
+    assert main_mod._ADS_LEASE_POLL_SECONDS <= 120
 
 
 def test_lease_busy_queues_one_retry_not_a_poll(monkeypatch):
-    """AdsSyncBusy must not schedule the 20-minute skip storm."""
+    """AdsSyncBusy arms one lease waiter — not 20-minute skip retries."""
     from src import main as main_mod
     added = []
     main_mod._PENDING_AFTER_LEASE.clear()
@@ -272,11 +277,59 @@ def test_lease_busy_queues_one_retry_not_a_poll(monkeypatch):
     monkeypatch.setattr(main_mod, "_SCHEDULER", Sched())
     assert main_mod._defer_ads_job("ads_placements_sync", 0, after_lease=True)
     assert main_mod._defer_ads_job("ads_placements_sync", 1, after_lease=True) is False
-    assert added == []
+    assert added == ["ads_placements_sync_after_lease"]
     assert list(main_mod._PENDING_AFTER_LEASE) == ["ads_placements_sync"]
     main_mod._flush_ads_after_lease()
-    assert added == ["ads_placements_sync_after_lease"]
+    assert added == [
+        "ads_placements_sync_after_lease", "ads_placements_sync_after_lease"]
     assert main_mod._PENDING_AFTER_LEASE == {}
+
+
+def test_lease_waiter_rearms_quietly_while_live(monkeypatch, lock_dir):
+    """Other-process holder: poll lease file, write no job_runs."""
+    from src import main as main_mod
+    import src.amazon_ads.sync_lock as sl
+    import os
+    added = []
+    started = []
+    ran = []
+    main_mod._PENDING_AFTER_LEASE.clear()
+
+    class Sched:
+        def add_job(self, fn, kind, run_date=None, id=None, **k):
+            added.append(id)
+
+    sl._write_lease(lock_dir, {
+        "pid": os.getpid(),
+        "heartbeat_at": _utc().isoformat(),
+        "started_at": _utc().isoformat(),
+        "job": "ads_sync",
+    })
+    monkeypatch.setattr(main_mod, "_SCHEDULER", Sched())
+    monkeypatch.setattr("src.db.job_start",
+                        lambda name: started.append(name) or "run-x")
+    main_mod._wait_ads_lease_then(
+        "ads_search_terms_gap_fill", lambda: ran.append(1), attempt=0)
+    assert ran == []
+    assert started == []
+    assert added == ["ads_search_terms_gap_fill_after_lease"]
+
+
+def test_lease_waiter_runs_once_when_heartbeat_dead(monkeypatch, lock_dir):
+    from src import main as main_mod
+    import src.amazon_ads.sync_lock as sl
+    ran = []
+    main_mod._PENDING_AFTER_LEASE["ads_placements_sync"] = lambda: ran.append(1)
+    sl._write_lease(lock_dir, {
+        "pid": 999_999_999,
+        "heartbeat_at": _utc().isoformat(),
+        "started_at": _utc().isoformat(),
+        "job": "ads_campaigns_sync",
+    })
+    main_mod._wait_ads_lease_then(
+        "ads_placements_sync", lambda: ran.append(1), attempt=0)
+    assert ran == [1]
+    assert "ads_placements_sync" not in main_mod._PENDING_AFTER_LEASE
 
 
 def test_gap_fill_and_gno_share_the_after_lease_queue(monkeypatch):
@@ -323,7 +376,11 @@ def test_release_lease_flushes_pending_retry(monkeypatch, lock_dir):
     monkeypatch.setattr(main_mod, "_SCHEDULER", Sched())
     main_mod._defer_ads_job("ads_search_terms_gap_fill", 0, after_lease=True)
     sl.release_ads_lease()
-    assert added == ["ads_search_terms_gap_fill_after_lease"]
+    # Waiter armed on enqueue; same-process release replaces it with the job.
+    assert added == [
+        "ads_search_terms_gap_fill_after_lease",
+        "ads_search_terms_gap_fill_after_lease",
+    ]
     assert main_mod._PENDING_AFTER_LEASE == {}
 
 
