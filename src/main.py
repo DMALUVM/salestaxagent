@@ -6093,11 +6093,13 @@ def _ads_alert(subject: str, detail: str) -> None:
 
 
 _SCHEDULER = None
-# 2026-08-24: campaigns held the lock past 08:51 ET. Three 20-minute
-# retries from 05:15 would have given up at 06:15. Eighteen covers a
-# Sunday backfill that overruns the 05:00 window (6 hours).
+# HTTP 425 (Amazon slot busy) still uses a capped date-trigger. Lease-busy
+# uses one after-release retry instead — 20-minute polls wrote a skip row
+# every cycle while campaigns held the lock for hours.
 _ADS_RETRY_MAX = 18
 _ADS_RETRY_SECONDS = 20 * 60
+_ADS_AFTER_LEASE_DELAY_SECONDS = 15
+_PENDING_AFTER_LEASE: dict[str, object] = {}
 
 
 def _schedule_ads_retry(fn, retry: int, job_id: str) -> None:
@@ -6121,44 +6123,98 @@ def _schedule_ads_retry(fn, retry: int, job_id: str) -> None:
         print(f"[Ads] Could not schedule {rid}: {e}")
 
 
-def _defer_ads_job(job_name: str, retry: int, **job_kwargs) -> bool:
-    """Enqueue one deferred retry for AdsSyncBusy or HTTP 425. Not a poll.
+def _enqueue_ads_after_lease(job_id: str, fn) -> bool:
+    """Remember at most one retry per job, fired when the lease drops.
 
-    Search-term 425 / weekday ST busy after a slot stop schedules the
-    one-shot day gap-fill, not another 7d rewrite. Caps at _ADS_RETRY_MAX.
-    Returns True when a retry was scheduled (or skipped because the
-    scheduler is down / cap hit).
+    Returns True on the first enqueue (caller may write one skip row).
+    Returns False when this job is already queued — do not write another
+    skip/deferred job_runs row.
     """
+    if job_id in _PENDING_AFTER_LEASE:
+        print(f"[Ads] {job_id} already queued after lease — not another skip")
+        return False
+    _PENDING_AFTER_LEASE[job_id] = fn
+    print(f"[Ads] Queued {job_id} once — retry after lease release")
+    return True
+
+
+def _flush_ads_after_lease() -> None:
+    """Schedule each pending after-lease retry. One date-trigger per job."""
+    if not _PENDING_AFTER_LEASE:
+        return
+    pending = list(_PENDING_AFTER_LEASE.items())
+    _PENDING_AFTER_LEASE.clear()
+    if _SCHEDULER is None:
+        for job_id, fn in pending:
+            _PENDING_AFTER_LEASE.setdefault(job_id, fn)
+        return
+    from datetime import datetime, timedelta
+    from src.rules import AGENT_TZ
+    when = datetime.now(AGENT_TZ) + timedelta(
+        seconds=_ADS_AFTER_LEASE_DELAY_SECONDS)
+    for job_id, fn in pending:
+        rid = f"{job_id}_after_lease"
+        try:
+            _SCHEDULER.add_job(
+                fn, "date", run_date=when, id=rid,
+                misfire_grace_time=3600, replace_existing=True)
+            print(f"[Ads] Scheduled {rid} at "
+                  f"{when.isoformat(timespec='minutes')} (lease released)")
+        except Exception as e:
+            print(f"[Ads] Could not schedule {rid}: {e}")
+            _PENDING_AFTER_LEASE.setdefault(job_id, fn)
+
+
+def _register_ads_lease_flush() -> None:
+    from src.amazon_ads.sync_lock import on_ads_lease_released
+    on_ads_lease_released(_flush_ads_after_lease)
+
+
+_register_ads_lease_flush()
+
+
+def _ads_job_already_queued(job_name: str) -> bool:
+    """True when a lease-busy retry for this job is already pending."""
+    _fn, job_id = _ads_retry_fn(job_name, 0)
+    return job_id in _PENDING_AFTER_LEASE
+
+
+def _ads_retry_fn(job_name: str, retry: int, **job_kwargs):
+    """Build the callable for a deferred ads retry."""
     nxt = retry + 1
     if job_name == "ads_campaigns_sync":
-        _schedule_ads_retry(
-            lambda n=nxt: _run_ads_campaigns_sync(retry=n), retry, job_name)
-        return True
+        return lambda n=nxt: _run_ads_campaigns_sync(retry=n), job_name
     if job_name == "ads_search_terms_backfill":
-        _schedule_ads_retry(
-            lambda n=nxt: _run_ads_search_terms_backfill(retry=n),
-            retry, job_name)
-        return True
+        return (lambda n=nxt: _run_ads_search_terms_backfill(retry=n),
+                job_name)
     if job_name in ("ads_search_terms_sync", "ads_search_terms_gap_fill"):
-        _schedule_ads_retry(
-            lambda n=nxt: _run_ads_search_terms_day_gaps(retry=n),
-            retry, "ads_search_terms_gap_fill")
-        return True
+        return (lambda n=nxt: _run_ads_search_terms_day_gaps(retry=n),
+                "ads_search_terms_gap_fill")
     if job_name == "ads_placements_sync":
-        _schedule_ads_retry(
-            lambda n=nxt: _run_ads_placements_sync(retry=n), retry, job_name)
-        return True
+        return lambda n=nxt: _run_ads_placements_sync(retry=n), job_name
     if job_name == "ads_sb_sd_heal":
-        _schedule_ads_retry(_run_ads_sb_sd_heal, retry, job_name)
-        return True
+        return lambda n=nxt: _run_ads_sb_sd_heal(retry=n), job_name
     if job_name == "ads_gno_campaigns_sync":
-        _schedule_ads_retry(
-            lambda n=nxt: _run_ads_gno_campaigns_sync(retry=n), retry, job_name)
-        return True
-    _schedule_ads_retry(
-        lambda n=nxt: _run_ads_sync_job(
-            job_name, retry=n, **job_kwargs),
-        retry, job_name)
+        return lambda n=nxt: _run_ads_gno_campaigns_sync(retry=n), job_name
+    return (lambda n=nxt: _run_ads_sync_job(
+        job_name, retry=n, **job_kwargs), job_name)
+
+
+def _defer_ads_job(job_name: str, retry: int, *,
+                   after_lease: bool = False, **job_kwargs) -> bool:
+    """Enqueue one deferred retry for AdsSyncBusy or HTTP 425. Not a poll.
+
+    Lease-busy (`after_lease=True`): one retry when the holder releases.
+    HTTP 425: one replaceable date-trigger (Amazon slot, not our lease).
+    Search-term 425 / weekday ST busy schedules the one-shot day gap-fill,
+    not another 7d rewrite. Caps at _ADS_RETRY_MAX.
+    Returns True when this call newly queued a retry (caller may write
+    one skip/deferred row). False if already queued — no extra row.
+    """
+    fn, job_id = _ads_retry_fn(job_name, retry, **job_kwargs)
+    if after_lease:
+        return _enqueue_ads_after_lease(job_id, fn)
+    _schedule_ads_retry(fn, retry, job_id)
     return True
 
 
@@ -6173,6 +6229,10 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
     """Shared body for the ads sync jobs. Returns the settled status."""
     from src.db import job_start, job_finish
     from src.amazon_ads.reports import AdsSyncBusy, sync_ads
+
+    if _ads_job_already_queued(job_name):
+        print(f"[Ads {label}] Already queued after lease — no skip row")
+        return "skipped"
 
     status = "fail"
     run_id = job_start(job_name)
@@ -6208,16 +6268,27 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
         from src.amazon_ads.reports import ads_slot_busy_in_result
         slot_busy = ads_slot_busy_in_result(result)
         if slot_busy:
-            print(f"[Ads {label}] Slot busy (HTTP 425) — one deferred retry")
-            _defer_ads_job(
-                job_name, retry,
-                days=days, campaigns_only=campaigns_only,
-                search_terms_only=search_terms_only,
-                placements_only=placements_only, label=label,
-                sb_sd_days=sb_sd_days,
-                skip_existing_search_term_weeks=skip_existing_search_term_weeks,
-                newest_first_search_terms=newest_first_search_terms)
-            return "deferred"
+            camp_kept = (
+                isinstance(camp, dict)
+                and ((camp.get("by_type") or {}).get("SP") or {}).get("ok")
+            )
+            if camp_kept:
+                # SP is in the table. Remaining SB/SD days already stopped
+                # so this job can release the lock. Do not defer the whole
+                # campaigns run — that would skip the ST/placements chain.
+                print(f"[Ads {label}] Slot busy after SP committed — "
+                      "heal SB/SD later; do not defer this job")
+            else:
+                print(f"[Ads {label}] Slot busy (HTTP 425) — one deferred retry")
+                _defer_ads_job(
+                    job_name, retry,
+                    days=days, campaigns_only=campaigns_only,
+                    search_terms_only=search_terms_only,
+                    placements_only=placements_only, label=label,
+                    sb_sd_days=sb_sd_days,
+                    skip_existing_search_term_weeks=skip_existing_search_term_weeks,
+                    newest_first_search_terms=newest_first_search_terms)
+                return "deferred"
         # A chunk that timed out and will be re-fetched tomorrow is routine and
         # stays in the log. Two things do get a push: a total failure, and an ad
         # product that dropped out entirely — the latter under-reports account
@@ -6242,16 +6313,21 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
     except AdsSyncBusy as e:
         print(f"[Ads {label}] Skipped: {e}")
         status = "skipped"
-        job_finish(run_id, status, str(e)[:500])
-        finished = True
-        _defer_ads_job(
-            job_name, retry,
+        newly = _defer_ads_job(
+            job_name, retry, after_lease=True,
             days=days, campaigns_only=campaigns_only,
             search_terms_only=search_terms_only,
             placements_only=placements_only, label=label,
             sb_sd_days=sb_sd_days,
             skip_existing_search_term_weeks=skip_existing_search_term_weeks,
             newest_first_search_terms=newest_first_search_terms)
+        # One skip row on the first defer. Later lease-busy hits stay quiet
+        # so gap-fill / placements do not spam job_runs every ~15–20m.
+        if newly:
+            job_finish(run_id, status, str(e)[:500])
+        else:
+            job_finish(run_id, "skipped", "already queued after lease")
+        finished = True
         return status
     except Exception as e:
         print(f"[Ads {label}] Failed: {e}")
@@ -6356,7 +6432,7 @@ def _run_ads_campaigns_sync(retry: int = 0):
     _run_ads_search_terms_sync()
 
 
-def _run_ads_sb_sd_heal():
+def _run_ads_sb_sd_heal(retry: int = 0):
     """13:00 (and post-partial retry) — fill SP-only days with SB/SD.
 
     Does nothing when the lookback already has Brands/Display on every day
@@ -6367,13 +6443,19 @@ def _run_ads_sb_sd_heal():
     from src.amazon_ads.reports import AdsSyncBusy
     from src.db import job_finish, job_start
 
+    if _ads_job_already_queued("ads_sb_sd_heal"):
+        print("[Ads heal] Already queued after lease — no skip row")
+        return
     run_id = job_start("ads_sb_sd_heal")
     try:
         out = sync_missing_sb_sd(on_progress=lambda m: print(f"[Ads heal] {m}"))
     except AdsSyncBusy as e:
         print(f"[Ads heal] Skipped: {e}")
-        job_finish(run_id, "skipped", str(e)[:500])
-        _defer_ads_job("ads_sb_sd_heal", 0)
+        newly = _defer_ads_job("ads_sb_sd_heal", retry, after_lease=True)
+        if newly:
+            job_finish(run_id, "skipped", str(e)[:500])
+        else:
+            job_finish(run_id, "skipped", "already queued after lease")
         return
     except Exception as e:
         print(f"[Ads heal] Failed: {e}")
@@ -6432,6 +6514,9 @@ def _run_ads_search_terms_day_gaps(retry: int = 0) -> str:
     if not gaps:
         print("[Ads search terms days] no search-term day gaps in lookback")
         return "success"
+    if _ads_job_already_queued("ads_search_terms_gap_fill"):
+        print("[Ads search terms days] Already queued after lease — no skip row")
+        return "skipped"
     print(f"[Ads search terms days] {len(gaps)} missing day(s) — "
           f"1-day chunks only")
     run_id = job_start("ads_search_terms_gap_fill")
@@ -6439,8 +6524,12 @@ def _run_ads_search_terms_day_gaps(retry: int = 0) -> str:
         result = sync_search_term_gap_days(lookback_days=7, gap_days=gaps)
     except AdsSyncBusy as e:
         print(f"[Ads search terms days] Skipped: {e}")
-        job_finish(run_id, "skipped", str(e)[:500])
-        _defer_ads_job("ads_search_terms_gap_fill", retry)
+        newly = _defer_ads_job("ads_search_terms_gap_fill", retry,
+                              after_lease=True)
+        if newly:
+            job_finish(run_id, "skipped", str(e)[:500])
+        else:
+            job_finish(run_id, "skipped", "already queued after lease")
         return "skipped"
     except Exception as e:
         print(f"[Ads search terms days] Failed: {e}")
