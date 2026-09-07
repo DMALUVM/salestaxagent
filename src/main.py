@@ -5197,6 +5197,23 @@ def run():
                 max_instances=1,
             )
             click.echo("[Scheduler] Ads placements sync daily at 05:15 (14d)")
+
+            # GNO PPC Watch — SP campaign snapshot every 4h in AGENT_TZ
+            # (01/09/13/17/21). Skips the 05:00 nightly slot. Observe only:
+            # campaigns_only, SP, last 3 closed days. Lock-busy skips; no
+            # 425 wait-loop. Search terms stay on the existing 05:30 ET job
+            # (GNO reads stored ads_search_terms_daily; no second 90-min pull).
+            scheduler.add_job(
+                _run_ads_gno_campaigns_sync,
+                "cron",
+                hour="1,9,13,17,21",
+                minute=0,
+                id="ads_gno_campaigns_sync",
+                misfire_grace_time=1800,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo("[Scheduler] GNO Watch SP campaigns every 4h at 01/09/13/17/21 (3d, observe only)")
         else:
             click.echo("[Scheduler] Amazon Ads not configured — ads jobs not scheduled")
 
@@ -6134,6 +6151,10 @@ def _defer_ads_job(job_name: str, retry: int, **job_kwargs) -> bool:
     if job_name == "ads_sb_sd_heal":
         _schedule_ads_retry(_run_ads_sb_sd_heal, retry, job_name)
         return True
+    if job_name == "ads_gno_campaigns_sync":
+        _schedule_ads_retry(
+            lambda n=nxt: _run_ads_gno_campaigns_sync(retry=n), retry, job_name)
+        return True
     _schedule_ads_retry(
         lambda n=nxt: _run_ads_sync_job(
             job_name, retry=n, **job_kwargs),
@@ -6147,6 +6168,7 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
                       sb_sd_days: int | None = None,
                       skip_existing_search_term_weeks: bool = False,
                       newest_first_search_terms: bool = False,
+                      ad_products: tuple[str, ...] | None = None,
                       retry: int = 0) -> str:
     """Shared body for the ads sync jobs. Returns the settled status."""
     from src.db import job_start, job_finish
@@ -6161,7 +6183,8 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
                           placements_only=placements_only,
                           sb_sd_days=sb_sd_days,
                           skip_existing_search_term_weeks=skip_existing_search_term_weeks,
-                          newest_first_search_terms=newest_first_search_terms)
+                          newest_first_search_terms=newest_first_search_terms,
+                          ad_products=ad_products)
         status, message = _ads_sync_outcome(result, days)
         camp = result.get("campaigns")
         if isinstance(camp, dict):
@@ -6298,6 +6321,18 @@ def _run_sqp_sync():
             print("[SQP] Rebuilt ads recommendations so the gate sees new ranks")
         except Exception as e:
             print(f"[SQP] Recommendation refresh failed: {e}")
+
+
+def _run_ads_gno_campaigns_sync(retry: int = 0):
+    """Every 4h — SP campaign snapshot for GNO PPC Watch.
+
+    Observe only. Does not chain placements or search terms, does not
+    pause / negate / raise bids or budgets. Lock-busy and HTTP 425 skip
+    via the shared job wrapper (one deferred retry, no wait-loop).
+    """
+    _run_ads_sync_job(
+        "ads_gno_campaigns_sync", days=3, campaigns_only=True,
+        label="gno-campaigns", ad_products=("SP",), retry=retry)
 
 
 def _run_ads_campaigns_sync(retry: int = 0):

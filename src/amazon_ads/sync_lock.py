@@ -35,6 +35,7 @@ ADS_PULL_JOBS = frozenset({
     "ads_placements_sync",
     "ads_campaigns_backfill",
     "ads_sb_sd_heal",
+    "ads_gno_campaigns_sync",
 })
 
 # In-process mutex — same object reports.py exposes as _SYNC_LOCK so
