@@ -347,15 +347,33 @@ def fetch_placements(start: date, end: date) -> dict:
 
     Requires supabase/migration_ads_placement.sql. If the table is absent the
     upsert fails loudly rather than silently discarding a completed report.
+
+    HTTP 425 / TimeoutError STOP remaining chunks so the ads lock is
+    released sooner — same rule as search terms and SB/SD campaigns.
     """
     chunks = _date_chunks(start, end)
     all_parsed: list[dict] = []
     errors: list[str] = []
+    stopped: str | None = None
 
     for i, (cs, ce) in enumerate(chunks, 1):
         log.info("Placements chunk %d/%d: %s → %s", i, len(chunks), cs, ce)
         try:
             rows = _fetch_placements_chunk(cs, ce)
+        except AdsReportSlotBusy as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:160]}"
+            log.error("STOP placements fetch: reporting slot busy (HTTP 425). "
+                      "Remaining chunks not requested.")
+            errors.append(msg)
+            stopped = "slot_busy"
+            break
+        except TimeoutError as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:160]}"
+            log.error("STOP placements fetch: report timed out. "
+                      "Remaining chunks not requested.")
+            errors.append(msg)
+            stopped = "timeout"
+            break
         except Exception as e:
             msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:120]}"
             log.warning("Placement %s", msg)
@@ -388,13 +406,14 @@ def fetch_placements(start: date, end: date) -> dict:
                 log.warning("ads_placement_daily missing — run "
                             "supabase/migration_ads_placement.sql to enable placement data")
                 return {"rows": len(all_parsed), "inserted": 0, "chunks": len(chunks),
-                        "errors": [], "skipped": "table missing: run migration_ads_placement.sql"}
+                        "errors": [], "stopped": stopped,
+                        "skipped": "table missing: run migration_ads_placement.sql"}
             raise
 
     dates = [r["date"] for r in all_parsed if r.get("date")]
     return {
         "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
-        "errors": errors,
+        "errors": errors, "stopped": stopped,
         "date_min": min(dates) if dates else None,
         "date_max": max(dates) if dates else None,
     }

@@ -1065,11 +1065,14 @@ class TestAdsPollResilience:
         assert "after_lease=True" in src
         assert "_ads_alert" not in src.split("except AdsSyncBusy")[1].split("except Exception")[0]
 
-    def test_busy_retry_window_covers_a_sunday_overrun(self):
-        """Three 20-minute retries from 05:15 would have given up at 06:15
-        on 2026-08-24 while campaigns still held the lock at 08:51."""
-        from src.main import _ADS_RETRY_MAX, _ADS_RETRY_SECONDS
-        assert _ADS_RETRY_MAX * _ADS_RETRY_SECONDS >= 6 * 3600
+    def test_busy_retry_is_one_shot_not_skip_spam(self):
+        """Lease-busy uses after-lease once; HTTP 425 date-trigger max is 1."""
+        from src.main import (
+            _ADS_AFTER_LEASE_DELAY_SECONDS, _ADS_RETRY_MAX, _ADS_RETRY_SECONDS,
+        )
+        assert _ADS_RETRY_MAX == 1
+        assert _ADS_RETRY_SECONDS == 20 * 60
+        assert _ADS_AFTER_LEASE_DELAY_SECONDS == 15
 
     def test_spapi_refresh_does_not_pull_ads(self):
         import inspect
