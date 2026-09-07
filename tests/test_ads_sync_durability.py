@@ -234,6 +234,34 @@ def test_defer_ads_job_schedules_one_replaceable_retry(monkeypatch):
     assert all(a["replace"] is True for a in added)
 
 
+def test_defer_caps_at_one_and_is_not_a_wait_loop():
+    import inspect
+    from src import main as main_mod
+    src = inspect.getsource(main_mod._defer_ads_job)
+    assert "AwaitShell" not in src
+    assert "while " not in src
+    assert "sleep" not in src
+    sched = inspect.getsource(main_mod._schedule_ads_retry)
+    assert "replace_existing=True" in sched
+    assert main_mod._ADS_RETRY_MAX == 1
+
+
+def test_defer_second_skip_does_not_reschedule(monkeypatch):
+    """Cap=1: retry=0 schedules once; retry=1 is silent (no skip spam)."""
+    from src import main as main_mod
+    added = []
+
+    class Sched:
+        def add_job(self, fn, kind, run_date=None, id=None, **k):
+            added.append(id)
+
+    monkeypatch.setattr(main_mod, "_SCHEDULER", Sched())
+    assert main_mod._defer_ads_job("ads_placements_sync", 0) is True
+    assert added == ["ads_placements_sync_retry_1"]
+    assert main_mod._defer_ads_job("ads_placements_sync", 1) is False
+    assert added == ["ads_placements_sync_retry_1"]
+
+
 def test_search_term_425_defers_gap_fill_not_7d_rewrite(monkeypatch):
     from src import main as main_mod
     added = []
@@ -243,21 +271,57 @@ def test_search_term_425_defers_gap_fill_not_7d_rewrite(monkeypatch):
             added.append(id)
 
     monkeypatch.setattr(main_mod, "_SCHEDULER", Sched())
-    main_mod._defer_ads_job("ads_search_terms_sync", 2)
-    assert added == ["ads_search_terms_gap_fill_retry_3"]
+    main_mod._defer_ads_job("ads_search_terms_sync", 0)
+    assert added == ["ads_search_terms_gap_fill_retry_1"]
+    # Second defer (retry=1) must not schedule — one-retry cap.
+    assert main_mod._defer_ads_job("ads_search_terms_sync", 1) is False
+    assert added == ["ads_search_terms_gap_fill_retry_1"]
 
 
-def test_defer_caps_and_is_not_a_wait_loop():
-    import inspect
-    from src import main as main_mod
-    src = inspect.getsource(main_mod._defer_ads_job)
-    assert "AwaitShell" not in src
-    assert "while " not in src
-    assert "sleep" not in src
-    sched = inspect.getsource(main_mod._schedule_ads_retry)
-    assert "replace_existing=True" in sched
-    assert main_mod._ADS_RETRY_MAX >= 1
+def test_campaigns_stop_on_425_skip_remaining_products(monkeypatch):
+    """Slot busy mid-SP must not grind SB/SD while holding the lock."""
+    import src.amazon_ads.reports as reports
+    from datetime import date
+    from src.amazon_ads.client import AdsReportSlotBusy
 
+    fetched = []
+
+    def fake_chunk(cs, ce, product="SP"):
+        fetched.append(product)
+        if product == "SP":
+            raise AdsReportSlotBusy("HTTP 425")
+        return [{"date": ce.isoformat(), "campaignId": f"{product}-1",
+                 "campaignName": product, "impressions": 1, "clicks": 1,
+                 "spend": 1.0}]
+
+    monkeypatch.setattr(reports, "_fetch_campaigns_chunk", fake_chunk)
+    monkeypatch.setattr(reports, "upsert_rows", lambda *a, **k: 0)
+    r = reports.fetch_campaigns_daily(date(2026, 9, 1), date(2026, 9, 1))
+    assert fetched == ["SP"]
+    assert r["stopped"] == "slot_busy"
+    assert "SB" in r["products_failed"]
+    assert "SD" in r["products_failed"]
+    assert reports.ads_slot_busy_in_result({"campaigns": r})
+
+
+def test_placements_stop_on_425(monkeypatch):
+    import src.amazon_ads.reports as reports
+    from datetime import date
+    from src.amazon_ads.client import AdsReportSlotBusy
+
+    calls = []
+
+    def fake(cs, ce):
+        calls.append((cs, ce))
+        if len(calls) == 1:
+            raise AdsReportSlotBusy("HTTP 425")
+        return []
+
+    monkeypatch.setattr(reports, "_fetch_placements_chunk", fake)
+    # Two chunks over 31+ days would normally continue — STOP after first 425.
+    r = reports.fetch_placements(date(2026, 8, 1), date(2026, 9, 5))
+    assert len(calls) == 1
+    assert r["stopped"] == "slot_busy"
 
 def test_run_ads_sync_job_defers_on_425(monkeypatch):
     from src import main as main_mod

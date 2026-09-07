@@ -331,15 +331,33 @@ def fetch_placements(start: date, end: date) -> dict:
 
     Requires supabase/migration_ads_placement.sql. If the table is absent the
     upsert fails loudly rather than silently discarding a completed report.
+
+    HTTP 425 / TimeoutError STOP remaining chunks so the ads lock is
+    released sooner — same rule as search terms.
     """
     chunks = _date_chunks(start, end)
     all_parsed: list[dict] = []
     errors: list[str] = []
+    stopped: str | None = None
 
     for i, (cs, ce) in enumerate(chunks, 1):
         log.info("Placements chunk %d/%d: %s → %s", i, len(chunks), cs, ce)
         try:
             rows = _fetch_placements_chunk(cs, ce)
+        except AdsReportSlotBusy as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:160]}"
+            log.error("STOP placements fetch: reporting slot busy (HTTP 425). "
+                      "Remaining chunks not requested.")
+            errors.append(msg)
+            stopped = "slot_busy"
+            break
+        except TimeoutError as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:160]}"
+            log.error("STOP placements fetch: report timed out. "
+                      "Remaining chunks not requested.")
+            errors.append(msg)
+            stopped = "timeout"
+            break
         except Exception as e:
             msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:120]}"
             log.warning("Placement %s", msg)
@@ -372,13 +390,14 @@ def fetch_placements(start: date, end: date) -> dict:
                 log.warning("ads_placement_daily missing — run "
                             "supabase/migration_ads_placement.sql to enable placement data")
                 return {"rows": len(all_parsed), "inserted": 0, "chunks": len(chunks),
-                        "errors": [], "skipped": "table missing: run migration_ads_placement.sql"}
+                        "errors": [], "stopped": stopped,
+                        "skipped": "table missing: run migration_ads_placement.sql"}
             raise
 
     dates = [r["date"] for r in all_parsed if r.get("date")]
     return {
         "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
-        "errors": errors,
+        "errors": errors, "stopped": stopped,
         "date_min": min(dates) if dates else None,
         "date_max": max(dates) if dates else None,
     }
@@ -429,6 +448,12 @@ def fetch_campaigns_daily(start: date, end: date,
     the ones that rate-limit — SP rows are still written and the nightly job
     still reports success for the data it did get. `by_type` carries the
     per-product outcome so callers can alert on a partial sync.
+
+    HTTP 425 (AdsReportSlotBusy) STOP remaining chunks AND remaining
+    products. Holding the lock while grinding SB/SD after a slot-busy
+    create is how morning jobs stacked "Skipped" spam — release sooner;
+    one deferred retry (or the next cron) picks up the gap. Per-chunk
+    timeouts stay soft-fail so an older SB gap does not skip SD.
     """
     products = tuple(ad_products or DEFAULT_AD_PRODUCTS)
     # Default is ADS_CAMPAIGN_CHUNK_DAYS (7), not 30. A single 30-day SB/SD
@@ -442,6 +467,7 @@ def fetch_campaigns_daily(start: date, end: date,
     errors: list[str] = []
     by_type: dict[str, dict] = {}
     inserted = 0
+    stopped: str | None = None
 
     for product in products:
         if product not in AD_PRODUCTS:
@@ -451,6 +477,7 @@ def fetch_campaigns_daily(start: date, end: date,
         parsed: list[dict] = []
         product_errors: list[str] = []
         product_inserted = 0
+        product_stopped: str | None = None
 
         product_chunks = chunks
         if product in ("SB", "SD"):
@@ -469,6 +496,16 @@ def fetch_campaigns_daily(start: date, end: date,
                      product, i, len(product_chunks), cs, ce)
             try:
                 rows = _fetch_campaigns_chunk(cs, ce, product)
+            except AdsReportSlotBusy as e:
+                msg = f"{product} chunk {i} ({cs}→{ce}): {str(e)[:160]}"
+                log.error("STOP %s campaigns: reporting slot busy (HTTP 425). "
+                          "Remaining chunks/products not requested.", product)
+                product_errors.append(msg)
+                say(f"    {product} chunk {i}/{len(product_chunks)} {cs}→{ce}: "
+                    f"STOP slot busy — {str(e)[:80]}")
+                product_stopped = "slot_busy"
+                stopped = "slot_busy"
+                break
             except Exception as e:
                 msg = f"{product} chunk {i} ({cs}→{ce}): {str(e)[:120]}"
                 log.warning("Campaign %s", msg)
@@ -530,6 +567,7 @@ def fetch_campaigns_daily(start: date, end: date,
             # is a gap, not "SB missing" — 2026-08-24 Telegram'd SB+SD
             # missing while SB had already written $993.71.
             "ok": bool(parsed),
+            "stopped": product_stopped,
         }
         log.info("%s campaigns: %d row(s), $%.2f spend, %d error(s)",
                  product, len(parsed), spend, len(product_errors))
@@ -537,12 +575,26 @@ def fetch_campaigns_daily(start: date, end: date,
         inserted += product_inserted
         all_parsed.extend(parsed)
         errors.extend(product_errors)
+        if stopped:
+            # Do not start SB/SD (or the next product) while the slot is busy —
+            # release the lock and let the one deferred retry / next cron run.
+            break
 
     total_spend = sum(r["spend"] for r in all_parsed)
     # min/max, not first/last — rows come back in API order, not date order.
     dates = [r["date"] for r in all_parsed if r.get("date")]
     ok_products = [p for p, v in by_type.items() if v["ok"]]
     failed_products = [p for p, v in by_type.items() if not v["ok"]]
+    # Products never attempted after a STOP are not "failed" — they are
+    # pending the deferred retry. Mark them so callers can see the gap.
+    for p in products:
+        if p in AD_PRODUCTS and p not in by_type:
+            by_type[p] = {
+                "rows": 0, "inserted": 0, "spend": 0.0, "clicks": 0,
+                "errors": [f"skipped after {stopped}"],
+                "ok": False, "stopped": stopped,
+            }
+            failed_products.append(p)
     return {
         "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
         "errors": errors, "total_spend": round(total_spend, 2),
@@ -554,6 +606,7 @@ def fetch_campaigns_daily(start: date, end: date,
         # Partial = some products landed, others did not. The nightly job uses
         # this to alert without treating a lost SB report as a lost sync.
         "partial": bool(ok_products and failed_products),
+        "stopped": stopped,
     }
 
 
