@@ -239,9 +239,17 @@ export async function GET() {
       loadErrors,
     });
   } catch (e) {
+    const exportBanner = evaluateExportNeed({
+      now: new Date(),
+      nextReviewAt: GNO_NEXT_REVIEW_AT,
+      p0: [],
+      p1: [],
+    });
     return Response.json({
       observeOnly: true,
       error: e instanceof Error ? e.message : String(e),
+      nextReviewAt: GNO_NEXT_REVIEW_AT,
+      exportBanner,
       alerts: [],
       p0: [],
       newExact: [],

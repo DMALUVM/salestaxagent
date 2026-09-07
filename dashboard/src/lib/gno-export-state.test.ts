@@ -154,6 +154,8 @@ describe("GNO export UI copy is wired", () => {
     assert.match(ui, /data-export-state/);
     assert.match(ui, /Log Grok outcome/);
     assert.match(ui, /last call:/);
+    assert.match(ui, /evaluateExportNeed/);
+    assert.doesNotMatch(ui, /if \(error && !data\?\.newExact\?\.length\)/);
     assert.doesNotMatch(ui, /autoPause\(/);
   });
 });

@@ -9,6 +9,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { evaluateExportNeed } from "@/lib/gno-export-state";
+import { GNO_NEXT_REVIEW_AT } from "@/lib/gno-ppc-watch";
 import { AlertTriangle, Check, CheckCircle, Download, RefreshCw, Shield } from "lucide-react";
 import {
   gnoAlertKey,
@@ -326,15 +328,6 @@ export function PpcGnoWatch() {
   if (loading) {
     return <p className="text-sm text-muted-foreground">Loading GNO PPC Watch…</p>;
   }
-  if (error && !data?.newExact?.length) {
-    return (
-      <Card className="border-red-200 dark:border-red-900">
-        <CardContent className="py-6 text-sm text-red-700 dark:text-red-300">
-          {error}
-        </CardContent>
-      </Card>
-    );
-  }
 
   const p0All = data?.p0 ?? [];
   const { open: p0, done: p0Done } = splitDoneAlerts(p0All, doneKeys);
@@ -349,8 +342,14 @@ export function PpcGnoWatch() {
   const keepers = data?.keepers ?? [];
   const harvest = data?.harvestQueue ?? [];
   const doneCount = p0Done.length + p1Done.length + lookbackNotes.done.length;
-  const banner = data?.exportBanner;
-  const exportDue = banner?.state === "EXPORT_NEEDED";
+  const banner = data?.exportBanner ?? evaluateExportNeed({
+    nextReviewAt: data?.nextReviewAt ?? GNO_NEXT_REVIEW_AT,
+    p0: data?.p0 ?? [],
+    p1: data?.p1 ?? [],
+    lastExportAt: data?.lastExportAt,
+    lastExportReason: data?.lastExportReason,
+  });
+  const exportDue = banner.state === "EXPORT_NEEDED";
 
   return (
     <div className="space-y-6">
@@ -374,7 +373,7 @@ export function PpcGnoWatch() {
 
       <div
         role="status"
-        data-export-state={banner?.state ?? "QUIET"}
+        data-export-state={banner.state}
         className={`rounded-lg border p-3 text-sm ${
           exportDue
             ? "border-amber-500/60 bg-amber-50 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100"
@@ -388,12 +387,12 @@ export function PpcGnoWatch() {
           {exportDue ? "EXPORT NEEDED" : "Up to date"}
         </p>
         <p className="mt-1 text-xs">
-          {banner?.headline ?? "Up to date. No pack due."}
-          {banner?.reasons?.length ? ` · ${banner.reasons.join(" + ")}` : ""}
+          {banner.headline}
+          {banner.reasons.length ? ` · ${banner.reasons.join(" + ")}` : ""}
         </p>
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Next human review: <strong className="text-foreground">{banner?.nextReviewLabel ?? data?.nextReviewAt ?? "—"}</strong>
-          {banner?.lastExportReason ? ` · last export reason ${banner.lastExportReason}` : ""}
+          Next human review: <strong className="text-foreground">{banner.nextReviewLabel}</strong>
+          {banner.lastExportReason ? ` · last export reason ${banner.lastExportReason}` : ""}
           {" · "}<Link href="/ppc" className="underline">Back to Recovery / This week</Link>
         </p>
       </div>
@@ -404,7 +403,7 @@ export function PpcGnoWatch() {
           <li><strong>Anytime a P0 fires</strong> — download the zip, drop it in Grok immediately.</li>
           <li>
             <strong>Wed evening ~48h review</strong>
-            {" "}({data?.exportBanner?.nextReviewLabel ?? data?.nextReviewAt ?? "date from nextReviewAt"})
+            {" "}({banner.nextReviewLabel})
             {" "}— export even if quiet; that is the scheduled hold / bid / harvest pass.
           </li>
           <li><strong>Optional daily</strong> — if you want a P1 digest reviewed; otherwise watch the page alerts.</li>
@@ -413,6 +412,14 @@ export function PpcGnoWatch() {
           Observe only — export never writes to Amazon. One change per campaign per day still Dave/Grok.
         </p>
       </div>
+
+      {error && (
+        <Card className="border-red-200 dark:border-red-900">
+          <CardContent className="py-4 text-sm text-red-700 dark:text-red-300">
+            {error}
+          </CardContent>
+        </Card>
+      )}
 
       {notice && (
         <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs">{notice}</p>
