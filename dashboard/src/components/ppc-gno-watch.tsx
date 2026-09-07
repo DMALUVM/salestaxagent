@@ -8,7 +8,14 @@ import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, Download, RefreshCw, Shield } from "lucide-react";
+import { AlertTriangle, Check, Download, RefreshCw, Shield } from "lucide-react";
+import {
+  gnoAlertKey,
+  loadLocalDoneKeys,
+  mergeDoneKeys,
+  splitDoneAlerts,
+  toggleDoneKey,
+} from "@/lib/gno-alert-done";
 
 interface Alert {
   priority: "P0" | "P1" | "P2";
@@ -80,6 +87,8 @@ interface GnoData {
   sqp?: { available: boolean; newestAsOf: string | null; stale: boolean; source?: string | null };
   lastSync?: { at: string | null; job: string | null; status: string | null };
   gaps?: string[];
+  acks?: string[];
+  lookbackDays?: number;
   loadErrors?: string[];
   error?: string;
 }
@@ -110,6 +119,40 @@ const ROLE_LABEL: Record<string, string> = {
   hero_chapstick: "Hero chapstick",
 };
 
+function AlertRow({
+  alert: a,
+  done,
+  tone,
+  onToggle,
+}: {
+  alert: Alert;
+  done: boolean;
+  tone: "p0" | "quiet";
+  onToggle: (a: Alert, done: boolean) => void;
+}) {
+  const box = tone === "p0" && !done
+    ? "border-red-200 bg-red-50/60 dark:border-red-900 dark:bg-red-950/30"
+    : "border-border bg-muted/30";
+  return (
+    <div className={`flex items-start justify-between gap-2 rounded-md border p-2 text-xs ${box} ${done ? "opacity-60" : ""}`}>
+      <div className="min-w-0">
+        <p className="font-medium">{a.title}</p>
+        <p className="mt-0.5 text-muted-foreground">{a.detail}</p>
+      </div>
+      <Button
+        type="button"
+        variant={done ? "default" : "outline"}
+        size="sm"
+        className="h-7 shrink-0 px-2 text-[10px]"
+        onClick={() => onToggle(a, !done)}
+      >
+        <Check className="mr-1 h-3 w-3" />
+        {done ? "Done" : "Mark Done"}
+      </Button>
+    </div>
+  );
+}
+
 /**
  * GNO PPC Watch widgets. Own fetch so Recovery / Bleeders on /ppc cannot
  * fail because this panel missed a table. Observe + export + alert only.
@@ -123,6 +166,8 @@ export function PpcGnoWatch() {
   const [sqpNotice, setSqpNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [queued, setQueued] = useState<string[]>([]);
   const [sqpBusy, setSqpBusy] = useState(false);
+  const [localDone, setLocalDone] = useState<string[]>([]);
+  const [showDone, setShowDone] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -141,6 +186,26 @@ export function PpcGnoWatch() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setLocalDone(loadLocalDoneKeys()); }, []);
+
+  const doneKeys = mergeDoneKeys(localDone, data?.acks);
+
+  function markDone(a: Alert, done: boolean) {
+    const key = gnoAlertKey(a);
+    setLocalDone(toggleDoneKey(localDone, key, done));
+    void fetch("/api/ppc/gno-ack", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        key,
+        code: a.code,
+        campaign_name: a.campaign_name,
+        search_term: a.search_term,
+        priority: a.priority,
+        done,
+      }),
+    }).catch(() => { /* localStorage already holds the checkoff */ });
+  }
 
   async function exportPack() {
     setExporting(true);
@@ -219,10 +284,19 @@ export function PpcGnoWatch() {
     );
   }
 
-  const p0 = data?.p0 ?? [];
+  const p0All = data?.p0 ?? [];
+  const { open: p0, done: p0Done } = splitDoneAlerts(p0All, doneKeys);
+  const p1All = (data?.p1 ?? []).filter((a) =>
+    ["JUNK_CANDIDATE", "PP_SHARE", "NEW_EXACT_DIGEST", "HARVEST_CANDIDATE"].includes(a.code));
+  const { open: p1Open, done: p1Done } = splitDoneAlerts(p1All, doneKeys);
+  const lookbackNotes = splitDoneAlerts(
+    (data?.p2 ?? []).filter((a) => a.code === "KEEPER_MISSING"),
+    doneKeys,
+  );
   const tiles = data?.newExact ?? [];
   const keepers = data?.keepers ?? [];
   const harvest = data?.harvestQueue ?? [];
+  const doneCount = p0Done.length + p1Done.length + lookbackNotes.done.length;
 
   return (
     <div className="space-y-6">
@@ -255,19 +329,45 @@ export function PpcGnoWatch() {
         <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs">{notice}</p>
       )}
 
-      {p0.length > 0 && (
+      {(p0.length > 0 || (showDone && p0Done.length > 0)) && (
         <Card className="border-red-500/40">
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm text-red-700 dark:text-red-300">
-              <AlertTriangle className="h-4 w-4" /> P0 — ping Dave
+            <CardTitle className="flex items-center justify-between gap-2 text-sm text-red-700 dark:text-red-300">
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4" /> P0 — ping Dave
+              </span>
+              {p0Done.length > 0 && (
+                <Button type="button" variant="ghost" size="sm" className="h-7 text-[10px]"
+                  onClick={() => setShowDone((v) => !v)}>
+                  {showDone ? "Hide done" : `Show ${p0Done.length} done`}
+                </Button>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {p0.map((a, i) => (
-              <div key={`${a.code}-${i}`} className="rounded-md border border-red-200 bg-red-50/60 p-2 text-xs dark:border-red-900 dark:bg-red-950/30">
-                <p className="font-medium">{a.title}</p>
-                <p className="mt-0.5 text-muted-foreground">{a.detail}</p>
-              </div>
+            {p0.map((a) => (
+              <AlertRow key={gnoAlertKey(a)} alert={a} done={false} tone="p0" onToggle={markDone} />
+            ))}
+            {showDone && p0Done.map((a) => (
+              <AlertRow key={gnoAlertKey(a)} alert={a} done tone="p0" onToggle={markDone} />
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {lookbackNotes.open.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">KEEP-ALIVE not in this spend window</CardTitle>
+            <p className="text-[11px] text-muted-foreground">
+              The desk reads {data?.lookbackDays ?? 14} closed days. Ads reports omit $0 days,
+              so a missing keeper is <strong>not a P0</strong>. Confirm in Ads console if needed.
+              Observe only.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {lookbackNotes.open.map((a) => (
+              <AlertRow key={gnoAlertKey(a)} alert={a} done={false} tone="quiet" onToggle={markDone} />
             ))}
           </CardContent>
         </Card>
@@ -376,16 +476,25 @@ export function PpcGnoWatch() {
         </CardContent>
       </Card>
 
-      {(data?.p1 ?? []).filter((a) => a.code === "JUNK_CANDIDATE" || a.code === "PP_SHARE").length > 0 && (
+      {(p1Open.length > 0 || (showDone && p1Done.length > 0)) && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">P1 digest (flag only)</CardTitle>
+            <CardTitle className="flex items-center justify-between gap-2 text-sm">
+              <span>P1 digest (flag only)</span>
+              {doneCount > 0 && (
+                <Button type="button" variant="ghost" size="sm" className="h-7 text-[10px]"
+                  onClick={() => setShowDone((v) => !v)}>
+                  {showDone ? "Hide done" : `Show ${doneCount} done`}
+                </Button>
+              )}
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1.5">
-            {(data?.p1 ?? []).filter((a) => ["JUNK_CANDIDATE", "PP_SHARE", "NEW_EXACT_DIGEST"].includes(a.code)).slice(0, 16).map((a, i) => (
-              <p key={`${a.code}-${i}`} className="text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground">{a.title}.</span> {a.detail}
-              </p>
+          <CardContent className="space-y-2">
+            {p1Open.slice(0, 16).map((a) => (
+              <AlertRow key={gnoAlertKey(a)} alert={a} done={false} tone="quiet" onToggle={markDone} />
+            ))}
+            {showDone && p1Done.map((a) => (
+              <AlertRow key={gnoAlertKey(a)} alert={a} done tone="quiet" onToggle={markDone} />
             ))}
           </CardContent>
         </Card>

@@ -2,6 +2,7 @@ import { getServerSupabase } from "@/lib/supabase-server";
 import { amazonAsOf, amazonToday, windowStart } from "@/lib/as-of";
 import {
   AUTO_LOOSE_NAME,
+  GNO_DESK_SPEND_LOOKBACK_DAYS,
   GNO_LAUNCHED_AT,
   GNO_NEXT_REVIEW_AT,
   GNO_OBSERVE_ONLY,
@@ -63,7 +64,7 @@ export async function GET() {
   try {
     const asOf = amazonAsOf();
     const today = amazonToday();
-    const start = windowStart(asOf, 14);
+    const start = windowStart(asOf, GNO_DESK_SPEND_LOOKBACK_DAYS);
     const sb = getServerSupabase();
     const loadErrors: string[] = [];
 
@@ -147,11 +148,24 @@ export async function GET() {
       }
     } catch { /* optional */ }
 
+    let acks: string[] = [];
+    try {
+      const r = await sb.from("gno_alert_acks")
+        .select("alert_key,status")
+        .eq("status", "done");
+      if (!r.error) {
+        acks = (r.data ?? [])
+          .map((row) => String((row as { alert_key?: string }).alert_key ?? ""))
+          .filter(Boolean);
+      }
+    } catch { /* table optional until migration_gno_alert_acks.sql */ }
+
     const now = new Date();
     const alerts = evaluateGnoAlerts({
       asOf, today, now, campaigns, searchTerms, placements,
       negativesAvailable: false,
       bidsKnown: false,
+      lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
     });
     const harvest = harvestQueue(searchTerms, campaigns, asOf);
     const sbL7 = campaigns.filter((c) => {
@@ -186,6 +200,8 @@ export async function GET() {
       harvestQueue: harvest.filter((t) => t.proposed_tag === "HARVEST_CANDIDATE"),
       junkQueue: harvest.filter((t) => t.proposed_tag === "JUNK_CANDIDATE"),
       harvestAll: harvest,
+      acks,
+      lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
       sbL7: [...sbByName.entries()].map(([campaign_name, m]) => ({
         campaign_name, ...m,
         acos: m.sales > 0 ? (m.spend / m.sales) * 100 : null,
