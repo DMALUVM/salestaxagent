@@ -5204,11 +5204,10 @@ def run():
             )
             click.echo("[Scheduler] Ads placements sync daily at 05:15 (14d)")
 
-            # GNO PPC Watch — SP campaign snapshot every 4h in AGENT_TZ
+            # GNO PPC Watch — Campaigns API snapshot every 4h in AGENT_TZ
             # (01/09/13/17/21). Skips the 05:00 nightly slot. Observe only:
-            # campaigns_only, SP, last 3 closed days. Lock-busy skips; no
-            # 425 wait-loop. Search terms stay on the existing 05:30 ET job
-            # (GNO reads stored ads_search_terms_daily; no second 90-min pull).
+            # list campaigns / portfolios / keywords / negatives. No Reporting
+            # v3, no 425 wait-loop. Metrics stay on nightly ads_*_daily.
             scheduler.add_job(
                 _run_ads_gno_campaigns_sync,
                 "cron",
@@ -5219,7 +5218,7 @@ def run():
                 coalesce=True,
                 max_instances=1,
             )
-            click.echo("[Scheduler] GNO Watch SP campaigns every 4h at 01/09/13/17/21 (3d, observe only)")
+            click.echo("[Scheduler] GNO Watch Campaigns API snapshot every 4h at 01/09/13/17/21 (observe only)")
         else:
             click.echo("[Scheduler] Amazon Ads not configured — ads jobs not scheduled")
 
@@ -6464,17 +6463,30 @@ def _run_sqp_sync():
 
 
 def _run_ads_gno_campaigns_sync(retry: int = 0):
-    """Every 4h — SP campaign snapshot for GNO PPC Watch.
+    """Every 4h — Campaigns API snapshot for GNO Export pack v2.
 
-    Observe only. Does not chain placements or search terms, does not
-    pause / negate / raise bids or budgets. Lock-busy and HTTP 425 skip
-    via the shared job wrapper (one deferred retry, no wait-loop).
+    Observe only. Lists SP campaigns, portfolios, keywords, and negatives.
+    Does not create Reporting v3 reports (no HTTP 425 wait-loop). Does not
+    pause / negate / raise bids or budgets. Does not take the ads report lock.
     """
-    # 3 closed days is a short spend lookback. Ads campaign reports omit
-    # $0 days, so a KEEP-ALIVE missing from this snapshot is never a P0.
-    _run_ads_sync_job(
-        "ads_gno_campaigns_sync", days=3, campaigns_only=True,
-        label="gno-campaigns", ad_products=("SP",), retry=retry)
+    from src.amazon_ads.campaigns_api import snapshot_gno_meta
+    from src.db import job_finish, job_start
+
+    del retry  # signature kept for the deferred-retry dispatcher
+    run_id = job_start("ads_gno_campaigns_sync")
+    try:
+        out = snapshot_gno_meta()
+        msg = (
+            f"Campaigns API snapshot: {out.get('campaigns', 0)} campaign(s), "
+            f"{out.get('portfolios', 0)} portfolio(s), "
+            f"{out.get('keywords', 0)} keyword(s), "
+            f"{out.get('negatives', 0)} negative(s). Observe only."
+        )
+        print(f"[GNO] {msg}")
+        job_finish(run_id, "success", msg)
+    except Exception as e:
+        job_finish(run_id, "fail", str(e)[:500])
+        raise
     # Cheap one-liner on P0 or 48h review-due only. Never spam; never waits.
     try:
         from src.amazon_ads.gno_watch_alert import maybe_send_gno_export_alert

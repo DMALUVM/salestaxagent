@@ -7,7 +7,7 @@
  */
 
 import spec from "../../config/gno_ppc_watch.json";
-import { shiftDays, windowStart } from "./as-of";
+import { AMAZON_TZ, shiftDays, windowStart } from "./as-of";
 import {
   applyHarvestLearning,
   lastCallForCampaign,
@@ -18,14 +18,21 @@ export const GNO_OBSERVE_ONLY = true as const;
 
 export const WATCH_CAMPAIGN_CSV_HEADERS = [
   "date_start", "date_end", "campaign_name", "state", "portfolio",
-  "daily_budget", "tos_pct", "ros_pct", "pp_pct", "impressions",
+  "daily_budget", "tos_modifier_pct", "ros_modifier_pct", "pp_modifier_pct",
+  "tos_spend_share", "ros_spend_share", "pp_spend_share", "impressions",
   "clicks", "spend", "cpc", "orders", "sales", "acos", "watch_list",
 ] as const;
 
 export const AUTO_LOOSE_TERM_CSV_HEADERS = [
-  "campaign_name", "customer_search_term", "match_type", "impressions",
-  "clicks", "spend", "orders", "sales", "acos", "cvr",
-  "has_enabled_exact_elsewhere", "proposed_tag",
+  "date_start", "date_end", "label", "campaign_name", "customer_search_term",
+  "match_type", "impressions", "clicks", "spend", "orders", "sales", "acos",
+  "cvr", "has_enabled_exact_elsewhere", "proposed_tag",
+] as const;
+
+export const KEYWORD_TARGET_CSV_HEADERS = [
+  "date_start", "date_end", "campaign_name", "keyword_text", "match_type",
+  "keyword_state", "bid", "impressions", "clicks", "spend", "orders",
+  "sales", "acos",
 ] as const;
 
 export const NEGATIVES_CSV_HEADERS = [
@@ -35,6 +42,8 @@ export const NEGATIVES_CSV_HEADERS = [
 export type WatchList = "NEW_EXACT" | "KEEPER" | "DAY5_PAUSE" | "OTHER";
 export type ProposedTag = "KEEP" | "HARVEST_CANDIDATE" | "JUNK_CANDIDATE";
 export type AlertPriority = "P0" | "P1" | "P2";
+export type TermWindowLabel = "L2" | "L7";
+export type PackWindowLabel = "Today" | "Last2" | "Last7";
 
 export interface GnoAlert {
   priority: AlertPriority;
@@ -109,9 +118,32 @@ export interface Metrics {
 }
 
 export interface PlacementShare {
-  tos_pct: number | null;
-  ros_pct: number | null;
-  pp_pct: number | null;
+  tos_spend_share: number | null;
+  ros_spend_share: number | null;
+  pp_spend_share: number | null;
+}
+
+export interface CampaignMeta {
+  campaign_id?: string;
+  campaign_name: string;
+  state?: string | null;
+  daily_budget?: number | null;
+  portfolio_id?: string | null;
+  portfolio_name?: string | null;
+  tos_modifier_pct?: number | null;
+  ros_modifier_pct?: number | null;
+  pp_modifier_pct?: number | null;
+}
+
+export interface KeywordTarget {
+  keyword_id?: string;
+  campaign_id?: string;
+  campaign_name: string;
+  ad_group_id?: string;
+  keyword_text: string;
+  match_type?: string | null;
+  state?: string | null;
+  bid?: number | null;
 }
 
 export interface NewExactTile {
@@ -148,6 +180,9 @@ export interface KeeperHeartbeat {
 }
 
 export interface HarvestTerm {
+  date_start?: string;
+  date_end?: string;
+  label?: TermWindowLabel;
   campaign_name: string;
   customer_search_term: string;
   match_type: string;
@@ -171,9 +206,12 @@ export interface WatchCampaignExportRow {
   state: string;
   portfolio: string;
   daily_budget: number | null;
-  tos_pct: number | null;
-  ros_pct: number | null;
-  pp_pct: number | null;
+  tos_modifier_pct: number | null;
+  ros_modifier_pct: number | null;
+  pp_modifier_pct: number | null;
+  tos_spend_share: number | null;
+  ros_spend_share: number | null;
+  pp_spend_share: number | null;
   impressions: number;
   clicks: number;
   spend: number;
@@ -182,6 +220,22 @@ export interface WatchCampaignExportRow {
   sales: number;
   acos: number | null;
   watch_list: WatchList;
+}
+
+export interface KeywordTargetExportRow {
+  date_start: string;
+  date_end: string;
+  campaign_name: string;
+  keyword_text: string;
+  match_type: string;
+  keyword_state: string;
+  bid: number | null;
+  impressions: number;
+  clicks: number;
+  spend: number;
+  orders: number;
+  sales: number;
+  acos: number | null;
 }
 
 export const GNO_SPEC = spec;
@@ -359,11 +413,11 @@ export function placementShares(rows: PlacementRow[]): PlacementShare {
     else other += spend;
   }
   const total = tos + ros + pp + other;
-  if (total <= 0) return { tos_pct: null, ros_pct: null, pp_pct: null };
+  if (total <= 0) return { tos_spend_share: null, ros_spend_share: null, pp_spend_share: null };
   return {
-    tos_pct: (tos / total) * 100,
-    ros_pct: (ros / total) * 100,
-    pp_pct: (pp / total) * 100,
+    tos_spend_share: (tos / total) * 100,
+    ros_spend_share: (ros / total) * 100,
+    pp_spend_share: (pp / total) * 100,
   };
 }
 
@@ -414,9 +468,19 @@ export function enabledExactKeywords(
   campaignRows: CampaignDailyRow[],
   termRows: SearchTermRow[],
   asOf: string,
+  keywordTargets: KeywordTarget[] = [],
 ): Set<string> {
   const latest = latestByCampaign(campaignRows.filter((r) => r.date <= asOf));
   const enabled = new Set<string>();
+  // Account-wide Campaigns API keyword text is the source of truth.
+  // lowercase + trim (normalizeTerm) so "Beef Tallow Lip Balm " matches.
+  for (const t of keywordTargets) {
+    const mt = String(t.match_type ?? "").toLowerCase();
+    if (mt && mt !== "exact") continue;
+    if (t.state && !isEnabledStatus(t.state)) continue;
+    const kw = normalizeTerm(t.keyword_text);
+    if (kw) enabled.add(kw);
+  }
   for (const name of NEW_EXACT) {
     const row = latest.get(normalizeName(name));
     if (row && !isEnabledStatus(row.campaign_status) && row.campaign_status) continue;
@@ -424,10 +488,11 @@ export function enabledExactKeywords(
     if (kw) enabled.add(kw);
   }
   for (const t of termRows) {
-    if (!isNewExact(t.campaign_name)) continue;
     const mt = String(t.match_type ?? "").toLowerCase();
     if (mt && mt !== "exact") continue;
-    const kw = normalizeTerm(t.keyword || t.search_term);
+    const status = latest.get(normalizeName(t.campaign_name));
+    if (status?.campaign_status && !isEnabledStatus(status.campaign_status)) continue;
+    const kw = normalizeTerm(t.keyword);
     if (kw) enabled.add(kw);
   }
   return enabled;
@@ -477,12 +542,57 @@ export function harvestQueue(
   termRows: SearchTermRow[],
   campaignRows: CampaignDailyRow[],
   asOf: string,
-  ledger: GnoLedgerRow[] = [],
+  extra: KeywordTarget[] | GnoLedgerRow[] | {
+    keywordTargets?: KeywordTarget[];
+    ledger?: GnoLedgerRow[];
+  } = [],
 ): HarvestTerm[] {
-  const start = windowStart(asOf, 7);
-  const enabled = enabledExactKeywords(campaignRows, termRows, asOf);
-  const latest = latestSearchTerms(termRows, start, asOf)
-    .filter((r) => isAutoLoose(r.campaign_name));
+  const { keywordTargets, ledger } = splitHarvestExtra(extra);
+  return rollSearchTerms({
+    termRows,
+    campaignRows,
+    start: windowStart(asOf, 7),
+    end: asOf,
+    label: "L7",
+    campaignPredicate: isAutoLoose,
+    keywordTargets,
+    ledger,
+  });
+}
+
+function splitHarvestExtra(
+  extra: KeywordTarget[] | GnoLedgerRow[] | {
+    keywordTargets?: KeywordTarget[];
+    ledger?: GnoLedgerRow[];
+  },
+): { keywordTargets: KeywordTarget[]; ledger: GnoLedgerRow[] } {
+  if (Array.isArray(extra)) {
+    if (extra.length && extra.every((r) => r && typeof r === "object" && "keyword_text" in r)) {
+      return { keywordTargets: extra as KeywordTarget[], ledger: [] };
+    }
+    return { keywordTargets: [], ledger: extra as GnoLedgerRow[] };
+  }
+  return {
+    keywordTargets: extra.keywordTargets ?? [],
+    ledger: extra.ledger ?? [],
+  };
+}
+
+function rollSearchTerms(input: {
+  termRows: SearchTermRow[];
+  campaignRows: CampaignDailyRow[];
+  start: string;
+  end: string;
+  label: TermWindowLabel;
+  campaignPredicate: (name: string) => boolean;
+  keywordTargets: KeywordTarget[];
+  ledger?: GnoLedgerRow[];
+}): HarvestTerm[] {
+  const { termRows, campaignRows, start, end, label, campaignPredicate, keywordTargets } = input;
+  const ledger = input.ledger ?? [];
+  const enabled = enabledExactKeywords(campaignRows, termRows, end, keywordTargets);
+  const latest = latestSearchTerms(termRows, start, end)
+    .filter((r) => campaignPredicate(r.campaign_name));
   const rolled = new Map<string, SearchTermRow[]>();
   for (const r of latest) {
     const key = `${normalizeTerm(r.search_term)}\t${normalizeName(r.match_type)}`;
@@ -505,6 +615,9 @@ export function harvestQueue(
       ledger,
     );
     out.push({
+      date_start: start,
+      date_end: end,
+      label,
       campaign_name: group[0].campaign_name || AUTO_LOOSE_NAME,
       customer_search_term: term,
       match_type: group[0].match_type || "",
@@ -521,6 +634,29 @@ export function harvestQueue(
     });
   }
   return out.sort((a, b) => b.spend - a.spend);
+}
+
+/** Auto Loose or fat parent search terms for L2 + L7 (export pack). */
+export function searchTermExportRows(
+  termRows: SearchTermRow[],
+  campaignRows: CampaignDailyRow[],
+  end: string,
+  campaignPredicate: (name: string) => boolean,
+  keywordTargets: KeywordTarget[] = [],
+  ledger: GnoLedgerRow[] = [],
+): HarvestTerm[] {
+  const windows: Array<{ start: string; end: string; label: TermWindowLabel }> = [
+    { start: windowStart(end, 2), end, label: "L2" },
+    { start: windowStart(end, 7), end, label: "L7" },
+  ];
+  const out: HarvestTerm[] = [];
+  for (const w of windows) {
+    out.push(...rollSearchTerms({
+      termRows, campaignRows, start: w.start, end: w.end,
+      label: w.label, campaignPredicate, keywordTargets, ledger,
+    }));
+  }
+  return out;
 }
 
 function alert(
@@ -546,6 +682,7 @@ export function evaluateGnoAlerts(input: {
   /** Declared spend window (desk = 14). Absence inside this is never P0. */
   lookbackDays?: number;
   ledger?: GnoLedgerRow[];
+  keywordTargets?: KeywordTarget[];
 }): GnoAlert[] {
   const { asOf, today, campaigns, searchTerms, placements } = input;
   const now = input.now ?? new Date();
@@ -639,7 +776,10 @@ export function evaluateGnoAlerts(input: {
     }
   }
 
-  const harvest = harvestQueue(searchTerms, campaigns, asOf, input.ledger);
+  const harvest = harvestQueue(searchTerms, campaigns, asOf, {
+    ledger: input.ledger,
+    keywordTargets: input.keywordTargets,
+  });
   for (const name of NEW_EXACT) {
     const m = sumMetrics(inWindow(rowsForName(campaigns, name), l7start, asOf));
     alerts.push(alert("P1", "NEW_EXACT_DIGEST", "NEW EXACT L7",
@@ -671,10 +811,10 @@ export function evaluateGnoAlerts(input: {
     const rows = placements.filter((p) =>
       namesEqual(p.campaign_name, name) || nameContains(p.campaign_name, name));
     const share = placementShares(inWindow(rows, l7start, asOf));
-    if (share.pp_pct != null && share.pp_pct > spec.placement_pp_share_alert_pct) {
+    if (share.pp_spend_share != null && share.pp_spend_share > spec.placement_pp_share_alert_pct) {
       const matched = rows[0]?.campaign_name ?? name;
       alerts.push(alert("P1", "PP_SHARE", "Product Page spend share > 25%",
-        `${matched} PP share ${share.pp_pct.toFixed(1)}% of L7 placement spend. Observe — do not auto-cut.`,
+        `${matched} PP share ${share.pp_spend_share.toFixed(1)}% of L7 placement spend. Observe — do not auto-cut.`,
         { campaign_name: matched }));
     }
   }
@@ -690,12 +830,40 @@ export function evaluateGnoAlerts(input: {
   return alerts;
 }
 
+export function metaForName(meta: CampaignMeta[], name: string): CampaignMeta | undefined {
+  const key = normalizeName(name);
+  if (!key) return undefined;
+  return meta.find((m) => normalizeName(m.campaign_name) === key);
+}
+
+function splitTileExtra(
+  extra: CampaignMeta[] | GnoLedgerRow[] | {
+    campaignMeta?: CampaignMeta[];
+    ledger?: GnoLedgerRow[];
+  },
+): { campaignMeta: CampaignMeta[]; ledger: GnoLedgerRow[] } {
+  if (Array.isArray(extra)) {
+    if (extra.length && extra.every((r) => r && typeof r === "object" && "dave_action" in r)) {
+      return { campaignMeta: [], ledger: extra as GnoLedgerRow[] };
+    }
+    return { campaignMeta: extra as CampaignMeta[], ledger: [] };
+  }
+  return {
+    campaignMeta: extra.campaignMeta ?? [],
+    ledger: extra.ledger ?? [],
+  };
+}
+
 export function newExactTiles(
   campaigns: CampaignDailyRow[],
   asOf: string,
   now: Date = new Date(),
-  ledger: GnoLedgerRow[] = [],
+  extra: CampaignMeta[] | GnoLedgerRow[] | {
+    campaignMeta?: CampaignMeta[];
+    ledger?: GnoLedgerRow[];
+  } = [],
 ): NewExactTile[] {
+  const { campaignMeta, ledger } = splitTileExtra(extra);
   const hours = hoursSinceLaunch(now);
   const latest = latestByCampaign(campaigns);
   const start = windowStart(asOf, 7);
@@ -704,12 +872,14 @@ export function newExactTiles(
     const m = sumMetrics(inWindow(rows, start, asOf));
     const snap = lastExplicitStatusRow(campaigns, name)
       ?? latest.get(normalizeName(name));
-    const budget = snap?.budget != null ? Number(snap.budget) : null;
+    const meta = metaForName(campaignMeta, name);
+    const budget = snap?.budget != null ? Number(snap.budget)
+      : (meta?.daily_budget != null ? Number(meta.daily_budget) : null);
     return {
       campaign_name: name,
       keyword: extractExactKeyword(name) ?? "",
       family: familyOf(name),
-      state: snap?.campaign_status ?? "",
+      state: snap?.campaign_status || meta?.state || "",
       daily_budget: budget,
       hours_since_launch: hours,
       impressions: m.impressions,
@@ -729,6 +899,7 @@ export function newExactTiles(
 export function keeperHeartbeats(
   campaigns: CampaignDailyRow[],
   asOf: string,
+  campaignMeta: CampaignMeta[] = [],
 ): KeeperHeartbeat[] {
   const start = windowStart(asOf, 7);
   const latest = latestByCampaign(campaigns);
@@ -743,12 +914,16 @@ export function keeperHeartbeats(
     const todayM = sumMetrics(inWindow(rows, asOf, asOf));
     const snap = lastExplicitStatusRow(campaigns, name)
       ?? latest.get(normalizeName(name));
+    const meta = metaForName(campaignMeta, name);
+    const state = snap?.campaign_status || meta?.state || "";
+    const budget = snap?.budget != null ? Number(snap.budget)
+      : (meta?.daily_budget != null ? Number(meta.daily_budget) : null);
     return {
       campaign_name: name,
       role,
-      state: snap?.campaign_status ?? "",
-      enabled: isEnabledStatus(snap?.campaign_status),
-      daily_budget: snap?.budget != null ? Number(snap.budget) : null,
+      state,
+      enabled: isEnabledStatus(state),
+      daily_budget: budget,
       spend_today: todayM.spend,
       spend_l7: l7.spend,
       spend_l7_avg: l7.spend / 7,
@@ -777,40 +952,58 @@ function uniqueWatchNames(campaigns: CampaignDailyRow[]): { name: string; list: 
   return out;
 }
 
+export function packWindows(end: string): Array<{ start: string; end: string; label: PackWindowLabel }> {
+  return [
+    { start: end, end, label: "Today" },
+    { start: windowStart(end, 2), end, label: "Last2" },
+    { start: windowStart(end, 7), end, label: "Last7" },
+  ];
+}
+
 export function watchCampaignExportRows(input: {
   asOf: string;
+  today?: string;
   campaigns: CampaignDailyRow[];
   placements: PlacementRow[];
+  campaignMeta?: CampaignMeta[];
 }): WatchCampaignExportRow[] {
-  const { asOf, campaigns, placements } = input;
-  const windows = [
-    { start: windowStart(asOf, 2), end: asOf },
-    { start: windowStart(asOf, 7), end: asOf },
-  ];
+  const { campaigns, placements } = input;
+  const end = input.today || input.asOf;
+  const windows = packWindows(end);
   const latest = latestByCampaign(campaigns);
   const names = uniqueWatchNames(campaigns);
+  const meta = input.campaignMeta ?? [];
   const rows: WatchCampaignExportRow[] = [];
   for (const w of windows) {
     for (const { name, list } of names) {
       const campRows = campaigns.filter((r) =>
         namesEqual(r.campaign_name, name) || (list === "DAY5_PAUSE" && nameContains(r.campaign_name, name)));
+      const storedName = campRows[0]?.campaign_name ?? name;
       const m = sumMetrics(inWindow(campRows, w.start, w.end));
       const place = placementShares(inWindow(
         placements.filter((p) =>
           namesEqual(p.campaign_name, name) || nameContains(p.campaign_name, name)),
         w.start, w.end,
       ));
-      const snap = latest.get(normalizeName(campRows[0]?.campaign_name ?? name));
+      const snap = latest.get(normalizeName(storedName));
+      const metaRow = metaForName(meta, storedName) ?? metaForName(meta, name);
+      const state = String(snap?.campaign_status || metaRow?.state || "");
+      const budget = snap?.budget != null ? Number(snap.budget)
+        : (metaRow?.daily_budget != null ? Number(metaRow.daily_budget) : null);
+      const portfolio = String(metaRow?.portfolio_name || "").trim() || "none";
       rows.push({
         date_start: w.start,
         date_end: w.end,
-        campaign_name: campRows[0]?.campaign_name ?? name,
-        state: snap?.campaign_status ?? "",
-        portfolio: "",
-        daily_budget: snap?.budget != null ? Number(snap.budget) : null,
-        tos_pct: place.tos_pct,
-        ros_pct: place.ros_pct,
-        pp_pct: place.pp_pct,
+        campaign_name: storedName,
+        state,
+        portfolio,
+        daily_budget: budget,
+        tos_modifier_pct: metaRow?.tos_modifier_pct ?? null,
+        ros_modifier_pct: metaRow?.ros_modifier_pct ?? null,
+        pp_modifier_pct: metaRow?.pp_modifier_pct ?? null,
+        tos_spend_share: place.tos_spend_share,
+        ros_spend_share: place.ros_spend_share,
+        pp_spend_share: place.pp_spend_share,
         impressions: m.impressions,
         clicks: m.clicks,
         spend: m.spend,
@@ -827,9 +1020,11 @@ export function watchCampaignExportRows(input: {
 
 export function csvEscape(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined) return "";
-  const s = typeof value === "number" && Number.isFinite(value)
-    ? (Number.isInteger(value) ? String(value) : value.toFixed(2))
-    : String(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "";
+    return Number.isInteger(value) ? String(value) : value.toFixed(2);
+  }
+  const s = String(value);
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
@@ -843,23 +1038,18 @@ export function toCsv(headers: readonly string[], rows: Array<Record<string, unk
 }
 
 export function watchCampaignsCsv(rows: WatchCampaignExportRow[]): string {
-  return toCsv(WATCH_CAMPAIGN_CSV_HEADERS, rows.map((r) => ({
-    ...r,
-    daily_budget: r.daily_budget,
-    tos_pct: r.tos_pct,
-    ros_pct: r.ros_pct,
-    pp_pct: r.pp_pct,
-    acos: r.acos,
-  })));
+  return toCsv(WATCH_CAMPAIGN_CSV_HEADERS, rows.map((r) => ({ ...r })));
 }
 
 export function autoLooseSearchTermsCsv(rows: HarvestTerm[]): string {
   return toCsv(AUTO_LOOSE_TERM_CSV_HEADERS, rows.map((r) => ({
     ...r,
     has_enabled_exact_elsewhere: r.has_enabled_exact_elsewhere,
-    acos: r.acos,
-    cvr: r.cvr,
   })));
+}
+
+export function keywordTargetsCsv(rows: KeywordTargetExportRow[]): string {
+  return toCsv(KEYWORD_TARGET_CSV_HEADERS, rows.map((r) => ({ ...r })));
 }
 
 export function negativesSnapshotCsv(rows: NegativeRow[]): string {
@@ -870,19 +1060,104 @@ export function negativesSnapshotCsv(rows: NegativeRow[]): string {
   })));
 }
 
+function keywordWindowMetrics(
+  terms: SearchTermRow[],
+  campaignName: string,
+  keywordText: string,
+  start: string,
+  end: string,
+): Metrics {
+  const kw = normalizeTerm(keywordText);
+  const rows = inWindow(terms, start, end).filter((t) => {
+    if (!namesEqual(t.campaign_name, campaignName)) return false;
+    return normalizeTerm(t.keyword) === kw || normalizeTerm(t.search_term) === kw;
+  });
+  return sumMetrics(rows);
+}
+
+export function keywordTargetExportRows(input: {
+  end: string;
+  keywordTargets: KeywordTarget[];
+  searchTerms: SearchTermRow[];
+}): KeywordTargetExportRow[] {
+  const wanted = input.keywordTargets.filter((t) => {
+    const list = watchListOf(t.campaign_name);
+    return list === "NEW_EXACT" || list === "KEEPER";
+  });
+  const rows: KeywordTargetExportRow[] = [];
+  for (const w of packWindows(input.end)) {
+    for (const t of wanted) {
+      const m = keywordWindowMetrics(
+        input.searchTerms, t.campaign_name, t.keyword_text, w.start, w.end);
+      rows.push({
+        date_start: w.start,
+        date_end: w.end,
+        campaign_name: t.campaign_name,
+        keyword_text: t.keyword_text,
+        match_type: t.match_type || "",
+        keyword_state: t.state || "",
+        bid: t.bid ?? null,
+        impressions: m.impressions,
+        clicks: m.clicks,
+        spend: m.spend,
+        orders: m.orders,
+        sales: m.sales,
+        acos: m.acos,
+      });
+    }
+  }
+  return rows;
+}
+
+/** `gno-pack-YYYY-MM-DD_HHMM` in America/Los_Angeles. */
+export function gnoPackStamp(now: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: AMAZON_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const g = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${g("year")}-${g("month")}-${g("day")}_${g("hour")}${g("minute")}`;
+}
+
 export function buildGnoPack(input: {
   asOf: string;
+  today?: string;
+  now?: Date;
   campaigns: CampaignDailyRow[];
   searchTerms: SearchTermRow[];
   placements: PlacementRow[];
+  campaignMeta?: CampaignMeta[];
+  keywordTargets?: KeywordTarget[];
   negatives?: NegativeRow[] | null;
   ledger?: GnoLedgerRow[];
 }): { files: { name: string; body: string }[]; filename: string } {
-  const watch = watchCampaignExportRows(input);
-  const terms = harvestQueue(input.searchTerms, input.campaigns, input.asOf, input.ledger);
+  const end = input.today || input.asOf;
+  const targets = input.keywordTargets ?? [];
+  const ledger = input.ledger ?? [];
+  const watch = watchCampaignExportRows({
+    asOf: input.asOf,
+    today: end,
+    campaigns: input.campaigns,
+    placements: input.placements,
+    campaignMeta: input.campaignMeta,
+  });
+  const autoTerms = searchTermExportRows(
+    input.searchTerms, input.campaigns, end, isAutoLoose, targets, ledger);
+  const fatTerms = searchTermExportRows(
+    input.searchTerms, input.campaigns, end, isFatParent, targets, ledger);
+  const keywords = keywordTargetExportRows({
+    end, keywordTargets: targets, searchTerms: input.searchTerms,
+  });
   const files = [
     { name: "watch_campaigns.csv", body: watchCampaignsCsv(watch) },
-    { name: "auto_loose_search_terms.csv", body: autoLooseSearchTermsCsv(terms) },
+    { name: "auto_loose_search_terms.csv", body: autoLooseSearchTermsCsv(autoTerms) },
+    { name: "fat_parent_search_terms.csv", body: autoLooseSearchTermsCsv(fatTerms) },
+    { name: "keyword_targets.csv", body: keywordTargetsCsv(keywords) },
   ];
   if (input.negatives && input.negatives.length) {
     const wanted = input.negatives.filter((n) =>
@@ -891,5 +1166,5 @@ export function buildGnoPack(input: {
       files.push({ name: "negatives_snapshot.csv", body: negativesSnapshotCsv(wanted) });
     }
   }
-  return { files, filename: `gno-pack-${input.asOf}.zip` };
+  return { files, filename: `gno-pack-${gnoPackStamp(input.now)}.zip` };
 }

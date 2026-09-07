@@ -42,15 +42,20 @@ def test_dashboard_json_matches_repo_config():
     assert spec["observe_only"] is True
 
 
-def test_gno_campaign_job_is_observe_only_sp_snapshot():
+def test_gno_campaign_job_is_observe_only_campaigns_api():
     from src.main import _run_ads_gno_campaigns_sync
     src = inspect.getsource(_run_ads_gno_campaigns_sync)
-    assert "days=3" in src
-    assert "campaigns_only=True" in src
-    assert 'ad_products=("SP",)' in src
+    assert "snapshot_gno_meta" in src
+    assert "campaigns_api" in src
+    assert "days=3" not in src
+    assert "campaigns_only=True" not in src
+    assert "_run_ads_sync_job" not in src
     assert "_run_ads_search_terms_sync" not in src
     assert "_run_ads_placements_sync" not in src
-    assert "pause" not in src.lower() or "Observe only" in src
+    assert "poll_report" not in src
+    assert "fetch_report" not in src
+    assert "Observe only" in src
+    assert "425" in src
 
 
 def test_gno_job_is_scheduled_every_4h_not_at_0500():
@@ -101,7 +106,7 @@ def test_keeper_missing_from_short_spend_lookback_is_not_p0():
     lib = (ROOT / "dashboard" / "src" / "lib" / "gno-ppc-watch.ts").read_text()
     assert "SHORT_SPEND_LOOKBACK_DAYS" in lib
     assert "keeperMissingPriority" in lib
-    assert 'days=3' in (ROOT / "src" / "main.py").read_text()
+    assert "snapshot_gno_meta" in (ROOT / "src" / "main.py").read_text()
 
 
 def test_gno_json_pins_export_and_learning_knobs():

@@ -12,6 +12,8 @@ import {
   keeperHeartbeats,
   newExactTiles,
   type CampaignDailyRow,
+  type CampaignMeta,
+  type KeywordTarget,
   type PlacementRow,
   type SearchTermRow,
 } from "@/lib/gno-ppc-watch";
@@ -80,6 +82,23 @@ export async function GET() {
     const campaigns = camp.rows as unknown as CampaignDailyRow[];
     const searchTerms = term.rows as unknown as SearchTermRow[];
     const placements = place.rows as unknown as PlacementRow[];
+
+    let campaignMeta: CampaignMeta[] = [];
+    let keywordTargets: KeywordTarget[] = [];
+    try {
+      const meta = await sb.from("ads_campaign_meta")
+        .select("campaign_id,campaign_name,state,daily_budget,portfolio_id,portfolio_name,tos_modifier_pct,ros_modifier_pct,pp_modifier_pct")
+        .order("campaign_id", { ascending: true })
+        .range(0, 999);
+      if (!meta.error) campaignMeta = (meta.data ?? []) as unknown as CampaignMeta[];
+    } catch { /* snapshot optional until migration */ }
+    try {
+      const kw = await sb.from("ads_keyword_targets")
+        .select("keyword_id,campaign_id,campaign_name,keyword_text,match_type,state,bid")
+        .order("keyword_id", { ascending: true })
+        .range(0, 9999);
+      if (!kw.error) keywordTargets = (kw.data ?? []) as unknown as KeywordTarget[];
+    } catch { /* snapshot optional until migration */ }
 
     let sqp: {
       available: boolean;
@@ -170,11 +189,12 @@ export async function GET() {
     const alerts = evaluateGnoAlerts({
       asOf, today, now, campaigns, searchTerms, placements,
       negativesAvailable: false,
-      bidsKnown: false,
+      bidsKnown: keywordTargets.some((t) => t.bid != null),
       lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
       ledger,
+      keywordTargets,
     });
-    const harvest = harvestQueue(searchTerms, campaigns, asOf, ledger);
+    const harvest = harvestQueue(searchTerms, campaigns, asOf, { keywordTargets, ledger });
     const p0 = alerts.filter((a) => a.priority === "P0");
     const p1 = alerts.filter((a) => a.priority === "P1");
     const exportBanner = evaluateExportNeed({
@@ -214,11 +234,11 @@ export async function GET() {
       p0,
       p1,
       p2: alerts.filter((a) => a.priority === "P2"),
-      newExact: newExactTiles(campaigns, asOf, now, ledger),
+      newExact: newExactTiles(campaigns, asOf, now, { campaignMeta, ledger }),
       exportBanner,
       lastExportAt: exportState?.last_export_at ?? null,
       lastExportReason: exportState?.last_export_reason ?? null,
-      keepers: keeperHeartbeats(campaigns, asOf),
+      keepers: keeperHeartbeats(campaigns, asOf, campaignMeta),
       harvestQueue: harvest.filter((t) => t.proposed_tag === "HARVEST_CANDIDATE"),
       junkQueue: harvest.filter((t) => t.proposed_tag === "JUNK_CANDIDATE"),
       harvestAll: harvest,
@@ -231,9 +251,8 @@ export async function GET() {
       sqp,
       lastSync,
       gaps: [
-        "Keyword bids are not stored — 0-impr P0 cannot confirm a bid bump.",
-        "Campaign / ad-group negatives are not stored — core-negative P0 is skipped (not faked).",
-        "Portfolio / bidding strategy / placement modifiers are not on ads_campaigns_daily.",
+        "Keyword bids / portfolio / placement modifiers come from ads_campaign_meta (Campaigns API snapshot). Missing snapshot is empty, not invented.",
+        "Campaign / ad-group negatives live in ads_negatives after the GNO snapshot. Core-negative P0 stays skipped until that table is populated.",
         "SQP Brand Analytics stays a manual CSV upload. Shares are never invented.",
       ],
       loadErrors,

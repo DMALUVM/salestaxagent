@@ -9,28 +9,35 @@ import {
   FAT_PARENT_NAME,
   GNO_OBSERVE_ONLY,
   KEEP_ALIVE,
+  KEYWORD_TARGET_CSV_HEADERS,
   LIP_BE_ACOS,
   NEW_EXACT,
   WATCH_CAMPAIGN_CSV_HEADERS,
   autoLooseSearchTermsCsv,
   buildGnoPack,
+  csvEscape,
   enabledExactKeywords,
   evaluateGnoAlerts,
   extractExactKeyword,
+  gnoPackStamp,
   harvestQueue,
   hoursSinceLaunch,
   isAutoLoose,
   isEnabledStatus,
   keeperHeartbeats,
+  keywordTargetsCsv,
   keeperMissingPriority,
   newExactTiles,
   spendLookbackDays,
   normalizeName,
+  searchTermExportRows,
   tagAutoLooseTerm,
   watchCampaignsCsv,
   watchCampaignExportRows,
   watchListOf,
   type CampaignDailyRow,
+  type CampaignMeta,
+  type KeywordTarget,
   type PlacementRow,
   type SearchTermRow,
 } from "./gno-ppc-watch";
@@ -345,21 +352,25 @@ describe("rules engine P0/P1", () => {
 });
 
 describe("export pack columns", () => {
-  test("watch_campaigns.csv headers and L2+L7 rows", () => {
+  test("watch_campaigns.csv headers and Today+Last2+Last7 rows", () => {
     const campaigns = [
       camp(NEW_EXACT[0], { date: "2026-09-05", spend: 4, impressions: 20, clicks: 2, orders_14d: 0 }),
       camp(NEW_EXACT[0], { date: "2026-09-06", spend: 6, impressions: 30, clicks: 3, orders_14d: 1, sales_14d: 12 }),
     ];
-    const rows = watchCampaignExportRows({ asOf: "2026-09-06", campaigns, placements: [] });
+    const rows = watchCampaignExportRows({ asOf: "2026-09-06", today: "2026-09-07", campaigns, placements: [] });
     const forNew = rows.filter((r) => r.campaign_name === NEW_EXACT[0]);
-    assert.equal(forNew.length, 2);
+    assert.equal(forNew.length, 3);
     assert.deepEqual([...new Set(forNew.map((r) => `${r.date_start}..${r.date_end}`))].sort(), [
-      "2026-08-31..2026-09-06",
-      "2026-09-05..2026-09-06",
+      "2026-09-01..2026-09-07",
+      "2026-09-06..2026-09-07",
+      "2026-09-07..2026-09-07",
     ]);
     assert.equal(forNew[0].watch_list, "NEW_EXACT");
     const csv = watchCampaignsCsv(rows);
     assert.equal(csv.split("\n")[0], WATCH_CAMPAIGN_CSV_HEADERS.join(","));
+    assert.match(csv, /tos_modifier_pct/);
+    assert.match(csv, /tos_spend_share/);
+    assert.doesNotMatch(csv.split("\n")[0], /(?<!modifier_|spend_share)tos_pct/);
   });
 
   test("auto_loose_search_terms.csv headers and tags", () => {
@@ -376,11 +387,14 @@ describe("export pack columns", () => {
     assert.equal(AUTO_LOOSE_TERM_CSV_HEADERS.includes("learning_note" as never), false);
     assert.match(csv, /HARVEST_CANDIDATE/);
     assert.match(csv, /false/);
+    assert.match(csv, /L7/);
   });
 
-  test("zip contains the two required files", () => {
+  test("zip contains the four required files and stamped filename", () => {
     const pack = buildGnoPack({
       asOf: "2026-09-06",
+      today: "2026-09-07",
+      now: new Date("2026-09-07T15:04:00-07:00"),
       campaigns: [camp(NEW_EXACT[0], { spend: 1 })],
       searchTerms: [],
       placements: [],
@@ -388,11 +402,16 @@ describe("export pack columns", () => {
     assert.deepEqual(pack.files.map((f) => f.name), [
       "watch_campaigns.csv",
       "auto_loose_search_terms.csv",
+      "fat_parent_search_terms.csv",
+      "keyword_targets.csv",
     ]);
+    assert.equal(pack.filename, "gno-pack-2026-09-07_1504.zip");
     const zip = zipStore(pack.files);
     const text = new TextDecoder().decode(zip);
     assert.match(text, /watch_campaigns\.csv/);
     assert.match(text, /auto_loose_search_terms\.csv/);
+    assert.match(text, /fat_parent_search_terms\.csv/);
+    assert.match(text, /keyword_targets\.csv/);
     assert.equal(zip[0], 0x50);
     assert.equal(zip[1], 0x4b);
   });
@@ -467,5 +486,180 @@ describe("widgets + safety rails", () => {
       assert.match(src, /\.order\(order2/);
       assert.match(src, /campaign_id/);
     }
+  });
+});
+
+describe("GNO pack v2 — Dave 7 Sep feedback", () => {
+  test("never omits watch-list campaigns with zero report rows", () => {
+    const rows = watchCampaignExportRows({
+      asOf: "2026-09-06",
+      today: "2026-09-07",
+      campaigns: [],
+      placements: [],
+      campaignMeta: NEW_EXACT.map((name) => ({
+        campaign_name: name,
+        state: "ENABLED",
+        daily_budget: 25,
+        portfolio_name: "Lip",
+        tos_modifier_pct: 140,
+        ros_modifier_pct: 0,
+        pp_modifier_pct: 0,
+      })),
+    });
+    const today = rows.filter((r) => r.date_start === "2026-09-07" && r.watch_list === "NEW_EXACT");
+    assert.equal(today.length, 7);
+    assert.ok(today.every((r) => r.state === "ENABLED"));
+    assert.ok(today.every((r) => r.daily_budget === 25));
+    assert.ok(today.every((r) => r.impressions === 0 && r.spend === 0));
+    assert.ok(today.every((r) => r.tos_modifier_pct === 140 && r.ros_modifier_pct === 0 && r.pp_modifier_pct === 0));
+    assert.ok(!today.some((r) => Number.isNaN(r.impressions)));
+  });
+
+  test("portfolio joins campaign meta name, else none", () => {
+    const rows = watchCampaignExportRows({
+      asOf: "2026-09-07",
+      today: "2026-09-07",
+      campaigns: [camp(NEW_EXACT[0])],
+      placements: [],
+      campaignMeta: [
+        { campaign_name: NEW_EXACT[0], portfolio_name: "Lip", state: "ENABLED" },
+        { campaign_name: NEW_EXACT[6], portfolio_name: "Deo", state: "ENABLED" },
+      ],
+    });
+    const today = rows.filter((r) => r.date_start === "2026-09-07");
+    assert.equal(today.find((r) => r.campaign_name === NEW_EXACT[0])?.portfolio, "Lip");
+    assert.equal(today.find((r) => r.campaign_name === NEW_EXACT[6])?.portfolio, "Deo");
+    assert.equal(today.find((r) => r.campaign_name === NEW_EXACT[1])?.portfolio, "none");
+  });
+
+  test("placement modifiers are not spend share", () => {
+    const placements: PlacementRow[] = [
+      { date: "2026-09-07", campaign_name: NEW_EXACT[0], placement: "Top of Search on-Amazon", spend: 8 },
+      { date: "2026-09-07", campaign_name: NEW_EXACT[0], placement: "Detail Page on-Amazon", spend: 2 },
+    ];
+    const meta: CampaignMeta[] = [{
+      campaign_name: NEW_EXACT[0],
+      tos_modifier_pct: 140, ros_modifier_pct: 0, pp_modifier_pct: 0,
+      portfolio_name: "Lip",
+    }];
+    const rows = watchCampaignExportRows({
+      asOf: "2026-09-07", today: "2026-09-07",
+      campaigns: [camp(NEW_EXACT[0], { date: "2026-09-07", spend: 10 })],
+      placements, campaignMeta: meta,
+    });
+    const today = rows.find((r) => r.campaign_name === NEW_EXACT[0] && r.date_start === "2026-09-07");
+    assert.equal(today?.tos_modifier_pct, 140);
+    assert.equal(today?.ros_modifier_pct, 0);
+    assert.equal(today?.pp_modifier_pct, 0);
+    assert.equal(today?.tos_spend_share, 80);
+    assert.equal(today?.pp_spend_share, 20);
+  });
+
+  test("has_enabled_exact_elsewhere matches account-wide Exact keyword text", () => {
+    const terms: SearchTermRow[] = [{
+      date: "2026-09-07",
+      campaign_name: AUTO_LOOSE_NAME,
+      search_term: "Beef Tallow Lip Balm",
+      match_type: "TARGETING_EXPRESSION",
+      spend: 8, sales_14d: 24, orders_14d: 3, clicks: 10, impressions: 200,
+    }];
+    const targets: KeywordTarget[] = [
+      {
+        campaign_name: "SP | Orange Assorted Peppermint | Exact",
+        keyword_text: "beef tallow lip balm",
+        match_type: "EXACT",
+        state: "ENABLED",
+        bid: 1.2,
+      },
+      {
+        campaign_name: FAT_PARENT_NAME,
+        keyword_text: "  Beef Tallow Lip Balm ",
+        match_type: "exact",
+        state: "enabled",
+        bid: 2.4,
+      },
+    ];
+    const enabled = enabledExactKeywords([], terms, "2026-09-07", targets);
+    assert.equal(enabled.has("beef tallow lip balm"), true);
+    const q = harvestQueue(terms, [], "2026-09-07", targets);
+    const row = q.find((t) => normalizeName(t.customer_search_term) === "beef tallow lip balm");
+    assert.equal(row?.has_enabled_exact_elsewhere, true);
+    assert.equal(row?.proposed_tag, "KEEP");
+  });
+
+  test("paused Exact elsewhere does not count as enabled", () => {
+    const targets: KeywordTarget[] = [{
+      campaign_name: "some paused exact",
+      keyword_text: "beef tallow lip balm",
+      match_type: "EXACT",
+      state: "PAUSED",
+    }];
+    const enabled = enabledExactKeywords([], [], "2026-09-07", targets);
+    assert.equal(enabled.has("beef tallow lip balm"), false);
+  });
+
+  test("auto loose and fat parent term CSVs carry L2/L7 dates", () => {
+    const terms: SearchTermRow[] = [{
+      date: "2026-09-07",
+      campaign_name: FAT_PARENT_NAME,
+      search_term: "tallow lip balm",
+      match_type: "EXACT",
+      keyword: "tallow lip balm",
+      spend: 12, sales_14d: 40, orders_14d: 2, clicks: 6, impressions: 90,
+    }];
+    const fat = searchTermExportRows(terms, [], "2026-09-07", (n) => n === FAT_PARENT_NAME);
+    assert.deepEqual([...new Set(fat.map((r) => r.label))].sort(), ["L2", "L7"]);
+    assert.ok(fat.every((r) => r.date_end === "2026-09-07"));
+    assert.ok(fat.some((r) => r.date_start === "2026-09-06" && r.label === "L2"));
+    assert.ok(fat.some((r) => r.date_start === "2026-09-01" && r.label === "L7"));
+    const csv = autoLooseSearchTermsCsv(fat);
+    assert.match(csv, /date_start,date_end,label/);
+  });
+
+  test("keyword_targets.csv covers NEW_EXACT + KEEPER with bid and metrics", () => {
+    const targets: KeywordTarget[] = [{
+      campaign_name: FAT_PARENT_NAME,
+      keyword_text: "tallow lip balm",
+      match_type: "EXACT",
+      state: "ENABLED",
+      bid: 2.45,
+    }];
+    const terms: SearchTermRow[] = [{
+      date: "2026-09-07",
+      campaign_name: FAT_PARENT_NAME,
+      search_term: "tallow lip balm",
+      keyword: "tallow lip balm",
+      match_type: "EXACT",
+      spend: 12, sales_14d: 40, orders_14d: 2, clicks: 6, impressions: 90,
+    }];
+    const pack = buildGnoPack({
+      asOf: "2026-09-06",
+      today: "2026-09-07",
+      campaigns: [camp(FAT_PARENT_NAME, { date: "2026-09-07" })],
+      searchTerms: terms,
+      placements: [],
+      keywordTargets: targets,
+      negatives: [{ campaign_name: AUTO_LOOSE_NAME, keyword: "chapstick", match_type: "EXACT" }],
+    });
+    assert.ok(pack.files.some((f) => f.name === "keyword_targets.csv"));
+    assert.ok(pack.files.some((f) => f.name === "negatives_snapshot.csv"));
+    const kw = pack.files.find((f) => f.name === "keyword_targets.csv")!.body;
+    assert.equal(kw.split("\n")[0], KEYWORD_TARGET_CSV_HEADERS.join(","));
+    assert.match(kw, /tallow lip balm/);
+    assert.match(kw, /2.45/);
+    assert.match(kw, /ENABLED/);
+    const csv = keywordTargetsCsv([{
+      date_start: "2026-09-07", date_end: "2026-09-07",
+      campaign_name: FAT_PARENT_NAME, keyword_text: "tallow lip balm",
+      match_type: "EXACT", keyword_state: "ENABLED", bid: 2.45,
+      impressions: 90, clicks: 6, spend: 12, orders: 2, sales: 40, acos: 30,
+    }]);
+    assert.match(csv, /2.45/);
+  });
+
+  test("csvEscape never writes NaN", () => {
+    assert.equal(csvEscape(Number.NaN), "");
+    assert.equal(csvEscape(Number.POSITIVE_INFINITY), "");
+    assert.equal(gnoPackStamp(new Date("2026-09-07T15:04:00-07:00")), "2026-09-07_1504");
   });
 });
