@@ -259,6 +259,112 @@ def test_defer_caps_and_is_not_a_wait_loop():
     assert main_mod._ADS_RETRY_MAX >= 1
 
 
+def test_lease_busy_queues_one_retry_not_a_poll(monkeypatch):
+    """AdsSyncBusy must not schedule the 20-minute skip storm."""
+    from src import main as main_mod
+    added = []
+    main_mod._PENDING_AFTER_LEASE.clear()
+
+    class Sched:
+        def add_job(self, fn, kind, run_date=None, id=None, **k):
+            added.append(id)
+
+    monkeypatch.setattr(main_mod, "_SCHEDULER", Sched())
+    assert main_mod._defer_ads_job("ads_placements_sync", 0, after_lease=True)
+    assert main_mod._defer_ads_job("ads_placements_sync", 1, after_lease=True) is False
+    assert added == []
+    assert list(main_mod._PENDING_AFTER_LEASE) == ["ads_placements_sync"]
+    main_mod._flush_ads_after_lease()
+    assert added == ["ads_placements_sync_after_lease"]
+    assert main_mod._PENDING_AFTER_LEASE == {}
+
+
+def test_gap_fill_and_gno_share_the_after_lease_queue(monkeypatch):
+    from src import main as main_mod
+    main_mod._PENDING_AFTER_LEASE.clear()
+    main_mod._defer_ads_job("ads_search_terms_gap_fill", 0, after_lease=True)
+    main_mod._defer_ads_job("ads_search_terms_sync", 0, after_lease=True)
+    main_mod._defer_ads_job("ads_gno_campaigns_sync", 0, after_lease=True)
+    assert set(main_mod._PENDING_AFTER_LEASE) == {
+        "ads_search_terms_gap_fill", "ads_gno_campaigns_sync",
+    }
+    main_mod._PENDING_AFTER_LEASE.clear()
+
+
+def test_already_queued_busy_job_writes_no_job_run(monkeypatch):
+    from src import main as main_mod
+    from src.amazon_ads.reports import AdsSyncBusy
+    starts = []
+    main_mod._PENDING_AFTER_LEASE.clear()
+    main_mod._enqueue_ads_after_lease("ads_placements_sync", lambda: None)
+    monkeypatch.setattr("src.db.job_start",
+                        lambda name: starts.append(name) or "run-x")
+    monkeypatch.setattr("src.db.job_finish", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "src.amazon_ads.reports.sync_ads",
+        lambda **k: (_ for _ in ()).throw(AdsSyncBusy("busy")))
+    status = main_mod._run_ads_sync_job(
+        "ads_placements_sync", days=14, placements_only=True, label="placements")
+    assert status == "skipped"
+    assert starts == []
+    main_mod._PENDING_AFTER_LEASE.clear()
+
+
+def test_release_lease_flushes_pending_retry(monkeypatch, lock_dir):
+    from src import main as main_mod
+    import src.amazon_ads.sync_lock as sl
+    added = []
+    main_mod._PENDING_AFTER_LEASE.clear()
+
+    class Sched:
+        def add_job(self, fn, kind, run_date=None, id=None, **k):
+            added.append(id)
+
+    monkeypatch.setattr(main_mod, "_SCHEDULER", Sched())
+    main_mod._defer_ads_job("ads_search_terms_gap_fill", 0, after_lease=True)
+    sl.release_ads_lease()
+    assert added == ["ads_search_terms_gap_fill_after_lease"]
+    assert main_mod._PENDING_AFTER_LEASE == {}
+
+
+def test_sb_sd_timeout_stops_remaining_days(monkeypatch):
+    import src.amazon_ads.reports as reports
+    from datetime import date
+    from src.amazon_ads.client import AdsReportSlotBusy
+
+    fetched = []
+
+    def fake(cs, ce, product="SP"):
+        fetched.append((product, cs))
+        if product == "SP":
+            return [{"date": ce.isoformat(), "campaignId": "sp-1",
+                     "campaignName": "sp", "impressions": 1, "clicks": 1,
+                     "spend": 10}]
+        if product == "SB":
+            raise TimeoutError("Report sb timed out after 1800s")
+        raise AdsReportSlotBusy("425")
+
+    monkeypatch.setattr(reports, "_fetch_campaigns_chunk", fake)
+    monkeypatch.setattr(reports, "upsert_rows",
+                        lambda *a, **k: 1)
+    r = reports.fetch_campaigns_daily(
+        date(2026, 9, 1), date(2026, 9, 7), sb_sd_days=7)
+    sb = [cs for product, cs in fetched if product == "SB"]
+    sd = [cs for product, cs in fetched if product == "SD"]
+    assert len(sb) == 1
+    assert sd == []
+    assert r["by_type"]["SP"]["ok"] is True
+    assert r["partial"] is True
+
+
+def test_sb_sd_should_release_lock_on_timeout_and_425():
+    from src.amazon_ads.client import AdsReportSlotBusy
+    from src.amazon_ads.reports import _sb_sd_should_release_lock
+    assert _sb_sd_should_release_lock(TimeoutError("timed out after 1800s"))
+    assert _sb_sd_should_release_lock(AdsReportSlotBusy("HTTP 425"))
+    assert not _sb_sd_should_release_lock(RuntimeError("429 rate limited"))
+
+
 def test_run_ads_sync_job_defers_on_425(monkeypatch):
     from src import main as main_mod
     deferred = []
@@ -284,10 +390,36 @@ def test_run_ads_sync_job_defers_on_425(monkeypatch):
     assert deferred == [("ads_search_terms_sync", 0)]
 
 
+def test_run_ads_sync_job_does_not_defer_when_sp_landed_on_425(monkeypatch):
+    from src import main as main_mod
+    deferred = []
+    main_mod._PENDING_AFTER_LEASE.clear()
+    monkeypatch.setattr(main_mod, "_defer_ads_job",
+                        lambda *a, **k: deferred.append((a, k)))
+    monkeypatch.setattr("src.db.job_start", lambda name: "run-1")
+    monkeypatch.setattr("src.db.job_finish", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "src.amazon_ads.reports.sync_ads",
+        lambda **k: {
+            "ran": ["campaigns"],
+            "campaigns": {
+                "errors": ["SB chunk 1: Amazon Ads reporting slot busy (HTTP 425)."],
+                "by_type": {"SP": {"ok": True, "rows": 8, "spend": 10, "clicks": 4}},
+                "products_ok": ["SP"],
+                "products_failed": ["SB"],
+            },
+        })
+    status = main_mod._run_ads_sync_job(
+        "ads_campaigns_sync", days=7, campaigns_only=True, label="campaigns")
+    assert status == "partial"
+    assert deferred == []
+
+
 def test_run_ads_sync_job_defers_on_busy(monkeypatch):
     from src import main as main_mod
     from src.amazon_ads.reports import AdsSyncBusy
     deferred = []
+    main_mod._PENDING_AFTER_LEASE.clear()
     monkeypatch.setattr(main_mod, "_defer_ads_job",
                         lambda name, retry, **k: deferred.append(name))
     monkeypatch.setattr("src.db.job_start", lambda name: "run-1")
