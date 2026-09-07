@@ -48,7 +48,7 @@ async function pageRows(
       if (order3) q = q.order(order3, { ascending: true });
       const r = await q.range(offset, offset + 999);
       if (r.error) throw new Error(r.error.message);
-      const page = r.data ?? [];
+      const page = (r.data ?? []) as unknown as Record<string, unknown>[];
       rows.push(...page);
       if (page.length < 1000) break;
       offset += 1000;

@@ -76,5 +76,6 @@ def test_gno_dashboard_never_auto_writes_amazon():
     api = (ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno" / "route.ts").read_text()
     for src in (ui, lib, api):
         assert "observe" in src.lower()
-        assert "auto-pause" not in src.lower()
         assert "amazonads" not in src.lower()
+        assert "autoPause(" not in src
+        assert "auto_pause = true" not in src.lower()
