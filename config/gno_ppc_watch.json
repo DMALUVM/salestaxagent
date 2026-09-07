@@ -11,6 +11,11 @@
   "placement_pp_share_alert_pct": 25,
   "harvest_min_l7_orders": 3,
   "junk_min_l7_spend": 5,
+  "export_review_lead_hours": 6,
+  "digest_window_et": { "start": "06:30", "end": "08:00" },
+  "learning_harvest_skip_threshold": 2,
+  "learning_harvest_extra_orders": 2,
+  "learning_junk_min_spend": 2,
   "core_negatives": ["tallow lip balm", "tallow chapstick", "chapstick"],
   "family_break_even_acos": {
     "lip_3pk": 42,

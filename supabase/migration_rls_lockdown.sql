@@ -115,6 +115,9 @@ ALTER TABLE IF EXISTS public.tpl_cost_monthly         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.tpl_cost_fees            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.tpl_cost_detail          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.inventory_sku_flags      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.gno_export_state         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.gno_decision_ledger      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.gno_alert_acks           ENABLE ROW LEVEL SECURITY;
 
 -- No CREATE POLICY for anon / authenticated on purpose.
 -- Deny-by-default: RLS on + zero permissive policies = no access for those roles.

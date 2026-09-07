@@ -71,18 +71,30 @@ def test_gno_job_on_pull_lease_and_last_sync_list():
 
 
 def test_gno_dashboard_never_auto_writes_amazon():
-    ui = (ROOT / "dashboard" / "src" / "components" / "ppc-gno-watch.tsx").read_text()
-    lib = (ROOT / "dashboard" / "src" / "lib" / "gno-ppc-watch.ts").read_text()
-    api = (ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno" / "route.ts").read_text()
-    ack = (ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno-ack" / "route.ts").read_text()
-    for src in (ui, lib, api, ack):
+    files = [
+        ROOT / "dashboard" / "src" / "components" / "ppc-gno-watch.tsx",
+        ROOT / "dashboard" / "src" / "lib" / "gno-ppc-watch.ts",
+        ROOT / "dashboard" / "src" / "lib" / "gno-export-state.ts",
+        ROOT / "dashboard" / "src" / "lib" / "gno-learning.ts",
+        ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno" / "route.ts",
+        ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno-export" / "route.ts",
+        ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno-outcome" / "route.ts",
+        ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno-ack" / "route.ts",
+    ]
+    for path in files:
+        src = path.read_text()
         assert "observe" in src.lower()
         assert "amazonads" not in src.lower()
         assert "autoPause(" not in src
         assert "auto_pause = true" not in src.lower()
+    ui = files[0].read_text()
+    lib = files[1].read_text()
     assert "Mark Done" in ui
     assert 'alert("P0", "KEEPER_MISSING"' not in lib
     assert "not a P0" in lib
+    assert "When to Export GNO pack" in ui
+    assert "EXPORT NEEDED" in ui
+    assert "Log Grok outcome" in ui
 
 
 def test_keeper_missing_from_short_spend_lookback_is_not_p0():
@@ -90,3 +102,11 @@ def test_keeper_missing_from_short_spend_lookback_is_not_p0():
     assert "SHORT_SPEND_LOOKBACK_DAYS" in lib
     assert "keeperMissingPriority" in lib
     assert 'days=3' in (ROOT / "src" / "main.py").read_text()
+
+
+def test_gno_json_pins_export_and_learning_knobs():
+    spec = json.loads((ROOT / "config" / "gno_ppc_watch.json").read_text())
+    assert spec["export_review_lead_hours"] == 6
+    assert spec["digest_window_et"] == {"start": "06:30", "end": "08:00"}
+    assert spec["learning_harvest_skip_threshold"] == 2
+    assert spec["observe_only"] is True

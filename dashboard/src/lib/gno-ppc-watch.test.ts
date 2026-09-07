@@ -373,6 +373,7 @@ describe("export pack columns", () => {
     const q = harvestQueue(terms, [], "2026-09-06");
     const csv = autoLooseSearchTermsCsv(q);
     assert.equal(csv.split("\n")[0], AUTO_LOOSE_TERM_CSV_HEADERS.join(","));
+    assert.equal(AUTO_LOOSE_TERM_CSV_HEADERS.includes("learning_note" as never), false);
     assert.match(csv, /HARVEST_CANDIDATE/);
     assert.match(csv, /false/);
   });
@@ -420,15 +421,24 @@ describe("widgets + safety rails", () => {
   });
 
   test("source forbids auto-pause / auto-negate / auto-bid", () => {
-    const lib = readFileSync(path.join(process.cwd(), "src/lib/gno-ppc-watch.ts"), "utf8");
-    const page = readFileSync(path.join(process.cwd(), "src/app/ppc/gno/page.tsx"), "utf8");
-    const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-gno-watch.tsx"), "utf8");
-    const api = readFileSync(path.join(process.cwd(), "src/app/api/ppc/gno-export/route.ts"), "utf8");
-    const ack = readFileSync(path.join(process.cwd(), "src/app/api/ppc/gno-ack/route.ts"), "utf8");
-    for (const src of [lib, page, ui, api, ack]) {
+    const files = [
+      "src/lib/gno-ppc-watch.ts",
+      "src/lib/gno-export-state.ts",
+      "src/lib/gno-learning.ts",
+      "src/lib/gno-store.ts",
+      "src/app/ppc/gno/page.tsx",
+      "src/components/ppc-gno-watch.tsx",
+      "src/app/api/ppc/gno-export/route.ts",
+      "src/app/api/ppc/gno-outcome/route.ts",
+      "src/app/api/ppc/gno-ack/route.ts",
+    ];
+    for (const rel of files) {
+      const src = readFileSync(path.join(process.cwd(), rel), "utf8");
       assert.doesNotMatch(src, /amazonads|autoPause\(|auto_pause\s*=\s*true/i);
       assert.match(src, /observe/i);
     }
+    const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-gno-watch.tsx"), "utf8");
+    const lib = readFileSync(path.join(process.cwd(), "src/lib/gno-ppc-watch.ts"), "utf8");
     assert.match(ui, /Mark Done/);
     assert.doesNotMatch(lib, /alert\("P0", "KEEPER_MISSING"/);
   });
@@ -447,6 +457,7 @@ describe("widgets + safety rails", () => {
     assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno/route.ts")), true);
     assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno-export/route.ts")), true);
     assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno-ack/route.ts")), true);
+    assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno-outcome/route.ts")), true);
   });
 
   test("GNO API pages with a date + campaign_id order", () => {
