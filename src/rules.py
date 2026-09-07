@@ -91,6 +91,21 @@ ADS_CAMPAIGN_TIMEOUT_SD_SECONDS: int = int(
 ADS_SKU_ECONOMICS_MIN_DATE: date = date.fromisoformat(
     str(_RULES["ads"].get("sku_economics_min_date", "2024-09-01")))
 
+# ── GNO PPC Watch (observe + export + alert only) ─────────
+_GNO_PATH = Path(__file__).resolve().parent.parent / "config" / "gno_ppc_watch.json"
+with open(_GNO_PATH) as _gno_f:
+    _GNO = json.load(_gno_f)
+GNO_OBSERVE_ONLY: bool = bool(_GNO.get("observe_only", True))
+GNO_KEEP_ALIVE: tuple[str, ...] = tuple(_GNO["keep_alive"])
+GNO_NEW_EXACT: tuple[str, ...] = tuple(_GNO["new_exact"])
+GNO_DAY5_PAUSE: tuple[str, ...] = tuple(_GNO["day5_pause"])
+GNO_AUTO_LOOSE_BUDGET: float = float(_GNO["auto_loose_budget"])
+GNO_LIP_BE_ACOS: float = float(_GNO["family_break_even_acos"]["lip_3pk"])
+GNO_DEO_BE_ACOS: float = float(_GNO["family_break_even_acos"]["deo"])
+GNO_BALM_BE_ACOS: float = float(_GNO["family_break_even_acos"]["balm"])
+GNO_FORBIDDEN_AUTO_ACTIONS: frozenset[str] = frozenset(
+    _GNO.get("forbidden_auto_actions") or ("pause", "negate", "raise_budget", "raise_bid"))
+
 # ── Agent scheduler ───────────────────────────────────────
 # Every cron job in `python -m src.main run` fires on this zone, regardless of
 # the machine's own timezone. Amazon *day boundaries* stay on AMAZON_TZ — this

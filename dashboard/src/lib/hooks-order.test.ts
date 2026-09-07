@@ -66,8 +66,11 @@ async function violations(patterns: string[]) {
 test("/ppc calls every hook unconditionally", { timeout: TIMEOUT }, async () => {
   const found = await violations([
     "src/app/ppc/**/*.tsx",
+    "src/app/ppc/gno/**/*.tsx",
     "src/components/ppc-playbook.tsx",
     "src/components/ppc-sku-ads.tsx",
+    "src/components/ppc-gno-watch.tsx",
+    "src/app/ppc/gno/**/*.tsx",
     "src/components/brand-share.tsx",
     "src/components/sqp-status.tsx",
     "src/components/loading.tsx",

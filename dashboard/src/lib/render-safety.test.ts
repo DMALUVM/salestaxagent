@@ -76,6 +76,11 @@ test("/ppc has an error boundary", () => {
     "without error.tsx a client exception renders the bare crash screen");
 });
 
+test("/ppc/gno has an error boundary", () => {
+  assert.ok(existsSync(path.join(APP, "ppc/gno/error.tsx")),
+    "without error.tsx a client exception renders the bare crash screen");
+});
+
 test("/paid-ads has an error boundary", () => {
   assert.ok(existsSync(path.join(APP, "paid-ads/error.tsx")),
     "without error.tsx a client exception renders the bare crash screen");
@@ -83,7 +88,7 @@ test("/paid-ads has an error boundary", () => {
 
 test("fetches guard against non-JSON responses", () => {
   // A gateway timeout returns HTML; .json() on it throws and kills the render.
-  for (const name of ["ppc-playbook.tsx", "registration-plan.tsx"]) {
+  for (const name of ["ppc-playbook.tsx", "registration-plan.tsx", "ppc-gno-watch.tsx"]) {
     const src = readFileSync(path.join(COMPONENTS, name), "utf8");
     assert.ok(src.includes("content-type"),
       `${name} must check content-type before calling .json()`);

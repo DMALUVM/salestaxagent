@@ -22,6 +22,7 @@ import type { WeeklyPayload } from "@/lib/ppc-weekly";
 import type { Bleeders10Payload } from "@/lib/ppc-bleeders-10";
 import type { DailyReconcileSummary } from "@/lib/ads-reconcile";
 import { isConfigured } from "@/lib/supabase";
+import Link from "next/link";
 import { Shield, Target, AlertTriangle, CheckCircle, X, RefreshCw, ChevronRight, Download, ClipboardCopy, Settings2 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -354,6 +355,7 @@ function TargetsDialog({
 const SYNC_JOB_LABELS: Record<string, string> = {
   ads_sync: "manual sync",
   ads_campaigns_sync: "campaigns",
+  ads_gno_campaigns_sync: "GNO campaign snapshot",
   ads_search_terms_sync: "search terms",
   ads_search_terms_backfill: "search terms 90d",
   ads_campaigns_backfill: "90d backfill",
@@ -904,6 +906,23 @@ export default function PPCPage() {
           </Button>
         </div>
       </div>
+
+      <Card className="border-sky-500/30">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3">
+          <div>
+            <p className="text-sm font-medium">GNO PPC Watch</p>
+            <p className="text-[11px] text-muted-foreground">
+              Tallowbourn keepers + 7 new Exact. Observe + export + alert only — never auto-pause or negate.
+            </p>
+          </div>
+          <Link
+            href="/ppc/gno"
+            className="inline-flex h-7 items-center rounded-md border px-2.5 text-[0.8rem] hover:bg-muted"
+          >
+            Open GNO Watch
+          </Link>
+        </CardContent>
+      </Card>
 
       <SectionNav
         items={[

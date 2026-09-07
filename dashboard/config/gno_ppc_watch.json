@@ -1,0 +1,68 @@
+{
+  "profile": "Tallowbourn",
+  "marketplace": "US",
+  "observe_only": true,
+  "launched_at": "2026-09-07T00:00:00-07:00",
+  "next_human_review_at": "2026-09-09T18:00:00-07:00",
+  "auto_loose_budget": 303,
+  "new_exact_zero_order_spend_alert": 15,
+  "shell_daily_budget_cap": 25,
+  "fat_parent_spend_floor_pct": 50,
+  "placement_pp_share_alert_pct": 25,
+  "harvest_min_l7_orders": 3,
+  "junk_min_l7_spend": 5,
+  "core_negatives": ["tallow lip balm", "tallow chapstick", "chapstick"],
+  "family_break_even_acos": {
+    "lip_3pk": 42,
+    "deo": 36,
+    "balm": 36
+  },
+  "keep_alive": [
+    "SP | TBL - 3Pck | B0CLHTKY3V |  Auto | Loose Match-TOS | SSG",
+    "SP - KW (TOS) - Exact - Tallow Lip Balm KW",
+    "SP - Hero KW(256KsV/TOS) -  Exact - Lip Balm - 3 Pack - B0CLHTKY3V/B0CLHV3V5C - -chapstick",
+    "SP KW - Exact(PM) - Lip Balm - DPB0CLHTKY3V/B0CLHVLG2F -",
+    "SP - KW(4kSV/TOS) - Exact - Lip Balm - 3 Pack - B0CLHTKY3V - -tallow lip balm",
+    "SP - 1KW - Exact(TOS) - lip balm -B0CLHVCPL5 - tallow lip balm organic",
+    "GG - B0CLHYY3BB - Deodorant - Asin Defense",
+    "SP - Auto - Deodorant - B0CLHYY3BB -",
+    "GG - Lip Balm - Broad M",
+    "SP - 1Branded KW(TOS) - Exact - Lip Balm - Mixed - -28ord",
+    "SP - STR - 1Branded KW - Exact - Deodorant - B0CLHYY3BB -  -(7 ordr)"
+  ],
+  "new_exact": [
+    "SP | TBL | B0CLHVCPL5 | EX | tallow lip balm | TOS",
+    "SP | TBL | B0CLHVLG2F | EX | tallow lip balm | TOS",
+    "SP | TBL | B0CLHV3V5C | EX | tallow lip balm | TOS",
+    "SP | TBL | B0CLHVCPL5 | EX | chapstick | TOS",
+    "SP | TBL | B0CLHVLG2F | EX | chapstick | TOS",
+    "SP | TBL | B0CLHV3V5C | EX | chapstick | TOS",
+    "SP | DEO | B0CLHYY3BB | EX | tallow deodorant | TOS"
+  ],
+  "day5_pause": [
+    "Catch-All Auto",
+    "Catch-All-Lip Balm-Auto High Interest",
+    "Catch All Deodorant High Interest",
+    "Catch-All Tallow balm-High Interest",
+    "TOS-Lip Balm",
+    "TOS-Deodorant",
+    "TOS-Tallow Balm",
+    "Auto-Low Lip Balm",
+    "Auto-Low Deodorant",
+    "Auto-Low Tallow balm",
+    "Campaign - 9/4/2026 07:48:57.835",
+    "Manual | Exact & Broad | Harvested terms 3rd September",
+    "SP - Auto - AUD (High-Interest) - Catch All - Mixed -"
+  ],
+  "aliases": {
+    "auto_loose": "SP | TBL - 3Pck | B0CLHTKY3V |  Auto | Loose Match-TOS | SSG",
+    "fat_parent": "SP - KW (TOS) - Exact - Tallow Lip Balm KW",
+    "hero_chapstick": "SP - Hero KW(256KsV/TOS) -  Exact - Lip Balm - 3 Pack - B0CLHTKY3V/B0CLHV3V5C - -chapstick"
+  },
+  "forbidden_auto_actions": [
+    "pause",
+    "negate",
+    "raise_budget",
+    "raise_bid"
+  ]
+}
