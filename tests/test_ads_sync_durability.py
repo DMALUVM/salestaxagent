@@ -643,3 +643,329 @@ def test_sunday_backfill_does_not_call_day_gaps():
     src = inspect.getsource(_run_ads_search_terms_backfill)
     assert "_run_ads_search_terms_day_gaps" not in src
     assert "skip_existing_search_term_weeks=True" in src
+
+
+@pytest.fixture
+def pending_dir(tmp_path, monkeypatch):
+    path = tmp_path / "ads_pending_reports.json"
+    import src.amazon_ads.pending_reports as pr
+    monkeypatch.setattr(pr, "_PATH_OVERRIDE", path)
+    yield path
+    monkeypatch.setattr(pr, "_PATH_OVERRIDE", None)
+    if path.exists():
+        path.unlink()
+
+
+def test_kind_from_config_campaigns_st_placements():
+    from src.amazon_ads.pending_reports import kind_from_config
+    assert kind_from_config({
+        "configuration": {"reportTypeId": "spCampaigns", "groupBy": ["campaign"]},
+    }) == "campaigns"
+    assert kind_from_config({
+        "configuration": {"reportTypeId": "spSearchTerm", "groupBy": ["searchTerm"]},
+    }) == "search_terms"
+    assert kind_from_config({
+        "configuration": {
+            "reportTypeId": "spCampaigns",
+            "groupBy": ["campaignPlacement"],
+        },
+    }) == "placements"
+
+
+def test_pending_registry_register_persist_clear(pending_dir):
+    from src.amazon_ads.pending_reports import (
+        clear_pending_report,
+        read_pending_reports,
+        register_pending_report,
+    )
+    entry = register_pending_report(
+        "rep-1",
+        config={
+            "startDate": "2026-09-01",
+            "endDate": "2026-09-07",
+            "configuration": {
+                "adProduct": "SPONSORED_PRODUCTS",
+                "reportTypeId": "spSearchTerm",
+            },
+        },
+    )
+    assert entry["report_id"] == "rep-1"
+    assert entry["kind"] == "search_terms"
+    assert entry["ad_product"] == "SPONSORED_PRODUCTS"
+    assert entry["start_date"] == "2026-09-01"
+    assert entry["end_date"] == "2026-09-07"
+    rows = read_pending_reports()
+    assert len(rows) == 1
+    assert rows[0]["report_id"] == "rep-1"
+    raw = pending_dir.read_text()
+    assert "rep-1" in raw
+    assert clear_pending_report("rep-1") is True
+    assert read_pending_reports() == []
+
+
+def test_pending_registry_replace_same_id(pending_dir):
+    from src.amazon_ads.pending_reports import (
+        read_pending_reports,
+        register_pending_report,
+    )
+    register_pending_report("rep-1", kind="campaigns", ad_product="SP")
+    register_pending_report("rep-1", kind="search_terms", ad_product="SP")
+    rows = read_pending_reports()
+    assert [r["report_id"] for r in rows] == ["rep-1"]
+    assert rows[0]["kind"] == "search_terms"
+
+
+def test_cancel_persisted_clears_success_keeps_failure(pending_dir, monkeypatch):
+    from src.amazon_ads import pending_reports as pr
+    pr.register_pending_report("rep-ok", kind="campaigns")
+    pr.register_pending_report("rep-fail", kind="search_terms")
+
+    def fake_cancel(rid):
+        return rid == "rep-ok"
+
+    monkeypatch.setattr("src.amazon_ads.client.cancel_report", fake_cancel)
+    swept = pr.cancel_persisted_pending_reports()
+    assert swept["cancelled"] == ["rep-ok"]
+    assert swept["failed"] == ["rep-fail"]
+    left = pr.read_pending_reports()
+    assert [r["report_id"] for r in left] == ["rep-fail"]
+
+
+def test_create_report_registers_pending(pending_dir, monkeypatch):
+    import src.amazon_ads.client as client
+
+    class Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"reportId": "rep-new"}
+
+    monkeypatch.setattr(client, "ads_headers", lambda: {})
+    monkeypatch.setattr(client.httpx, "post", lambda *a, **k: Resp())
+    rid = client.create_report({
+        "startDate": "2026-09-06",
+        "endDate": "2026-09-06",
+        "configuration": {
+            "adProduct": "SPONSORED_DISPLAY",
+            "reportTypeId": "sdCampaigns",
+            "groupBy": ["campaign"],
+        },
+    })
+    assert rid == "rep-new"
+    from src.amazon_ads.pending_reports import read_pending_reports
+    rows = read_pending_reports()
+    assert rows[0]["report_id"] == "rep-new"
+    assert rows[0]["kind"] == "campaigns"
+    assert rows[0]["ad_product"] == "SPONSORED_DISPLAY"
+
+
+def test_create_report_425_cancels_persisted_no_wait_loop(
+        pending_dir, monkeypatch):
+    import src.amazon_ads.client as client
+    from src.amazon_ads.pending_reports import register_pending_report
+
+    register_pending_report("rep-zombie", kind="campaigns",
+                            ad_product="SPONSORED_PRODUCTS")
+    posts = []
+    cancelled = []
+
+    class Resp:
+        status_code = 425
+        text = "Too Early"
+
+        def json(self):
+            return {}
+
+        def raise_for_status(self):
+            raise AssertionError("425 must not fall through to raise_for_status")
+
+    monkeypatch.setattr(client, "ads_headers", lambda: {})
+    monkeypatch.setattr(client.httpx, "post",
+                        lambda *a, **k: posts.append(1) or Resp())
+    monkeypatch.setattr(client, "cancel_report",
+                        lambda rid: cancelled.append(rid) or True)
+    slept = []
+    monkeypatch.setattr(client.time, "sleep", lambda s: slept.append(s))
+
+    with pytest.raises(client.AdsReportSlotBusy, match="Cancelled 1") as ei:
+        client.create_report({"configuration": {"reportTypeId": "spSearchTerm"}})
+    assert ei.value.cancelled_ids == ["rep-zombie"]
+    assert cancelled == ["rep-zombie"]
+    assert posts == [1]
+    assert slept == []
+    from src.amazon_ads.pending_reports import read_pending_reports
+    assert read_pending_reports() == []
+
+
+def test_425_then_single_defer_not_inline_retry(monkeypatch, pending_dir):
+    """425 cancels persisted ids, then exactly one deferred retry — no loop."""
+    import inspect
+    import src.amazon_ads.client as client
+    from src import main as main_mod
+
+    src = inspect.getsource(client.create_report)
+    assert "_clear_slot_after_busy" in src
+    assert "sleep" not in src
+    backoff = inspect.getsource(__import__(
+        "src.amazon_ads.reports", fromlist=["_fetch_report_with_backoff"]
+    )._fetch_report_with_backoff)
+    assert "except AdsReportSlotBusy" in backoff
+    assert "raise" in backoff.split("except AdsReportSlotBusy")[1].split("except")[0]
+
+    deferred = []
+    monkeypatch.setattr(main_mod, "_defer_ads_job",
+                        lambda name, retry, **k: deferred.append((name, retry)))
+    monkeypatch.setattr("src.db.job_start", lambda name: "run-1")
+    monkeypatch.setattr("src.db.job_finish", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "src.amazon_ads.reports.sync_ads",
+        lambda **k: {"ran": ["search_terms"],
+                     "search_terms": {"stopped": "slot_busy",
+                                      "errors": ["HTTP 425"], "rows": 0}})
+    monkeypatch.setattr(main_mod, "_ads_sync_outcome",
+                        lambda result, days: ("partial", "425"))
+    monkeypatch.setattr(main_mod, "_ads_alert", lambda *a, **k: None)
+
+    status = main_mod._run_ads_sync_job(
+        "ads_search_terms_sync", days=7, search_terms_only=True,
+        label="search terms")
+    assert status == "deferred"
+    assert deferred == [("ads_search_terms_sync", 0)]
+
+
+def test_fetch_report_clears_pending_on_complete(pending_dir, monkeypatch):
+    import src.amazon_ads.client as client
+    from src.amazon_ads.pending_reports import (
+        read_pending_reports,
+        register_pending_report,
+    )
+
+    register_pending_report("rep-done", kind="campaigns")
+    monkeypatch.setattr(client, "create_report", lambda cfg: "rep-done")
+    monkeypatch.setattr(client, "poll_report",
+                        lambda *a, **k: {"status": "COMPLETED", "url": "http://x"})
+    monkeypatch.setattr(client, "download_report", lambda url: [{"ok": 1}])
+    rows = client.fetch_report({"configuration": {}})
+    assert rows == [{"ok": 1}]
+    assert read_pending_reports() == []
+
+
+def test_claim_steals_stale_heartbeat_even_if_pid_alive(lock_dir):
+    import src.amazon_ads.sync_lock as sl
+    sl._write_lease(lock_dir, {
+        "pid": os.getpid(),
+        "heartbeat_at": _utc(hours_ago=2).isoformat(),
+        "started_at": _utc(hours_ago=2).isoformat(),
+        "job": "ads_campaigns_sync",
+    })
+    assert sl.lease_is_live(sl.read_lease()) is False
+    assert sl.claim_ads_lease("ads_search_terms_sync") is True
+    held = sl.read_lease()
+    assert held["pid"] == os.getpid()
+    assert held["job"] == "ads_search_terms_sync"
+    sl.release_ads_lease()
+
+
+def test_beat_does_not_update_other_pid_lease(lock_dir):
+    import src.amazon_ads.sync_lock as sl
+    sl._write_lease(lock_dir, {
+        "pid": 1,
+        "heartbeat_at": "2026-09-01T00:00:00+00:00",
+        "started_at": "2026-09-01T00:00:00+00:00",
+        "job": "ads_sync",
+    })
+    sl.beat_ads_lease()
+    lease = sl.read_lease()
+    assert lease["pid"] == 1
+    assert lease["heartbeat_at"] == "2026-09-01T00:00:00+00:00"
+
+
+def test_fail_stale_keeps_own_pid_row_started_before_lease(
+        lock_dir, monkeypatch):
+    import src.amazon_ads.sync_lock as sl
+    lease_start = _utc(hours_ago=0.02)
+    sl._write_lease(lock_dir, {
+        "pid": os.getpid(),
+        "heartbeat_at": _utc().isoformat(),
+        "started_at": lease_start.isoformat(),
+        "job": "ads_campaigns_sync",
+    })
+    finished = []
+    rows = [{
+        "id": "run-cli",
+        "job_name": "ads_campaigns_sync",
+        "status": "running",
+        "started_at": (lease_start - timedelta(minutes=2)).isoformat(),
+    }]
+    monkeypatch.setattr("src.db.get_client", lambda: _JobClient(rows))
+    monkeypatch.setattr("src.db.job_finish",
+                        lambda rid, status, message, stats=None:
+                        finished.append((rid, status, message)))
+    assert sl.fail_stale_ads_job_runs(now=_utc()) == []
+    assert finished == []
+
+
+def test_fail_stale_still_clears_old_orphan_after_we_steal(
+        lock_dir, monkeypatch):
+    import src.amazon_ads.sync_lock as sl
+    sl._write_lease(lock_dir, {
+        "pid": os.getpid(),
+        "heartbeat_at": _utc().isoformat(),
+        "started_at": _utc().isoformat(),
+        "job": "ads_search_terms_sync",
+    })
+    finished = []
+    rows = [{
+        "id": "run-orphan",
+        "job_name": "ads_campaigns_sync",
+        "status": "running",
+        "started_at": _utc(hours_ago=5).isoformat(),
+    }]
+    monkeypatch.setattr("src.db.get_client", lambda: _JobClient(rows))
+    monkeypatch.setattr("src.db.job_finish",
+                        lambda rid, status, message, stats=None:
+                        finished.append(rid))
+    failed = sl.fail_stale_ads_job_runs(now=_utc())
+    assert [r["id"] for r in failed] == ["run-orphan"]
+    assert finished == ["run-orphan"]
+
+
+def test_sync_ads_fail_stale_runs_after_claim():
+    import inspect
+    from src.amazon_ads.reports import sync_ads, sync_search_term_gap_days
+    for fn in (sync_ads, sync_search_term_gap_days):
+        src = inspect.getsource(fn)
+        claim_at = src.index("claim_ads_lease")
+        stale_at = src.index("fail_stale_ads_job_runs")
+        assert claim_at < stale_at, fn.__name__
+
+
+def test_lease_exit_hooks_document_sigkill():
+    import inspect
+    from src.amazon_ads.sync_lock import (
+        claim_ads_lease,
+        install_ads_lease_exit_hooks,
+    )
+    src = inspect.getsource(install_ads_lease_exit_hooks)
+    assert "atexit" in src
+    assert "SIGTERM" in src
+    assert "SIGKILL" in src
+    claim = inspect.getsource(claim_ads_lease)
+    assert "install_ads_lease_exit_hooks" in claim
+    assert "stealing" in claim or "steal" in claim
+
+
+def test_ads_sync_cli_has_cancel_stale_reports():
+    import inspect
+    from src import main as main_mod
+    src = inspect.getsource(main_mod)
+    start = src.index("def ads_sync_cmd")
+    body = src[start:src.index("def _print_search_term_coverage")]
+    assert "--cancel-stale-reports" in src
+    assert "--cancel-all-pending" in src
+    assert "cancel_all_pending" in body
+    assert "_cancel_ads_reports_cli" in body
+    assert "SIGKILL" in body

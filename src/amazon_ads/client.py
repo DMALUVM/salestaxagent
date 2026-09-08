@@ -30,10 +30,15 @@ TRANSIENT_POLL_STATUS = frozenset({429, 425, 500, 502, 503, 504})
 class AdsReportSlotBusy(RuntimeError):
     """HTTP 425 on create — the Ads reporting slot is occupied.
 
-    Do not wait-loop or create another report. Cancel a known hung report
-    if the API allows, then STOP. Reporting-queue cleanup only — this is
-    not an ads write (no bids, negatives, status, or budgets).
+    Do not wait-loop or create another report. Cancel persisted PENDING
+    ids from logs/ads_pending_reports.json (best-effort), then STOP or
+    schedule exactly one deferred retry. Reporting-queue cleanup only —
+    this is not an ads write (no bids, negatives, status, or budgets).
     """
+
+    def __init__(self, message: str, *, cancelled_ids: list[str] | None = None):
+        super().__init__(message)
+        self.cancelled_ids = list(cancelled_ids or [])
 # SB/SD campaign poll caps live in config/business_rules.json
 # (ads.campaign_report_timeout_{sb,sd}_seconds) and are applied in
 # reports.CAMPAIGN_REPORT_TIMEOUT — not here — so SP stays on this default.
@@ -42,8 +47,20 @@ class AdsReportSlotBusy(RuntimeError):
 SEARCH_TERM_TIMEOUT = ADS_SEARCH_TERM_TIMEOUT_SECONDS
 
 
+def _clear_slot_after_busy() -> list[str]:
+    """Cancel every persisted PENDING report id. Never sleep or re-create."""
+    from src.amazon_ads.pending_reports import cancel_persisted_pending_reports
+    swept = cancel_persisted_pending_reports()
+    return list(swept.get("cancelled") or [])
+
+
 def create_report(config: dict) -> str:
-    """Create an async report. Returns reportId."""
+    """Create an async report. Returns reportId.
+
+    Persists the id so a later SIGKILL cannot leave the slot occupied
+    with no known id to cancel. HTTP 425 cancels persisted ids once,
+    then raises — no inline wait-loop.
+    """
     headers = ads_headers()
     report_type = config.get("configuration", {}).get("reportTypeId", "unknown")
     resp = httpx.post(f"{BASE_URL}/reporting/reports",
@@ -53,12 +70,19 @@ def create_report(config: dict) -> str:
     if resp.status_code == 403:
         raise PermissionError("Ads API forbidden (403) — check profile scope")
     if resp.status_code == 425:
+        cancelled = _clear_slot_after_busy()
         raise AdsReportSlotBusy(
             "Amazon Ads reporting slot busy (HTTP 425). "
-            "Do not retry in a loop. Cancel a hung report if an id is known, then stop.")
+            f"Cancelled {len(cancelled)} persisted PENDING report(s). "
+            "Do not retry in a loop. Slot is cleared for the next "
+            "scheduled one-shot.",
+            cancelled_ids=cancelled)
     resp.raise_for_status()
     data = resp.json()
     report_id = data.get("reportId", "")
+    if report_id:
+        from src.amazon_ads.pending_reports import register_pending_report
+        register_pending_report(report_id, config=config)
     log.info("Ads report created: %s (type=%s)", report_id, report_type)
     return report_id
 
@@ -128,8 +152,9 @@ def cancel_report(report_id: str) -> bool:
     """Best-effort DELETE of a PENDING report so the next create is not 425.
 
     Reporting-queue cleanup only. Does not change bids, negatives, status,
-    or budgets. There is no list-all-reports API — only a known id can
-    be cancelled. 404 means it is already gone.
+    or budgets. There is no list-all-reports API — ids come from the
+    pending-report registry or an explicit CLI argument. 404 means it
+    is already gone.
     """
     if not report_id:
         return False
@@ -140,6 +165,8 @@ def cancel_report(report_id: str) -> bool:
             headers=headers, timeout=15)
         if resp.status_code in (200, 204, 404):
             log.info("Ads report %s cancel → HTTP %s", report_id, resp.status_code)
+            from src.amazon_ads.pending_reports import clear_pending_report
+            clear_pending_report(report_id)
             return True
         log.warning("Ads report %s cancel → HTTP %s %s",
                     report_id, resp.status_code, (resp.text or "")[:160])
@@ -176,6 +203,10 @@ def fetch_report(config: dict, timeout: int | None = None) -> list[dict]:
                         report_id)
             cancel_report(report_id)
         raise
+    finally:
+        if report_id:
+            from src.amazon_ads.pending_reports import clear_pending_report
+            clear_pending_report(report_id)
 
 
 def get_profiles() -> list[dict]:
