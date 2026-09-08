@@ -5,7 +5,10 @@ import path from "node:path";
 import {
   AUTO_LOOSE_NAME,
   AUTO_LOOSE_TERM_CSV_HEADERS,
+  BALM_BE_ACOS,
+  CM_NOTE,
   CORE_NEGATIVES,
+  DEO_BE_ACOS,
   FAT_PARENT_NAME,
   GNO_OBSERVE_ONLY,
   HERO_CHAPSTICK_NAME,
@@ -14,6 +17,10 @@ import {
   LIP_BE_ACOS,
   NEW_EXACT,
   WATCH_CAMPAIGN_CSV_HEADERS,
+  acosVsBe,
+  breakEvenAcosOf,
+  familyOf,
+  formatAcosVsBe,
   autoLooseSearchTermsCsv,
   buildGnoPack,
   csvEscape,
@@ -86,6 +93,8 @@ describe("GNO watchlists and matching", () => {
     assert.equal(extractExactKeyword(NEW_EXACT[0]), "tallow lip balm");
     assert.equal(extractExactKeyword(NEW_EXACT[3]), "chapstick");
     assert.equal(LIP_BE_ACOS, 42);
+    assert.equal(DEO_BE_ACOS, 36);
+    assert.equal(BALM_BE_ACOS, 36);
     assert.deepEqual([...CORE_NEGATIVES], ["tallow lip balm", "tallow chapstick", "chapstick"]);
   });
 
@@ -106,15 +115,18 @@ describe("GNO watchlists and matching", () => {
 });
 
 describe("harvest / junk tags", () => {
-  test("HARVEST_CANDIDATE needs L7 orders ≥ 3, ACOS ≤ 42, no Exact home", () => {
+  test("HARVEST_CANDIDATE needs L7 orders ≥ 3, ACOS ≤ family BE, no Exact home", () => {
     assert.equal(tagAutoLooseTerm({
       orders: 3, spend: 10, sales: 30, search_term: "tallow lip balm organic",
+      campaign_name: AUTO_LOOSE_NAME,
     }, false), "HARVEST_CANDIDATE");
     assert.equal(tagAutoLooseTerm({
       orders: 3, spend: 10, sales: 30, search_term: "tallow lip balm",
+      campaign_name: AUTO_LOOSE_NAME,
     }, true), "KEEP");
     assert.equal(tagAutoLooseTerm({
       orders: 2, spend: 10, sales: 30, search_term: "foo",
+      campaign_name: AUTO_LOOSE_NAME,
     }, false), "KEEP");
   });
 
@@ -165,7 +177,78 @@ describe("harvest / junk tags", () => {
     const junk = q.find((t) => t.customer_search_term === "random junk");
     assert.equal(harvest?.proposed_tag, "HARVEST_CANDIDATE");
     assert.equal(harvest?.has_enabled_exact_elsewhere, false);
+    assert.equal(harvest?.family, "lip_3pk");
+    assert.equal(harvest?.break_even_acos, LIP_BE_ACOS);
+    assert.ok(harvest?.acos_vs_be != null && harvest.acos_vs_be < 0);
     assert.equal(junk?.proposed_tag, "JUNK_CANDIDATE");
+  });
+});
+
+describe("family contribution BE", () => {
+  const deoCamp = "SP - Auto - Deodorant - B0CLHYY3BB -";
+  const balmCamp = FAT_PARENT_NAME;
+  const lipCamp = AUTO_LOOSE_NAME;
+  // 38% sits between deo/balm BE 36 and lip 3pk BE 42.
+  const overDeo = { orders: 3, spend: 11.4, sales: 30, search_term: "tallow deodorant" };
+  const underDeo = { orders: 3, spend: 10.2, sales: 30, search_term: "tallow deodorant" };
+
+  test("familyOf / breakEvenAcosOf split lip 3pk vs deo vs balm", () => {
+    assert.equal(familyOf(lipCamp), "lip_3pk");
+    assert.equal(breakEvenAcosOf(lipCamp), 42);
+    assert.equal(familyOf(HERO_CHAPSTICK_NAME), "lip_3pk");
+    assert.equal(breakEvenAcosOf(HERO_CHAPSTICK_NAME), 42);
+
+    assert.equal(familyOf(deoCamp), "deo");
+    assert.equal(breakEvenAcosOf(deoCamp), 36);
+    assert.equal(familyOf(NEW_EXACT[6]), "deo");
+    assert.equal(breakEvenAcosOf(NEW_EXACT[6]), 36);
+
+    assert.equal(familyOf(balmCamp), "balm");
+    assert.equal(breakEvenAcosOf(balmCamp), 36);
+    assert.equal(familyOf(NEW_EXACT[0]), "balm");
+    assert.equal(breakEvenAcosOf(NEW_EXACT[0]), 36);
+    assert.equal(familyOf(NEW_EXACT[3]), "balm");
+    assert.equal(breakEvenAcosOf(NEW_EXACT[3]), 36);
+  });
+
+  test("harvest uses family BE — 38% harvests on lip, not deo or balm", () => {
+    assert.equal(tagAutoLooseTerm({ ...overDeo, campaign_name: lipCamp }, false), "HARVEST_CANDIDATE");
+    assert.equal(tagAutoLooseTerm({ ...overDeo, campaign_name: deoCamp }, false), "KEEP");
+    assert.equal(tagAutoLooseTerm({ ...overDeo, campaign_name: balmCamp }, false), "KEEP");
+    assert.equal(tagAutoLooseTerm({ ...underDeo, campaign_name: deoCamp }, false), "HARVEST_CANDIDATE");
+    assert.equal(tagAutoLooseTerm({ ...underDeo, campaign_name: balmCamp }, false), "HARVEST_CANDIDATE");
+  });
+
+  test("acos_vs_be is ACOS minus BE (negative = under BE / healthier)", () => {
+    assert.equal(acosVsBe(34, 36), -2);
+    assert.equal(acosVsBe(38, 36), 2);
+    assert.equal(acosVsBe(null, 42), null);
+    assert.match(formatAcosVsBe(34, deoCamp), /ACOS 34\.0% vs deo BE 36% \(Δ -2\.0\)/);
+    assert.match(CM_NOTE, /config family CM BE/);
+  });
+
+  test("digest / harvest alerts quote family BE next to ACOS", () => {
+    const campaigns = [
+      ...KEEP_ALIVE.map((name) => camp(name, { budget: 303, spend: 10, sales_14d: 40, orders_14d: 2 })),
+      camp(NEW_EXACT[6], { spend: 8, sales_14d: 20, orders_14d: 1, impressions: 12 }),
+    ];
+    const terms: SearchTermRow[] = [{
+      date: "2026-09-06",
+      campaign_name: AUTO_LOOSE_NAME,
+      search_term: "organic tallow 3 pack",
+      match_type: "TARGETING_EXPRESSION",
+      spend: 10, sales_14d: 30, orders_14d: 3, clicks: 8, impressions: 100,
+    }];
+    const alerts = evaluateGnoAlerts({
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns, searchTerms: terms, placements: [],
+    });
+    const harvest = alerts.find((a) => a.code === "HARVEST_CANDIDATE");
+    const deoDigest = alerts.find((a) => a.code === "NEW_EXACT_DIGEST" && a.campaign_name === NEW_EXACT[6]);
+    const keeper = alerts.find((a) => a.code === "KEEPER_DIGEST" && a.campaign_name === AUTO_LOOSE_NAME);
+    assert.match(harvest?.detail ?? "", /lip_3pk BE 42%/);
+    assert.match(deoDigest?.detail ?? "", /deo BE 36%/);
+    assert.match(keeper?.detail ?? "", /lip_3pk BE 42%/);
   });
 });
 
@@ -376,6 +459,11 @@ describe("export pack columns", () => {
     assert.match(csv, /tos_modifier_pct/);
     assert.match(csv, /tos_spend_share/);
     assert.match(csv, /metrics_complete/);
+    assert.ok(WATCH_CAMPAIGN_CSV_HEADERS.includes("family"));
+    assert.ok(WATCH_CAMPAIGN_CSV_HEADERS.includes("break_even_acos"));
+    assert.ok(WATCH_CAMPAIGN_CSV_HEADERS.includes("acos_vs_be"));
+    assert.ok(WATCH_CAMPAIGN_CSV_HEADERS.includes("cm_note"));
+    assert.match(csv.split("\n")[0], /family,break_even_acos,acos_vs_be,cm_note/);
     assert.doesNotMatch(csv.split("\n")[0], /(?<!modifier_|spend_share)tos_pct/);
   });
 
@@ -391,7 +479,12 @@ describe("export pack columns", () => {
     const csv = autoLooseSearchTermsCsv(q);
     assert.equal(csv.split("\n")[0], AUTO_LOOSE_TERM_CSV_HEADERS.join(","));
     assert.equal(AUTO_LOOSE_TERM_CSV_HEADERS.includes("learning_note" as never), false);
+    assert.ok(AUTO_LOOSE_TERM_CSV_HEADERS.includes("family"));
+    assert.ok(AUTO_LOOSE_TERM_CSV_HEADERS.includes("break_even_acos"));
+    assert.ok(AUTO_LOOSE_TERM_CSV_HEADERS.includes("acos_vs_be"));
+    assert.match(csv.split("\n")[0], /family,break_even_acos,acos_vs_be,cm_note/);
     assert.match(csv, /HARVEST_CANDIDATE/);
+    assert.match(csv, /lip_3pk/);
     assert.match(csv, /false/);
     assert.match(csv, /L7/);
   });
@@ -432,6 +525,10 @@ describe("widgets + safety rails", () => {
     );
     assert.equal(tiles.length, 7);
     assert.ok(tiles.every((t) => t.zero_impr_after_24h));
+    assert.equal(tiles[0].family, "balm");
+    assert.equal(tiles[0].break_even_acos, 36);
+    assert.equal(tiles[6].family, "deo");
+    assert.equal(tiles[6].break_even_acos, 36);
   });
 
   test("keeper heartbeat marks Auto Loose enabled + sparkline length 7", () => {
@@ -440,6 +537,8 @@ describe("widgets + safety rails", () => {
       "2026-09-06",
     );
     assert.equal(beats[0].enabled, true);
+    assert.equal(beats[0].family, "lip_3pk");
+    assert.equal(beats[0].break_even_acos, 42);
     assert.equal(beats[0].sparkline.length, 7);
     assert.equal(isEnabledStatus("ENABLED"), true);
     assert.equal(isEnabledStatus("paused"), false);
@@ -465,7 +564,11 @@ describe("widgets + safety rails", () => {
     const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-gno-watch.tsx"), "utf8");
     const lib = readFileSync(path.join(process.cwd(), "src/lib/gno-ppc-watch.ts"), "utf8");
     assert.match(ui, /Mark Done/);
+    assert.match(ui, /acosWithBe/);
+    assert.match(ui, /Family BE ACOS/);
     assert.doesNotMatch(lib, /alert\("P0", "KEEPER_MISSING"/);
+    assert.doesNotMatch(lib, /acos <= LIP_BE_ACOS/);
+    assert.match(lib, /breakEvenAcosOf\(term\.campaign_name/);
   });
 
   test("/ppc tab union still defaults to This week", () => {
@@ -625,6 +728,8 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
     assert.ok(fat.some((r) => r.date_start === "2026-08-31" && r.label === "L7"));
     const csv = autoLooseSearchTermsCsv(fat);
     assert.match(csv, /date_start,date_end,label/);
+    assert.match(csv, /family,break_even_acos,acos_vs_be,cm_note/);
+    assert.ok(fat.every((r) => r.family === "balm" && r.break_even_acos === 36));
   });
 
   test("keyword_targets.csv covers NEW_EXACT + KEEPER with bid and metrics", () => {
@@ -656,18 +761,25 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
     assert.ok(pack.files.some((f) => f.name === "negatives_snapshot.csv"));
     const kw = pack.files.find((f) => f.name === "keyword_targets.csv")!.body;
     assert.equal(kw.split("\n")[0], KEYWORD_TARGET_CSV_HEADERS.join(","));
+    assert.match(kw.split("\n")[0], /family,break_even_acos,acos_vs_be,cm_note/);
+    assert.ok(KEYWORD_TARGET_CSV_HEADERS.includes("family"));
+    assert.ok(KEYWORD_TARGET_CSV_HEADERS.includes("break_even_acos"));
+    assert.ok(KEYWORD_TARGET_CSV_HEADERS.includes("acos_vs_be"));
     assert.match(kw, /tallow lip balm/);
     assert.match(kw, /2.45/);
     assert.match(kw, /ENABLED/);
+    assert.match(kw, /balm/);
     const csv = keywordTargetsCsv([{
       date_start: "2026-09-07", date_end: "2026-09-07",
       campaign_name: FAT_PARENT_NAME, asin: "", keyword_text: "tallow lip balm",
       match_type: "EXACT", keyword_state: "ENABLED", bid: 2.45,
       impressions: 90, clicks: 6, spend: 12, orders: 2, sales: 40, acos: 30,
       metrics_complete: false,
+      family: "balm", break_even_acos: 36, acos_vs_be: -6, cm_note: CM_NOTE,
     }]);
     assert.match(csv, /2.45/);
     assert.match(csv, /metrics_complete/);
+    assert.match(csv, /balm/);
   });
 
   test("csvEscape never writes NaN", () => {
@@ -723,6 +835,12 @@ describe("GNO pack nits — closed-day L2 + Today config-only", () => {
     assert.equal(l7?.spend, 40);
     assert.equal(l7?.metrics_complete, true);
     assert.equal(today?.asin, "B0CLHTKY3V");
+    assert.equal(today?.family, "lip_3pk");
+    assert.equal(today?.break_even_acos, 42);
+    assert.equal(today?.acos_vs_be, null);
+    assert.equal(today?.cm_note, CM_NOTE);
+    assert.equal(l2?.family, "lip_3pk");
+    assert.equal(l2?.break_even_acos, 42);
   });
 
   test("keyword_targets Today is config-only and keeps PAUSED fat-parent Exact", () => {

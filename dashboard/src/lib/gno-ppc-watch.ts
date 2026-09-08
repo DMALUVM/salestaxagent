@@ -21,19 +21,21 @@ export const WATCH_CAMPAIGN_CSV_HEADERS = [
   "daily_budget", "tos_modifier_pct", "ros_modifier_pct", "pp_modifier_pct",
   "tos_spend_share", "ros_spend_share", "pp_spend_share", "impressions",
   "clicks", "spend", "cpc", "orders", "sales", "acos", "watch_list",
-  "metrics_complete",
+  "metrics_complete", "family", "break_even_acos", "acos_vs_be", "cm_note",
 ] as const;
 
 export const AUTO_LOOSE_TERM_CSV_HEADERS = [
   "date_start", "date_end", "label", "campaign_name", "customer_search_term",
   "match_type", "impressions", "clicks", "spend", "orders", "sales", "acos",
   "cvr", "has_enabled_exact_elsewhere", "proposed_tag",
+  "family", "break_even_acos", "acos_vs_be", "cm_note",
 ] as const;
 
 export const KEYWORD_TARGET_CSV_HEADERS = [
   "date_start", "date_end", "campaign_name", "asin", "keyword_text",
   "match_type", "keyword_state", "bid", "impressions", "clicks", "spend",
   "orders", "sales", "acos", "metrics_complete",
+  "family", "break_even_acos", "acos_vs_be", "cm_note",
 ] as const;
 
 export const NEGATIVES_CSV_HEADERS = [
@@ -45,6 +47,18 @@ export type ProposedTag = "KEEP" | "HARVEST_CANDIDATE" | "JUNK_CANDIDATE";
 export type AlertPriority = "P0" | "P1" | "P2";
 export type TermWindowLabel = "L2" | "L7";
 export type PackWindowLabel = "Today" | "Last2" | "Last7";
+export type GnoFamily = "lip_3pk" | "deo" | "balm" | "other";
+
+/** Config family contribution-margin BE — not ad-only TACOS. */
+export const CM_NOTE = "config family CM BE (not TACOS)";
+
+export interface ContributionFrame {
+  family: GnoFamily;
+  break_even_acos: number;
+  /** ACOS − family BE. Negative = under BE / healthier. Null when ACOS is unknown. */
+  acos_vs_be: number | null;
+  cm_note: string;
+}
 
 export interface GnoAlert {
   priority: AlertPriority;
@@ -150,7 +164,7 @@ export interface KeywordTarget {
 export interface NewExactTile {
   campaign_name: string;
   keyword: string;
-  family: "lip_3pk" | "deo" | "balm" | "other";
+  family: GnoFamily;
   state: string;
   daily_budget: number | null;
   hours_since_launch: number;
@@ -161,6 +175,8 @@ export interface NewExactTile {
   sales: number;
   cpc: number;
   acos: number | null;
+  break_even_acos: number;
+  acos_vs_be: number | null;
   zero_impr_after_24h: boolean;
   over_shell_budget: boolean;
   /** Last Dave/Grok bid call from the ledger. Observe only. */
@@ -170,6 +186,7 @@ export interface NewExactTile {
 export interface KeeperHeartbeat {
   campaign_name: string;
   role: "auto_loose" | "fat_parent" | "hero_chapstick";
+  family: GnoFamily;
   state: string;
   enabled: boolean;
   daily_budget: number | null;
@@ -177,6 +194,8 @@ export interface KeeperHeartbeat {
   spend_l7: number;
   spend_l7_avg: number;
   acos_l7: number | null;
+  break_even_acos: number;
+  acos_vs_be: number | null;
   sparkline: number[];
 }
 
@@ -196,6 +215,10 @@ export interface HarvestTerm {
   cvr: number | null;
   has_enabled_exact_elsewhere: boolean;
   proposed_tag: ProposedTag;
+  family: GnoFamily;
+  break_even_acos: number;
+  acos_vs_be: number | null;
+  cm_note: string;
   /** UI-only. Not a CSV column. */
   learning_note?: string;
 }
@@ -224,6 +247,10 @@ export interface WatchCampaignExportRow {
   watch_list: WatchList;
   /** false on Today — Ads lag; $0 is not a pause. Read spend/ACOS from L2/L7. */
   metrics_complete: boolean;
+  family: GnoFamily;
+  break_even_acos: number;
+  acos_vs_be: number | null;
+  cm_note: string;
 }
 
 export interface KeywordTargetExportRow {
@@ -243,6 +270,10 @@ export interface KeywordTargetExportRow {
   acos: number | null;
   /** false on Today — config-only until Amazon attributes. */
   metrics_complete: boolean;
+  family: GnoFamily;
+  break_even_acos: number;
+  acos_vs_be: number | null;
+  cm_note: string;
 }
 
 export const GNO_SPEC = spec;
@@ -332,11 +363,11 @@ export function extractAsin(campaignName: string | null | undefined): string {
   return [...new Set(matches.map((a) => a.toUpperCase()))].join("/");
 }
 
-export function familyOf(campaignName: string): "lip_3pk" | "deo" | "balm" | "other" {
+export function familyOf(campaignName: string): GnoFamily {
   const n = normalizeName(campaignName);
   if (n.includes("deo") || n.includes("deodorant")) return "deo";
   if (n.includes("3pck") || n.includes("3 pack") || n.includes("b0clhtky3v")) return "lip_3pk";
-  if (n.includes("lip") || n.includes("balm") || n.includes("chapstick")) return "lip_3pk";
+  if (n.includes("lip") || n.includes("balm") || n.includes("chapstick")) return "balm";
   return "other";
 }
 
@@ -345,6 +376,37 @@ export function breakEvenAcosOf(campaignName: string): number {
   if (fam === "deo") return DEO_BE_ACOS;
   if (fam === "balm") return BALM_BE_ACOS;
   return LIP_BE_ACOS;
+}
+
+/** ACOS − family BE. Negative = under BE / healthier contribution. */
+export function acosVsBe(acos: number | null | undefined, breakEven: number): number | null {
+  if (acos == null || !Number.isFinite(acos)) return null;
+  return acos - breakEven;
+}
+
+export function contributionFrame(
+  campaignName: string,
+  acos: number | null | undefined,
+): ContributionFrame {
+  const family = familyOf(campaignName);
+  const break_even_acos = breakEvenAcosOf(campaignName);
+  return {
+    family,
+    break_even_acos,
+    acos_vs_be: acosVsBe(acos ?? null, break_even_acos),
+    cm_note: CM_NOTE,
+  };
+}
+
+/** Alert / digest line: `ACOS 33.3% vs lip_3pk BE 42% (Δ -8.7)`. */
+export function formatAcosVsBe(
+  acos: number | null | undefined,
+  campaignName: string,
+): string {
+  const { family, break_even_acos, acos_vs_be } = contributionFrame(campaignName, acos);
+  const a = acos == null || !Number.isFinite(acos) ? "—" : `${acos.toFixed(1)}%`;
+  const delta = acos_vs_be == null ? "" : ` (Δ ${acos_vs_be.toFixed(1)})`;
+  return `ACOS ${a} vs ${family} BE ${break_even_acos}%${delta}`;
 }
 
 export function hoursSinceLaunch(now: Date = new Date(), launchedAt = GNO_LAUNCHED_AT): number {
@@ -512,14 +574,21 @@ export function enabledExactKeywords(
 }
 
 export function tagAutoLooseTerm(
-  term: { orders: number; spend: number; sales: number; search_term: string },
+  term: {
+    orders: number;
+    spend: number;
+    sales: number;
+    search_term: string;
+    campaign_name?: string;
+  },
   hasExact: boolean,
 ): ProposedTag {
   const acos = term.sales > 0 ? (term.spend / term.sales) * 100 : null;
+  const be = breakEvenAcosOf(term.campaign_name ?? "");
   if (
     term.orders >= spec.harvest_min_l7_orders
     && acos != null
-    && acos <= LIP_BE_ACOS
+    && acos <= be
     && !hasExact
   ) {
     return "HARVEST_CANDIDATE";
@@ -617,9 +686,13 @@ function rollSearchTerms(input: {
   for (const group of rolled.values()) {
     const m = sumMetrics(group);
     const term = group[0].search_term;
+    const campaignName = group[0].campaign_name || AUTO_LOOSE_NAME;
     const hasExact = enabled.has(normalizeTerm(term));
     const base = tagAutoLooseTerm(
-      { orders: m.orders, spend: m.spend, sales: m.sales, search_term: term },
+      {
+        orders: m.orders, spend: m.spend, sales: m.sales,
+        search_term: term, campaign_name: campaignName,
+      },
       hasExact,
     );
     const learned = applyHarvestLearning(
@@ -627,11 +700,12 @@ function rollSearchTerms(input: {
       { orders: m.orders, spend: m.spend, search_term: term },
       ledger,
     );
+    const frame = contributionFrame(campaignName, m.acos);
     out.push({
       date_start: start,
       date_end: end,
       label,
-      campaign_name: group[0].campaign_name || AUTO_LOOSE_NAME,
+      campaign_name: campaignName,
       customer_search_term: term,
       match_type: group[0].match_type || "",
       impressions: m.impressions,
@@ -644,6 +718,7 @@ function rollSearchTerms(input: {
       has_enabled_exact_elsewhere: hasExact,
       proposed_tag: learned.tag,
       learning_note: learned.note,
+      ...frame,
     });
   }
   return out.sort((a, b) => b.spend - a.spend);
@@ -796,7 +871,7 @@ export function evaluateGnoAlerts(input: {
   for (const name of NEW_EXACT) {
     const m = sumMetrics(inWindow(rowsForName(campaigns, name), l7start, asOf));
     alerts.push(alert("P1", "NEW_EXACT_DIGEST", "NEW EXACT L7",
-      `${name}: impr ${m.impressions}, clicks ${m.clicks}, spend $${m.spend.toFixed(2)}, CPC $${m.cpc.toFixed(2)}, orders ${m.orders}, ACOS ${m.acos == null ? "—" : `${m.acos.toFixed(1)}%`}`,
+      `${name}: impr ${m.impressions}, clicks ${m.clicks}, spend $${m.spend.toFixed(2)}, CPC $${m.cpc.toFixed(2)}, orders ${m.orders}, ${formatAcosVsBe(m.acos, name)}`,
       { campaign_name: name }));
   }
   for (const name of KEEP_ALIVE) {
@@ -805,12 +880,12 @@ export function evaluateGnoAlerts(input: {
     const todayM = sumMetrics(inWindow(rows, asOf, asOf));
     const avg = l7.spend / 7;
     alerts.push(alert("P1", "KEEPER_DIGEST", "KEEP-ALIVE spend vs 7-day avg",
-      `${name}: as-of spend $${todayM.spend.toFixed(2)} vs L7 daily avg $${avg.toFixed(2)}, L7 ACOS ${l7.acos == null ? "—" : `${l7.acos.toFixed(1)}%`}`,
+      `${name}: as-of spend $${todayM.spend.toFixed(2)} vs L7 daily avg $${avg.toFixed(2)}, L7 ${formatAcosVsBe(l7.acos, name)}`,
       { campaign_name: name }));
   }
   for (const t of harvest.filter((x) => x.proposed_tag === "HARVEST_CANDIDATE")) {
     alerts.push(alert("P1", "HARVEST_CANDIDATE", "Auto Loose harvest candidate (do not negate)",
-      `"${t.customer_search_term}" L7 orders ${t.orders}, ACOS ${t.acos?.toFixed(1)}%, no enabled 1-child Exact. Tag only.`,
+      `"${t.customer_search_term}" L7 orders ${t.orders}, ${formatAcosVsBe(t.acos, t.campaign_name)}, no enabled 1-child Exact. Tag only.`,
       { campaign_name: t.campaign_name, search_term: t.customer_search_term }));
   }
   for (const t of harvest.filter((x) => x.proposed_tag === "JUNK_CANDIDATE")) {
@@ -888,10 +963,11 @@ export function newExactTiles(
     const meta = metaForName(campaignMeta, name);
     const budget = snap?.budget != null ? Number(snap.budget)
       : (meta?.daily_budget != null ? Number(meta.daily_budget) : null);
+    const frame = contributionFrame(name, m.acos);
     return {
       campaign_name: name,
       keyword: extractExactKeyword(name) ?? "",
-      family: familyOf(name),
+      family: frame.family,
       state: snap?.campaign_status || meta?.state || "",
       daily_budget: budget,
       hours_since_launch: hours,
@@ -902,6 +978,8 @@ export function newExactTiles(
       sales: m.sales,
       cpc: m.cpc,
       acos: m.acos,
+      break_even_acos: frame.break_even_acos,
+      acos_vs_be: frame.acos_vs_be,
       zero_impr_after_24h: hours >= 24 && m.impressions === 0,
       over_shell_budget: budget != null && budget > SHELL_DAILY_BUDGET_CAP,
       last_call: lastCallForCampaign(ledger, name),
@@ -931,9 +1009,11 @@ export function keeperHeartbeats(
     const state = snap?.campaign_status || meta?.state || "";
     const budget = snap?.budget != null ? Number(snap.budget)
       : (meta?.daily_budget != null ? Number(meta.daily_budget) : null);
+    const frame = contributionFrame(name, l7.acos);
     return {
       campaign_name: name,
       role,
+      family: frame.family,
       state,
       enabled: isEnabledStatus(state),
       daily_budget: budget,
@@ -941,6 +1021,8 @@ export function keeperHeartbeats(
       spend_l7: l7.spend,
       spend_l7_avg: l7.spend / 7,
       acos_l7: l7.acos,
+      break_even_acos: frame.break_even_acos,
+      acos_vs_be: frame.acos_vs_be,
       sparkline: dailySpendSeries(rows, start, asOf),
     };
   });
@@ -1060,6 +1142,7 @@ export function watchCampaignExportRows(input: {
         acos: m.acos,
         watch_list: list,
         metrics_complete: w.metrics_complete,
+        ...contributionFrame(storedName, m.acos),
       });
     }
   }
@@ -1157,6 +1240,7 @@ export function keywordTargetExportRows(input: {
         sales: m.sales,
         acos: m.acos,
         metrics_complete: w.metrics_complete,
+        ...contributionFrame(t.campaign_name, m.acos),
       });
     }
   }
