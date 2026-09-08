@@ -1547,7 +1547,7 @@ class TestAdsSearchTermSlotStop:
         assert "no search-term gaps in lookback" in body
         assert "AdsSyncBusy" in body
         assert "Do not retry in a loop" in body
-        assert "cancel_report" in body
+        assert "_cancel_ads_reports_cli" in body
 
 
 class TestAdsSearchTermGapsOnly:
