@@ -6,13 +6,20 @@ Single-writer: only the scheduler and the explicit `ads-sync` CLI may pull
 kill, or crash the lease dies with the PID / heartbeat so morning jobs are
 not blocked by an orphan row.
 
+Claim steals when the holder PID is dead OR the heartbeat is stale.
+`atexit` + SIGTERM/SIGINT release the file if we own it. SIGKILL cannot
+be caught (launchd `kickstart -k`); the next claim steals the dead-PID
+lease and the pending-report registry cancels known hung Amazon reports.
+
 Telegram stays quiet for routine stale clears — one log line only.
 """
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
+import signal
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -48,6 +55,10 @@ _beat_stop = threading.Event()
 _beat_thread: threading.Thread | None = None
 _BEAT_INTERVAL_SECONDS = 60
 _release_hooks: list = []
+_exit_hooks_installed = False
+_prev_signals: dict = {}
+# CLI job_start() can land a few seconds before claim_ads_lease().
+_OWN_ROW_GRACE = timedelta(minutes=5)
 
 
 def on_ads_lease_released(fn) -> None:
@@ -142,17 +153,23 @@ def _lease_payload(job: str | None = None) -> dict:
     }
 
 
+def _lease_pid(lease: dict | None):
+    if not lease:
+        return None
+    try:
+        return int(lease.get("pid"))
+    except (TypeError, ValueError):
+        return None
+
+
 def beat_ads_lease() -> None:
-    """Refresh heartbeat_at while this process holds the lease."""
+    """Refresh heartbeat_at only while this process is the lock PID."""
     path = ads_lock_path()
-    lease = read_lease(path) or {}
-    if lease.get("pid") not in (None, os.getpid()):
+    lease = read_lease(path)
+    if not lease or _lease_pid(lease) != os.getpid():
         return
     lease = dict(lease)
-    lease["pid"] = os.getpid()
     lease["heartbeat_at"] = datetime.now(timezone.utc).isoformat()
-    lease.setdefault("started_at", lease["heartbeat_at"])
-    lease.setdefault("job", "ads_sync")
     try:
         _write_lease(path, lease)
     except Exception as e:
@@ -179,20 +196,62 @@ def _stop_beater() -> None:
     _beat_stop.set()
 
 
+def install_ads_lease_exit_hooks() -> None:
+    """Release our lease on interpreter exit or SIGTERM/SIGINT.
+
+    SIGKILL (launchd kickstart -k) cannot be handled. Recovery is
+    dead-PID / stale-heartbeat steal plus the pending-report registry.
+    """
+    global _exit_hooks_installed
+    if _exit_hooks_installed:
+        return
+    _exit_hooks_installed = True
+    atexit.register(release_ads_lease)
+
+    def _on_signal(signum, frame):
+        release_ads_lease()
+        prev = _prev_signals.get(signum)
+        if callable(prev):
+            prev(signum, frame)
+            return
+        signal.signal(signum, signal.SIG_DFL)
+        try:
+            os.kill(os.getpid(), signum)
+        except OSError:
+            raise SystemExit(128 + int(signum))
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            _prev_signals[sig] = signal.getsignal(sig)
+            signal.signal(sig, _on_signal)
+        except (ValueError, OSError):
+            # Not the main thread — atexit still covers a clean exit.
+            pass
+
+
 def claim_ads_lease(job: str | None = None) -> bool:
-    """Write our PID+heartbeat. False when another live holder exists."""
+    """Write our PID+heartbeat. False when another live holder exists.
+
+    Steals when the existing PID is dead or the heartbeat is stale.
+    """
     path = ads_lock_path()
     existing = read_lease(path)
-    if lease_is_live(existing) and existing.get("pid") != os.getpid():
+    existing_pid = _lease_pid(existing)
+    if lease_is_live(existing) and existing_pid != os.getpid():
         return False
+    if existing and not lease_is_live(existing):
+        log.info("Ads lock: stealing dead/stale lease (was pid=%s job=%s)",
+                 existing_pid, (existing or {}).get("job"))
     payload = _lease_payload(job)
-    if existing and existing.get("pid") == os.getpid() and existing.get("started_at"):
+    if (existing and existing_pid == os.getpid() and existing.get("started_at")
+            and lease_is_live(existing)):
         payload["started_at"] = existing["started_at"]
         payload["job"] = existing.get("job") or payload["job"]
     _write_lease(path, payload)
     check = read_lease(path)
-    if not check or check.get("pid") != os.getpid():
+    if not check or _lease_pid(check) != os.getpid():
         return False
+    install_ads_lease_exit_hooks()
     _start_beater()
     return True
 
@@ -202,7 +261,7 @@ def release_ads_lease() -> None:
     _stop_beater()
     path = ads_lock_path()
     lease = read_lease(path)
-    if lease and lease.get("pid") not in (None, os.getpid()):
+    if lease and _lease_pid(lease) not in (None, os.getpid()):
         return
     try:
         path.unlink(missing_ok=True)
@@ -229,11 +288,20 @@ def _row_started(row: dict) -> datetime | None:
 
 
 def _row_belongs_to_live_lease(row: dict, lease: dict) -> bool:
-    """Keep the current holder's running row; fail leftovers from before it."""
+    """Keep the current holder's running row; fail leftovers from before it.
+
+    CLI `job_start()` runs before `claim_ads_lease()`, so the row can
+    predate the lease file. If this process owns the lease, never
+    auto-fail that job_run — a stale sweep must not race a live CLI.
+    """
     row_start = _row_started(row)
     lease_start = _parse_iso(lease.get("started_at"))
+    if _lease_pid(lease) == os.getpid():
+        if row_start is None or lease_start is None:
+            return True
+        return row_start >= lease_start - _OWN_ROW_GRACE
     if row_start is None or lease_start is None:
-        return lease.get("pid") == os.getpid()
+        return False
     return row_start >= lease_start - timedelta(seconds=90)
 
 
@@ -270,7 +338,13 @@ def fail_stale_ads_job_runs(*, now: datetime | None = None) -> list[dict]:
         name = row.get("job_name") or ""
         if not is_ads_pull_job(name):
             continue
-        if live and lease is not None and _row_belongs_to_live_lease(row, lease):
+        # Own PID: do not auto-fail our job_run, even if the heartbeat
+        # looks stale for a moment after claim. A live other-process
+        # holder still keeps its own row via lease_is_live.
+        if lease is not None and _lease_pid(lease) == os.getpid():
+            if _row_belongs_to_live_lease(row, lease):
+                continue
+        elif live and lease is not None and _row_belongs_to_live_lease(row, lease):
             continue
         started = _row_started(row)
         age = (now - started) if started is not None else ttl

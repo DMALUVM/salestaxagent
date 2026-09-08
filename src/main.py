@@ -726,6 +726,41 @@ def ads_test_cmd():
         click.echo(f"Error: {e}")
 
 
+def _cancel_ads_reports_cli(report_id: str | None = None,
+                            all_pending: bool = False) -> bool:
+    """Queue cleanup only — DELETE persisted PENDING reports, then STOP."""
+    from src.amazon_ads.client import cancel_report
+    from src.amazon_ads.pending_reports import (
+        cancel_persisted_pending_reports,
+        read_pending_reports,
+    )
+    if all_pending:
+        rows = read_pending_reports()
+        click.echo(
+            f"Cancelling {len(rows)} persisted PENDING Ads report(s) "
+            "(queue cleanup only — not an ads write)...")
+        swept = cancel_persisted_pending_reports()
+        cancelled = swept.get("cancelled") or []
+        failed = swept.get("failed") or []
+        for rid in cancelled:
+            click.echo(f"  cancelled {rid}")
+        for rid in failed:
+            click.echo(f"  cancel failed {rid}")
+        if not rows:
+            click.echo("  none persisted")
+        click.echo("STOP. Slot is cleared for the next scheduled one-shot. "
+                   "Do not start a fetch from this command when cancelling.")
+        return True
+    if report_id:
+        click.echo(f"Cancelling report {report_id} (queue cleanup only — "
+                   f"not an ads write)...")
+        ok = cancel_report(report_id)
+        click.echo("  cancelled" if ok else "  cancel failed or id unknown")
+        click.echo("STOP. Do not start a fetch from this command when cancelling.")
+        return True
+    return False
+
+
 @cli.command("ads-sync")
 @click.option("--days", default=14, help="Days of history to sync")
 @click.option("--campaigns-only", is_flag=True,
@@ -745,15 +780,26 @@ def ads_test_cmd():
               help="Comma-separated ad products for campaigns: SP,SB,SD "
                    "(default: all three). Search terms and placements are "
                    "always Sponsored Products.")
+@click.option("--cancel-report-id", default=None,
+              help="Cancel this PENDING report id, then STOP (no fetch).")
+@click.option("--cancel-all-pending", is_flag=True,
+              help="Cancel every id in logs/ads_pending_reports.json, then STOP.")
+@click.option("--cancel-stale-reports", is_flag=True,
+              help="Alias for --cancel-all-pending.")
 def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
                  with_placements, search_term_chunk_days, campaign_chunk_days,
-                 ad_products):
+                 ad_products, cancel_report_id, cancel_all_pending,
+                 cancel_stale_reports):
     """Sync Amazon Ads campaigns + search terms (auto-chunked).
 
     Single-writer: only the scheduler and this CLI may pull. Parallel
     `ads-sync` / dashboard / agent retries are rejected by the PID+heartbeat
     lease (`AdsSyncBusy`). Do not start a second pull; wait or let the
     scheduler's one deferred retry fire.
+
+    The lease is released on exit (atexit + SIGTERM/SIGINT). SIGKILL
+    cannot be caught — the next job steals a dead-PID lease and cancels
+    persisted PENDING report ids so HTTP 425 cannot stick forever.
 
     Campaigns chunk at 7 days by default (≤30 max); search terms at 7.
     A single 30-day SB/SD report times out on this account.
@@ -766,6 +812,12 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
     if not settings.amazon_ads_enabled:
         click.echo("Amazon Ads not configured. Set AMAZON_ADS_* in .env")
         return
+    if _cancel_ads_reports_cli(
+            cancel_report_id,
+            all_pending=cancel_all_pending or cancel_stale_reports):
+        return
+    from src.amazon_ads.sync_lock import install_ads_lease_exit_hooks
+    install_ads_lease_exit_hooks()
     if sum(bool(f) for f in (campaigns_only, search_terms_only, placements_only)) > 1:
         raise click.UsageError("--campaigns-only, --search-terms-only and "
                                "--placements-only are mutually exclusive")
@@ -849,6 +901,12 @@ def ads_sync_cmd(days, campaigns_only, search_terms_only, placements_only,
     status, message = _ads_sync_outcome(result, days)
     job_finish(run_id, status, message)
     click.echo(f"  Job {job_name}: {status} — {message}")
+    from src.amazon_ads.reports import ads_slot_busy_in_result
+    if ads_slot_busy_in_result(result):
+        click.echo("STOP: Ads reporting slot was busy (HTTP 425). "
+                   "Persisted PENDING reports were cancelled. "
+                   "Do not retry in a loop — the next scheduled one-shot "
+                   "can create.")
 
 
 def _print_search_term_coverage() -> None:
@@ -877,7 +935,12 @@ def _print_search_term_coverage() -> None:
               help="Ads reporting chunk size. 7 is what this account completes.")
 @click.option("--cancel-report-id", default=None,
               help="Cancel this PENDING report id, then STOP (no fetch).")
-def ads_search_terms_backfill_cmd(days, chunk_days, cancel_report_id):
+@click.option("--cancel-all-pending", is_flag=True,
+              help="Cancel every id in logs/ads_pending_reports.json, then STOP.")
+@click.option("--cancel-stale-reports", is_flag=True,
+              help="Alias for --cancel-all-pending.")
+def ads_search_terms_backfill_cmd(days, chunk_days, cancel_report_id,
+                                  cancel_all_pending, cancel_stale_reports):
     """Gaps-only search-terms backfill. Never writes to Amazon Ads.
 
     Detect missing closed weeks in ads_search_terms_daily before requesting
@@ -893,19 +956,17 @@ def ads_search_terms_backfill_cmd(days, chunk_days, cancel_report_id):
     if not settings.amazon_ads_enabled:
         click.echo("Amazon Ads not configured. Set AMAZON_ADS_* in .env")
         return
-    from src.amazon_ads.client import cancel_report
     from src.amazon_ads.reports import (
         AdsSyncBusy, missing_search_term_lookback, sync_ads,
     )
     from src.db import job_start, job_finish
 
-    if cancel_report_id:
-        click.echo(f"Cancelling report {cancel_report_id} (queue cleanup only — "
-                   f"not an ads write)...")
-        ok = cancel_report(cancel_report_id)
-        click.echo("  cancelled" if ok else "  cancel failed or id unknown")
-        click.echo("STOP. Do not start a fetch from this command when cancelling.")
+    if _cancel_ads_reports_cli(
+            cancel_report_id,
+            all_pending=cancel_all_pending or cancel_stale_reports):
         return
+    from src.amazon_ads.sync_lock import install_ads_lease_exit_hooks
+    install_ads_lease_exit_hooks()
 
     click.echo(f"Gaps-only search-terms backfill: last {days}d in "
                f"{chunk_days}d chunks, skip existing weeks, newest first. "

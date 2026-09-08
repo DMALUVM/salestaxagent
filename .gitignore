@@ -25,6 +25,8 @@ logs/heartbeat.tmp
 logs/health_state.json
 logs/ads_sync.lock.json
 logs/ads_sync.lock.tmp
+logs/ads_pending_reports.json
+logs/ads_pending_reports.tmp
 logs/*.log
 
 # Generated exports / CPA packets / filing CSVs — never commit business data.

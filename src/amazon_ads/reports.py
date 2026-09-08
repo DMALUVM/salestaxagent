@@ -830,7 +830,6 @@ def sync_search_term_gap_days(
             },
         }
 
-    fail_stale_ads_job_runs()
     acquired = _SYNC_LOCK.acquire(timeout=_SYNC_LOCK_TIMEOUT)
     if not acquired:
         raise AdsSyncBusy(
@@ -842,6 +841,9 @@ def sync_search_term_gap_days(
                 "another ads pull is running — skipped so this job does not "
                 "wait hours and page Telegram")
         try:
+            # After we own the lease so a just-started CLI job_run is
+            # not auto-failed by a stale sweep racing this process.
+            fail_stale_ads_job_runs()
             if on_progress:
                 on_progress(f"search-term day gaps: {len(gap_days)} day(s)")
             result = fetch_search_term_gap_days(gap_days)
@@ -1011,7 +1013,8 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
     pull (Sunday/one-shot `ads-search-terms-backfill` uses this same lease).
     The process lock is a PID+heartbeat file lease, not a leftover
     `job_runs.status=running` row. Stale running ads pull rows are
-    auto-failed before the lease is taken.
+    auto-failed after this process takes the lease so a live CLI
+    job_run is not raced.
 
     Campaign ranges are chunked to `campaign_chunk_days` (default 7, max 30);
     search-term ranges to `search_term_chunk_days` (default 7). A single
@@ -1058,7 +1061,6 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
                 },
             }
 
-    fail_stale_ads_job_runs()
     acquired = _SYNC_LOCK.acquire(timeout=_SYNC_LOCK_TIMEOUT)
     if not acquired:
         raise AdsSyncBusy(
@@ -1074,6 +1076,9 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
                 "another ads pull is running — skipped so this job does not "
                 "wait hours and page Telegram")
         try:
+            # After we own the lease so a just-started CLI job_run is
+            # not auto-failed by a stale sweep racing this process.
+            fail_stale_ads_job_runs()
             def _progress(msg):
                 beat_ads_lease()
                 if on_progress:
