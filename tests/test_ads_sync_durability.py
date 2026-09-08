@@ -775,6 +775,7 @@ def test_create_report_425_cancels_persisted_no_wait_loop(
     class Resp:
         status_code = 425
         text = "Too Early"
+        headers = {"content-type": "application/json"}
 
         def json(self):
             return {}
@@ -798,6 +799,60 @@ def test_create_report_425_cancels_persisted_no_wait_loop(
     assert slept == []
     from src.amazon_ads.pending_reports import read_pending_reports
     assert read_pending_reports() == []
+
+
+def test_425_cancels_report_id_named_in_body(pending_dir, monkeypatch, caplog):
+    import logging
+    import src.amazon_ads.client as client
+
+    cancelled = []
+    posts = []
+
+    class Resp:
+        status_code = 425
+        text = '{"code":"TOO_EARLY","reportId":"rep-from-amazon"}'
+        headers = {
+            "content-type": "application/json",
+            "x-amzn-requestid": "req-1",
+        }
+
+        def json(self):
+            return {"code": "TOO_EARLY", "reportId": "rep-from-amazon"}
+
+        def raise_for_status(self):
+            raise AssertionError("425 must not fall through")
+
+    monkeypatch.setattr(client, "ads_headers", lambda: {})
+    monkeypatch.setattr(client.httpx, "post",
+                        lambda *a, **k: posts.append(1) or Resp())
+    monkeypatch.setattr(client, "cancel_report",
+                        lambda rid: cancelled.append(rid) or True)
+    caplog.set_level(logging.WARNING, logger="src.amazon_ads.client")
+
+    with pytest.raises(client.AdsReportSlotBusy) as ei:
+        client.create_report({"configuration": {"reportTypeId": "spSearchTerm"}})
+    assert ei.value.cancelled_ids == ["rep-from-amazon"]
+    assert cancelled == ["rep-from-amazon"]
+    assert posts == [1]
+    logged = " ".join(r.message for r in caplog.records)
+    assert "HTTP 425" in logged
+    assert "rep-from-amazon" in logged
+    assert "x-amzn-requestid" in logged.lower() or "req-1" in logged
+
+
+def test_report_ids_from_busy_response_headers_and_nested():
+    import src.amazon_ads.client as client
+
+    class Resp:
+        text = '{"details":{"blockingReportId":"rep-nested"}}'
+        headers = {"Location": "https://advertising-api.amazon.com/reporting/reports/rep-loc"}
+
+        def json(self):
+            return {"details": {"blockingReportId": "rep-nested"}}
+
+    ids = client.report_ids_from_busy_response(Resp())
+    assert "rep-nested" in ids
+    assert "rep-loc" in ids
 
 
 def test_425_then_single_defer_not_inline_retry(monkeypatch, pending_dir):

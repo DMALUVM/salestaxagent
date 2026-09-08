@@ -54,12 +54,79 @@ def _clear_slot_after_busy() -> list[str]:
     return list(swept.get("cancelled") or [])
 
 
+_REPORT_ID_KEYS = frozenset({
+    "reportid", "report_id", "reportids", "report_ids",
+    "blockingreportid", "occupyingreportid", "existingreportid",
+})
+
+
+def _log_slot_busy_response(resp) -> None:
+    """Amazon 425 bodies sometimes name the occupying report. Log all of it."""
+    try:
+        headers = dict(getattr(resp, "headers", {}) or {})
+    except Exception:
+        headers = {"<unreadable>": True}
+    body = getattr(resp, "text", None)
+    if body is None:
+        body = ""
+    log.warning("Ads create HTTP 425 headers=%s body=%s",
+                headers, str(body)[:4000])
+
+
+def _ids_from_obj(obj, found: list[str]) -> None:
+    if isinstance(obj, dict):
+        for key, val in obj.items():
+            if str(key).lower().replace("-", "_") in _REPORT_ID_KEYS:
+                if isinstance(val, str) and val.strip():
+                    found.append(val.strip())
+                elif isinstance(val, list):
+                    found.extend(str(x).strip() for x in val if x)
+            _ids_from_obj(val, found)
+    elif isinstance(obj, list):
+        for item in obj:
+            _ids_from_obj(item, found)
+
+
+def report_ids_from_busy_response(resp) -> list[str]:
+    """Pull reportId values from a 425 body or headers. Empty if unnamed."""
+    found: list[str] = []
+    try:
+        _ids_from_obj(resp.json(), found)
+    except Exception:
+        pass
+    import re
+    text = getattr(resp, "text", None) or ""
+    for match in re.finditer(
+            r'"(?:reportId|report_id|blockingReportId)"\s*:\s*"([^"]+)"',
+            str(text)):
+        found.append(match.group(1).strip())
+    try:
+        headers = dict(getattr(resp, "headers", {}) or {})
+    except Exception:
+        headers = {}
+    for key, val in headers.items():
+        k = str(key).lower()
+        if "report" in k and "id" in k and val:
+            found.append(str(val).strip())
+        if k == "location":
+            tail = str(val).rstrip("/").split("/")[-1]
+            if tail and tail.lower() not in {"reports", "reporting"}:
+                found.append(tail)
+    seen: set[str] = set()
+    out: list[str] = []
+    for rid in found:
+        if rid and rid not in seen:
+            seen.add(rid)
+            out.append(rid)
+    return out
+
+
 def create_report(config: dict) -> str:
     """Create an async report. Returns reportId.
 
     Persists the id so a later SIGKILL cannot leave the slot occupied
-    with no known id to cancel. HTTP 425 cancels persisted ids once,
-    then raises — no inline wait-loop.
+    with no known id to cancel. HTTP 425 cancels persisted ids and any
+    reportId named in the 425 body, once, then raises — no inline wait-loop.
     """
     headers = ads_headers()
     report_type = config.get("configuration", {}).get("reportTypeId", "unknown")
@@ -70,10 +137,17 @@ def create_report(config: dict) -> str:
     if resp.status_code == 403:
         raise PermissionError("Ads API forbidden (403) — check profile scope")
     if resp.status_code == 425:
+        _log_slot_busy_response(resp)
         cancelled = _clear_slot_after_busy()
+        named = report_ids_from_busy_response(resp)
+        for rid in named:
+            if rid in cancelled:
+                continue
+            if cancel_report(rid):
+                cancelled.append(rid)
         raise AdsReportSlotBusy(
             "Amazon Ads reporting slot busy (HTTP 425). "
-            f"Cancelled {len(cancelled)} persisted PENDING report(s). "
+            f"Cancelled {len(cancelled)} persisted/named PENDING report(s). "
             "Do not retry in a loop. Slot is cleared for the next "
             "scheduled one-shot.",
             cancelled_ids=cancelled)
