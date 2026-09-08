@@ -11,6 +11,7 @@ from src.rules import (
     GNO_DEO_BE_ACOS,
     GNO_FORBIDDEN_AUTO_ACTIONS,
     GNO_KEEP_ALIVE,
+    GNO_BALM_BE_ACOS,
     GNO_LIP_BE_ACOS,
     GNO_NEW_EXACT,
     GNO_OBSERVE_ONLY,
@@ -27,6 +28,7 @@ def test_gno_spec_pins_dave_watchlists():
     assert len(GNO_DAY5_PAUSE) == 13
     assert GNO_LIP_BE_ACOS == 42
     assert GNO_DEO_BE_ACOS == 36
+    assert GNO_BALM_BE_ACOS == 36
     assert GNO_AUTO_LOOSE_BUDGET == 303
     assert "SP | TBL | B0CLHVCPL5 | EX | tallow lip balm | TOS" in GNO_NEW_EXACT
     assert any("Loose Match-TOS" in n for n in GNO_KEEP_ALIVE)
@@ -98,11 +100,17 @@ def test_gno_dashboard_never_auto_writes_amazon():
     assert 'alert("P0", "KEEPER_MISSING"' not in lib
     assert "not a P0" in lib
     assert "metrics_complete" in lib
+    assert "break_even_acos" in lib
+    assert "acos_vs_be" in lib
+    assert "breakEvenAcosOf(term.campaign_name" in lib
+    assert "acos <= LIP_BE_ACOS" not in lib
     assert "packClosedEnd" in lib
     assert "Never `today`" in lib
     assert "When to Export GNO pack" in ui
     assert "EXPORT NEEDED" in ui
     assert "Log Grok outcome" in ui
+    assert "Family BE ACOS" in ui
+    assert "acosWithBe" in ui
 
 
 def test_keeper_missing_from_short_spend_lookback_is_not_p0():

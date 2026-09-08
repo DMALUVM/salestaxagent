@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { evaluateExportNeed } from "@/lib/gno-export-state";
-import { GNO_NEXT_REVIEW_AT } from "@/lib/gno-ppc-watch";
+import { GNO_NEXT_REVIEW_AT, CM_NOTE } from "@/lib/gno-ppc-watch";
 import { AlertTriangle, Check, CheckCircle, Download, RefreshCw, Shield } from "lucide-react";
 import {
   gnoAlertKey,
@@ -33,6 +33,7 @@ interface Alert {
 interface Tile {
   campaign_name: string;
   keyword: string;
+  family?: string;
   state: string;
   daily_budget: number | null;
   hours_since_launch: number;
@@ -41,6 +42,8 @@ interface Tile {
   spend: number;
   orders: number;
   acos: number | null;
+  break_even_acos?: number;
+  acos_vs_be?: number | null;
   zero_impr_after_24h: boolean;
   over_shell_budget: boolean;
   last_call?: "hold" | "bid_down" | "bid_up" | null;
@@ -49,12 +52,15 @@ interface Tile {
 interface Heartbeat {
   campaign_name: string;
   role: string;
+  family?: string;
   state: string;
   enabled: boolean;
   daily_budget: number | null;
   spend_today: number;
   spend_l7_avg: number;
   acos_l7: number | null;
+  break_even_acos?: number;
+  acos_vs_be?: number | null;
   sparkline: number[];
 }
 
@@ -71,6 +77,9 @@ interface HarvestRow {
   cvr: number | null;
   has_enabled_exact_elsewhere: boolean;
   proposed_tag: string;
+  family?: string;
+  break_even_acos?: number;
+  acos_vs_be?: number | null;
   learning_note?: string;
 }
 
@@ -114,6 +123,18 @@ interface GnoData {
 
 function money(n: number): string {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Desk ACOS with family contribution BE — matches pack `acos` / `break_even_acos`. */
+function acosWithBe(
+  acos: number | null | undefined,
+  be?: number | null,
+  family?: string,
+): string {
+  const a = acos == null ? "—" : `${acos.toFixed(0)}%`;
+  if (be == null) return a;
+  const fam = family && family !== "other" ? ` ${family}` : "";
+  return `${a} ·${fam} BE ${be}%`;
 }
 
 function Spark({ values }: { values: number[] }) {
@@ -366,6 +387,9 @@ export function PpcGnoWatch() {
           <p className="text-sm text-muted-foreground">
             Tallowbourn US · observe + export + alert only · closed LA day {data?.asOf ?? "—"}
           </p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Family BE ACOS is the config contribution-margin target ({CM_NOTE}).
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => { setLoading(true); load(); }}>
@@ -487,7 +511,7 @@ export function PpcGnoWatch() {
                 <p className="text-xs tabular-nums">Impr {t.impressions.toLocaleString()}</p>
                 <p className="text-xs tabular-nums">Spend ${money(t.spend)}</p>
                 <p className="text-xs tabular-nums">Orders {t.orders}</p>
-                <p className="text-xs tabular-nums">ACOS {t.acos == null ? "—" : `${t.acos.toFixed(0)}%`}</p>
+                <p className="text-xs tabular-nums">ACOS {acosWithBe(t.acos, t.break_even_acos, t.family)}</p>
                 <p className="text-[10px] text-muted-foreground">{t.hours_since_launch.toFixed(0)}h since launch</p>
                 {t.last_call && (
                   <p className="text-[10px] font-medium">last call: {t.last_call.replace("_", " ")}</p>
@@ -536,7 +560,7 @@ export function PpcGnoWatch() {
                 </div>
                 <p className="truncate text-[10px] text-muted-foreground" title={k.campaign_name}>{k.campaign_name}</p>
                 <p className="text-xs tabular-nums">As-of ${money(k.spend_today)} · L7 avg ${money(k.spend_l7_avg)}</p>
-                <p className="text-xs tabular-nums">L7 ACOS {k.acos_l7 == null ? "—" : `${k.acos_l7.toFixed(0)}%`}</p>
+                <p className="text-xs tabular-nums">L7 ACOS {acosWithBe(k.acos_l7, k.break_even_acos, k.family)}</p>
                 <div className={k.enabled ? "text-emerald-700 dark:text-emerald-400" : "text-red-600"}>
                   <Spark values={k.sparkline} />
                 </div>
@@ -562,7 +586,7 @@ export function PpcGnoWatch() {
                 <TableHead>Search term</TableHead>
                 <TableHead className="text-right">Spend</TableHead>
                 <TableHead className="text-right">Orders</TableHead>
-                <TableHead className="text-right">ACOS</TableHead>
+                <TableHead className="text-right">ACOS vs BE</TableHead>
                 <TableHead>Exact home</TableHead>
                 <TableHead>Tag</TableHead>
                 <TableHead>Log Grok outcome</TableHead>
@@ -590,7 +614,7 @@ export function PpcGnoWatch() {
                     <TableCell className="text-xs">{t.customer_search_term}</TableCell>
                     <TableCell className="text-right tabular-nums text-xs">${money(t.spend)}</TableCell>
                     <TableCell className="text-right tabular-nums text-xs">{t.orders}</TableCell>
-                    <TableCell className="text-right tabular-nums text-xs">{t.acos == null ? "—" : `${t.acos.toFixed(0)}%`}</TableCell>
+                    <TableCell className="text-right tabular-nums text-xs">{acosWithBe(t.acos, t.break_even_acos, t.family)}</TableCell>
                     <TableCell className="text-xs">{t.has_enabled_exact_elsewhere ? "yes" : "no"}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-[9px]">{on ? "IN PACK" : t.proposed_tag}</Badge>
