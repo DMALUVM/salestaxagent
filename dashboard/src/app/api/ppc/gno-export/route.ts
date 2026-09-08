@@ -20,7 +20,8 @@ import { loadGnoExportState, loadGnoLedger, saveGnoExportAck } from "@/lib/gno-s
  * GET /api/ppc/gno-export — Export GNO pack v2 zip.
  * watch_campaigns.csv + auto_loose_search_terms.csv + fat_parent_search_terms.csv
  * + keyword_targets.csv (+ optional negatives_snapshot.csv).
- * Today / Last2 / Last7. Campaigns API snapshot fills 0-impr shells.
+ * Today = config only (metrics_complete=false). L2/L7 = closed days
+ * ending yesterday. Campaigns API snapshot fills 0-impr shells.
  * Observe / export only. Never writes to Amazon.
  */
 

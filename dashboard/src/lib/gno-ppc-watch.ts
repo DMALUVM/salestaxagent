@@ -17,10 +17,11 @@ import {
 export const GNO_OBSERVE_ONLY = true as const;
 
 export const WATCH_CAMPAIGN_CSV_HEADERS = [
-  "date_start", "date_end", "campaign_name", "state", "portfolio",
+  "date_start", "date_end", "campaign_name", "asin", "state", "portfolio",
   "daily_budget", "tos_modifier_pct", "ros_modifier_pct", "pp_modifier_pct",
   "tos_spend_share", "ros_spend_share", "pp_spend_share", "impressions",
   "clicks", "spend", "cpc", "orders", "sales", "acos", "watch_list",
+  "metrics_complete",
 ] as const;
 
 export const AUTO_LOOSE_TERM_CSV_HEADERS = [
@@ -30,9 +31,9 @@ export const AUTO_LOOSE_TERM_CSV_HEADERS = [
 ] as const;
 
 export const KEYWORD_TARGET_CSV_HEADERS = [
-  "date_start", "date_end", "campaign_name", "keyword_text", "match_type",
-  "keyword_state", "bid", "impressions", "clicks", "spend", "orders",
-  "sales", "acos",
+  "date_start", "date_end", "campaign_name", "asin", "keyword_text",
+  "match_type", "keyword_state", "bid", "impressions", "clicks", "spend",
+  "orders", "sales", "acos", "metrics_complete",
 ] as const;
 
 export const NEGATIVES_CSV_HEADERS = [
@@ -203,6 +204,7 @@ export interface WatchCampaignExportRow {
   date_start: string;
   date_end: string;
   campaign_name: string;
+  asin: string;
   state: string;
   portfolio: string;
   daily_budget: number | null;
@@ -220,12 +222,15 @@ export interface WatchCampaignExportRow {
   sales: number;
   acos: number | null;
   watch_list: WatchList;
+  /** false on Today — Ads lag; $0 is not a pause. Read spend/ACOS from L2/L7. */
+  metrics_complete: boolean;
 }
 
 export interface KeywordTargetExportRow {
   date_start: string;
   date_end: string;
   campaign_name: string;
+  asin: string;
   keyword_text: string;
   match_type: string;
   keyword_state: string;
@@ -236,6 +241,8 @@ export interface KeywordTargetExportRow {
   orders: number;
   sales: number;
   acos: number | null;
+  /** false on Today — config-only until Amazon attributes. */
+  metrics_complete: boolean;
 }
 
 export const GNO_SPEC = spec;
@@ -317,6 +324,12 @@ export function isEnabledStatus(status: string | null | undefined): boolean {
 export function extractExactKeyword(campaignName: string): string | null {
   const m = String(campaignName ?? "").match(/\|\s*EX\s*\|\s*([^|]+?)\s*\|/i);
   return m ? normalizeTerm(m[1]) : null;
+}
+
+/** ASINs embedded in campaign names, including mixed keepers (B0…/B0…). */
+export function extractAsin(campaignName: string | null | undefined): string {
+  const matches = String(campaignName ?? "").match(/B0[A-Z0-9]{8}/gi) ?? [];
+  return [...new Set(matches.map((a) => a.toUpperCase()))].join("/");
 }
 
 export function familyOf(campaignName: string): "lip_3pk" | "deo" | "balm" | "other" {
@@ -636,18 +649,18 @@ function rollSearchTerms(input: {
   return out.sort((a, b) => b.spend - a.spend);
 }
 
-/** Auto Loose or fat parent search terms for L2 + L7 (export pack). */
+/** Auto Loose or fat parent search terms for closed-day L2 + L7 (export pack). */
 export function searchTermExportRows(
   termRows: SearchTermRow[],
   campaignRows: CampaignDailyRow[],
-  end: string,
+  closedEnd: string,
   campaignPredicate: (name: string) => boolean,
   keywordTargets: KeywordTarget[] = [],
   ledger: GnoLedgerRow[] = [],
 ): HarvestTerm[] {
   const windows: Array<{ start: string; end: string; label: TermWindowLabel }> = [
-    { start: windowStart(end, 2), end, label: "L2" },
-    { start: windowStart(end, 7), end, label: "L7" },
+    { start: windowStart(closedEnd, 2), end: closedEnd, label: "L2" },
+    { start: windowStart(closedEnd, 7), end: closedEnd, label: "L7" },
   ];
   const out: HarvestTerm[] = [];
   for (const w of windows) {
@@ -933,7 +946,10 @@ export function keeperHeartbeats(
   });
 }
 
-function uniqueWatchNames(campaigns: CampaignDailyRow[]): { name: string; list: WatchList }[] {
+function uniqueWatchNames(
+  campaigns: CampaignDailyRow[],
+  extraNames: string[] = [],
+): { name: string; list: WatchList }[] {
   const seen = new Set<string>();
   const out: { name: string; list: WatchList }[] = [];
   const add = (name: string, list: WatchList) => {
@@ -949,14 +965,39 @@ function uniqueWatchNames(campaigns: CampaignDailyRow[]): { name: string; list: 
     const list = watchListOf(r.campaign_name);
     if (list !== "OTHER") add(r.campaign_name, list);
   }
+  for (const name of extraNames) {
+    const list = watchListOf(name);
+    if (list !== "OTHER") add(name, list);
+  }
   return out;
 }
 
-export function packWindows(end: string): Array<{ start: string; end: string; label: PackWindowLabel }> {
+export interface PackWindow {
+  start: string;
+  end: string;
+  label: PackWindowLabel;
+  metrics_complete: boolean;
+}
+
+/**
+ * Last closed Amazon day that L2/L7 may include. Never `today`.
+ * Ads Today is incomplete — L2 = yesterday + day before.
+ */
+export function packClosedEnd(today: string, asOf: string): string {
+  return asOf < today ? asOf : shiftDays(today, -1);
+}
+
+/**
+ * Pack windows as of Amazon Today.
+ * Example 2026-09-07: Today=2026-09-07; L2=2026-09-05..2026-09-06;
+ * L7=last 7 closed days ending yesterday (2026-08-31..2026-09-06).
+ */
+export function packWindows(today: string, asOf: string): PackWindow[] {
+  const closed = packClosedEnd(today, asOf);
   return [
-    { start: end, end, label: "Today" },
-    { start: windowStart(end, 2), end, label: "Last2" },
-    { start: windowStart(end, 7), end, label: "Last7" },
+    { start: today, end: today, label: "Today", metrics_complete: false },
+    { start: windowStart(closed, 2), end: closed, label: "Last2", metrics_complete: true },
+    { start: windowStart(closed, 7), end: closed, label: "Last7", metrics_complete: true },
   ];
 }
 
@@ -968,23 +1009,28 @@ export function watchCampaignExportRows(input: {
   campaignMeta?: CampaignMeta[];
 }): WatchCampaignExportRow[] {
   const { campaigns, placements } = input;
-  const end = input.today || input.asOf;
-  const windows = packWindows(end);
+  const today = input.today || input.asOf;
+  const windows = packWindows(today, input.asOf);
   const latest = latestByCampaign(campaigns);
-  const names = uniqueWatchNames(campaigns);
   const meta = input.campaignMeta ?? [];
+  const names = uniqueWatchNames(campaigns, meta.map((m) => m.campaign_name));
   const rows: WatchCampaignExportRow[] = [];
   for (const w of windows) {
     for (const { name, list } of names) {
       const campRows = campaigns.filter((r) =>
         namesEqual(r.campaign_name, name) || (list === "DAY5_PAUSE" && nameContains(r.campaign_name, name)));
       const storedName = campRows[0]?.campaign_name ?? name;
-      const m = sumMetrics(inWindow(campRows, w.start, w.end));
-      const place = placementShares(inWindow(
-        placements.filter((p) =>
-          namesEqual(p.campaign_name, name) || nameContains(p.campaign_name, name)),
-        w.start, w.end,
-      ));
+      // Today is config-only. Spend / orders / ACOS live on closed L2 + L7.
+      const m = w.metrics_complete
+        ? sumMetrics(inWindow(campRows, w.start, w.end))
+        : { impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0, cpc: 0, acos: null, cvr: null };
+      const place = w.metrics_complete
+        ? placementShares(inWindow(
+          placements.filter((p) =>
+            namesEqual(p.campaign_name, name) || nameContains(p.campaign_name, name)),
+          w.start, w.end,
+        ))
+        : { tos_spend_share: null, ros_spend_share: null, pp_spend_share: null };
       const snap = latest.get(normalizeName(storedName));
       const metaRow = metaForName(meta, storedName) ?? metaForName(meta, name);
       const state = String(snap?.campaign_status || metaRow?.state || "");
@@ -995,6 +1041,7 @@ export function watchCampaignExportRows(input: {
         date_start: w.start,
         date_end: w.end,
         campaign_name: storedName,
+        asin: extractAsin(storedName),
         state,
         portfolio,
         daily_budget: budget,
@@ -1012,6 +1059,7 @@ export function watchCampaignExportRows(input: {
         sales: m.sales,
         acos: m.acos,
         watch_list: list,
+        metrics_complete: w.metrics_complete,
       });
     }
   }
@@ -1076,23 +1124,28 @@ function keywordWindowMetrics(
 }
 
 export function keywordTargetExportRows(input: {
-  end: string;
+  today: string;
+  asOf: string;
   keywordTargets: KeywordTarget[];
   searchTerms: SearchTermRow[];
 }): KeywordTargetExportRow[] {
+  // Include PAUSED + ENABLED. Today rows are config-only (bid / state).
   const wanted = input.keywordTargets.filter((t) => {
     const list = watchListOf(t.campaign_name);
     return list === "NEW_EXACT" || list === "KEEPER";
   });
   const rows: KeywordTargetExportRow[] = [];
-  for (const w of packWindows(input.end)) {
+  for (const w of packWindows(input.today, input.asOf)) {
     for (const t of wanted) {
-      const m = keywordWindowMetrics(
-        input.searchTerms, t.campaign_name, t.keyword_text, w.start, w.end);
+      const m = w.metrics_complete
+        ? keywordWindowMetrics(
+          input.searchTerms, t.campaign_name, t.keyword_text, w.start, w.end)
+        : { impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0, cpc: 0, acos: null, cvr: null };
       rows.push({
         date_start: w.start,
         date_end: w.end,
         campaign_name: t.campaign_name,
+        asin: extractAsin(t.campaign_name),
         keyword_text: t.keyword_text,
         match_type: t.match_type || "",
         keyword_state: t.state || "",
@@ -1103,6 +1156,7 @@ export function keywordTargetExportRows(input: {
         orders: m.orders,
         sales: m.sales,
         acos: m.acos,
+        metrics_complete: w.metrics_complete,
       });
     }
   }
@@ -1136,22 +1190,24 @@ export function buildGnoPack(input: {
   negatives?: NegativeRow[] | null;
   ledger?: GnoLedgerRow[];
 }): { files: { name: string; body: string }[]; filename: string } {
-  const end = input.today || input.asOf;
+  const today = input.today || input.asOf;
+  const asOf = input.asOf;
+  const closed = packClosedEnd(today, asOf);
   const targets = input.keywordTargets ?? [];
   const ledger = input.ledger ?? [];
   const watch = watchCampaignExportRows({
-    asOf: input.asOf,
-    today: end,
+    asOf,
+    today,
     campaigns: input.campaigns,
     placements: input.placements,
     campaignMeta: input.campaignMeta,
   });
   const autoTerms = searchTermExportRows(
-    input.searchTerms, input.campaigns, end, isAutoLoose, targets, ledger);
+    input.searchTerms, input.campaigns, closed, isAutoLoose, targets, ledger);
   const fatTerms = searchTermExportRows(
-    input.searchTerms, input.campaigns, end, isFatParent, targets, ledger);
+    input.searchTerms, input.campaigns, closed, isFatParent, targets, ledger);
   const keywords = keywordTargetExportRows({
-    end, keywordTargets: targets, searchTerms: input.searchTerms,
+    today, asOf, keywordTargets: targets, searchTerms: input.searchTerms,
   });
   const files = [
     { name: "watch_campaigns.csv", body: watchCampaignsCsv(watch) },

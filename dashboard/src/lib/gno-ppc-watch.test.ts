@@ -8,6 +8,7 @@ import {
   CORE_NEGATIVES,
   FAT_PARENT_NAME,
   GNO_OBSERVE_ONLY,
+  HERO_CHAPSTICK_NAME,
   KEEP_ALIVE,
   KEYWORD_TARGET_CSV_HEADERS,
   LIP_BE_ACOS,
@@ -18,6 +19,7 @@ import {
   csvEscape,
   enabledExactKeywords,
   evaluateGnoAlerts,
+  extractAsin,
   extractExactKeyword,
   gnoPackStamp,
   harvestQueue,
@@ -25,9 +27,12 @@ import {
   isAutoLoose,
   isEnabledStatus,
   keeperHeartbeats,
+  keywordTargetExportRows,
   keywordTargetsCsv,
   keeperMissingPriority,
   newExactTiles,
+  packClosedEnd,
+  packWindows,
   spendLookbackDays,
   normalizeName,
   searchTermExportRows,
@@ -361,8 +366,8 @@ describe("export pack columns", () => {
     const forNew = rows.filter((r) => r.campaign_name === NEW_EXACT[0]);
     assert.equal(forNew.length, 3);
     assert.deepEqual([...new Set(forNew.map((r) => `${r.date_start}..${r.date_end}`))].sort(), [
-      "2026-09-01..2026-09-07",
-      "2026-09-06..2026-09-07",
+      "2026-08-31..2026-09-06",
+      "2026-09-05..2026-09-06",
       "2026-09-07..2026-09-07",
     ]);
     assert.equal(forNew[0].watch_list, "NEW_EXACT");
@@ -370,6 +375,7 @@ describe("export pack columns", () => {
     assert.equal(csv.split("\n")[0], WATCH_CAMPAIGN_CSV_HEADERS.join(","));
     assert.match(csv, /tos_modifier_pct/);
     assert.match(csv, /tos_spend_share/);
+    assert.match(csv, /metrics_complete/);
     assert.doesNotMatch(csv.split("\n")[0], /(?<!modifier_|spend_share)tos_pct/);
   });
 
@@ -511,6 +517,7 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
     assert.ok(today.every((r) => r.state === "ENABLED"));
     assert.ok(today.every((r) => r.daily_budget === 25));
     assert.ok(today.every((r) => r.impressions === 0 && r.spend === 0));
+    assert.ok(today.every((r) => r.metrics_complete === false));
     assert.ok(today.every((r) => r.tos_modifier_pct === 140 && r.ros_modifier_pct === 0 && r.pp_modifier_pct === 0));
     assert.ok(!today.some((r) => Number.isNaN(r.impressions)));
   });
@@ -534,8 +541,8 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
 
   test("placement modifiers are not spend share", () => {
     const placements: PlacementRow[] = [
-      { date: "2026-09-07", campaign_name: NEW_EXACT[0], placement: "Top of Search on-Amazon", spend: 8 },
-      { date: "2026-09-07", campaign_name: NEW_EXACT[0], placement: "Detail Page on-Amazon", spend: 2 },
+      { date: "2026-09-06", campaign_name: NEW_EXACT[0], placement: "Top of Search on-Amazon", spend: 8 },
+      { date: "2026-09-06", campaign_name: NEW_EXACT[0], placement: "Detail Page on-Amazon", spend: 2 },
     ];
     const meta: CampaignMeta[] = [{
       campaign_name: NEW_EXACT[0],
@@ -543,16 +550,20 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
       portfolio_name: "Lip",
     }];
     const rows = watchCampaignExportRows({
-      asOf: "2026-09-07", today: "2026-09-07",
-      campaigns: [camp(NEW_EXACT[0], { date: "2026-09-07", spend: 10 })],
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns: [camp(NEW_EXACT[0], { date: "2026-09-06", spend: 10 })],
       placements, campaignMeta: meta,
     });
     const today = rows.find((r) => r.campaign_name === NEW_EXACT[0] && r.date_start === "2026-09-07");
+    const l2 = rows.find((r) => r.campaign_name === NEW_EXACT[0] && r.date_start === "2026-09-05");
     assert.equal(today?.tos_modifier_pct, 140);
     assert.equal(today?.ros_modifier_pct, 0);
     assert.equal(today?.pp_modifier_pct, 0);
-    assert.equal(today?.tos_spend_share, 80);
-    assert.equal(today?.pp_spend_share, 20);
+    assert.equal(today?.tos_spend_share, null);
+    assert.equal(today?.metrics_complete, false);
+    assert.equal(l2?.tos_spend_share, 80);
+    assert.equal(l2?.pp_spend_share, 20);
+    assert.equal(l2?.metrics_complete, true);
   });
 
   test("has_enabled_exact_elsewhere matches account-wide Exact keyword text", () => {
@@ -600,18 +611,18 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
 
   test("auto loose and fat parent term CSVs carry L2/L7 dates", () => {
     const terms: SearchTermRow[] = [{
-      date: "2026-09-07",
+      date: "2026-09-06",
       campaign_name: FAT_PARENT_NAME,
       search_term: "tallow lip balm",
       match_type: "EXACT",
       keyword: "tallow lip balm",
       spend: 12, sales_14d: 40, orders_14d: 2, clicks: 6, impressions: 90,
     }];
-    const fat = searchTermExportRows(terms, [], "2026-09-07", (n) => n === FAT_PARENT_NAME);
+    const fat = searchTermExportRows(terms, [], "2026-09-06", (n) => n === FAT_PARENT_NAME);
     assert.deepEqual([...new Set(fat.map((r) => r.label))].sort(), ["L2", "L7"]);
-    assert.ok(fat.every((r) => r.date_end === "2026-09-07"));
-    assert.ok(fat.some((r) => r.date_start === "2026-09-06" && r.label === "L2"));
-    assert.ok(fat.some((r) => r.date_start === "2026-09-01" && r.label === "L7"));
+    assert.ok(fat.every((r) => r.date_end === "2026-09-06"));
+    assert.ok(fat.some((r) => r.date_start === "2026-09-05" && r.label === "L2"));
+    assert.ok(fat.some((r) => r.date_start === "2026-08-31" && r.label === "L7"));
     const csv = autoLooseSearchTermsCsv(fat);
     assert.match(csv, /date_start,date_end,label/);
   });
@@ -650,16 +661,127 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
     assert.match(kw, /ENABLED/);
     const csv = keywordTargetsCsv([{
       date_start: "2026-09-07", date_end: "2026-09-07",
-      campaign_name: FAT_PARENT_NAME, keyword_text: "tallow lip balm",
+      campaign_name: FAT_PARENT_NAME, asin: "", keyword_text: "tallow lip balm",
       match_type: "EXACT", keyword_state: "ENABLED", bid: 2.45,
       impressions: 90, clicks: 6, spend: 12, orders: 2, sales: 40, acos: 30,
+      metrics_complete: false,
     }]);
     assert.match(csv, /2.45/);
+    assert.match(csv, /metrics_complete/);
   });
 
   test("csvEscape never writes NaN", () => {
     assert.equal(csvEscape(Number.NaN), "");
     assert.equal(csvEscape(Number.POSITIVE_INFINITY), "");
     assert.equal(gnoPackStamp(new Date("2026-09-07T15:04:00-07:00")), "2026-09-07_1504");
+  });
+});
+
+describe("GNO pack nits — closed-day L2 + Today config-only", () => {
+  test("as of 2026-09-07: Today / L2 / L7 are closed-day windows", () => {
+    assert.equal(packClosedEnd("2026-09-07", "2026-09-06"), "2026-09-06");
+    assert.equal(packClosedEnd("2026-09-07", "2026-09-07"), "2026-09-06");
+    const windows = packWindows("2026-09-07", "2026-09-06");
+    assert.deepEqual(windows, [
+      { start: "2026-09-07", end: "2026-09-07", label: "Today", metrics_complete: false },
+      { start: "2026-09-05", end: "2026-09-06", label: "Last2", metrics_complete: true },
+      { start: "2026-08-31", end: "2026-09-06", label: "Last7", metrics_complete: true },
+    ]);
+    assert.equal(windows[1].end < windows[0].start, true);
+    assert.equal(windows[2].end < windows[0].start, true);
+  });
+
+  test("Today $0 keeper stays ENABLED with metrics_complete=false", () => {
+    const campaigns = [
+      camp(AUTO_LOOSE_NAME, {
+        date: "2026-09-06", campaign_status: "enabled", budget: 303, spend: 40,
+      }),
+    ];
+    const rows = watchCampaignExportRows({
+      asOf: "2026-09-06",
+      today: "2026-09-07",
+      campaigns,
+      placements: [],
+      campaignMeta: [{
+        campaign_name: AUTO_LOOSE_NAME,
+        state: "ENABLED",
+        daily_budget: 303,
+        portfolio_name: "Lip",
+        tos_modifier_pct: 0,
+      }],
+    });
+    const today = rows.find((r) => r.campaign_name === AUTO_LOOSE_NAME && r.date_start === "2026-09-07");
+    const l2 = rows.find((r) => r.campaign_name === AUTO_LOOSE_NAME && r.date_start === "2026-09-05");
+    const l7 = rows.find((r) => r.campaign_name === AUTO_LOOSE_NAME && r.date_start === "2026-08-31");
+    assert.equal(today?.state, "enabled");
+    assert.equal(today?.daily_budget, 303);
+    assert.equal(today?.portfolio, "Lip");
+    assert.equal(today?.spend, 0);
+    assert.equal(today?.metrics_complete, false);
+    assert.equal(l2?.spend, 40);
+    assert.equal(l2?.metrics_complete, true);
+    assert.equal(l7?.spend, 40);
+    assert.equal(l7?.metrics_complete, true);
+    assert.equal(today?.asin, "B0CLHTKY3V");
+  });
+
+  test("keyword_targets Today is config-only and keeps PAUSED fat-parent Exact", () => {
+    const targets: KeywordTarget[] = [
+      {
+        campaign_name: FAT_PARENT_NAME,
+        keyword_text: "tallow lip balm",
+        match_type: "EXACT",
+        state: "PAUSED",
+        bid: 1.75,
+      },
+      {
+        campaign_name: FAT_PARENT_NAME,
+        keyword_text: "tallow lip balms",
+        match_type: "EXACT",
+        state: "ENABLED",
+        bid: 1.60,
+      },
+    ];
+    const terms: SearchTermRow[] = [{
+      date: "2026-09-06",
+      campaign_name: FAT_PARENT_NAME,
+      search_term: "tallow lip balms",
+      keyword: "tallow lip balms",
+      match_type: "EXACT",
+      spend: 8, sales_14d: 20, orders_14d: 1, clicks: 4, impressions: 50,
+    }];
+    const rows = keywordTargetExportRows({
+      today: "2026-09-07",
+      asOf: "2026-09-06",
+      keywordTargets: targets,
+      searchTerms: terms,
+    });
+    const todayPaused = rows.find((r) =>
+      r.date_start === "2026-09-07" && r.keyword_text === "tallow lip balm");
+    const todayPlural = rows.find((r) =>
+      r.date_start === "2026-09-07" && r.keyword_text === "tallow lip balms");
+    const l2Plural = rows.find((r) =>
+      r.date_start === "2026-09-05" && r.keyword_text === "tallow lip balms");
+    assert.equal(todayPaused?.keyword_state, "PAUSED");
+    assert.equal(todayPaused?.bid, 1.75);
+    assert.equal(todayPaused?.spend, 0);
+    assert.equal(todayPaused?.metrics_complete, false);
+    assert.equal(todayPlural?.keyword_state, "ENABLED");
+    assert.equal(todayPlural?.bid, 1.6);
+    assert.equal(todayPlural?.metrics_complete, false);
+    assert.equal(l2Plural?.spend, 8);
+    assert.equal(l2Plural?.metrics_complete, true);
+    assert.equal(rows.filter((r) => r.keyword_text === "tallow lip balm").length, 3);
+    assert.equal(rows.filter((r) => r.keyword_state === "PAUSED").length, 3);
+  });
+
+  test("extractAsin keeps mixed-ASIN keepers visible", () => {
+    assert.equal(extractAsin(NEW_EXACT[0]), "B0CLHVCPL5");
+    assert.equal(extractAsin(HERO_CHAPSTICK_NAME), "B0CLHTKY3V/B0CLHV3V5C");
+    assert.equal(
+      extractAsin("SP KW - Exact(PM) - Lip Balm - DPB0CLHTKY3V/B0CLHVLG2F -"),
+      "B0CLHTKY3V/B0CLHVLG2F",
+    );
+    assert.equal(extractAsin(FAT_PARENT_NAME), "");
   });
 });
