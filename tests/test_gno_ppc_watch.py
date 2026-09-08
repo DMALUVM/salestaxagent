@@ -97,6 +97,9 @@ def test_gno_dashboard_never_auto_writes_amazon():
     assert "Mark Done" in ui
     assert 'alert("P0", "KEEPER_MISSING"' not in lib
     assert "not a P0" in lib
+    assert "metrics_complete" in lib
+    assert "packClosedEnd" in lib
+    assert "Never `today`" in lib
     assert "When to Export GNO pack" in ui
     assert "EXPORT NEEDED" in ui
     assert "Log Grok outcome" in ui
