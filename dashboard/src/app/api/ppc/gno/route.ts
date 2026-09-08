@@ -86,11 +86,23 @@ export async function GET() {
     let campaignMeta: CampaignMeta[] = [];
     let keywordTargets: KeywordTarget[] = [];
     try {
-      const meta = await sb.from("ads_campaign_meta")
-        .select("campaign_id,campaign_name,state,daily_budget,portfolio_id,portfolio_name,tos_modifier_pct,ros_modifier_pct,pp_modifier_pct")
+      const META_WITH_CREATE =
+        "campaign_id,campaign_name,state,daily_budget,portfolio_id,portfolio_name,tos_modifier_pct,ros_modifier_pct,pp_modifier_pct,created_at,snapshot_at";
+      const META_BASE =
+        "campaign_id,campaign_name,state,daily_budget,portfolio_id,portfolio_name,tos_modifier_pct,ros_modifier_pct,pp_modifier_pct";
+      const withCreate = await sb.from("ads_campaign_meta")
+        .select(META_WITH_CREATE)
         .order("campaign_id", { ascending: true })
         .range(0, 999);
-      if (!meta.error) campaignMeta = (meta.data ?? []) as unknown as CampaignMeta[];
+      if (!withCreate.error) {
+        campaignMeta = (withCreate.data ?? []) as unknown as CampaignMeta[];
+      } else if (/created_at|snapshot_at|schema cache|PGRST/i.test(withCreate.error.message || "")) {
+        const base = await sb.from("ads_campaign_meta")
+          .select(META_BASE)
+          .order("campaign_id", { ascending: true })
+          .range(0, 999);
+        if (!base.error) campaignMeta = (base.data ?? []) as unknown as CampaignMeta[];
+      }
     } catch { /* snapshot optional until migration */ }
     try {
       const kw = await sb.from("ads_keyword_targets")
@@ -193,6 +205,7 @@ export async function GET() {
       lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
       ledger,
       keywordTargets,
+      campaignMeta,
     });
     const harvest = harvestQueue(searchTerms, campaigns, asOf, { keywordTargets, ledger });
     const p0 = alerts.filter((a) => a.priority === "P0");

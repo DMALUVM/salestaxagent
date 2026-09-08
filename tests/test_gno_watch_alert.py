@@ -4,12 +4,22 @@ from __future__ import annotations
 from datetime import datetime
 
 from src.amazon_ads.gno_watch_alert import (
+    campaign_launched_at,
     cheap_p0s_from_campaigns,
+    hours_since_campaign_launch,
+    hours_since_launch,
+    new_exact_zero_impr_p0s,
     ping_reasons,
     review_due,
     unacked_p0s,
 )
-from src.rules import GNO_AUTO_LOOSE_BUDGET, GNO_KEEP_ALIVE, GNO_NEXT_REVIEW_AT
+from src.rules import (
+    GNO_AUTO_LOOSE_BUDGET,
+    GNO_KEEP_ALIVE,
+    GNO_LAUNCHED_AT,
+    GNO_NEW_EXACT,
+    GNO_NEXT_REVIEW_AT,
+)
 
 
 def test_review_due_window_and_ack():
@@ -64,6 +74,60 @@ def test_ping_reasons_p0_and_review_not_digest():
         acked_p0_keys=[],
     )
     assert quiet == []
+
+
+MIDDAY_ET = "2026-09-07T12:00:00-04:00"
+MIDNIGHT_PT = "2026-09-07T00:00:00-07:00"
+TALLOW = next(n for n in GNO_NEW_EXACT if "tallow lip balm" in n)
+
+
+def _zero_rows() -> list[dict]:
+    return [{"date": "2026-09-08", "campaign_name": n, "impressions": 0} for n in GNO_NEW_EXACT]
+
+
+def test_fallback_launched_at_is_midday_et_not_midnight_pt():
+    assert GNO_LAUNCHED_AT == MIDDAY_ET
+    assert GNO_NEXT_REVIEW_AT == "2026-09-09T18:00:00-07:00"
+    tue_7am = datetime.fromisoformat("2026-09-08T07:00:00-04:00")
+    assert hours_since_launch(tue_7am) < 24
+    assert hours_since_launch(tue_7am, MIDNIGHT_PT) >= 28
+
+
+def test_new_exact_zero_impr_18h_no_p0_25h_p0():
+    created = [{"campaign_name": n, "created_at": MIDDAY_ET} for n in GNO_NEW_EXACT]
+    plus_18h = datetime.fromisoformat("2026-09-08T06:00:00-04:00")
+    plus_25h = datetime.fromisoformat("2026-09-08T13:00:00-04:00")
+    assert new_exact_zero_impr_p0s(_zero_rows(), plus_18h, meta=created) == []
+    p0s = new_exact_zero_impr_p0s(_zero_rows(), plus_25h, meta=created)
+    assert {p["code"] for p in p0s} == {"NEW_EXACT_ZERO_IMPR"}
+    assert all("tallow lip balm" in p["campaign_name"] for p in p0s)
+
+
+def test_midnight_launched_at_does_not_override_later_created_at():
+    tue_7am = datetime.fromisoformat("2026-09-08T07:00:00-04:00")
+    meta = {"campaign_name": TALLOW, "created_at": MIDDAY_ET}
+    iso = campaign_launched_at(meta, MIDNIGHT_PT)
+    assert iso.startswith("2026-09-07T12:00:00") or "2026-09-07T16:00:00" in iso
+    hours = hours_since_campaign_launch(tue_7am, meta, MIDNIGHT_PT)
+    assert hours < 24
+    assert hours_since_launch(tue_7am, MIDNIGHT_PT) >= 28
+    all_meta = [{"campaign_name": n, "created_at": MIDDAY_ET} for n in GNO_NEW_EXACT]
+    p0s = new_exact_zero_impr_p0s(
+        _zero_rows(), tue_7am, meta=all_meta, launched_at=MIDNIGHT_PT)
+    assert p0s == []
+
+
+def test_tue_7am_nudge_quiet_without_meta_uses_midday_fallback():
+    tue_7am = datetime.fromisoformat("2026-09-08T07:00:00-04:00")
+    assert new_exact_zero_impr_p0s(_zero_rows(), tue_7am, meta=[]) == []
+    reasons = ping_reasons(
+        now=tue_7am,
+        next_review_at=GNO_NEXT_REVIEW_AT,
+        last_export_at=None,
+        p0s=[],
+        acked_p0_keys=[],
+    )
+    assert reasons == []
 
 
 def test_alert_module_is_observe_only_no_wait():
