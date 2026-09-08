@@ -13,6 +13,8 @@ from src.rules import (
     GNO_AUTO_LOOSE_BUDGET,
     GNO_EXPORT_REVIEW_LEAD_HOURS,
     GNO_KEEP_ALIVE,
+    GNO_LAUNCHED_AT,
+    GNO_NEW_EXACT,
     GNO_NEXT_REVIEW_AT,
 )
 
@@ -37,6 +39,70 @@ def parse_iso(value: str | None) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def coerce_launch_iso(value: Any) -> str | None:
+    """ISO / epoch-ms / epoch-seconds → ISO timestamptz. None if unusable."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        ms = float(value)
+        if ms != ms:
+            return None
+        if ms < 1e12:
+            ms *= 1000
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.replace(".", "", 1).isdigit():
+        try:
+            return coerce_launch_iso(float(text))
+        except (TypeError, ValueError):
+            return None
+    parsed = parse_iso(text)
+    return parsed.isoformat() if parsed else None
+
+
+def hours_since_launch(now: datetime, launched_at: str | None = None) -> float:
+    start = parse_iso(launched_at or GNO_LAUNCHED_AT)
+    if start is None:
+        return 0.0
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=start.tzinfo)
+    else:
+        now = now.astimezone(start.tzinfo)
+    return max(0.0, (now - start).total_seconds() / 3600)
+
+
+def campaign_launched_at(
+    meta: dict[str, Any] | None,
+    fallback: str | None = None,
+) -> str:
+    """Prefer per-campaign created_at / creationDate / first snapshot."""
+    fb = fallback or GNO_LAUNCHED_AT
+    if not meta:
+        return fb
+    for key in ("created_at", "creationDate", "creation_date", "snapshot_at"):
+        iso = coerce_launch_iso(meta.get(key))
+        if iso:
+            return iso
+    return fb
+
+
+def hours_since_campaign_launch(
+    now: datetime,
+    meta: dict[str, Any] | None = None,
+    fallback: str | None = None,
+) -> float:
+    return hours_since_launch(now, campaign_launched_at(meta, fallback))
+
+
+def extract_exact_keyword(campaign_name: str) -> str:
+    import re
+
+    m = re.search(r"\|\s*EX\s*\|\s*([^|]+?)\s*\|", str(campaign_name or ""), re.I)
+    return normalize_name(m.group(1) if m else "")
 
 
 def review_due(
@@ -109,6 +175,46 @@ def cheap_p0s_from_campaigns(
                         })
                 except (TypeError, ValueError):
                     pass
+    return out
+
+
+def new_exact_zero_impr_p0s(
+    rows: list[dict[str, Any]],
+    now: datetime,
+    *,
+    meta: list[dict[str, Any]] | None = None,
+    new_exact: tuple[str, ...] | None = None,
+    launched_at: str | None = None,
+) -> list[dict[str, str]]:
+    """P0 after 24h from the campaign clock — not the global midnight fallback."""
+    names = new_exact or GNO_NEW_EXACT
+    fallback = launched_at or GNO_LAUNCHED_AT
+    meta_by_name = {
+        normalize_name(m.get("campaign_name")): m
+        for m in (meta or [])
+        if normalize_name(m.get("campaign_name"))
+    }
+    impressions: dict[str, float] = {}
+    for r in rows:
+        key = normalize_name(r.get("campaign_name"))
+        if not key:
+            continue
+        try:
+            impressions[key] = impressions.get(key, 0.0) + float(r.get("impressions") or 0)
+        except (TypeError, ValueError):
+            pass
+    out: list[dict[str, str]] = []
+    for name in names:
+        if "tallow lip balm" not in extract_exact_keyword(name):
+            continue
+        hours = hours_since_campaign_launch(
+            now, meta_by_name.get(normalize_name(name)), fallback)
+        if hours >= 24 and impressions.get(normalize_name(name), 0.0) == 0:
+            out.append({
+                "code": "NEW_EXACT_ZERO_IMPR",
+                "campaign_name": name,
+                "search_term": "",
+            })
     return out
 
 
@@ -188,7 +294,7 @@ def _load_recent_campaigns() -> list[dict[str, Any]]:
         r = (
             get_client()
             .table("ads_campaigns_daily")
-            .select("date,campaign_name,campaign_status,budget")
+            .select("date,campaign_name,campaign_status,budget,impressions")
             .gte("date", start)
             .order("date", desc=True)
             .limit(2000)
@@ -197,6 +303,23 @@ def _load_recent_campaigns() -> list[dict[str, Any]]:
         return list(r.data or [])
     except Exception as e:
         log.debug("gno cheap P0 campaign read failed: %s", e)
+        return []
+
+
+def _load_campaign_meta() -> list[dict[str, Any]]:
+    from src.db import get_client
+
+    try:
+        r = (
+            get_client()
+            .table("ads_campaign_meta")
+            .select("campaign_id,campaign_name,created_at,snapshot_at")
+            .limit(2000)
+            .execute()
+        )
+        return list(r.data or [])
+    except Exception as e:
+        log.debug("gno campaign meta read failed: %s", e)
         return []
 
 
@@ -211,7 +334,10 @@ def maybe_send_gno_export_alert(now: datetime | None = None) -> dict[str, Any]:
     acked = state.get("acked_p0_keys") or []
     if not isinstance(acked, list):
         acked = []
-    p0s = cheap_p0s_from_campaigns(_load_recent_campaigns())
+    campaigns = _load_recent_campaigns()
+    p0s = cheap_p0s_from_campaigns(campaigns)
+    p0s.extend(new_exact_zero_impr_p0s(
+        campaigns, moment, meta=_load_campaign_meta()))
     reasons = ping_reasons(
         now=moment,
         next_review_at=GNO_NEXT_REVIEW_AT,

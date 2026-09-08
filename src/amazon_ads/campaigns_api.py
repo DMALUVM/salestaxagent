@@ -175,6 +175,65 @@ def parse_portfolio_id(campaign: dict) -> str:
     return str(raw)
 
 
+def parse_created_at(value: Any) -> str | None:
+    """Campaigns API creationDate → ISO timestamptz. Epoch ms/s or ISO."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        ms = float(value)
+        if ms != ms:  # NaN
+            return None
+        if ms < 1e12:
+            ms *= 1000
+        from datetime import datetime, timezone
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.replace(".", "", 1).isdigit():
+        try:
+            return parse_created_at(float(text))
+        except (TypeError, ValueError):
+            return None
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
+def parse_campaign_created_at(campaign: dict) -> str | None:
+    """Prefer extendedData.creationDate, then top-level aliases."""
+    ext = campaign.get("extendedData") or campaign.get("extended_data") or {}
+    if not isinstance(ext, dict):
+        ext = {}
+    for raw in (
+        ext.get("creationDate"),
+        ext.get("creationDateTime"),
+        ext.get("createdDate"),
+        campaign.get("creationDate"),
+        campaign.get("creationDateTime"),
+        campaign.get("createdDate"),
+        campaign.get("created_at"),
+    ):
+        parsed = parse_created_at(raw)
+        if parsed:
+            return parsed
+    return None
+
+
+def merge_created_at(
+    api_created: str | None,
+    existing: str | None,
+    snapshot_at: str,
+) -> str:
+    """API create time, else persisted first-seen, else this snapshot."""
+    return api_created or existing or snapshot_at
+
+
 def parse_campaign_row(campaign: dict, portfolios: dict[str, str]) -> dict:
     cid = str(campaign.get("campaignId") or "")
     name = str(campaign.get("name") or campaign.get("campaignName") or "")
@@ -196,6 +255,7 @@ def parse_campaign_row(campaign: dict, portfolios: dict[str, str]) -> dict:
         "ros_modifier_pct": ros,
         "pp_modifier_pct": pp,
         "bidding_strategy": str(bidding.get("strategy") or "") or None,
+        "created_at": parse_campaign_created_at(campaign),
     }
 
 
@@ -293,6 +353,30 @@ def list_sp_negatives() -> list[dict]:
     return [(r, "ad_group") for r in adg] + [(r, "campaign") for r in camp]
 
 
+def _existing_created_at() -> dict[str, str]:
+    """Persisted first-seen / API create times. Empty if column missing."""
+    try:
+        from src.db import get_client
+
+        r = (
+            get_client()
+            .table("ads_campaign_meta")
+            .select("campaign_id,created_at")
+            .limit(10000)
+            .execute()
+        )
+        out: dict[str, str] = {}
+        for row in r.data or []:
+            cid = str(row.get("campaign_id") or "")
+            ts = row.get("created_at")
+            if cid and ts:
+                out[cid] = str(ts)
+        return out
+    except Exception as e:
+        log.debug("ads_campaign_meta created_at read failed: %s", e)
+        return {}
+
+
 def snapshot_gno_meta() -> dict:
     """Fetch Campaigns API lists and upsert snapshot tables. Observe only."""
     from datetime import datetime, timezone
@@ -305,6 +389,10 @@ def snapshot_gno_meta() -> dict:
     raw_campaigns = list_sp_campaigns()
     campaigns = [parse_campaign_row(c, port_by_id) for c in raw_campaigns]
     campaigns = [c for c in campaigns if c["campaign_id"]]
+    existing_created = _existing_created_at()
+    for row in campaigns:
+        row["created_at"] = merge_created_at(
+            row.get("created_at"), existing_created.get(row["campaign_id"]), now)
     name_by_id = {c["campaign_id"]: c["campaign_name"] for c in campaigns}
 
     keywords = [
@@ -326,9 +414,21 @@ def snapshot_gno_meta() -> dict:
     for row in negatives:
         row["snapshot_at"] = now
 
+    try:
+        camp_n = upsert_rows(
+            "ads_campaign_meta", campaigns, on_conflict="campaign_id")
+    except Exception as e:
+        err = str(e)
+        if "created_at" in err.lower() or "PGRST204" in err:
+            log.warning("Retrying ads_campaign_meta upsert without created_at: %s", err[:160])
+            for row in campaigns:
+                row.pop("created_at", None)
+            camp_n = upsert_rows(
+                "ads_campaign_meta", campaigns, on_conflict="campaign_id")
+        else:
+            raise
     inserted = {
-        "campaigns": upsert_rows(
-            "ads_campaign_meta", campaigns, on_conflict="campaign_id"),
+        "campaigns": camp_n,
         "portfolios": upsert_rows(
             "ads_portfolios", portfolios, on_conflict="portfolio_id"),
         "keywords": upsert_rows(

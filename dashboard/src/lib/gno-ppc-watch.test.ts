@@ -10,6 +10,8 @@ import {
   CORE_NEGATIVES,
   DEO_BE_ACOS,
   FAT_PARENT_NAME,
+  GNO_LAUNCHED_AT,
+  GNO_NEXT_REVIEW_AT,
   GNO_OBSERVE_ONLY,
   HERO_CHAPSTICK_NAME,
   KEEP_ALIVE,
@@ -30,6 +32,8 @@ import {
   extractExactKeyword,
   gnoPackStamp,
   harvestQueue,
+  campaignLaunchedAt,
+  hoursSinceCampaignLaunch,
   hoursSinceLaunch,
   isAutoLoose,
   isEnabledStatus,
@@ -54,6 +58,7 @@ import {
   type SearchTermRow,
 } from "./gno-ppc-watch";
 import { zipStore } from "./zip-store";
+import { evaluateExportNeed, QUIET } from "./gno-export-state";
 
 const ROOT_JSON = path.join(process.cwd(), "..", "config", "gno_ppc_watch.json");
 const DASH_JSON = path.join(process.cwd(), "config", "gno_ppc_watch.json");
@@ -436,6 +441,107 @@ describe("rules engine P0/P1", () => {
     });
     assert.equal(alerts.some((a) => a.code === "NEW_EXACT_ZERO_IMPR"), false);
     assert.ok(hoursSinceLaunch(new Date("2026-09-07T12:00:00-07:00")) < 24);
+  });
+});
+
+describe("per-campaign New Exact launch clock", () => {
+  const midnightPt = "2026-09-07T00:00:00-07:00";
+  const middayEt = "2026-09-07T12:00:00-04:00";
+  const tue7amEt = new Date("2026-09-08T07:00:00-04:00");
+  const plus18h = new Date("2026-09-08T06:00:00-04:00");
+  const plus25h = new Date("2026-09-08T13:00:00-04:00");
+  const tallowMeta: CampaignMeta[] = NEW_EXACT.map((name) => ({
+    campaign_name: name,
+    created_at: middayEt,
+  }));
+
+  function zeroShells(): CampaignDailyRow[] {
+    return [
+      ...KEEP_ALIVE.map((n) => camp(n, { budget: 303 })),
+      ...NEW_EXACT.map((n) => camp(n, { impressions: 0, spend: 0 })),
+    ];
+  }
+
+  test("config launched_at fallback is Dave midday ET, Wed review unchanged", () => {
+    assert.equal(GNO_LAUNCHED_AT, middayEt);
+    assert.equal(GNO_NEXT_REVIEW_AT, "2026-09-09T18:00:00-07:00");
+    assert.ok(hoursSinceLaunch(tue7amEt) < 24);
+    assert.ok(hoursSinceLaunch(tue7amEt) > 18);
+    assert.ok(hoursSinceLaunch(tue7amEt, midnightPt) >= 28);
+  });
+
+  test("midday create → at +18h no P0 even with 0 impressions", () => {
+    const alerts = evaluateGnoAlerts({
+      asOf: "2026-09-08", today: "2026-09-08",
+      now: plus18h,
+      campaigns: zeroShells(), searchTerms: [], placements: [],
+      campaignMeta: tallowMeta,
+    });
+    assert.equal(alerts.some((a) => a.code === "NEW_EXACT_ZERO_IMPR"), false);
+    const hours = hoursSinceCampaignLaunch(plus18h, tallowMeta[0], midnightPt);
+    assert.ok(hours >= 17.9 && hours < 24);
+  });
+
+  test("midday create → at +25h with 0 impr → P0", () => {
+    const alerts = evaluateGnoAlerts({
+      asOf: "2026-09-08", today: "2026-09-08",
+      now: plus25h,
+      campaigns: zeroShells(), searchTerms: [], placements: [],
+      campaignMeta: tallowMeta,
+    });
+    const zeros = alerts.filter((a) => a.code === "NEW_EXACT_ZERO_IMPR");
+    assert.ok(zeros.length >= 1);
+    assert.ok(zeros.every((a) => /tallow lip balm/.test(a.campaign_name ?? "")));
+    assert.match(zeros[0].detail, /25h after launch/);
+    const hours = hoursSinceCampaignLaunch(plus25h, tallowMeta[0]);
+    assert.ok(hours >= 24);
+  });
+
+  test("global midnight launched_at must not override a later campaign created_at", () => {
+    const laterCreate: CampaignMeta = { campaign_name: NEW_EXACT[0], created_at: middayEt };
+    assert.equal(
+      campaignLaunchedAt(laterCreate, midnightPt).startsWith("2026-09-07T16:00:00"),
+      true,
+    );
+    const hours = hoursSinceCampaignLaunch(tue7amEt, laterCreate, midnightPt);
+    assert.ok(hours < 24, `expected <24h from midday create, got ${hours}`);
+    assert.ok(hoursSinceLaunch(tue7amEt, midnightPt) >= 28);
+
+    const alerts = evaluateGnoAlerts({
+      asOf: "2026-09-08", today: "2026-09-08",
+      now: tue7amEt,
+      campaigns: zeroShells(), searchTerms: [], placements: [],
+      campaignMeta: tallowMeta,
+    });
+    assert.equal(alerts.some((a) => a.code === "NEW_EXACT_ZERO_IMPR"), false);
+    assert.ok(!alerts.some((a) => /28h/.test(a.detail)));
+  });
+
+  test("Tue 7am ET desk tiles are ~19h, not 28h, and not red", () => {
+    const tiles = newExactTiles(zeroShells(), "2026-09-08", tue7amEt, tallowMeta);
+    assert.ok(tiles.every((t) => t.hours_since_launch < 24));
+    assert.ok(tiles.every((t) => t.hours_since_launch > 18));
+    assert.ok(tiles.every((t) => !t.zero_impr_after_24h));
+    assert.ok(tiles.every((t) => Math.round(t.hours_since_launch) === 19));
+  });
+
+  test("export-due / digest window does not raise P0 from the midnight clock", () => {
+    const alerts = evaluateGnoAlerts({
+      asOf: "2026-09-08", today: "2026-09-08",
+      now: tue7amEt,
+      campaigns: zeroShells(), searchTerms: [], placements: [],
+      campaignMeta: tallowMeta,
+    });
+    const p0 = alerts.filter((a) => a.priority === "P0");
+    const banner = evaluateExportNeed({
+      now: tue7amEt,
+      nextReviewAt: GNO_NEXT_REVIEW_AT,
+      p0,
+      p1: [],
+    });
+    assert.equal(p0.some((a) => a.code === "NEW_EXACT_ZERO_IMPR"), false);
+    assert.equal(banner.reasons.includes("P0"), false);
+    assert.equal(banner.state, QUIET);
   });
 });
 
