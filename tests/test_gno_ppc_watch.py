@@ -11,9 +11,11 @@ from src.rules import (
     GNO_DEO_BE_ACOS,
     GNO_FORBIDDEN_AUTO_ACTIONS,
     GNO_KEEP_ALIVE,
+    GNO_LAUNCHED_AT,
     GNO_BALM_BE_ACOS,
     GNO_LIP_BE_ACOS,
     GNO_NEW_EXACT,
+    GNO_NEXT_REVIEW_AT,
     GNO_OBSERVE_ONLY,
 )
 
@@ -34,6 +36,8 @@ def test_gno_spec_pins_dave_watchlists():
     assert any("Loose Match-TOS" in n for n in GNO_KEEP_ALIVE)
     assert GNO_FORBIDDEN_AUTO_ACTIONS == frozenset(
         {"pause", "negate", "raise_budget", "raise_bid"})
+    assert GNO_LAUNCHED_AT == "2026-09-07T12:00:00-04:00"
+    assert GNO_NEXT_REVIEW_AT == "2026-09-09T18:00:00-07:00"
 
 
 def test_dashboard_json_matches_repo_config():
@@ -106,6 +110,7 @@ def test_gno_dashboard_never_auto_writes_amazon():
     assert "acos <= LIP_BE_ACOS" not in lib
     assert "packClosedEnd" in lib
     assert "Never `today`" in lib
+    assert "hoursSinceCampaignLaunch" in lib
     assert "When to Export GNO pack" in ui
     assert "EXPORT NEEDED" in ui
     assert "Log Grok outcome" in ui
@@ -126,3 +131,5 @@ def test_gno_json_pins_export_and_learning_knobs():
     assert spec["digest_window_et"] == {"start": "06:30", "end": "08:00"}
     assert spec["learning_harvest_skip_threshold"] == 2
     assert spec["observe_only"] is True
+    assert spec["launched_at"] == "2026-09-07T12:00:00-04:00"
+    assert spec["next_human_review_at"] == "2026-09-09T18:00:00-07:00"

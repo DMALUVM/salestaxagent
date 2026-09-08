@@ -32,6 +32,8 @@ const TERM_COLS =
 const PLACE_COLS =
   "date,campaign_id,campaign_name,placement,spend";
 const META_COLS =
+  "campaign_id,campaign_name,state,daily_budget,portfolio_id,portfolio_name,tos_modifier_pct,ros_modifier_pct,pp_modifier_pct,created_at,snapshot_at";
+const META_COLS_BASE =
   "campaign_id,campaign_name,state,daily_budget,portfolio_id,portfolio_name,tos_modifier_pct,ros_modifier_pct,pp_modifier_pct";
 const KW_COLS =
   "keyword_id,campaign_id,campaign_name,ad_group_id,keyword_text,match_type,state,bid";
@@ -97,7 +99,7 @@ export async function GET() {
     const today = amazonToday();
     const start = windowStart(today, 14);
     const sb = getServerSupabase();
-    const [campaigns, searchTerms, placements, meta, keywords, negatives] = await Promise.all([
+    const [campaigns, searchTerms, placements, metaLoaded, keywords, negatives] = await Promise.all([
       pageRows(sb, "ads_campaigns_daily", CAMP_COLS, start, today, "campaign_id"),
       pageRows(sb, "ads_search_terms_daily", TERM_COLS, start, today, "campaign_id", "search_term"),
       pageRows(sb, "ads_placement_daily", PLACE_COLS, start, today, "campaign_id", "placement"),
@@ -105,6 +107,9 @@ export async function GET() {
       pageAll(sb, "ads_keyword_targets", KW_COLS, "keyword_id"),
       pageAll(sb, "ads_negatives", NEG_COLS, "negative_id"),
     ]);
+    const meta = metaLoaded.length
+      ? metaLoaded
+      : await pageAll(sb, "ads_campaign_meta", META_COLS_BASE, "campaign_id");
     const [ledger, exportState] = await Promise.all([
       loadGnoLedger(sb),
       loadGnoExportState(sb),
@@ -130,6 +135,7 @@ export async function GET() {
       lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
       ledger,
       keywordTargets: keywords as unknown as KeywordTarget[],
+      campaignMeta: meta as unknown as CampaignMeta[],
     });
     const p0 = alerts.filter((a) => a.priority === "P0");
     const p1 = alerts.filter((a) => a.priority === "P1");

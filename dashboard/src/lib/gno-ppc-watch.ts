@@ -148,6 +148,12 @@ export interface CampaignMeta {
   tos_modifier_pct?: number | null;
   ros_modifier_pct?: number | null;
   pp_modifier_pct?: number | null;
+  /** Campaigns API creationDate, else first snapshot. */
+  created_at?: string | number | null;
+  /** Raw Campaigns API creationDate (epoch ms or ISO) when not yet persisted. */
+  creationDate?: string | number | null;
+  /** First snapshot only — later snapshot_at writes must not reset the clock. */
+  snapshot_at?: string | null;
 }
 
 export interface KeywordTarget {
@@ -410,9 +416,51 @@ export function formatAcosVsBe(
 }
 
 export function hoursSinceLaunch(now: Date = new Date(), launchedAt = GNO_LAUNCHED_AT): number {
-  const start = Date.parse(launchedAt);
-  if (!Number.isFinite(start)) return 0;
+  const start = parseLaunchInstant(launchedAt);
+  if (start == null) return 0;
   return Math.max(0, (now.getTime() - start) / 3_600_000);
+}
+
+/** ISO / epoch-ms / epoch-seconds → ms since epoch. */
+export function parseLaunchInstant(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 1e12 ? value * 1000 : value;
+  }
+  const s = String(value).trim();
+  if (!s) return null;
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (!Number.isFinite(n)) return null;
+    return n < 1e12 ? n * 1000 : n;
+  }
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * Per-campaign launch clock. Prefer Campaigns API / ads_campaign_meta
+ * created_at (creationDate or first snapshot). Config launched_at is
+ * fallback only — a later campaign created_at always wins.
+ */
+export function campaignLaunchedAt(
+  meta?: Pick<CampaignMeta, "created_at" | "creationDate" | "snapshot_at"> | null,
+  fallback = GNO_LAUNCHED_AT,
+): string {
+  const ms =
+    parseLaunchInstant(meta?.created_at)
+    ?? parseLaunchInstant(meta?.creationDate)
+    ?? parseLaunchInstant(meta?.snapshot_at);
+  if (ms == null) return fallback;
+  return new Date(ms).toISOString();
+}
+
+export function hoursSinceCampaignLaunch(
+  now: Date = new Date(),
+  meta?: Pick<CampaignMeta, "created_at" | "creationDate" | "snapshot_at"> | null,
+  fallback = GNO_LAUNCHED_AT,
+): number {
+  return hoursSinceLaunch(now, campaignLaunchedAt(meta, fallback));
 }
 
 /** Inclusive closed-day span of the campaign rows, or the declared desk window. */
@@ -771,10 +819,12 @@ export function evaluateGnoAlerts(input: {
   lookbackDays?: number;
   ledger?: GnoLedgerRow[];
   keywordTargets?: KeywordTarget[];
+  /** Per-campaign create time from Campaigns API / ads_campaign_meta. */
+  campaignMeta?: CampaignMeta[];
 }): GnoAlert[] {
   const { asOf, today, campaigns, searchTerms, placements } = input;
   const now = input.now ?? new Date();
-  const hours = hoursSinceLaunch(now);
+  const campaignMeta = input.campaignMeta ?? [];
   const latest = latestByCampaign(campaigns);
   const l7start = windowStart(asOf, 7);
   const trailStart = windowStart(shiftDays(asOf, -1), 7);
@@ -833,6 +883,7 @@ export function evaluateGnoAlerts(input: {
     const checkDays = todayRows.length ? todayRows : day;
     const m = sumMetrics(checkDays.length ? checkDays : day);
     const all = sumMetrics(rows);
+    const hours = hoursSinceCampaignLaunch(now, metaForName(campaignMeta, name));
     const kw = extractExactKeyword(name) ?? "";
     const tallowHole = kw.includes("tallow lip balm");
     if (tallowHole && hours >= 24 && all.impressions === 0) {
@@ -952,7 +1003,6 @@ export function newExactTiles(
   } = [],
 ): NewExactTile[] {
   const { campaignMeta, ledger } = splitTileExtra(extra);
-  const hours = hoursSinceLaunch(now);
   const latest = latestByCampaign(campaigns);
   const start = windowStart(asOf, 7);
   return NEW_EXACT.map((name) => {
@@ -961,6 +1011,7 @@ export function newExactTiles(
     const snap = lastExplicitStatusRow(campaigns, name)
       ?? latest.get(normalizeName(name));
     const meta = metaForName(campaignMeta, name);
+    const hours = hoursSinceCampaignLaunch(now, meta);
     const budget = snap?.budget != null ? Number(snap.budget)
       : (meta?.daily_budget != null ? Number(meta.daily_budget) : null);
     const frame = contributionFrame(name, m.acos);

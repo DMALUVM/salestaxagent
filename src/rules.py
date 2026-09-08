@@ -106,6 +106,7 @@ GNO_BALM_BE_ACOS: float = float(_GNO["family_break_even_acos"]["balm"])
 GNO_FORBIDDEN_AUTO_ACTIONS: frozenset[str] = frozenset(
     _GNO.get("forbidden_auto_actions") or ("pause", "negate", "raise_budget", "raise_bid"))
 GNO_NEXT_REVIEW_AT: str = str(_GNO.get("next_human_review_at") or "")
+GNO_LAUNCHED_AT: str = str(_GNO.get("launched_at") or "")
 GNO_EXPORT_REVIEW_LEAD_HOURS: int = int(_GNO.get("export_review_lead_hours", 6))
 
 # ── Agent scheduler ───────────────────────────────────────
