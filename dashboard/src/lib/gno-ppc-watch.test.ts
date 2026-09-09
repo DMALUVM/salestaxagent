@@ -1226,8 +1226,11 @@ describe("GNO pack v3 — Wed review upgrades", () => {
     assert.match(file!.body, /B0CLHV3V5C/);
     assert.match(file!.body, /Sweet Orange 3pk/);
     assert.match(file!.body, /campaign-level L7/);
-    const data = file!.body.split("\n").filter((l) => l.includes("B0CLHTKY3V") || l.includes("B0CLHV3V5C"));
-    assert.ok(data.every((l) => l.includes("22.00") || l.includes("22")));
+    const hero = file!.body.split("\n").filter((l) => l.includes("Hero KW"));
+    assert.equal(hero.length, 2);
+    assert.ok(hero.every((l) => l.includes("22")));
+    assert.ok(hero.some((l) => l.includes("B0CLHTKY3V") && l.includes("Sweet Orange 3pk")));
+    assert.ok(hero.some((l) => l.includes("B0CLHV3V5C") && l.includes("Peppermint 3pk")));
   });
 
   test("SQP slice includes latest week only and omits the file when empty", () => {
