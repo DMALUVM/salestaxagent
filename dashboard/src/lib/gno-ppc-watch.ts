@@ -1373,7 +1373,7 @@ export function keywordWindowMetrics(
   return sumMetrics(rows);
 }
 
-function metricFingerprint(m: Metrics): string {
+function metricFingerprint(m: Pick<Metrics, "impressions" | "clicks" | "spend" | "orders" | "sales">): string {
   return [m.impressions, m.clicks, m.spend.toFixed(2), m.orders, m.sales.toFixed(2)].join("|");
 }
 
@@ -1478,8 +1478,7 @@ export function advertisedProductL7Rows(input: {
   const out: AdvertisedProductL7Row[] = [];
   for (const { name, list } of names) {
     if (list === "DAY5_PAUSE") continue;
-    const campRows = input.campaigns.filter((r) =>
-      namesEqual(r.campaign_name, name) || (list === "DAY5_PAUSE" && nameContains(r.campaign_name, name)));
+    const campRows = input.campaigns.filter((r) => namesEqual(r.campaign_name, name));
     const storedName = campRows[0]?.campaign_name ?? name;
     const asins = extractAsin(storedName).split("/").map((a) => a.trim()).filter(Boolean);
     if (!asins.length) continue;
