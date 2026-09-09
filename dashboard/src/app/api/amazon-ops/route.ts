@@ -3,6 +3,7 @@ import {
   loadShippedAsinTitleOverrides,
   resolveParentProductNames,
 } from "@/lib/amazon-ops-titles";
+import { loadSoldScopeAsinIntel } from "@/lib/soldscope-load";
 
 /** GET /api/amazon-ops — Sales & Traffic + Reimbursements with title resolution. */
 export async function GET() {
@@ -45,6 +46,15 @@ export async function GET() {
         loadShippedAsinTitleOverrides(),
         dbTitles,
       );
+      const ssAsin = await loadSoldScopeAsinIntel(sb);
+      for (const row of asinTraffic) {
+        const asin = String(row.parent_asin ?? "").trim().toUpperCase();
+        const hit = ssAsin.get(asin);
+        row.stars = hit?.rating ?? null;
+        row.reviews = hit?.ratings_count ?? null;
+        row.estimate_units = hit?.estimate_units ?? null;
+        row.estimate_as_of = hit?.estimate_as_of ?? null;
+      }
     }
 
     try {

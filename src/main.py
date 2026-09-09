@@ -2214,6 +2214,61 @@ def sqp_status_cmd():
         click.echo(f"  oldest as_of      : {dates[0]}")
 
 
+@cli.command("soldscope-weekly-sync")
+@click.option("--dry-run/--apply", default=False,
+              help="Parse + call API but skip warehouse upserts")
+def soldscope_weekly_sync_cmd(dry_run):
+    """Weekly SoldScope history for the three parent hero ASINs.
+
+    Observe-only Amazon intel (sales / BSR / price). Rank Tracker lists
+    existing groups and pulls phrases when a hero matches — never POSTs
+    create group/phrase. Not a replacement for SP-API or Ads sync.
+    Requires SOLDSCOPE_API_TOKEN. Scheduled Sunday 10:30 ET.
+    """
+    from src.db import job_finish, job_start
+    from src.soldscope.sync import sync_weekly
+
+    run_id = None if dry_run else job_start("soldscope_weekly_sync")
+    try:
+        r = sync_weekly(dry_run=dry_run)
+    except Exception as e:
+        if run_id:
+            job_finish(run_id, "fail", str(e)[:500])
+        raise click.ClickException(str(e)[:400])
+
+    status = r.get("status") or "fail"
+    msg = r.get("message") or status
+    if run_id:
+        job_finish(run_id, status, msg, stats={
+            "written": r.get("written"),
+            "counts": r.get("counts"),
+            "quota_remaining": r.get("quota_remaining"),
+        })
+
+    click.echo(f"{'DRY RUN — ' if dry_run else ''}SoldScope weekly sync: {status}")
+    click.echo(f"  {msg}")
+    click.echo(f"  ASINs     : {', '.join(r.get('asins') or [])}")
+    counts = r.get("counts") or {}
+    written = r.get("written") or {}
+    click.echo(
+        f"  rows      : sales={counts.get('sales', 0)} "
+        f"bsr={counts.get('bsr', 0)} price={counts.get('price', 0)} "
+        f"rank={counts.get('rank', 0)}"
+    )
+    if not dry_run:
+        click.echo(
+            f"  written   : sales={written.get('sales', 0)} "
+            f"bsr={written.get('bsr', 0)} price={written.get('price', 0)} "
+            f"rank={written.get('rank', 0)}"
+        )
+    if r.get("quota_remaining") is not None:
+        click.echo(f"  quota rem : {r.get('quota_remaining')} (reset {r.get('quota_reset')})")
+    for n in r.get("notes") or []:
+        click.echo(f"  note      : {n}")
+    for e in r.get("errors") or []:
+        click.echo(f"  ✗ {e}")
+
+
 @cli.command("sqp-import")
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--asin", default=None, help="ASIN when the export has no ASIN column")
@@ -5364,6 +5419,41 @@ def run():
         )
         click.echo("[Scheduler] GitHub backup weekly Sunday 09:00")
 
+        # SoldScope weekly intel — Sunday 10:30 ET, after the Sunday ads
+        # backfills and GitHub backup. Hero history only. Rank Tracker is
+        # read-only (0 groups → note + empty). No Ads wait-loops.
+        _ss_sched = {
+            "day_of_week": "sun",
+            "hour": 10,
+            "minute": 30,
+            "timezone": AGENT_TZ_NAME,
+        }
+        try:
+            from src.soldscope.sync import load_config as _ss_cfg
+            _ss_sched = (_ss_cfg().get("schedule") or _ss_sched)
+        except Exception:
+            pass
+        scheduler.add_job(
+            _run_soldscope_weekly_sync,
+            "cron",
+            day_of_week=_ss_sched.get("day_of_week", "sun"),
+            hour=int(_ss_sched.get("hour", 10)),
+            minute=int(_ss_sched.get("minute", 30)),
+            timezone=_ss_sched.get("timezone", AGENT_TZ_NAME),
+            id="soldscope_weekly_sync",
+            misfire_grace_time=7200,
+            coalesce=True,
+            max_instances=1,
+        )
+        click.echo(
+            f"[Scheduler] SoldScope weekly "
+            f"{_ss_sched.get('day_of_week', 'sun')} "
+            f"{int(_ss_sched.get('hour', 10)):02d}:"
+            f"{int(_ss_sched.get('minute', 30)):02d} "
+            f"{_ss_sched.get('timezone', AGENT_TZ_NAME)} "
+            "(hero history + RT observe-only)"
+        )
+
         # Agent job worker: poll every 45 seconds
         scheduler.add_job(
             _run_job_worker,
@@ -6898,6 +6988,27 @@ def _run_pnl_sync():
         "shopify_contribution": shop.get("total_contribution", 0),
         "shopify_days": shop.get("days", 0),
     })
+
+
+def _run_soldscope_weekly_sync():
+    """Sunday SoldScope hero-ASIN history. Fail soft if token missing / 402."""
+    from src.db import job_finish, job_start
+    from src.soldscope.sync import sync_weekly
+
+    run_id = job_start("soldscope_weekly_sync")
+    try:
+        r = sync_weekly()
+        status = r.get("status") or "fail"
+        msg = r.get("message") or status
+        print(f"[SoldScope] {status}: {msg}")
+        job_finish(run_id, status, msg, stats={
+            "written": r.get("written"),
+            "counts": r.get("counts"),
+            "quota_remaining": r.get("quota_remaining"),
+        })
+    except Exception as e:
+        print(f"[SoldScope] Error: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
 
 
 def _run_github_backup():

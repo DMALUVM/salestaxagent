@@ -10,6 +10,7 @@ import { LoadingState } from "@/components/loading";
 import { isConfigured } from "@/lib/supabase";
 import { amazonAsOf, windowStart } from "@/lib/as-of";
 import { Shield, TrendingUp, DollarSign, Eye, ShoppingCart, AlertTriangle } from "lucide-react";
+import { formatSoldScopeStars, formatSoldScopeVol } from "@/lib/soldscope-status";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 function fmtD(n: number) { return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -23,6 +24,10 @@ interface AsinTraffic {
   product_name: string | null;
   units_ordered: number; ordered_product_sales: number;
   sessions: number; unit_session_pct: number; buy_box_pct: number;
+  stars?: number | null;
+  reviews?: number | null;
+  estimate_units?: number | null;
+  estimate_as_of?: string | null;
 }
 interface Reimbursement {
   approval_date: string; reimbursement_id: string; reason: string | null;
@@ -223,6 +228,9 @@ export default function AmazonOpsPage() {
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium">Product Performance (latest Brand Analytics pull)</CardTitle>
+                    <p className="text-[11px] text-muted-foreground">
+                      Units and sales are SP-API. Stars/reviews and the estimate badge are SoldScope when stored — never a second sales desk.
+                    </p>
                   </CardHeader>
                   <CardContent className="p-0 overflow-x-auto">
                     <Table>
@@ -231,6 +239,8 @@ export default function AmazonOpsPage() {
                           <TableHead>Product</TableHead>
                           <TableHead className="text-right">Units</TableHead>
                           <TableHead className="text-right">Sales</TableHead>
+                          <TableHead className="text-right">Stars</TableHead>
+                          <TableHead className="text-right">Reviews</TableHead>
                           <TableHead className="text-right">Sessions</TableHead>
                           <TableHead className="text-right">Conv %</TableHead>
                         </TableRow>
@@ -243,9 +253,20 @@ export default function AmazonOpsPage() {
                                 {a.product_name || a.parent_asin}
                               </div>
                               <span className="text-[10px] text-muted-foreground">{a.parent_asin}</span>
+                              {a.estimate_units != null && (
+                                <Badge
+                                  variant="outline"
+                                  className="mt-1 text-[9px] font-normal"
+                                  title={`SoldScope estimated units${a.estimate_as_of ? ` as of ${a.estimate_as_of}` : ""} — not SP-API sales`}
+                                >
+                                  ~{formatSoldScopeVol(a.estimate_units)} est
+                                </Badge>
+                              )}
                             </TableCell>
                             <TableCell className="text-right tabular-nums">{fmt(a.units_ordered)}</TableCell>
                             <TableCell className="text-right tabular-nums">${fmtD(a.ordered_product_sales)}</TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">{formatSoldScopeStars(a.stars)}</TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">{formatSoldScopeVol(a.reviews)}</TableCell>
                             <TableCell className="text-right tabular-nums">{fmt(a.sessions)}</TableCell>
                             <TableCell className="text-right tabular-nums">{a.unit_session_pct.toFixed(1)}%</TableCell>
                           </TableRow>
