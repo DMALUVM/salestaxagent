@@ -43,16 +43,16 @@ export async function GET() {
       return { missing: false as const, count: count ?? 0 };
     };
 
-    const newestOf = async (table: string, col: string) => {
+    const newestOf = async (table: string, col: "date") => {
       const { data, error } = await sb
         .from(table)
-        .select(col)
+        .select("*")
         .in("asin", asins)
         .order(col, { ascending: false })
         .limit(1);
       if (error || !data?.length) return null;
-      const row = data[0] as Record<string, unknown>;
-      return row[col] != null ? String(row[col]) : null;
+      const row = data[0] as { date?: string | null };
+      return row.date != null ? String(row.date) : null;
     };
 
     const [sales, bsr, price, rank] = await Promise.all([
