@@ -59,10 +59,37 @@
     "Manual | Exact & Broad | Harvested terms 3rd September",
     "SP - Auto - AUD (High-Interest) - Catch All - Mixed -"
   ],
+  "flavor_shell": [
+    "Assorted Lip Balm - SP - Beef Tallow Chapstick - KWs - Exact",
+    "Assorted Lip Balm - SP - beef tallow chapstick lip balm - KWs -Exact",
+    "Assorted Lip Balm - SP - beef tallow lip - KWs - Exact",
+    "Assorted Lip Balm - SP - beef tallow lip balm - KWs - Exact",
+    "Assorted Lip Balm - SP - Lip Balm - KWs - Exact",
+    "Assorted Lip Balm - SP - Organic Lip Balm - Kws - Exact",
+    "Assorted Lip Balm - SP - tallow chapstick - KWs - Exact",
+    "Assorted Lip Balm - SP - Tallow Lip Balms - KW - Exact",
+    "Orange Lip Balm - SP - Beef Tallow Chapstick - KW - Exact",
+    "Orange Lip Balm - SP - beef tallow chapstick lip balm - KWs - Exact",
+    "Orange Lip Balm - SP - beef tallow lip - KWs - Exact",
+    "Orange Lip Balm - SP - beef tallow lip balm - KWs - Exact",
+    "Orange Lip Balm - SP - Tallow Chapstick - KWs - Exact",
+    "Orange Lip Balm - SP - Tallow Lip Balms - Exact",
+    "Peppermint Lip Balm - SP - Beef Tallow Chapstick - KWs - Exact",
+    "Peppermint Lip Balm - SP - beef tallow chapstick lip balm - KWs - Exact",
+    "Peppermint Lip Balm - SP - beef tallow lip - KWs -Exact",
+    "Peppermint Lip Balm - SP - beef tallow lip balm - KWs - Exact",
+    "Peppermint Lip Balm - SP - Lip Balm - KWs - Exact",
+    "Peppermint Lip Balm - SP - Organic Lip Balm - KWs - Exact",
+    "Peppermint Lip Balm - SP - tallow chapstick - KWs - Exact",
+    "Peppermint Lip Balm - SP- Tallow Lip Balms -KW - Exact",
+    "Unscented Lip Balm - SP - Lip Balm - KWs - Exact",
+    "Unscented Lip Balm - SP - Organic Lip Balm - KWs - Exact"
+  ],
   "aliases": {
     "auto_loose": "SP | TBL - 3Pck | B0CLHTKY3V |  Auto | Loose Match-TOS | SSG",
     "fat_parent": "SP - KW (TOS) - Exact - Tallow Lip Balm KW",
-    "hero_chapstick": "SP - Hero KW(256KsV/TOS) -  Exact - Lip Balm - 3 Pack - B0CLHTKY3V/B0CLHV3V5C - -chapstick"
+    "hero_chapstick": "SP - Hero KW(256KsV/TOS) -  Exact - Lip Balm - 3 Pack - B0CLHTKY3V/B0CLHV3V5C - -chapstick",
+    "broad_m": "GG - Lip Balm - Broad M"
   },
   "forbidden_auto_actions": [
     "pause",
