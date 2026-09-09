@@ -12,6 +12,7 @@ import { LoadingState } from "@/components/loading";
 import { SectionNav } from "@/components/section-nav";
 import { rankBadgeOf } from "@/lib/ppc-actions";
 import { SqpStatus } from "@/components/sqp-status";
+import { SoldScopeCard } from "@/components/soldscope-card";
 import { BrandShare } from "@/components/brand-share";
 import { PpcPlaybook } from "@/components/ppc-playbook";
 import { PpcSkuAds } from "@/components/ppc-sku-ads";
@@ -1079,6 +1080,8 @@ export default function PPCPage() {
           <BrandShare />
 
           <SqpStatus />
+
+          <SoldScopeCard />
 
           <PpcReconcile summary={data?.dailyReconcile ?? null} asOfLabel={asOf} />
 

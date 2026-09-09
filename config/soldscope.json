@@ -1,0 +1,20 @@
+{
+  "_doc": "SoldScope v1 — additive research warehouse for three parent hero ASINs. Weekly sales/BSR/price history when the API has data. Rank Tracker is read-only (0 groups = no-op; never POST create). Not a Pulse/Ads/sales_daily source and not a second Dashboard chart. Token is SOLDSCOPE_API_TOKEN only.",
+  "marketplace": "US",
+  "days": 90,
+  "asins": [
+    "B0CLHTF8YN",
+    "B0DQFKMJFY",
+    "B0HBSZ71XQ"
+  ],
+  "schedule": {
+    "day_of_week": "sun",
+    "hour": 10,
+    "minute": 30,
+    "timezone": "America/New_York"
+  },
+  "rank_tracker": {
+    "enabled": true,
+    "create_groups": false
+  }
+}

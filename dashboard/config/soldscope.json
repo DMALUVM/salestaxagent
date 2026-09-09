@@ -1,0 +1,20 @@
+{
+  "_doc": "Dashboard copy of repo-root config/soldscope.json (hero list only). Vercel cwd=dashboard/. Not a second sales/ads chart. Keep in sync with the root file.",
+  "marketplace": "US",
+  "days": 90,
+  "asins": [
+    "B0CLHTF8YN",
+    "B0DQFKMJFY",
+    "B0HBSZ71XQ"
+  ],
+  "schedule": {
+    "day_of_week": "sun",
+    "hour": 10,
+    "minute": 30,
+    "timezone": "America/New_York"
+  },
+  "rank_tracker": {
+    "enabled": true,
+    "create_groups": false
+  }
+}
