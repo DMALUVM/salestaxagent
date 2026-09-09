@@ -42,7 +42,21 @@ export const NEGATIVES_CSV_HEADERS = [
   "campaign_name", "keyword", "match_type",
 ] as const;
 
-export type WatchList = "NEW_EXACT" | "KEEPER" | "DAY5_PAUSE" | "OTHER";
+export const ADVERTISED_PRODUCT_L7_CSV_HEADERS = [
+  "date_start", "date_end", "asin", "campaign_name", "watch_list",
+  "spend", "orders", "sales", "acos", "sku", "product_name",
+  "mixed_asin", "family", "break_even_acos", "acos_vs_be", "cm_note",
+] as const;
+
+export const SQP_SLICE_CSV_HEADERS = [
+  "week_start", "week_end", "asin", "search_query", "query_normalized",
+  "search_query_volume", "impression_share", "click_share", "purchase_share",
+  "asin_impressions", "asin_clicks", "asin_purchases", "source",
+] as const;
+
+export const SQP_SLICE_QUERIES = ["lip balm", "tallow lip balm", "chapstick"] as const;
+
+export type WatchList = "NEW_EXACT" | "KEEPER" | "DAY5_PAUSE" | "FLAVOR_SHELL" | "OTHER";
 export type ProposedTag = "KEEP" | "HARVEST_CANDIDATE" | "JUNK_CANDIDATE";
 export type AlertPriority = "P0" | "P1" | "P2";
 export type TermWindowLabel = "L2" | "L7";
@@ -51,6 +65,13 @@ export type GnoFamily = "lip_3pk" | "deo" | "balm" | "other";
 
 /** Config family contribution-margin BE — not ad-only TACOS. */
 export const CM_NOTE = "config family CM BE (not TACOS)";
+/** L2/L7 keeper spend exists but ads_placement_daily has no rows in-window. */
+export const PLACEMENT_LAG_NOTE = "placement report lag: no ads_placement_daily rows in this window";
+/** Keyword_targets must not copy search-term rollups onto every match-type row. */
+export const KEYWORD_ST_NOTE =
+  "search-term performance stays in fat_parent_search_terms.csv; keyword_targets are not search-term rollups";
+export const ADVERTISED_PRODUCT_NOTE =
+  "campaign-level L7; no advertised-product report synced — spend not split by ASIN";
 
 export interface ContributionFrame {
   family: GnoFamily;
@@ -95,6 +116,7 @@ export interface SearchTermRow {
   ad_group_id?: string;
   ad_group_name?: string;
   keyword?: string | null;
+  keyword_id?: string | null;
   match_type?: string | null;
   spend?: number | null;
   sales_14d?: number | null;
@@ -282,14 +304,57 @@ export interface KeywordTargetExportRow {
   cm_note: string;
 }
 
+export interface AdvertisedProductL7Row {
+  date_start: string;
+  date_end: string;
+  asin: string;
+  campaign_name: string;
+  watch_list: WatchList;
+  spend: number;
+  orders: number;
+  sales: number;
+  acos: number | null;
+  sku: string;
+  product_name: string;
+  mixed_asin: boolean;
+  family: GnoFamily;
+  break_even_acos: number;
+  acos_vs_be: number | null;
+  cm_note: string;
+}
+
+export interface SqpSliceRow {
+  week_start: string;
+  week_end: string;
+  asin?: string | null;
+  search_query?: string | null;
+  query_normalized?: string | null;
+  search_query_volume?: number | null;
+  impression_share?: number | null;
+  click_share?: number | null;
+  purchase_share?: number | null;
+  asin_impressions?: number | null;
+  asin_clicks?: number | null;
+  asin_purchases?: number | null;
+  source?: string | null;
+}
+
+export interface AsinCatalogRow {
+  asin: string;
+  sku?: string | null;
+  product_name?: string | null;
+}
+
 export const GNO_SPEC = spec;
 
 export const KEEP_ALIVE = spec.keep_alive as readonly string[];
 export const NEW_EXACT = spec.new_exact as readonly string[];
 export const DAY5_PAUSE = spec.day5_pause as readonly string[];
+export const FLAVOR_SHELL = spec.flavor_shell as readonly string[];
 export const AUTO_LOOSE_NAME = spec.aliases.auto_loose;
 export const FAT_PARENT_NAME = spec.aliases.fat_parent;
 export const HERO_CHAPSTICK_NAME = spec.aliases.hero_chapstick;
+export const BROAD_M_NAME = spec.aliases.broad_m;
 export const AUTO_LOOSE_BUDGET = spec.auto_loose_budget;
 export const NEW_EXACT_SPEND_ALERT = spec.new_exact_zero_order_spend_alert;
 export const SHELL_DAILY_BUDGET_CAP = spec.shell_daily_budget_cap;
@@ -327,6 +392,19 @@ function nameContains(haystack: string, needle: string): boolean {
   return h.length > 0 && n.length > 0 && h.includes(n);
 }
 
+/**
+ * Flavor-shell 1-keyword Exact campaigns discovered from ads_campaign_meta:
+ * `{Orange|Assorted|Peppermint|Unscented} Lip Balm - SP - {kw} - Exact`.
+ * Do not invent names — STR Unscented / GG Peppermint Asin Off are not shells.
+ */
+const FLAVOR_SHELL_NAME_RE = /^(orange|assorted|peppermint|unscented) lip balm - sp\b/;
+
+export function isFlavorShellName(campaignName: string): boolean {
+  if (FLAVOR_SHELL.some((n) => namesEqual(n, campaignName))) return true;
+  const n = normalizeName(campaignName);
+  return FLAVOR_SHELL_NAME_RE.test(n) && n.includes("exact");
+}
+
 /** Collapse whitespace so Dave's extra-space names still match stored rows. */
 export function watchListOf(campaignName: string): WatchList {
   if (NEW_EXACT.some((n) => namesEqual(n, campaignName))) return "NEW_EXACT";
@@ -334,6 +412,7 @@ export function watchListOf(campaignName: string): WatchList {
   if (DAY5_PAUSE.some((n) => namesEqual(n, campaignName) || nameContains(campaignName, n))) {
     return "DAY5_PAUSE";
   }
+  if (isFlavorShellName(campaignName)) return "FLAVOR_SHELL";
   return "OTHER";
 }
 
@@ -347,6 +426,10 @@ export function isFatParent(campaignName: string): boolean {
 
 export function isHeroChapstick(campaignName: string): boolean {
   return namesEqual(campaignName, HERO_CHAPSTICK_NAME);
+}
+
+export function isBroadM(campaignName: string): boolean {
+  return namesEqual(campaignName, BROAD_M_NAME);
 }
 
 export function isNewExact(campaignName: string): boolean {
@@ -372,8 +455,21 @@ export function extractAsin(campaignName: string | null | undefined): string {
 export function familyOf(campaignName: string): GnoFamily {
   const n = normalizeName(campaignName);
   if (n.includes("deo") || n.includes("deodorant")) return "deo";
-  if (n.includes("3pck") || n.includes("3 pack") || n.includes("b0clhtky3v")) return "lip_3pk";
-  if (n.includes("lip") || n.includes("balm") || n.includes("chapstick")) return "balm";
+  // Lip (incl. fat parent / Broad M / lip Exact) is lip_3pk BE 42 — not body balm/36.
+  // "tallow lip balm" contains "lip"; body "tallow balm" does not.
+  if (
+    n.includes("lip")
+    || n.includes("chapstick")
+    || n.includes("3pck")
+    || n.includes("3 pack")
+    || n.includes("b0clhtky3v")
+    || n.includes("b0clhvcpl5")
+    || n.includes("b0clhvlg2f")
+    || n.includes("b0clhv3v5c")
+  ) {
+    return "lip_3pk";
+  }
+  if (n.includes("balm")) return "balm";
   return "other";
 }
 
@@ -393,14 +489,16 @@ export function acosVsBe(acos: number | null | undefined, breakEven: number): nu
 export function contributionFrame(
   campaignName: string,
   acos: number | null | undefined,
+  extraNotes: string[] = [],
 ): ContributionFrame {
   const family = familyOf(campaignName);
   const break_even_acos = breakEvenAcosOf(campaignName);
+  const extras = extraNotes.map((s) => s.trim()).filter(Boolean);
   return {
     family,
     break_even_acos,
     acos_vs_be: acosVsBe(acos ?? null, break_even_acos),
-    cm_note: CM_NOTE,
+    cm_note: extras.length ? [CM_NOTE, ...extras].join("; ") : CM_NOTE,
   };
 }
 
@@ -945,7 +1043,7 @@ export function evaluateGnoAlerts(input: {
       { campaign_name: t.campaign_name, search_term: t.customer_search_term }));
   }
 
-  const watchNames = [...KEEP_ALIVE, ...NEW_EXACT, ...DAY5_PAUSE];
+  const watchNames = [...KEEP_ALIVE, ...NEW_EXACT, ...DAY5_PAUSE, ...FLAVOR_SHELL];
   for (const name of watchNames) {
     const rows = placements.filter((p) =>
       namesEqual(p.campaign_name, name) || nameContains(p.campaign_name, name));
@@ -1094,6 +1192,7 @@ function uniqueWatchNames(
   for (const n of NEW_EXACT) add(n, "NEW_EXACT");
   for (const n of KEEP_ALIVE) add(n, "KEEPER");
   for (const n of DAY5_PAUSE) add(n, "DAY5_PAUSE");
+  for (const n of FLAVOR_SHELL) add(n, "FLAVOR_SHELL");
   for (const r of campaigns) {
     const list = watchListOf(r.campaign_name);
     if (list !== "OTHER") add(r.campaign_name, list);
@@ -1170,6 +1269,11 @@ export function watchCampaignExportRows(input: {
       const budget = snap?.budget != null ? Number(snap.budget)
         : (metaRow?.daily_budget != null ? Number(metaRow.daily_budget) : null);
       const portfolio = String(metaRow?.portfolio_name || "").trim() || "none";
+      const placementLag = w.metrics_complete
+        && m.spend > 0
+        && place.tos_spend_share == null
+        && place.ros_spend_share == null
+        && place.pp_spend_share == null;
       rows.push({
         date_start: w.start,
         date_end: w.end,
@@ -1193,7 +1297,7 @@ export function watchCampaignExportRows(input: {
         acos: m.acos,
         watch_list: list,
         metrics_complete: w.metrics_complete,
-        ...contributionFrame(storedName, m.acos),
+        ...contributionFrame(storedName, m.acos, placementLag ? [PLACEMENT_LAG_NOTE] : []),
       });
     }
   }
@@ -1242,19 +1346,39 @@ export function negativesSnapshotCsv(rows: NegativeRow[]): string {
   })));
 }
 
-function keywordWindowMetrics(
+/**
+ * Attribute search-term rows to the keyword that actually served.
+ * Never fall back to customer search_term — that copies one rollup onto
+ * every match-type sibling (paused Exact `tallow lip balm` vs enabled
+ * Exact `tallow lip balms`).
+ */
+export function keywordWindowMetrics(
   terms: SearchTermRow[],
-  campaignName: string,
-  keywordText: string,
+  target: Pick<KeywordTarget, "campaign_name" | "keyword_text" | "match_type" | "keyword_id">,
   start: string,
   end: string,
 ): Metrics {
-  const kw = normalizeTerm(keywordText);
+  const kw = normalizeTerm(target.keyword_text);
+  const mt = normalizeName(target.match_type);
+  const kid = String(target.keyword_id ?? "").trim();
   const rows = inWindow(terms, start, end).filter((t) => {
-    if (!namesEqual(t.campaign_name, campaignName)) return false;
-    return normalizeTerm(t.keyword) === kw || normalizeTerm(t.search_term) === kw;
+    if (!namesEqual(t.campaign_name, target.campaign_name)) return false;
+    const termKid = String(t.keyword_id ?? "").trim();
+    if (kid && termKid) return termKid === kid;
+    if (normalizeTerm(t.keyword) !== kw) return false;
+    const termMt = normalizeName(t.match_type);
+    if (mt && termMt && termMt !== mt) return false;
+    return true;
   });
   return sumMetrics(rows);
+}
+
+function metricFingerprint(m: Pick<Metrics, "impressions" | "clicks" | "spend" | "orders" | "sales">): string {
+  return [m.impressions, m.clicks, m.spend.toFixed(2), m.orders, m.sales.toFixed(2)].join("|");
+}
+
+function emptyMetrics(): Metrics {
+  return { impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0, cpc: 0, acos: null, cvr: null };
 }
 
 export function keywordTargetExportRows(input: {
@@ -1266,16 +1390,16 @@ export function keywordTargetExportRows(input: {
   // Include PAUSED + ENABLED. Today rows are config-only (bid / state).
   const wanted = input.keywordTargets.filter((t) => {
     const list = watchListOf(t.campaign_name);
-    return list === "NEW_EXACT" || list === "KEEPER";
+    return list === "NEW_EXACT" || list === "KEEPER" || list === "FLAVOR_SHELL";
   });
   const rows: KeywordTargetExportRow[] = [];
   for (const w of packWindows(input.today, input.asOf)) {
+    const windowRows: KeywordTargetExportRow[] = [];
     for (const t of wanted) {
       const m = w.metrics_complete
-        ? keywordWindowMetrics(
-          input.searchTerms, t.campaign_name, t.keyword_text, w.start, w.end)
-        : { impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0, cpc: 0, acos: null, cvr: null };
-      rows.push({
+        ? keywordWindowMetrics(input.searchTerms, t, w.start, w.end)
+        : emptyMetrics();
+      windowRows.push({
         date_start: w.start,
         date_end: w.end,
         campaign_name: t.campaign_name,
@@ -1294,8 +1418,172 @@ export function keywordTargetExportRows(input: {
         ...contributionFrame(t.campaign_name, m.acos),
       });
     }
+    if (w.metrics_complete) {
+      const byCamp = new Map<string, KeywordTargetExportRow[]>();
+      for (const r of windowRows) {
+        const key = normalizeName(r.campaign_name);
+        const list = byCamp.get(key) ?? [];
+        list.push(r);
+        byCamp.set(key, list);
+      }
+      for (const group of byCamp.values()) {
+        const counts = new Map<string, number>();
+        for (const r of group) {
+          if (r.spend <= 0 && r.impressions <= 0) continue;
+          const fp = metricFingerprint(r);
+          counts.set(fp, (counts.get(fp) ?? 0) + 1);
+        }
+        for (const r of group) {
+          if (r.spend <= 0 && r.impressions <= 0) continue;
+          const fp = metricFingerprint(r);
+          if ((counts.get(fp) ?? 0) < 2) continue;
+          const keep = isEnabledStatus(r.keyword_state);
+          if (keep && group.filter((x) =>
+            metricFingerprint(x) === fp && isEnabledStatus(x.keyword_state)).length === 1) {
+            continue;
+          }
+          r.impressions = 0;
+          r.clicks = 0;
+          r.spend = 0;
+          r.orders = 0;
+          r.sales = 0;
+          r.acos = null;
+          Object.assign(r, contributionFrame(r.campaign_name, null, [KEYWORD_ST_NOTE]));
+        }
+      }
+    }
+    rows.push(...windowRows);
   }
   return rows;
+}
+
+export function advertisedProductL7Rows(input: {
+  today: string;
+  asOf: string;
+  campaigns: CampaignDailyRow[];
+  campaignMeta?: CampaignMeta[];
+  asinCatalog?: AsinCatalogRow[];
+}): AdvertisedProductL7Row[] {
+  const closed = packClosedEnd(input.today, input.asOf);
+  const start = windowStart(closed, 7);
+  const catalog = new Map<string, AsinCatalogRow>();
+  for (const row of input.asinCatalog ?? []) {
+    const asin = String(row.asin ?? "").trim().toUpperCase();
+    if (asin) catalog.set(asin, row);
+  }
+  const names = uniqueWatchNames(
+    input.campaigns,
+    (input.campaignMeta ?? []).map((m) => m.campaign_name),
+  );
+  const out: AdvertisedProductL7Row[] = [];
+  for (const { name, list } of names) {
+    if (list === "DAY5_PAUSE") continue;
+    const campRows = input.campaigns.filter((r) => namesEqual(r.campaign_name, name));
+    const storedName = campRows[0]?.campaign_name ?? name;
+    const asins = extractAsin(storedName).split("/").map((a) => a.trim()).filter(Boolean);
+    if (!asins.length) continue;
+    const m = sumMetrics(inWindow(campRows, start, closed));
+    const mixed = asins.length > 1;
+    const frame = contributionFrame(storedName, m.acos, [ADVERTISED_PRODUCT_NOTE]);
+    for (const asin of asins) {
+      const cat = catalog.get(asin.toUpperCase());
+      out.push({
+        date_start: start,
+        date_end: closed,
+        asin,
+        campaign_name: storedName,
+        watch_list: list,
+        spend: m.spend,
+        orders: m.orders,
+        sales: m.sales,
+        acos: m.acos,
+        sku: String(cat?.sku ?? ""),
+        product_name: String(cat?.product_name ?? ""),
+        mixed_asin: mixed,
+        ...frame,
+      });
+    }
+  }
+  return out.sort((a, b) => b.spend - a.spend || a.campaign_name.localeCompare(b.campaign_name) || a.asin.localeCompare(b.asin));
+}
+
+export function advertisedProductL7Csv(rows: AdvertisedProductL7Row[]): string {
+  return toCsv(ADVERTISED_PRODUCT_L7_CSV_HEADERS, rows.map((r) => ({ ...r })));
+}
+
+export function sqpWeeklySliceRows(rows: SqpSliceRow[]): SqpSliceRow[] {
+  const wanted = new Set<string>(SQP_SLICE_QUERIES);
+  const filtered = rows.filter((r) => {
+    const q = normalizeTerm(r.query_normalized || r.search_query);
+    return wanted.has(q);
+  });
+  if (!filtered.length) return [];
+  let latest = "";
+  for (const r of filtered) {
+    const end = String(r.week_end ?? "");
+    if (end > latest) latest = end;
+  }
+  return filtered
+    .filter((r) => String(r.week_end ?? "") === latest)
+    .sort((a, b) => {
+      const qa = normalizeTerm(a.query_normalized || a.search_query);
+      const qb = normalizeTerm(b.query_normalized || b.search_query);
+      if (qa !== qb) return qa.localeCompare(qb);
+      return String(a.asin ?? "").localeCompare(String(b.asin ?? ""));
+    });
+}
+
+export function sqpWeeklySliceCsv(rows: SqpSliceRow[]): string {
+  return toCsv(SQP_SLICE_CSV_HEADERS, rows.map((r) => ({
+    week_start: r.week_start ?? "",
+    week_end: r.week_end ?? "",
+    asin: r.asin ?? "",
+    search_query: r.search_query ?? "",
+    query_normalized: r.query_normalized ?? "",
+    search_query_volume: r.search_query_volume ?? null,
+    impression_share: r.impression_share ?? null,
+    click_share: r.click_share ?? null,
+    purchase_share: r.purchase_share ?? null,
+    asin_impressions: r.asin_impressions ?? null,
+    asin_clicks: r.asin_clicks ?? null,
+    asin_purchases: r.asin_purchases ?? null,
+    source: r.source ?? "",
+  })));
+}
+
+export function gnoPackReadme(input: { files: string[]; sqpIncluded: boolean }): string {
+  const sqpLine = input.sqpIncluded
+    ? "- sqp_weekly_slice.csv — latest week for lip balm / tallow lip balm / chapstick (from sqp_weekly). Shares are reported, never invented."
+    : "- sqp_weekly_slice.csv — OMITTED. No sqp_weekly / Brand Analytics rows for lip balm, tallow lip balm, or chapstick. Do not invent SQP rows.";
+  return [
+    "GNO Export pack — observe only. Never writes to Amazon.",
+    "",
+    "Windows:",
+    "- Today = config only (metrics_complete=false). $0 is not a pause.",
+    "- L2 / L7 = closed Amazon days ending yesterday.",
+    "",
+    "Family BE (config family_break_even_acos, not TACOS):",
+    "- lip_3pk (lip campaigns, fat parent, GG Lip Broad M, lip Exact) = 42",
+    "- deo = 36",
+    "- balm (body tallow balm, not lip) = 36",
+    "",
+    "Files:",
+    "- watch_campaigns.csv — NEW_EXACT + KEEPER + DAY5_PAUSE + FLAVOR_SHELL",
+    "- auto_loose_search_terms.csv",
+    "- fat_parent_search_terms.csv",
+    "- broad_m_search_terms.csv — campaign exactly GG - Lip Balm - Broad M",
+    "- keyword_targets.csv — bid/state per keyword_id; Today config-only; L2/L7 attributed to the serving keyword (not copied across match types)",
+    "- advertised_product_l7.csv — L7 by ASIN from campaign names. No advertised-product report is synced; mixed-ASIN spend is campaign-level (not split).",
+    sqpLine,
+    "- negatives_snapshot.csv — optional",
+    "- README.txt — this file",
+    "",
+    `Pack files: ${input.files.join(", ")}`,
+    "",
+    "Placement shares on L2/L7 come from ads_placement_daily. If spend exists but shares are empty, cm_note says placement report lag.",
+    "FLAVOR_SHELL = Orange / Assorted / Peppermint / Unscented 1-keyword Exact campaigns discovered from ads_campaign_meta (not invented).",
+    "",
+  ].join("\n");
 }
 
 /** `gno-pack-YYYY-MM-DD_HHMM` in America/Los_Angeles. */
@@ -1324,6 +1612,8 @@ export function buildGnoPack(input: {
   keywordTargets?: KeywordTarget[];
   negatives?: NegativeRow[] | null;
   ledger?: GnoLedgerRow[];
+  sqpWeekly?: SqpSliceRow[] | null;
+  asinCatalog?: AsinCatalogRow[];
 }): { files: { name: string; body: string }[]; filename: string } {
   const today = input.today || input.asOf;
   const asOf = input.asOf;
@@ -1341,21 +1631,41 @@ export function buildGnoPack(input: {
     input.searchTerms, input.campaigns, closed, isAutoLoose, targets, ledger);
   const fatTerms = searchTermExportRows(
     input.searchTerms, input.campaigns, closed, isFatParent, targets, ledger);
+  const broadTerms = searchTermExportRows(
+    input.searchTerms, input.campaigns, closed, isBroadM, targets, ledger);
   const keywords = keywordTargetExportRows({
     today, asOf, keywordTargets: targets, searchTerms: input.searchTerms,
+  });
+  const advertised = advertisedProductL7Rows({
+    today, asOf, campaigns: input.campaigns,
+    campaignMeta: input.campaignMeta, asinCatalog: input.asinCatalog,
   });
   const files = [
     { name: "watch_campaigns.csv", body: watchCampaignsCsv(watch) },
     { name: "auto_loose_search_terms.csv", body: autoLooseSearchTermsCsv(autoTerms) },
     { name: "fat_parent_search_terms.csv", body: autoLooseSearchTermsCsv(fatTerms) },
+    { name: "broad_m_search_terms.csv", body: autoLooseSearchTermsCsv(broadTerms) },
     { name: "keyword_targets.csv", body: keywordTargetsCsv(keywords) },
+    { name: "advertised_product_l7.csv", body: advertisedProductL7Csv(advertised) },
   ];
+  const sqp = sqpWeeklySliceRows(input.sqpWeekly ?? []);
+  if (sqp.length) {
+    files.push({ name: "sqp_weekly_slice.csv", body: sqpWeeklySliceCsv(sqp) });
+  }
   if (input.negatives && input.negatives.length) {
     const wanted = input.negatives.filter((n) =>
-      isAutoLoose(n.campaign_name) || isFatParent(n.campaign_name) || isNewExact(n.campaign_name));
+      isAutoLoose(n.campaign_name) || isFatParent(n.campaign_name)
+      || isNewExact(n.campaign_name) || isBroadM(n.campaign_name));
     if (wanted.length) {
       files.push({ name: "negatives_snapshot.csv", body: negativesSnapshotCsv(wanted) });
     }
   }
+  files.push({
+    name: "README.txt",
+    body: gnoPackReadme({
+      files: files.map((f) => f.name).concat("README.txt"),
+      sqpIncluded: sqp.length > 0,
+    }),
+  });
   return { files, filename: `gno-pack-${gnoPackStamp(input.now)}.zip` };
 }
