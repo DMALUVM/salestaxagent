@@ -34,12 +34,15 @@ _ALLOWED_GET_EXACT = frozenset({
     "/common/search-volume",
     "/common/ratings-history",
     "/rank-tracker/groups",
+    "/keyword-research/searches",
 })
 _ALLOWED_GET_PATTERNS = (
     re.compile(r"^/rank-tracker/groups/\d+$"),
     re.compile(r"^/rank-tracker/groups/\d+/products$"),
     re.compile(r"^/rank-tracker/groups/\d+/products/\d+/phrases/v2$"),
+    re.compile(r"^/keyword-research/searches/asin/single/\d+$"),
 )
+_KR_CREATE_PATH = "/keyword-research/searches/asin/single"
 
 _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
@@ -128,7 +131,7 @@ def assert_read_only(method: str, path: str) -> None:
     if not _is_allowed_get(path):
         raise SoldScopeError(
             f"Refusing GET {path} — not in the SoldScope v1 allowlist "
-            "(history + search-volume + ratings + Rank Tracker read)."
+            "(history + search-volume + ratings + Rank Tracker + KR reads)."
         )
 
 
@@ -226,9 +229,19 @@ def request(
     q = quota_headers(resp)
     log_quota(resp, path)
 
+    return _parse_response(resp, path, q)
+
+
+def _parse_response(
+    resp: httpx.Response,
+    path: str,
+    q: dict[str, str | None],
+    *,
+    method: str = "GET",
+) -> tuple[Any, dict[str, str | None]]:
     if resp.status_code == 402:
         raise QuotaExceeded(
-            f"SoldScope quota exceeded (402) on GET {path}"
+            f"SoldScope quota exceeded (402) on {method} {path}"
             + (f" Remaining={q['remaining']}" if q["remaining"] is not None else "")
             + (f" Reset={q['reset']}" if q["reset"] else ""),
             remaining=q["remaining"],
@@ -236,22 +249,21 @@ def request(
             reset=q["reset"],
         )
     if resp.status_code == 401:
-        raise AuthError(f"SoldScope auth failed (401) on GET {path}")
+        raise AuthError(f"SoldScope auth failed (401) on {method} {path}")
     if resp.status_code == 403:
-        raise AuthError(f"SoldScope forbidden (403) on GET {path}")
+        raise AuthError(f"SoldScope forbidden (403) on {method} {path}")
     if resp.status_code == 404:
-        # Catalog still syncing / ASIN not in SoldScope yet. Empty, not a retry.
         if path == "/auth/check":
-            raise AuthError(f"SoldScope auth failed (404) on GET {path}")
-        log.info("SoldScope GET %s returned 404 — treating as empty (not ready)", path)
+            raise AuthError(f"SoldScope auth failed (404) on {method} {path}")
+        log.info("SoldScope %s %s returned 404 — treating as empty (not ready)", method, path)
         return {}, q
     if resp.status_code == 429:
         raise SoldScopeError(
-            f"SoldScope GET {path} rate-limited (429) — not retrying"
+            f"SoldScope {method} {path} rate-limited (429) — not retrying"
         )
     if resp.status_code >= 400:
         raise SoldScopeError(
-            f"SoldScope GET {path} failed ({resp.status_code}): {resp.text[:300]}"
+            f"SoldScope {method} {path} failed ({resp.status_code}): {resp.text[:300]}"
         )
 
     if not resp.content:
@@ -259,7 +271,7 @@ def request(
     try:
         return resp.json(), q
     except ValueError as e:
-        raise SoldScopeError(f"SoldScope GET {path} returned non-JSON") from e
+        raise SoldScopeError(f"SoldScope {method} {path} returned non-JSON") from e
 
 
 def check_auth() -> dict:
@@ -339,4 +351,57 @@ def list_product_phrases(
         f"/rank-tracker/groups/{int(group_id)}/products/{int(product_id)}/phrases/v2",
         params={"page": page, "perPage": per_page},
     )
+    return body if isinstance(body, dict) else {}
+
+
+def list_kr_searches(
+    *,
+    page: int = 1,
+    per_page: int = 50,
+    asin: str | None = None,
+) -> dict:
+    """GET completed Keyword Research searches. Reuse saved searches only."""
+    params: dict[str, Any] = {"page": page, "perPage": per_page, "sortDesc": True}
+    if asin:
+        params["filters[titleAsinKeyword]"] = asin
+    body, _ = request("GET", "/keyword-research/searches", params=params)
+    return body if isinstance(body, dict) else {}
+
+
+def get_kr_asin_results(
+    search_id: int,
+    *,
+    page: int = 1,
+    per_page: int = 100,
+) -> dict:
+    body, _ = request(
+        "GET",
+        f"/keyword-research/searches/asin/single/{int(search_id)}",
+        params={
+            "page": page,
+            "perPage": per_page,
+            "sort": "searchVolume",
+            "sortDesc": True,
+        },
+    )
+    return body if isinstance(body, dict) else {}
+
+
+def create_single_asin_search(*, marketplace: str, asin: str) -> dict:
+    """POST one single-ASIN KR search. Never Product Research. Never RT create.
+
+    Caller must gate this: download ready, no saved search, no RT phrases,
+    one POST per hero max. 402 stops with no retry.
+    """
+    path = _KR_CREATE_PATH
+    url = f"{BASE_URL}{path}"
+    resp = httpx.post(
+        url,
+        headers=_headers(),
+        json={"marketplace": marketplace, "asin": asin},
+        timeout=60,
+    )
+    q = quota_headers(resp)
+    log_quota(resp, path)
+    body, _ = _parse_response(resp, path, q, method="POST")
     return body if isinstance(body, dict) else {}

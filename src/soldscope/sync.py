@@ -26,9 +26,12 @@ from src.soldscope.client import (
     get_ratings_history,
     get_sales_history,
     get_search_volume,
+    get_kr_asin_results,
     list_group_products,
+    list_kr_searches,
     list_product_phrases,
     list_rank_groups,
+    create_single_asin_search,
     token_present,
 )
 
@@ -48,6 +51,7 @@ PRICE_TABLE = "soldscope_price_history"
 RANK_TABLE = "soldscope_rank_snapshots"
 RATINGS_TABLE = "soldscope_ratings_history"
 VOLUME_TABLE = "soldscope_search_volume"
+KR_TABLE = "soldscope_keyword_research"
 
 SALES_CONFLICT = "asin,marketplace,date"
 BSR_CONFLICT = "asin,marketplace,date,category_id"
@@ -55,6 +59,9 @@ PRICE_CONFLICT = "asin,marketplace,date"
 RANK_CONFLICT = "asin,marketplace,group_id,phrase,as_of"
 RATINGS_CONFLICT = "asin,marketplace,date"
 VOLUME_CONFLICT = "keyword_normalized,marketplace"
+KR_CONFLICT = "asin,marketplace,keyword_normalized,search_id"
+
+DEFAULT_KR_MAX_KEYWORDS = 80
 
 DEFAULT_SV_MAX_KEYWORDS = 20
 DEFAULT_RATINGS_DAYS = 365
@@ -123,6 +130,16 @@ def load_config() -> dict:
         "ratings": {
             "enabled": bool((raw.get("ratings") or {}).get("enabled", True)),
             "days": int((raw.get("ratings") or {}).get("days") or DEFAULT_RATINGS_DAYS),
+        },
+        "keyword_research": {
+            "enabled": bool((raw.get("keyword_research") or {}).get("enabled", True)),
+            "create_if_needed": bool(
+                (raw.get("keyword_research") or {}).get("create_if_needed", True)
+            ),
+            "max_keywords": int(
+                (raw.get("keyword_research") or {}).get("max_keywords")
+                or DEFAULT_KR_MAX_KEYWORDS
+            ),
         },
     }
 
@@ -352,6 +369,91 @@ def search_volume_row_from_payload(
     }
 
 
+def kr_search_asin(item: dict) -> str | None:
+    for key in ("mainAsin", "seedAsin"):
+        a = str(item.get(key) or "").strip().upper()
+        if a:
+            return a
+    asins = item.get("asins")
+    if isinstance(asins, list) and asins:
+        a = str(asins[0] or "").strip().upper()
+        if a:
+            return a
+    return None
+
+
+def is_single_asin_kr(item: dict) -> bool:
+    return item.get("searchType") in (0, "0")
+
+
+def collect_saved_kr_search_ids(*, asins: Iterable[str]) -> dict[str, int]:
+    """Newest completed single-ASIN search id per hero. Never creates."""
+    found: dict[str, int] = {}
+    heroes = {str(a).strip().upper() for a in asins}
+    for asin in heroes:
+        body = list_kr_searches(page=1, per_page=20, asin=asin)
+        for item in _page_items(body):
+            if not isinstance(item, dict) or not is_single_asin_kr(item):
+                continue
+            sid = item.get("id")
+            matched = kr_search_asin(item)
+            if sid is None or matched not in heroes:
+                continue
+            if matched not in found:
+                found[matched] = int(sid)
+    return found
+
+
+def collect_kr_results(search_id: int, *, cap: int) -> list[dict]:
+    items: list[dict] = []
+    page = 1
+    while len(items) < cap:
+        body = get_kr_asin_results(search_id, page=page, per_page=min(100, cap))
+        batch = [p for p in _page_items(body) if isinstance(p, dict)]
+        items.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+        if page > 5:
+            break
+    return items[:cap]
+
+
+def kr_rows_from_payload(
+    items: list[dict],
+    *,
+    asin: str,
+    marketplace: str,
+    search_id: int,
+    pulled_at: str,
+) -> list[dict]:
+    from src.amazon_ads.organic_rank import normalize_keyword
+
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for p in items:
+        keyword = str(p.get("keyword") or "").strip()
+        key = normalize_keyword(keyword)
+        if not keyword or key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "asin": asin,
+            "marketplace": marketplace,
+            "search_id": int(search_id),
+            "keyword_normalized": key,
+            "keyword": keyword,
+            "search_volume": _int(p.get("searchVolume")),
+            "opportunity_score": _int(p.get("opportunityScore")),
+            "organic_rank": _int(p.get("organicRank")),
+            "sponsored_rank": _int(p.get("sponsoredRank")),
+            "cpc": _num(p.get("cpc")),
+            "as_of": date.today().isoformat(),
+            "pulled_at": pulled_at,
+        })
+    return rows
+
+
 def collect_existing_keywords(*, limit: int = DEFAULT_SV_MAX_KEYWORDS) -> list[str]:
     """Keywords we already show (targets + search terms). Never invent queries."""
     from src.amazon_ads.organic_rank import normalize_keyword
@@ -412,6 +514,11 @@ def upsert_key(table: str, row: dict) -> tuple:
         return (row["asin"], row["marketplace"], row["date"])
     if table == VOLUME_TABLE:
         return (row["keyword_normalized"], row["marketplace"])
+    if table == KR_TABLE:
+        return (
+            row["asin"], row["marketplace"],
+            row["keyword_normalized"], int(row["search_id"]),
+        )
     raise KeyError(table)
 
 
@@ -536,7 +643,7 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
     errors: list[str] = []
     written = {
         "sales": 0, "bsr": 0, "price": 0, "rank": 0,
-        "ratings": 0, "search_volume": 0,
+        "ratings": 0, "search_volume": 0, "keyword_research": 0,
     }
     pulled_at = datetime.now(timezone.utc).isoformat()
     cfg = load_config()
@@ -594,6 +701,7 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
     rank_rows: list[dict] = []
     ratings_rows: list[dict] = []
     volume_rows: list[dict] = []
+    kr_rows: list[dict] = []
     quota: QuotaExceeded | None = None
     ratings_days = int(cfg["ratings"]["days"])
 
@@ -736,6 +844,59 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
             + "."
         )
 
+    history_ready = bool(sales_rows or bsr_rows or price_rows)
+    if quota is None and cfg["keyword_research"]["enabled"]:
+        kr_cap = int(cfg["keyword_research"]["max_keywords"])
+        try:
+            saved = collect_saved_kr_search_ids(asins=cfg["asins"])
+            for asin in cfg["asins"]:
+                sid = saved.get(asin)
+                if sid is None and cfg["keyword_research"]["create_if_needed"]:
+                    has_rt = any(r.get("asin") == asin for r in rank_rows)
+                    if not history_ready:
+                        notes.append(
+                            f"Skip KR create for {asin} — SoldScope still downloading "
+                            "(history empty)."
+                        )
+                    elif has_rt:
+                        notes.append(
+                            f"Skip KR create for {asin} — Rank Tracker phrases already stored."
+                        )
+                    else:
+                        created = create_single_asin_search(
+                            marketplace=marketplace, asin=asin,
+                        )
+                        data = created.get("data") if isinstance(created, dict) else None
+                        new_id = (data or {}).get("id") if isinstance(data, dict) else None
+                        if new_id is None:
+                            notes.append(f"KR create for {asin} returned no search id.")
+                        else:
+                            sid = int(new_id)
+                            notes.append(f"Created single-ASIN KR search {sid} for {asin}.")
+                if sid is None:
+                    continue
+                items = collect_kr_results(sid, cap=kr_cap)
+                kr_rows.extend(kr_rows_from_payload(
+                    items,
+                    asin=asin,
+                    marketplace=marketplace,
+                    search_id=sid,
+                    pulled_at=pulled_at,
+                ))
+            notes.append(
+                f"Keyword research: {len(kr_rows)} keyword(s) from "
+                f"{len({r['search_id'] for r in kr_rows})} saved/created search(es)."
+            )
+        except QuotaExceeded as e:
+            quota = e
+            notes.append(
+                f"402 on keyword-research; stopping (Remaining={e.remaining})."
+            )
+        except (SoldScopeError, AuthError) as e:
+            errors.append(f"keyword-research: {e}")
+        except Exception as e:
+            errors.append(f"keyword-research: {e}")
+
     if not dry_run:
         from src.db import upsert_rows
 
@@ -749,10 +910,13 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
         written["search_volume"] = upsert_rows(
             VOLUME_TABLE, volume_rows, on_conflict=VOLUME_CONFLICT,
         )
+        written["keyword_research"] = upsert_rows(
+            KR_TABLE, kr_rows, on_conflict=KR_CONFLICT,
+        )
 
     total_in = (
         len(sales_rows) + len(bsr_rows) + len(price_rows) + len(rank_rows)
-        + len(ratings_rows) + len(volume_rows)
+        + len(ratings_rows) + len(volume_rows) + len(kr_rows)
     )
     history_empty = not (sales_rows or bsr_rows or price_rows)
     if history_empty and quota is None:
@@ -770,7 +934,7 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
         f"{len(cfg['asins'])} hero ASIN(s), {len(sales_rows)} sales / "
         f"{len(bsr_rows)} bsr / {len(price_rows)} price / "
         f"{len(rank_rows)} rank / {len(ratings_rows)} ratings / "
-        f"{len(volume_rows)} search-volume row(s)"
+        f"{len(volume_rows)} search-volume / {len(kr_rows)} KR row(s)"
     )
     if dry_run:
         message = "DRY RUN — " + message
@@ -790,6 +954,7 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
             "rank": len(rank_rows),
             "ratings": len(ratings_rows),
             "search_volume": len(volume_rows),
+            "keyword_research": len(kr_rows),
         },
         "pulled_at": pulled_at,
         "asins": cfg["asins"],

@@ -114,5 +114,29 @@ alter table if exists public.soldscope_sales_history    enable row level securit
 alter table if exists public.soldscope_bsr_history      enable row level security;
 alter table if exists public.soldscope_price_history    enable row level security;
 alter table if exists public.soldscope_rank_snapshots   enable row level security;
-alter table if exists public.soldscope_search_volume    enable row level security;
-alter table if exists public.soldscope_ratings_history  enable row level security;
+-- Saved Keyword Research reads (single-ASIN). Used for the GNO outlier checklist.
+create table if not exists soldscope_keyword_research (
+    asin                 text not null,
+    marketplace          text not null default 'US',
+    search_id            integer not null,
+    keyword_normalized   text not null,
+    keyword              text not null,
+    search_volume        integer,
+    opportunity_score    integer,
+    organic_rank         integer,
+    sponsored_rank       integer,
+    cpc                  numeric,
+    as_of                date not null,
+    pulled_at            timestamptz not null default now(),
+    primary key (asin, marketplace, keyword_normalized, search_id)
+);
+
+create index if not exists idx_soldscope_kr_asin
+    on soldscope_keyword_research (asin, opportunity_score desc);
+
+comment on table soldscope_keyword_research is
+    'SoldScope Keyword Research keywords from saved (or gated single-ASIN) searches. Feeds the GNO outlier checklist. Never Product Research.';
+
+alter table if exists public.soldscope_search_volume     enable row level security;
+alter table if exists public.soldscope_ratings_history   enable row level security;
+alter table if exists public.soldscope_keyword_research  enable row level security;

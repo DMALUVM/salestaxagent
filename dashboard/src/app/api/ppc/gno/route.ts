@@ -19,8 +19,9 @@ import {
 } from "@/lib/gno-ppc-watch";
 import { evaluateExportNeed } from "@/lib/gno-export-state";
 import { loadGnoExportState, loadGnoLedger } from "@/lib/gno-store";
-import { loadSoldScopeKeywordIntel, loadSoldScopeRankStatus } from "@/lib/soldscope-load";
+import { loadSoldScopeKeywordIntel, loadSoldScopeOutlierSources, loadSoldScopeRankStatus } from "@/lib/soldscope-load";
 import { attachKeywordIntel } from "@/lib/soldscope-status";
+import { OUTLIER_EMPTY_COPY, buildKeywordOutliers } from "@/lib/soldscope-outliers";
 
 /**
  * GET /api/ppc/gno — GNO PPC Watch payload from stored Ads tables.
@@ -210,10 +211,20 @@ export async function GET() {
       campaignMeta,
     });
     const harvestRaw = harvestQueue(searchTerms, campaigns, asOf, { keywordTargets, ledger });
-    const [ssIntel, ssRank] = await Promise.all([
+    const [ssIntel, ssRank, ssOutlierSrc] = await Promise.all([
       loadSoldScopeKeywordIntel(sb),
       loadSoldScopeRankStatus(sb),
+      loadSoldScopeOutlierSources(sb),
     ]);
+    const keywordOutliers = buildKeywordOutliers({
+      rankRows: ssOutlierSrc.rankRows,
+      researchRows: ssOutlierSrc.researchRows,
+      targets: keywordTargets,
+      searchTerms: searchTerms.map((t) => ({
+        search_term: t.search_term,
+        campaign_name: t.campaign_name,
+      })),
+    });
     const harvest = attachKeywordIntel(
       harvestRaw as unknown as Record<string, unknown>[],
       (t) => String(t.customer_search_term ?? ""),
@@ -271,6 +282,8 @@ export async function GET() {
         rankTrackerCopy: ssRank.copy,
         groups: ssRank.groups,
         phrases: ssRank.phrases,
+        keywordOutliers,
+        outlierEmptyCopy: OUTLIER_EMPTY_COPY,
       },
       acks,
       lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,

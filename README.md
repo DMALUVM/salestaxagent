@@ -207,7 +207,7 @@ nano .env
 
 Fill in all required values (see `.env.example` for descriptions).
 
-**SoldScope (optional, weekly Amazon intel):** set `SOLDSCOPE_API_TOKEN` on the Mac Mini `.env` (launchd) after creating a Personal Access Token in SoldScope → API Access. Do **not** commit the token. The first `soldscope_weekly_sync` run after the env is set stores hero history / ratings / capped search-volume when SoldScope has finished downloading the Amazon catalog (can take up to ~24h). Rank Tracker is read-only — 0 groups is a clean no-op; this agent never creates groups. Vercel does not need the token (existing `/ppc`, `/ppc/gno`, and Amazon Ops surfaces read `soldscope_*` via the service role). Apply `supabase/migration_soldscope.sql` once. Manual run: `python -m src.main soldscope-weekly-sync`.
+**SoldScope (optional, weekly Amazon intel):** set `SOLDSCOPE_API_TOKEN` on the Mac Mini `.env` (launchd) after creating a Personal Access Token in SoldScope → API Access. Do **not** commit the token. The first `soldscope_weekly_sync` run after the env is set stores hero history / ratings / capped search-volume when SoldScope has finished downloading the Amazon catalog (can take up to ~24h). Rank Tracker is read-only — 0 groups is a clean no-op; this agent never creates groups. Keyword Research **reads** saved single-ASIN searches; a create is allowed only after history is non-empty and that hero has no RT phrases (max one POST per hero). Vercel does not need the token (existing `/ppc`, `/ppc/gno`, and Amazon Ops surfaces read `soldscope_*` via the service role). Keyword outliers for Blake live on `/ppc/gno`. Apply `supabase/migration_soldscope.sql` once. Manual run: `python -m src.main soldscope-weekly-sync`.
 
 ### 6. Initialize Database
 

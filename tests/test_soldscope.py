@@ -60,7 +60,8 @@ def test_observe_only_refuses_writes_and_discovery():
         ("POST", "/product-research/products"),
         ("GET", "/product-research/products"),
         ("GET", "/listing-analyzer/processes"),
-        ("GET", "/keyword-research/searches"),
+        ("POST", "/keyword-research/searches/asin/single"),
+        ("POST", "/keyword-research/searches/asin/multi"),
         ("DELETE", "/rank-tracker/groups"),
         ("PUT", "/rank-tracker/tags/1"),
     ]:
@@ -72,6 +73,8 @@ def test_observe_only_refuses_writes_and_discovery():
     ss.assert_read_only("GET", "/common/ratings-history")
     ss.assert_read_only("GET", "/rank-tracker/groups")
     ss.assert_read_only("GET", "/rank-tracker/groups/12/products/7/phrases/v2")
+    ss.assert_read_only("GET", "/keyword-research/searches")
+    ss.assert_read_only("GET", "/keyword-research/searches/asin/single/42")
     with pytest.raises(ss.SoldScopeError, match="Refusing"):
         ss.assert_read_only("GET", "/rank-tracker/groups/1/heatmap")
 
@@ -160,6 +163,11 @@ def test_empty_rt_groups_is_clean_noop(monkeypatch):
     monkeypatch.setattr(syn, "get_ratings_history",
                         lambda **k: {"data": {"ratings": []}})
     monkeypatch.setattr(syn, "collect_existing_keywords", lambda **k: [])
+    monkeypatch.setattr(syn, "list_kr_searches", lambda **k: {"data": []})
+    monkeypatch.setattr(
+        syn, "create_single_asin_search",
+        lambda **k: (_ for _ in ()).throw(AssertionError("KR create while downloading")),
+    )
     monkeypatch.setattr(syn, "list_rank_groups",
                         lambda **k: {"data": [], "meta": {"last_page": 1}})
 
@@ -177,10 +185,12 @@ def test_empty_rt_groups_is_clean_noop(monkeypatch):
     assert syn.EMPTY_HISTORY_NOTE in r["notes"]
     assert r["written"] == {
         "sales": 0, "bsr": 0, "price": 0, "rank": 0,
-        "ratings": 0, "search_volume": 0,
+        "ratings": 0, "search_volume": 0, "keyword_research": 0,
     }
     assert r["counts"]["ratings"] == 0
     assert r["counts"]["search_volume"] == 0
+    assert r["counts"]["keyword_research"] == 0
+    assert any("Skip KR create" in n and "downloading" in n for n in r["notes"])
 
 
 def test_missing_token_fails_soft_without_http(monkeypatch):
@@ -300,11 +310,12 @@ def test_sync_module_never_creates_groups_or_product_research():
     src = inspect.getsource(syn) + inspect.getsource(ss)
     assert "product-research" not in src
     assert "listing-analyzer" not in src
-    assert "keyword-research" not in src
     assert "create_groups" in inspect.getsource(syn)
     assert syn.load_config()["rank_tracker"]["create_groups"] is False
     assert syn.load_config()["search_volume"]["max_keywords"] == 20
     assert syn.load_config()["ratings"]["days"] == 365
+    assert syn.load_config()["keyword_research"]["create_if_needed"] is True
+    assert "create_single_asin_search" in inspect.getsource(ss)
 
 
 def test_ratings_and_search_volume_parsers():
@@ -365,6 +376,11 @@ def test_search_volume_skips_keywords_already_on_rt(monkeypatch):
     monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [])
     monkeypatch.setattr(syn, "collect_existing_keywords",
                         lambda **k: ["tallow lip balm", "beef tallow"])
+    monkeypatch.setattr(syn, "list_kr_searches", lambda **k: {"data": []})
+    monkeypatch.setattr(
+        syn, "create_single_asin_search",
+        lambda **k: (_ for _ in ()).throw(AssertionError("KR create while downloading")),
+    )
 
     def sv(**kwargs):
         return {"data": {
@@ -405,3 +421,91 @@ def test_402_on_ratings_stops_search_volume(monkeypatch):
     assert r["status"] == "fail"
     assert r["quota_remaining"] == "0"
     assert any("402" in n for n in r["notes"])
+
+
+def test_kr_rows_from_payload_and_single_asin_filter():
+    items = [
+        {"keyword": "Tallow Lip Balm", "searchVolume": 900, "opportunityScore": 210,
+         "organicRank": 4, "sponsoredRank": 2, "cpc": 1.1},
+        {"keyword": "tallow lip balm", "searchVolume": 50},
+        {"keyword": "", "searchVolume": 9},
+    ]
+    rows = syn.kr_rows_from_payload(
+        items, asin="B0CLHTF8YN", marketplace="US", search_id=9,
+        pulled_at="2026-09-09T12:00:00+00:00",
+    )
+    assert len(rows) == 1
+    assert rows[0]["keyword_normalized"] == "tallow lip balm"
+    assert rows[0]["opportunity_score"] == 210
+    assert syn.is_single_asin_kr({"searchType": 0, "id": 1}) is True
+    assert syn.is_single_asin_kr({"searchType": 1, "id": 2}) is False
+    assert syn.kr_search_asin({"mainAsin": "b0clhtf8yn"}) == "B0CLHTF8YN"
+
+
+def test_kr_create_only_when_download_ready_and_no_rt(monkeypatch):
+    created: list[str] = []
+
+    def make_sales(**kwargs):
+        return {"data": {"sales": [{"value": 2, "time": 1705334400}]}}
+
+    monkeypatch.setattr(syn, "token_present", lambda: True)
+    monkeypatch.setattr(syn, "check_auth", lambda: {"account": {"id": 1}})
+    monkeypatch.setattr(syn, "get_sales_history", make_sales)
+    monkeypatch.setattr(syn, "get_bsr_history",
+                        lambda **k: {"data": {"bsr": []}})
+    monkeypatch.setattr(syn, "get_price_history",
+                        lambda **k: {"data": {"price": []}})
+    monkeypatch.setattr(syn, "get_ratings_history",
+                        lambda **k: {"data": {"ratings": []}})
+    monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [])
+    monkeypatch.setattr(syn, "collect_existing_keywords", lambda **k: [])
+    monkeypatch.setattr(syn, "list_kr_searches", lambda **k: {"data": []})
+
+    def create(**kwargs):
+        created.append(kwargs["asin"])
+        return {"data": {"id": 77, "searchType": 0, "mainAsin": kwargs["asin"]}}
+
+    monkeypatch.setattr(syn, "create_single_asin_search", create)
+    monkeypatch.setattr(syn, "get_kr_asin_results", lambda *a, **k: {"data": [
+        {"keyword": "grass fed tallow", "searchVolume": 400, "opportunityScore": 180},
+    ]})
+
+    r = syn.sync_weekly(dry_run=True)
+    assert created == list(HEROES)
+    assert r["counts"]["keyword_research"] == 3
+    assert r["status"] == "success"
+
+
+def test_kr_create_skipped_when_rt_phrases_exist(monkeypatch):
+    monkeypatch.setattr(syn, "token_present", lambda: True)
+    monkeypatch.setattr(syn, "check_auth", lambda: {"account": {"id": 1}})
+    monkeypatch.setattr(syn, "get_sales_history",
+                        lambda **k: {"data": {"sales": [{"value": 2, "time": 1705334400}]}})
+    monkeypatch.setattr(syn, "get_bsr_history",
+                        lambda **k: {"data": {"bsr": []}})
+    monkeypatch.setattr(syn, "get_price_history",
+                        lambda **k: {"data": {"price": []}})
+    monkeypatch.setattr(syn, "get_ratings_history",
+                        lambda **k: {"data": {"ratings": []}})
+    monkeypatch.setattr(syn, "collect_existing_keywords", lambda **k: [])
+    monkeypatch.setattr(syn, "list_kr_searches", lambda **k: {"data": []})
+    monkeypatch.setattr(
+        syn, "create_single_asin_search",
+        lambda **k: (_ for _ in ()).throw(AssertionError("KR create when RT exists")),
+    )
+    monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [
+        {"id": 1, "asin": "B0CLHTF8YN"},
+        {"id": 2, "asin": "B0DQFKMJFY"},
+        {"id": 3, "asin": "B0HBSZ71XQ"},
+    ])
+    monkeypatch.setattr(syn, "list_group_products", lambda gid: {
+        "data": [{"id": gid, "asin": list(HEROES)[gid - 1]}],
+    })
+    monkeypatch.setattr(syn, "list_product_phrases", lambda *a, **k: {
+        "data": [{"id": 1, "phrase": "tallow lip balm", "organicPosition": 3,
+                  "sponsoredPosition": 1, "searchVolume": 200}],
+    })
+    r = syn.sync_weekly(dry_run=True)
+    assert r["counts"]["rank"] == 3
+    assert r["counts"]["keyword_research"] == 0
+    assert any("Rank Tracker phrases already stored" in n for n in r["notes"])

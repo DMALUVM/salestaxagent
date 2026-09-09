@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { evaluateExportNeed } from "@/lib/gno-export-state";
 import { GNO_NEXT_REVIEW_AT, CM_NOTE } from "@/lib/gno-ppc-watch";
 import { RT_EMPTY_COPY, formatSoldScopeRank, formatSoldScopeVol } from "@/lib/soldscope-status";
+import { OUTLIER_EMPTY_COPY } from "@/lib/soldscope-outliers";
 import { AlertTriangle, Check, CheckCircle, Download, RefreshCw, Shield } from "lucide-react";
 import {
   gnoAlertKey,
@@ -103,7 +104,22 @@ interface GnoData {
   junkQueue?: HarvestRow[];
   sbL7?: Array<{ campaign_name: string; spend: number; sales: number; orders: number; acos: number | null }>;
   sqp?: { available: boolean; newestAsOf: string | null; stale: boolean; source?: string | null };
-  soldscope?: { observeOnly?: boolean; rankTrackerCopy?: string; groups?: number; phrases?: number };
+  soldscope?: {
+    observeOnly?: boolean;
+    rankTrackerCopy?: string;
+    groups?: number;
+    phrases?: number;
+    keywordOutliers?: Array<{
+      keyword: string;
+      asin: string;
+      volume: number | null;
+      opportunity: number | null;
+      already_bidding: "Y" | "N";
+      bidding_note: string;
+      note: string;
+    }>;
+    outlierEmptyCopy?: string;
+  };
   lastSync?: { at: string | null; job: string | null; status: string | null };
   exportBanner?: {
     state: "EXPORT_NEEDED" | "QUIET";
@@ -574,6 +590,57 @@ export function PpcGnoWatch() {
           ))}
         </div>
       </div>
+
+      <Card id="soldscope-outliers">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">SoldScope keyword outliers — bid-base checklist</CardTitle>
+          <p className="text-[11px] text-muted-foreground">
+            High-opportunity phrases vs current Exact/Phrase/Broad targets and Auto Loose / Fat parent
+            search terms. Tags only — nothing writes to Amazon. Empty until Rank Tracker phrases or a
+            saved Keyword Research search land.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0 overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Keyword</TableHead>
+                <TableHead>ASIN</TableHead>
+                <TableHead className="text-right">Vol</TableHead>
+                <TableHead className="text-right">Opp</TableHead>
+                <TableHead>Bidding</TableHead>
+                <TableHead>Note</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(data?.soldscope?.keywordOutliers ?? []).length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-xs text-muted-foreground">
+                    {data?.soldscope?.outlierEmptyCopy ?? OUTLIER_EMPTY_COPY}
+                  </TableCell>
+                </TableRow>
+              )}
+              {(data?.soldscope?.keywordOutliers ?? []).map((row) => (
+                <TableRow key={`${row.asin}-${row.keyword}`}>
+                  <TableCell className="text-xs">{row.keyword}</TableCell>
+                  <TableCell className="text-[10px] tabular-nums text-muted-foreground">{row.asin}</TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">{formatSoldScopeVol(row.volume)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">{formatSoldScopeVol(row.opportunity)}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-[9px]">
+                      {row.already_bidding}
+                    </Badge>
+                    {row.bidding_note && row.bidding_note !== "—" && (
+                      <p className="mt-0.5 text-[9px] text-muted-foreground">{row.bidding_note}</p>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-[10px] text-muted-foreground">{row.note}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">

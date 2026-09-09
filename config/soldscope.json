@@ -24,5 +24,10 @@
   "ratings": {
     "enabled": true,
     "days": 365
+  },
+  "keyword_research": {
+    "enabled": true,
+    "create_if_needed": true,
+    "max_keywords": 80
   }
 }

@@ -50,11 +50,21 @@ export type SoldScopeVolumeRow = {
 
 export type SoldScopeRankRow = {
   phrase?: string | null;
+  asin?: string | null;
   organic_position?: number | null;
   sponsored_position?: number | null;
   search_volume?: number | null;
   as_of?: string | null;
   group_id?: number | null;
+};
+
+export type SoldScopeResearchRow = {
+  keyword?: string | null;
+  asin?: string | null;
+  search_volume?: number | null;
+  opportunity_score?: number | null;
+  organic_rank?: number | null;
+  sponsored_rank?: number | null;
 };
 
 export type SoldScopeRatingRow = {

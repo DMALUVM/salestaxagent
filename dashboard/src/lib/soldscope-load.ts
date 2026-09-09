@@ -13,6 +13,7 @@ import {
   type SoldScopeKeywordIntel,
   type SoldScopeRankRow,
   type SoldScopeRatingRow,
+  type SoldScopeResearchRow,
   type SoldScopeSalesRow,
   type SoldScopeVolumeRow,
 } from "@/lib/soldscope-status";
@@ -75,4 +76,17 @@ export async function loadSoldScopeRankStatus(
   const ranks = (await selectAll(sb, "soldscope_rank_snapshots")) as SoldScopeRankRow[];
   const counts = rankTrackerCounts(ranks);
   return { ...counts, copy: rankTrackerCopy(counts.groups, counts.phrases) };
+}
+
+export async function loadSoldScopeOutlierSources(
+  sb: Sb = getServerSupabase(),
+): Promise<{ rankRows: SoldScopeRankRow[]; researchRows: SoldScopeResearchRow[] }> {
+  const [ranks, research] = await Promise.all([
+    selectAll(sb, "soldscope_rank_snapshots"),
+    selectAll(sb, "soldscope_keyword_research"),
+  ]);
+  return {
+    rankRows: ranks as SoldScopeRankRow[],
+    researchRows: research as SoldScopeResearchRow[],
+  };
 }

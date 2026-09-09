@@ -211,6 +211,9 @@ export function SqpStatus() {
           {s.soldscopePhrases
             ? " Organic + sponsored ranks join the GNO harvest table when stored."
             : " Empty groups stay empty — this card does not create Rank Tracker groups."}
+          {" "}Keyword outliers for Blake live on{" "}
+          <a href="/ppc/gno#soldscope-outliers" className="underline underline-offset-2">GNO Watch</a>
+          {" "}— empty until phrases or a saved KR search land.
         </p>
         {msg && (
           <pre className="whitespace-pre-wrap rounded bg-muted p-2 text-[10px]">{msg}</pre>
