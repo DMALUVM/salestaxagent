@@ -3,21 +3,27 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import {
+  ADVERTISED_PRODUCT_L7_CSV_HEADERS,
   AUTO_LOOSE_NAME,
   AUTO_LOOSE_TERM_CSV_HEADERS,
   BALM_BE_ACOS,
+  BROAD_M_NAME,
   CM_NOTE,
   CORE_NEGATIVES,
   DEO_BE_ACOS,
   FAT_PARENT_NAME,
+  FLAVOR_SHELL,
   GNO_LAUNCHED_AT,
   GNO_NEXT_REVIEW_AT,
   GNO_OBSERVE_ONLY,
   HERO_CHAPSTICK_NAME,
   KEEP_ALIVE,
+  KEYWORD_ST_NOTE,
   KEYWORD_TARGET_CSV_HEADERS,
   LIP_BE_ACOS,
   NEW_EXACT,
+  PLACEMENT_LAG_NOTE,
+  SQP_SLICE_CSV_HEADERS,
   WATCH_CAMPAIGN_CSV_HEADERS,
   acosVsBe,
   breakEvenAcosOf,
@@ -32,6 +38,8 @@ import {
   extractExactKeyword,
   gnoPackStamp,
   harvestQueue,
+  isBroadM,
+  isFlavorShellName,
   campaignLaunchedAt,
   hoursSinceCampaignLaunch,
   hoursSinceLaunch,
@@ -47,6 +55,7 @@ import {
   spendLookbackDays,
   normalizeName,
   searchTermExportRows,
+  sqpWeeklySliceRows,
   tagAutoLooseTerm,
   watchCampaignsCsv,
   watchCampaignExportRows,
@@ -93,6 +102,9 @@ describe("GNO watchlists and matching", () => {
   test("hard-coded names match Dave's spec", () => {
     assert.equal(KEEP_ALIVE.length, 11);
     assert.equal(NEW_EXACT.length, 7);
+    assert.equal(FLAVOR_SHELL.length, 24);
+    assert.equal(BROAD_M_NAME, "GG - Lip Balm - Broad M");
+    assert.equal(isBroadM(BROAD_M_NAME), true);
     assert.ok(KEEP_ALIVE[0].includes("Loose Match-TOS"));
     assert.ok(NEW_EXACT[0].includes("tallow lip balm"));
     assert.equal(extractExactKeyword(NEW_EXACT[0]), "tallow lip balm");
@@ -191,7 +203,7 @@ describe("harvest / junk tags", () => {
 
 describe("family contribution BE", () => {
   const deoCamp = "SP - Auto - Deodorant - B0CLHYY3BB -";
-  const balmCamp = FAT_PARENT_NAME;
+  const balmCamp = "TOS-Tallow Balm";
   const lipCamp = AUTO_LOOSE_NAME;
   // 38% sits between deo/balm BE 36 and lip 3pk BE 42.
   const overDeo = { orders: 3, spend: 11.4, sales: 30, search_term: "tallow deodorant" };
@@ -208,12 +220,20 @@ describe("family contribution BE", () => {
     assert.equal(familyOf(NEW_EXACT[6]), "deo");
     assert.equal(breakEvenAcosOf(NEW_EXACT[6]), 36);
 
+    assert.equal(familyOf(FAT_PARENT_NAME), "lip_3pk");
+    assert.equal(breakEvenAcosOf(FAT_PARENT_NAME), 42);
+    assert.equal(familyOf(BROAD_M_NAME), "lip_3pk");
+    assert.equal(breakEvenAcosOf(BROAD_M_NAME), 42);
+    assert.equal(familyOf(NEW_EXACT[0]), "lip_3pk");
+    assert.equal(breakEvenAcosOf(NEW_EXACT[0]), 42);
+    assert.equal(familyOf(NEW_EXACT[3]), "lip_3pk");
+    assert.equal(breakEvenAcosOf(NEW_EXACT[3]), 42);
+    assert.equal(familyOf("SP KW - Exact(PM) - Lip Balm - DPB0CLHTKY3V/B0CLHVLG2F -"), "lip_3pk");
+
     assert.equal(familyOf(balmCamp), "balm");
     assert.equal(breakEvenAcosOf(balmCamp), 36);
-    assert.equal(familyOf(NEW_EXACT[0]), "balm");
-    assert.equal(breakEvenAcosOf(NEW_EXACT[0]), 36);
-    assert.equal(familyOf(NEW_EXACT[3]), "balm");
-    assert.equal(breakEvenAcosOf(NEW_EXACT[3]), 36);
+    assert.equal(familyOf("SP - Branded KW(TOS) - Exact - Tallow Balm - Mixed -"), "balm");
+    assert.equal(breakEvenAcosOf("Auto-Low Tallow balm"), 36);
   });
 
   test("harvest uses family BE — 38% harvests on lip, not deo or balm", () => {
@@ -604,19 +624,25 @@ describe("export pack columns", () => {
       searchTerms: [],
       placements: [],
     });
-    assert.deepEqual(pack.files.map((f) => f.name), [
-      "watch_campaigns.csv",
-      "auto_loose_search_terms.csv",
-      "fat_parent_search_terms.csv",
-      "keyword_targets.csv",
-    ]);
+    const names = pack.files.map((f) => f.name);
+    assert.ok(names.includes("watch_campaigns.csv"));
+    assert.ok(names.includes("auto_loose_search_terms.csv"));
+    assert.ok(names.includes("fat_parent_search_terms.csv"));
+    assert.ok(names.includes("broad_m_search_terms.csv"));
+    assert.ok(names.includes("keyword_targets.csv"));
+    assert.ok(names.includes("advertised_product_l7.csv"));
+    assert.ok(names.includes("README.txt"));
+    assert.equal(names.includes("sqp_weekly_slice.csv"), false);
+    assert.ok(names.length >= 5);
     assert.equal(pack.filename, "gno-pack-2026-09-07_1504.zip");
     const zip = zipStore(pack.files);
     const text = new TextDecoder().decode(zip);
     assert.match(text, /watch_campaigns\.csv/);
     assert.match(text, /auto_loose_search_terms\.csv/);
     assert.match(text, /fat_parent_search_terms\.csv/);
+    assert.match(text, /broad_m_search_terms\.csv/);
     assert.match(text, /keyword_targets\.csv/);
+    assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /OMITTED/);
     assert.equal(zip[0], 0x50);
     assert.equal(zip[1], 0x4b);
   });
@@ -631,8 +657,8 @@ describe("widgets + safety rails", () => {
     );
     assert.equal(tiles.length, 7);
     assert.ok(tiles.every((t) => t.zero_impr_after_24h));
-    assert.equal(tiles[0].family, "balm");
-    assert.equal(tiles[0].break_even_acos, 36);
+    assert.equal(tiles[0].family, "lip_3pk");
+    assert.equal(tiles[0].break_even_acos, 42);
     assert.equal(tiles[6].family, "deo");
     assert.equal(tiles[6].break_even_acos, 36);
   });
@@ -701,6 +727,11 @@ describe("widgets + safety rails", () => {
       assert.match(src, /\.order\(order2/);
       assert.match(src, /campaign_id/);
     }
+    const exp = readFileSync(path.join(process.cwd(), "src/app/api/ppc/gno-export/route.ts"), "utf8");
+    assert.match(exp, /sqp_weekly/);
+    assert.match(exp, /pageSqpSlice/);
+    assert.match(exp, /\.range\(/);
+    assert.match(exp, /query_normalized/);
   });
 });
 
@@ -835,7 +866,7 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
     const csv = autoLooseSearchTermsCsv(fat);
     assert.match(csv, /date_start,date_end,label/);
     assert.match(csv, /family,break_even_acos,acos_vs_be,cm_note/);
-    assert.ok(fat.every((r) => r.family === "balm" && r.break_even_acos === 36));
+    assert.ok(fat.every((r) => r.family === "lip_3pk" && r.break_even_acos === 42));
   });
 
   test("keyword_targets.csv covers NEW_EXACT + KEEPER with bid and metrics", () => {
@@ -874,18 +905,18 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
     assert.match(kw, /tallow lip balm/);
     assert.match(kw, /2.45/);
     assert.match(kw, /ENABLED/);
-    assert.match(kw, /balm/);
+    assert.match(kw, /lip_3pk/);
     const csv = keywordTargetsCsv([{
       date_start: "2026-09-07", date_end: "2026-09-07",
       campaign_name: FAT_PARENT_NAME, asin: "", keyword_text: "tallow lip balm",
       match_type: "EXACT", keyword_state: "ENABLED", bid: 2.45,
       impressions: 90, clicks: 6, spend: 12, orders: 2, sales: 40, acos: 30,
       metrics_complete: false,
-      family: "balm", break_even_acos: 36, acos_vs_be: -6, cm_note: CM_NOTE,
+      family: "lip_3pk", break_even_acos: 42, acos_vs_be: -12, cm_note: CM_NOTE,
     }]);
     assert.match(csv, /2.45/);
     assert.match(csv, /metrics_complete/);
-    assert.match(csv, /balm/);
+    assert.match(csv, /lip_3pk/);
   });
 
   test("csvEscape never writes NaN", () => {
@@ -1007,5 +1038,235 @@ describe("GNO pack nits — closed-day L2 + Today config-only", () => {
       "B0CLHTKY3V/B0CLHVLG2F",
     );
     assert.equal(extractAsin(FAT_PARENT_NAME), "");
+  });
+});
+
+describe("GNO pack v3 — Wed review upgrades", () => {
+  const orangeChapstick = "Orange Lip Balm - SP - Tallow Chapstick - KWs - Exact";
+  const assortedLipBalm = "Assorted Lip Balm - SP - Lip Balm - KWs - Exact";
+  const unscentedOrganic = "Unscented Lip Balm - SP - Organic Lip Balm - KWs - Exact";
+  const peppermintBalms = "Peppermint Lip Balm - SP- Tallow Lip Balms -KW - Exact";
+  const strUnscented = "SP - STR - KW Exact - Lip Balm, Unscented  - B0CLHVCPL5 - -8-10ord";
+
+  test("FLAVOR_SHELL classifies discovered 1-keyword Exact flavor names only", () => {
+    assert.equal(watchListOf(orangeChapstick), "FLAVOR_SHELL");
+    assert.equal(watchListOf(assortedLipBalm), "FLAVOR_SHELL");
+    assert.equal(watchListOf(unscentedOrganic), "FLAVOR_SHELL");
+    assert.equal(watchListOf(peppermintBalms), "FLAVOR_SHELL");
+    assert.equal(isFlavorShellName(orangeChapstick), true);
+    assert.equal(isFlavorShellName(strUnscented), false);
+    assert.equal(watchListOf(strUnscented), "OTHER");
+    assert.equal(watchListOf("GG - Peppermint - Asin Off - Competitor 1"), "OTHER");
+    assert.equal(watchListOf(NEW_EXACT[0]), "NEW_EXACT");
+    assert.equal(watchListOf(FAT_PARENT_NAME), "KEEPER");
+    assert.equal(watchListOf("Catch-All Auto"), "DAY5_PAUSE");
+    assert.ok(FLAVOR_SHELL.includes(orangeChapstick));
+  });
+
+  test("watch_campaigns includes FLAVOR_SHELL without dropping NEW_EXACT / KEEPER / DAY5", () => {
+    const rows = watchCampaignExportRows({
+      asOf: "2026-09-06",
+      today: "2026-09-07",
+      campaigns: [
+        camp(orangeChapstick, { date: "2026-09-06", spend: 9, impressions: 40 }),
+      ],
+      placements: [],
+    });
+    const today = rows.filter((r) => r.date_start === "2026-09-07");
+    assert.ok(today.some((r) => r.watch_list === "FLAVOR_SHELL" && r.campaign_name === orangeChapstick));
+    assert.equal(today.filter((r) => r.watch_list === "NEW_EXACT").length, 7);
+    assert.ok(today.filter((r) => r.watch_list === "KEEPER").length >= KEEP_ALIVE.length);
+    assert.ok(today.some((r) => r.watch_list === "DAY5_PAUSE"));
+    const flavor = today.find((r) => r.campaign_name === orangeChapstick);
+    assert.equal(flavor?.family, "lip_3pk");
+    assert.equal(flavor?.break_even_acos, 42);
+  });
+
+  test("broad_m_search_terms.csv matches Auto Loose columns and L2+L7 windows", () => {
+    const terms: SearchTermRow[] = [{
+      date: "2026-09-06",
+      campaign_name: BROAD_M_NAME,
+      search_term: "all natural chapstick",
+      match_type: "BROAD",
+      spend: 15.82, sales_14d: 0, orders_14d: 0, clicks: 10, impressions: 80,
+    }];
+    const pack = buildGnoPack({
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns: [camp(BROAD_M_NAME, { spend: 16 })],
+      searchTerms: terms,
+      placements: [],
+    });
+    const file = pack.files.find((f) => f.name === "broad_m_search_terms.csv");
+    assert.ok(file);
+    const header = file!.body.split("\n")[0];
+    assert.equal(header, AUTO_LOOSE_TERM_CSV_HEADERS.join(","));
+    assert.match(file!.body, /GG - Lip Balm - Broad M/);
+    assert.match(file!.body, /all natural chapstick/);
+    assert.match(file!.body, /L2/);
+    assert.match(file!.body, /L7/);
+    assert.match(file!.body, /lip_3pk/);
+    assert.match(file!.body, /42/);
+    assert.match(file!.body, /has_enabled_exact_elsewhere/);
+    assert.equal(file!.body.split("\n").filter((l) => l.includes("all natural chapstick")).length, 2);
+  });
+
+  test("keyword_targets do not copy search-term rollups onto every match type", () => {
+    const targets: KeywordTarget[] = [
+      {
+        keyword_id: "paused-exact",
+        campaign_name: FAT_PARENT_NAME,
+        keyword_text: "tallow lip balm",
+        match_type: "EXACT",
+        state: "PAUSED",
+        bid: 1.75,
+      },
+      {
+        keyword_id: "paused-broad",
+        campaign_name: FAT_PARENT_NAME,
+        keyword_text: "tallow lip balm",
+        match_type: "BROAD",
+        state: "PAUSED",
+        bid: 0.53,
+      },
+      {
+        keyword_id: "enabled-plural",
+        campaign_name: FAT_PARENT_NAME,
+        keyword_text: "tallow lip balms",
+        match_type: "EXACT",
+        state: "ENABLED",
+        bid: 1.60,
+      },
+    ];
+    const terms: SearchTermRow[] = [{
+      date: "2026-09-06",
+      campaign_name: FAT_PARENT_NAME,
+      search_term: "tallow lip balm",
+      keyword: "tallow lip balms",
+      keyword_id: "enabled-plural",
+      match_type: "EXACT",
+      spend: 36, sales_14d: 80, orders_14d: 2, clicks: 13, impressions: 504,
+    }];
+    const rows = keywordTargetExportRows({
+      today: "2026-09-07",
+      asOf: "2026-09-06",
+      keywordTargets: targets,
+      searchTerms: terms,
+    });
+    const l2Paused = rows.find((r) =>
+      r.date_start === "2026-09-05" && r.keyword_text === "tallow lip balm" && r.match_type === "EXACT");
+    const l2Broad = rows.find((r) =>
+      r.date_start === "2026-09-05" && r.keyword_text === "tallow lip balm" && r.match_type === "BROAD");
+    const l2Enabled = rows.find((r) =>
+      r.date_start === "2026-09-05" && r.keyword_text === "tallow lip balms");
+    const todayPaused = rows.find((r) =>
+      r.date_start === "2026-09-07" && r.keyword_text === "tallow lip balm" && r.match_type === "EXACT");
+    assert.equal(l2Enabled?.impressions, 504);
+    assert.equal(l2Enabled?.clicks, 13);
+    assert.equal(l2Enabled?.spend, 36);
+    assert.equal(l2Enabled?.keyword_state, "ENABLED");
+    assert.equal(l2Paused?.impressions, 0);
+    assert.equal(l2Paused?.spend, 0);
+    assert.equal(l2Paused?.keyword_state, "PAUSED");
+    assert.equal(l2Broad?.impressions, 0);
+    assert.equal(todayPaused?.metrics_complete, false);
+    assert.equal(todayPaused?.spend, 0);
+    assert.equal(todayPaused?.bid, 1.75);
+    assert.ok(!KEYWORD_ST_NOTE.includes("tallow lip balms") || l2Paused?.spend === 0);
+  });
+
+  test("L2/L7 keeper placement lag writes a cm_note instead of silent blanks", () => {
+    const campaigns = [
+      camp(FAT_PARENT_NAME, { date: "2026-09-06", spend: 40, impressions: 100, clicks: 8 }),
+    ];
+    const missing = watchCampaignExportRows({
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns, placements: [],
+    });
+    const l2 = missing.find((r) => r.campaign_name === FAT_PARENT_NAME && r.date_start === "2026-09-05");
+    const today = missing.find((r) => r.campaign_name === FAT_PARENT_NAME && r.date_start === "2026-09-07");
+    assert.equal(l2?.spend, 40);
+    assert.equal(l2?.tos_spend_share, null);
+    assert.equal(l2?.ros_spend_share, null);
+    assert.equal(l2?.pp_spend_share, null);
+    assert.match(l2?.cm_note ?? "", /placement report lag/i);
+    assert.ok((l2?.cm_note ?? "").includes(PLACEMENT_LAG_NOTE));
+    assert.equal(today?.tos_spend_share, null);
+    assert.doesNotMatch(today?.cm_note ?? "", /placement report lag/i);
+
+    const present = watchCampaignExportRows({
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns,
+      placements: [
+        { date: "2026-09-06", campaign_name: FAT_PARENT_NAME, placement: "Top of Search on-Amazon", spend: 30 },
+        { date: "2026-09-06", campaign_name: FAT_PARENT_NAME, placement: "Other on-Amazon", spend: 10 },
+      ],
+    });
+    const l2p = present.find((r) => r.campaign_name === FAT_PARENT_NAME && r.date_start === "2026-09-05");
+    assert.equal(l2p?.tos_spend_share, 75);
+    assert.equal(l2p?.ros_spend_share, 25);
+    assert.equal(l2p?.pp_spend_share, 0);
+    assert.doesNotMatch(l2p?.cm_note ?? "", /placement report lag/i);
+  });
+
+  test("advertised_product_l7.csv splits mixed-ASIN keepers without inventing ASIN spend", () => {
+    const pack = buildGnoPack({
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns: [camp(HERO_CHAPSTICK_NAME, { date: "2026-09-06", spend: 22, orders_14d: 2, sales_14d: 80 })],
+      searchTerms: [],
+      placements: [],
+      asinCatalog: [
+        { asin: "B0CLHTKY3V", sku: "DDPE0003Shop", product_name: "Sweet Orange 3pk" },
+        { asin: "B0CLHV3V5C", sku: "DDPE0002Shop", product_name: "Peppermint 3pk" },
+      ],
+    });
+    const file = pack.files.find((f) => f.name === "advertised_product_l7.csv");
+    assert.ok(file);
+    assert.equal(file!.body.split("\n")[0], ADVERTISED_PRODUCT_L7_CSV_HEADERS.join(","));
+    assert.match(file!.body, /B0CLHTKY3V/);
+    assert.match(file!.body, /B0CLHV3V5C/);
+    assert.match(file!.body, /Sweet Orange 3pk/);
+    assert.match(file!.body, /campaign-level L7/);
+    const data = file!.body.split("\n").filter((l) => l.includes("B0CLHTKY3V") || l.includes("B0CLHV3V5C"));
+    assert.ok(data.every((l) => l.includes("22.00") || l.includes("22")));
+  });
+
+  test("SQP slice includes latest week only and omits the file when empty", () => {
+    const withSqp = buildGnoPack({
+      asOf: "2026-09-06", today: "2026-09-07",
+      campaigns: [], searchTerms: [], placements: [],
+      sqpWeekly: [
+        {
+          week_start: "2026-08-16", week_end: "2026-08-22",
+          asin: "B0CLHTKY3V", search_query: "lip balm", query_normalized: "lip balm",
+          search_query_volume: 90000, click_share: 0.11, source: "sqp_spapi",
+        },
+        {
+          week_start: "2026-08-23", week_end: "2026-08-29",
+          asin: "", search_query: "lip balm", query_normalized: "lip balm",
+          search_query_volume: 91047, click_share: 0.15, source: "sqp_brand_csv",
+        },
+        {
+          week_start: "2026-08-23", week_end: "2026-08-29",
+          asin: "", search_query: "chapstick", query_normalized: "chapstick",
+          search_query_volume: 78344, click_share: 0.39, source: "sqp_brand_csv",
+        },
+        {
+          week_start: "2026-08-23", week_end: "2026-08-29",
+          asin: "", search_query: "ignored", query_normalized: "beef tallow moisturizer",
+          search_query_volume: 10, source: "sqp_brand_csv",
+        },
+      ],
+    });
+    const sqp = withSqp.files.find((f) => f.name === "sqp_weekly_slice.csv");
+    assert.ok(sqp);
+    assert.equal(sqp!.body.split("\n")[0], SQP_SLICE_CSV_HEADERS.join(","));
+    assert.match(sqp!.body, /2026-08-29/);
+    assert.doesNotMatch(sqp!.body, /2026-08-22/);
+    assert.match(sqp!.body, /chapstick/);
+    assert.doesNotMatch(sqp!.body, /beef tallow moisturizer/);
+    assert.match(withSqp.files.find((f) => f.name === "README.txt")!.body, /sqp_weekly_slice\.csv — latest week/);
+
+    const empty = sqpWeeklySliceRows([]);
+    assert.deepEqual(empty, []);
   });
 });

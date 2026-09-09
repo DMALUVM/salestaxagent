@@ -6,20 +6,24 @@ import {
   evaluateGnoAlerts,
   GNO_DESK_SPEND_LOOKBACK_DAYS,
   GNO_NEXT_REVIEW_AT,
+  SQP_SLICE_QUERIES,
+  type AsinCatalogRow,
   type CampaignDailyRow,
   type CampaignMeta,
   type KeywordTarget,
   type NegativeRow,
   type PlacementRow,
   type SearchTermRow,
+  type SqpSliceRow,
 } from "@/lib/gno-ppc-watch";
 import { ackPayload, evaluateExportNeed } from "@/lib/gno-export-state";
 import { loadGnoExportState, loadGnoLedger, saveGnoExportAck } from "@/lib/gno-store";
 
 /**
- * GET /api/ppc/gno-export — Export GNO pack v2 zip.
- * watch_campaigns.csv + auto_loose_search_terms.csv + fat_parent_search_terms.csv
- * + keyword_targets.csv (+ optional negatives_snapshot.csv).
+ * GET /api/ppc/gno-export — Export GNO pack zip.
+ * watch_campaigns.csv + auto_loose / fat_parent / broad_m search terms
+ * + keyword_targets.csv + advertised_product_l7.csv + README.txt
+ * (+ optional sqp_weekly_slice.csv, negatives_snapshot.csv).
  * Today = config only (metrics_complete=false). L2/L7 = closed days
  * ending yesterday. Campaigns API snapshot fills 0-impr shells.
  * Observe / export only. Never writes to Amazon.
@@ -28,7 +32,7 @@ import { loadGnoExportState, loadGnoLedger, saveGnoExportAck } from "@/lib/gno-s
 const CAMP_COLS =
   "date,campaign_id,campaign_name,campaign_type,campaign_status,budget,spend,sales_14d,orders_14d,clicks,impressions";
 const TERM_COLS =
-  "date,search_term,campaign_id,campaign_name,ad_group_id,match_type,keyword,spend,sales_14d,orders_14d,clicks,impressions";
+  "date,search_term,campaign_id,campaign_name,ad_group_id,match_type,keyword,keyword_id,spend,sales_14d,orders_14d,clicks,impressions";
 const PLACE_COLS =
   "date,campaign_id,campaign_name,placement,spend";
 const META_COLS =
@@ -68,6 +72,62 @@ async function pageRows(
   return rows;
 }
 
+const SQP_COLS =
+  "week_start,week_end,asin,search_query,query_normalized,search_query_volume,impression_share,click_share,purchase_share,asin_impressions,asin_clicks,asin_purchases,source";
+
+async function pageSqpSlice(
+  sb: ReturnType<typeof getServerSupabase>,
+): Promise<SqpSliceRow[]> {
+  const rows: Record<string, unknown>[] = [];
+  let offset = 0;
+  while (true) {
+    const r = await sb.from("sqp_weekly").select(SQP_COLS)
+      .in("query_normalized", [...SQP_SLICE_QUERIES])
+      .order("week_end", { ascending: true })
+      .order("query_normalized", { ascending: true })
+      .order("asin", { ascending: true })
+      .range(offset, offset + 999);
+    if (r.error) {
+      const msg = r.error.message || "";
+      if (/does not exist|schema cache|PGRST/i.test(msg)) return [];
+      throw new Error(`sqp_weekly: ${msg}`);
+    }
+    const page = (r.data ?? []) as unknown as Record<string, unknown>[];
+    rows.push(...page);
+    if (page.length < 1000) break;
+    offset += 1000;
+  }
+  return rows as unknown as SqpSliceRow[];
+}
+
+async function pageAsinCatalog(
+  sb: ReturnType<typeof getServerSupabase>,
+): Promise<AsinCatalogRow[]> {
+  const rows: Record<string, unknown>[] = [];
+  let offset = 0;
+  while (true) {
+    const r = await sb.from("sku_costs").select("sku,asin,product_name")
+      .order("sku", { ascending: true })
+      .range(offset, offset + 999);
+    if (r.error) {
+      const msg = r.error.message || "";
+      if (/does not exist|schema cache|PGRST/i.test(msg)) return [];
+      throw new Error(`sku_costs: ${msg}`);
+    }
+    const page = (r.data ?? []) as unknown as Record<string, unknown>[];
+    rows.push(...page);
+    if (page.length < 1000) break;
+    offset += 1000;
+  }
+  return rows
+    .map((r) => ({
+      asin: String(r.asin ?? "").trim(),
+      sku: r.sku != null ? String(r.sku) : "",
+      product_name: r.product_name != null ? String(r.product_name) : "",
+    }))
+    .filter((r) => r.asin);
+}
+
 async function pageAll(
   sb: ReturnType<typeof getServerSupabase>,
   table: string,
@@ -99,13 +159,15 @@ export async function GET() {
     const today = amazonToday();
     const start = windowStart(today, 14);
     const sb = getServerSupabase();
-    const [campaigns, searchTerms, placements, metaLoaded, keywords, negatives] = await Promise.all([
+    const [campaigns, searchTerms, placements, metaLoaded, keywords, negatives, sqpWeekly, asinCatalog] = await Promise.all([
       pageRows(sb, "ads_campaigns_daily", CAMP_COLS, start, today, "campaign_id"),
       pageRows(sb, "ads_search_terms_daily", TERM_COLS, start, today, "campaign_id", "search_term"),
       pageRows(sb, "ads_placement_daily", PLACE_COLS, start, today, "campaign_id", "placement"),
       pageAll(sb, "ads_campaign_meta", META_COLS, "campaign_id"),
       pageAll(sb, "ads_keyword_targets", KW_COLS, "keyword_id"),
       pageAll(sb, "ads_negatives", NEG_COLS, "negative_id"),
+      pageSqpSlice(sb),
+      pageAsinCatalog(sb),
     ]);
     const meta = metaLoaded.length
       ? metaLoaded
@@ -128,6 +190,8 @@ export async function GET() {
       keywordTargets: keywords as unknown as KeywordTarget[],
       negatives: negatives as unknown as NegativeRow[],
       ledger,
+      sqpWeekly,
+      asinCatalog,
     });
     const now = new Date();
     const alerts = evaluateGnoAlerts({

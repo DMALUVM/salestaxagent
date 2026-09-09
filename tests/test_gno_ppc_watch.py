@@ -9,6 +9,7 @@ from src.rules import (
     GNO_AUTO_LOOSE_BUDGET,
     GNO_DAY5_PAUSE,
     GNO_DEO_BE_ACOS,
+    GNO_FLAVOR_SHELL,
     GNO_FORBIDDEN_AUTO_ACTIONS,
     GNO_KEEP_ALIVE,
     GNO_LAUNCHED_AT,
@@ -28,6 +29,8 @@ def test_gno_spec_pins_dave_watchlists():
     assert len(GNO_KEEP_ALIVE) == 11
     assert len(GNO_NEW_EXACT) == 7
     assert len(GNO_DAY5_PAUSE) == 13
+    assert len(GNO_FLAVOR_SHELL) == 24
+    assert any("Orange Lip Balm - SP -" in n for n in GNO_FLAVOR_SHELL)
     assert GNO_LIP_BE_ACOS == 42
     assert GNO_DEO_BE_ACOS == 36
     assert GNO_BALM_BE_ACOS == 36
@@ -46,6 +49,8 @@ def test_dashboard_json_matches_repo_config():
     assert repo == dash
     spec = json.loads(repo)
     assert spec["observe_only"] is True
+    assert spec["aliases"]["broad_m"] == "GG - Lip Balm - Broad M"
+    assert len(spec["flavor_shell"]) == 24
 
 
 def test_gno_campaign_job_is_observe_only_campaigns_api():
@@ -116,6 +121,15 @@ def test_gno_dashboard_never_auto_writes_amazon():
     assert "Log Grok outcome" in ui
     assert "Family BE ACOS" in ui
     assert "acosWithBe" in ui
+    assert "FLAVOR_SHELL" in lib
+    assert "broad_m_search_terms.csv" in lib
+    assert "advertised_product_l7.csv" in lib
+    assert "placement report lag" in lib
+    assert "isBroadM" in lib
+    assert 'n.includes("lip")' in lib
+    assert "keywordWindowMetrics" in lib
+    assert "search_term === kw" not in lib.replace("normalizeTerm(t.search_term) === kw", "")
+    assert "normalizeTerm(t.search_term) === kw" not in lib
 
 
 def test_keeper_missing_from_short_spend_lookback_is_not_p0():
