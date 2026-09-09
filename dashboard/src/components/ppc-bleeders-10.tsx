@@ -13,6 +13,7 @@ import {
   type Bleeders10Payload,
   type Bleeders10Row,
 } from "@/lib/ppc-bleeders-10";
+import { formatSoldScopeVol } from "@/lib/soldscope-status";
 
 function fmtD(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -172,6 +173,7 @@ export function PpcBleeders10({
                   <TableHead>Campaign</TableHead>
                   <TableHead>Ad group</TableHead>
                   <TableHead>Term</TableHead>
+                  <TableHead className="text-right">SS Vol</TableHead>
                   <TableHead>Match</TableHead>
                   <TableHead className="text-right">Clicks</TableHead>
                   <TableHead className="text-right">Spend</TableHead>
@@ -210,6 +212,9 @@ export function PpcBleeders10({
                       </TableCell>
                       <TableCell className="text-xs max-w-[10rem] truncate">{r.ad_group_name || "—"}</TableCell>
                       <TableCell className="text-xs max-w-[10rem] truncate">{r.search_term}</TableCell>
+                      <TableCell className="text-right tabular-nums text-xs text-muted-foreground" title="SoldScope search volume when stored">
+                        {formatSoldScopeVol(r.soldscope_sv)}
+                      </TableCell>
                       <TableCell className="text-[10px] text-muted-foreground">{r.match_type || "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">{r.clicks}</TableCell>
                       <TableCell className="text-right tabular-nums">${fmtD(r.spend)}</TableCell>

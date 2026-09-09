@@ -118,6 +118,13 @@ ALTER TABLE IF EXISTS public.inventory_sku_flags      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.gno_export_state         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.gno_decision_ledger      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.gno_alert_acks           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.soldscope_sales_history  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.soldscope_bsr_history    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.soldscope_price_history  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.soldscope_rank_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.soldscope_search_volume  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.soldscope_ratings_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.soldscope_keyword_research ENABLE ROW LEVEL SECURITY;
 
 -- No CREATE POLICY for anon / authenticated on purpose.
 -- Deny-by-default: RLS on + zero permissive policies = no access for those roles.

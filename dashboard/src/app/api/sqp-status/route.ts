@@ -1,6 +1,8 @@
 import path from "node:path";
 
 import { getServerSupabase } from "@/lib/supabase-server";
+import { loadSoldScopeRankStatus } from "@/lib/soldscope-load";
+import { RT_EMPTY_COPY } from "@/lib/soldscope-status";
 
 /**
  * GET /api/sqp-status — freshness of the organic-rank data the PPC gate reads.
@@ -42,6 +44,14 @@ export async function GET() {
       out.setupHint = missing
         ? "Run supabase/migration_organic_rank.sql, then trigger an SQP sync."
         : null;
+      try {
+        const ss = await loadSoldScopeRankStatus(sb);
+        out.soldscopeRankTracker = ss.copy;
+        out.soldscopeGroups = ss.groups;
+        out.soldscopePhrases = ss.phrases;
+      } catch {
+        out.soldscopeRankTracker = RT_EMPTY_COPY;
+      }
       return Response.json(out);
     }
 
@@ -75,6 +85,14 @@ export async function GET() {
     out.oldestAsOf = weekEnds.length ? weekEnds[weekEnds.length - 1] : null;
     out.ageDays = ageDays;
     out.stale = ageDays === null ? true : ageDays > staleAfter;
+    try {
+      const ss = await loadSoldScopeRankStatus(sb);
+      out.soldscopeRankTracker = ss.copy;
+      out.soldscopeGroups = ss.groups;
+      out.soldscopePhrases = ss.phrases;
+    } catch {
+      out.soldscopeRankTracker = RT_EMPTY_COPY;
+    }
     return Response.json(out);
   } catch (e) {
     out.error = e instanceof Error ? e.message : "unknown error";

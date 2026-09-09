@@ -11,6 +11,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { evaluateExportNeed } from "@/lib/gno-export-state";
 import { GNO_NEXT_REVIEW_AT, CM_NOTE } from "@/lib/gno-ppc-watch";
+import { RT_EMPTY_COPY, formatSoldScopeRank, formatSoldScopeVol } from "@/lib/soldscope-status";
+import { OUTLIER_EMPTY_COPY } from "@/lib/soldscope-outliers";
 import { AlertTriangle, Check, CheckCircle, Download, RefreshCw, Shield } from "lucide-react";
 import {
   gnoAlertKey,
@@ -81,6 +83,9 @@ interface HarvestRow {
   break_even_acos?: number;
   acos_vs_be?: number | null;
   learning_note?: string;
+  soldscope_sv?: number | null;
+  soldscope_organic?: number | null;
+  soldscope_sponsored?: number | null;
 }
 
 interface GnoData {
@@ -99,6 +104,22 @@ interface GnoData {
   junkQueue?: HarvestRow[];
   sbL7?: Array<{ campaign_name: string; spend: number; sales: number; orders: number; acos: number | null }>;
   sqp?: { available: boolean; newestAsOf: string | null; stale: boolean; source?: string | null };
+  soldscope?: {
+    observeOnly?: boolean;
+    rankTrackerCopy?: string;
+    groups?: number;
+    phrases?: number;
+    keywordOutliers?: Array<{
+      keyword: string;
+      asin: string;
+      volume: number | null;
+      opportunity: number | null;
+      already_bidding: "Y" | "N";
+      bidding_note: string;
+      note: string;
+    }>;
+    outlierEmptyCopy?: string;
+  };
   lastSync?: { at: string | null; job: string | null; status: string | null };
   exportBanner?: {
     state: "EXPORT_NEEDED" | "QUIET";
@@ -570,6 +591,57 @@ export function PpcGnoWatch() {
         </div>
       </div>
 
+      <Card id="soldscope-outliers">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">SoldScope keyword outliers — bid-base checklist</CardTitle>
+          <p className="text-[11px] text-muted-foreground">
+            High-opportunity phrases vs current Exact/Phrase/Broad targets and Auto Loose / Fat parent
+            search terms. Tags only — nothing writes to Amazon. Empty until Rank Tracker phrases or a
+            saved Keyword Research search land.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0 overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Keyword</TableHead>
+                <TableHead>ASIN</TableHead>
+                <TableHead className="text-right">Vol</TableHead>
+                <TableHead className="text-right">Opp</TableHead>
+                <TableHead>Bidding</TableHead>
+                <TableHead>Note</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(data?.soldscope?.keywordOutliers ?? []).length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-xs text-muted-foreground">
+                    {data?.soldscope?.outlierEmptyCopy ?? OUTLIER_EMPTY_COPY}
+                  </TableCell>
+                </TableRow>
+              )}
+              {(data?.soldscope?.keywordOutliers ?? []).map((row) => (
+                <TableRow key={`${row.asin}-${row.keyword}`}>
+                  <TableCell className="text-xs">{row.keyword}</TableCell>
+                  <TableCell className="text-[10px] tabular-nums text-muted-foreground">{row.asin}</TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">{formatSoldScopeVol(row.volume)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">{formatSoldScopeVol(row.opportunity)}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-[9px]">
+                      {row.already_bidding}
+                    </Badge>
+                    {row.bidding_note && row.bidding_note !== "—" && (
+                      <p className="mt-0.5 text-[9px] text-muted-foreground">{row.bidding_note}</p>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-[10px] text-muted-foreground">{row.note}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Harvest queue — Auto Loose</CardTitle>
@@ -577,6 +649,7 @@ export function PpcGnoWatch() {
             Clicking a row does <strong>not</strong> negate. It adds the term to
             the next Grok pack selection ({queued.length} queued). Tags only.
             Log Grok outcome stores Dave&apos;s call — still no Amazon write.
+            SS Vol / Org / Sp light up from SoldScope when stored; em dash means empty, not zero.
           </p>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
@@ -584,6 +657,9 @@ export function PpcGnoWatch() {
             <TableHeader>
               <TableRow>
                 <TableHead>Search term</TableHead>
+                <TableHead className="text-right">SS Vol</TableHead>
+                <TableHead className="text-right">Org</TableHead>
+                <TableHead className="text-right">Sp</TableHead>
                 <TableHead className="text-right">Spend</TableHead>
                 <TableHead className="text-right">Orders</TableHead>
                 <TableHead className="text-right">ACOS vs BE</TableHead>
@@ -595,7 +671,7 @@ export function PpcGnoWatch() {
             <TableBody>
               {harvest.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-xs text-muted-foreground">
+                  <TableCell colSpan={10} className="text-xs text-muted-foreground">
                     No HARVEST_CANDIDATE terms on Auto Loose for L7.
                   </TableCell>
                 </TableRow>
@@ -612,6 +688,15 @@ export function PpcGnoWatch() {
                         : [...q, t.customer_search_term])}
                   >
                     <TableCell className="text-xs">{t.customer_search_term}</TableCell>
+                    <TableCell className="text-right tabular-nums text-xs text-muted-foreground" title="SoldScope search volume when stored">
+                      {formatSoldScopeVol(t.soldscope_sv)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-xs text-muted-foreground" title="SoldScope organic rank when a Rank Tracker group exists">
+                      {formatSoldScopeRank(t.soldscope_organic)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-xs text-muted-foreground" title="SoldScope sponsored rank when a Rank Tracker group exists">
+                      {formatSoldScopeRank(t.soldscope_sponsored)}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums text-xs">${money(t.spend)}</TableCell>
                     <TableCell className="text-right tabular-nums text-xs">{t.orders}</TableCell>
                     <TableCell className="text-right tabular-nums text-xs">{acosWithBe(t.acos, t.break_even_acos, t.family)}</TableCell>
@@ -747,6 +832,7 @@ export function PpcGnoWatch() {
             {data?.sqp?.newestAsOf
               ? ` Newest stored week: ${data.sqp.newestAsOf}.`
               : " No SQP rows stored."}
+            {" "}{data?.soldscope?.rankTrackerCopy ?? RT_EMPTY_COPY}
           </p>
         </CardHeader>
         <CardContent className="space-y-2">
