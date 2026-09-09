@@ -15,6 +15,8 @@ import {
 } from "@/lib/ppc-weekly-blake-recovery-0905";
 import { buildBleeders10, emptyBleeders10 } from "@/lib/ppc-bleeders-10";
 import type { WeeklyCampaignRef, WeeklyPlacementRef, WeeklyTermRef } from "@/lib/ppc-weekly-blake-recovery-0905";
+import { loadSoldScopeKeywordIntel } from "@/lib/soldscope-load";
+import { attachKeywordIntel } from "@/lib/soldscope-status";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -631,7 +633,8 @@ export async function GET() {
     ) as Record<RangeKey, TermAgg[]>;
 
     // Back-compat for any caller still reading the flat list.
-    const searchTerms = searchTermsByRange["7d"];
+    // Reassigned after SoldScope volume attach so 7d and by-range stay in sync.
+    let searchTerms = searchTermsByRange["7d"];
 
     // ── This week: Blake Recovery Sep 5 (66 rows). ST ~60d through
     //    2026-09-04. Do not call buildBleeders. Recommend-only — nothing
@@ -727,6 +730,24 @@ export async function GET() {
     // Bleeders 1.0 — pasted 10. Secondary triage. Not This week.
     // Do not re-aggregate. Do not expand to 22. No 2.0.
     const bleeders10 = buildBleeders10({ decisions });
+
+    const ssIntel = await loadSoldScopeKeywordIntel(sb);
+    const attachTerms = (rows: TermAgg[]) => attachKeywordIntel(
+      rows as unknown as Record<string, unknown>[],
+      (t) => String(t.search_term ?? t.term_key ?? ""),
+      ssIntel,
+    ) as unknown as TermAgg[];
+    for (const key of RANGE_KEYS) {
+      searchTermsByRange[key] = attachTerms(searchTermsByRange[key]);
+    }
+    searchTerms = searchTermsByRange["7d"];
+    if (bleeders10.rows?.length) {
+      bleeders10.rows = attachKeywordIntel(
+        bleeders10.rows as unknown as Record<string, unknown>[],
+        (t) => String(t.search_term ?? t.keyword ?? ""),
+        ssIntel,
+      ) as unknown as typeof bleeders10.rows;
+    }
 
     // ── Recommendations (paginated — a limit here would under-count the
     //    "Actions (N)" badge, which must match what is actually open) ──

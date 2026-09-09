@@ -11,7 +11,7 @@ for the Production environment (and Preview if you use preview deploys).
 | `SUPABASE_SERVICE_KEY` | recommended | server routes only | Service role. **Never** prefix this with `NEXT_PUBLIC_` — that would publish a key that bypasses RLS to every visitor. Without it, server routes fall back to the anon key and any table not readable under RLS returns empty. |
 | `DASHBOARD_USER` | yes | middleware | Basic-auth user. |
 | `DASHBOARD_PASSWORD` | yes | middleware | Basic-auth password. The whole dashboard 503s if this is unset. |
-| `SOLDSCOPE_API_TOKEN` | Mini only | Python weekly job | **Do not set on Vercel.** The `/ppc` SoldScope card reads `soldscope_*` through `SUPABASE_SERVICE_KEY`. Put the token on the Mac Mini `.env` so `soldscope_weekly_sync` can run. Never commit it. |
+| `SOLDSCOPE_API_TOKEN` | Mini only | Python weekly job | **Do not set on Vercel.** Existing `/ppc`, `/ppc/gno`, and Amazon Ops columns read `soldscope_*` through `SUPABASE_SERVICE_KEY`. Put the token on the Mac Mini `.env` so `soldscope_weekly_sync` can run. Never commit it. |
 
 `src/lib/supabase-server.ts` resolves server credentials as
 `SUPABASE_URL ?? NEXT_PUBLIC_SUPABASE_URL` and

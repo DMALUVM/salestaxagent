@@ -1,5 +1,5 @@
 {
-  "_doc": "Dashboard copy of repo-root config/soldscope.json (hero list only). Vercel cwd=dashboard/. Not a second sales/ads chart. Keep in sync with the root file.",
+  "_doc": "Dashboard copy of repo-root config/soldscope.json (hero list only). Vercel cwd=dashboard/. Enrichment on /ppc /ppc/gno /amazon — not a second sales/ads chart. Keep in sync with the root file.",
   "marketplace": "US",
   "days": 90,
   "asins": [
@@ -16,5 +16,13 @@
   "rank_tracker": {
     "enabled": true,
     "create_groups": false
+  },
+  "search_volume": {
+    "enabled": true,
+    "max_keywords": 20
+  },
+  "ratings": {
+    "enabled": true,
+    "days": 365
   }
 }

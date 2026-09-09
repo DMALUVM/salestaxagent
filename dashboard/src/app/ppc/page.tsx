@@ -12,7 +12,7 @@ import { LoadingState } from "@/components/loading";
 import { SectionNav } from "@/components/section-nav";
 import { rankBadgeOf } from "@/lib/ppc-actions";
 import { SqpStatus } from "@/components/sqp-status";
-import { SoldScopeCard } from "@/components/soldscope-card";
+import { formatSoldScopeVol } from "@/lib/soldscope-status";
 import { BrandShare } from "@/components/brand-share";
 import { PpcPlaybook } from "@/components/ppc-playbook";
 import { PpcSkuAds } from "@/components/ppc-sku-ads";
@@ -116,10 +116,11 @@ interface SearchTerm {
   /** Normalized join key — the same one the organic-rank gate uses. */
   term_key: string;
   match_types: string[];
-  spend: number; sales: number; orders: number; clicks: number; impressions: number;
+  spend: number; sales: number; orders: number; clicks: number;   impressions: number;
   campaign_count: number;
   campaigns: TermCampaign[];
   days: TermDay[];
+  soldscope_sv?: number | null;
 }
 interface Rec {
   id: string; type: string; priority: string; impact_estimate: number;
@@ -1081,8 +1082,6 @@ export default function PPCPage() {
 
           <SqpStatus />
 
-          <SoldScopeCard />
-
           <PpcReconcile summary={data?.dailyReconcile ?? null} asOfLabel={asOf} />
 
           {spendScope && spendScope.productsMissing.length > 0 && (
@@ -1420,6 +1419,7 @@ export default function PPCPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Search Term</TableHead>
+                      <TableHead className="text-right">SS Vol</TableHead>
                       <TableHead className="w-32">Campaigns</TableHead>
                       <TableHead className="w-28">Match</TableHead>
                       <TableHead className="text-right">Spend</TableHead>
@@ -1444,6 +1444,9 @@ export default function PPCPage() {
                                 <ChevronRight className={`mt-0.5 h-3 w-3 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
                                 <span className="truncate">{s.search_term}</span>
                               </div>
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums text-xs text-muted-foreground" title="SoldScope search volume when stored — not Ads impressions">
+                              {formatSoldScopeVol(s.soldscope_sv)}
                             </TableCell>
                             <TableCell>
                               {/* Multi-campaign overlap is the thing worth
@@ -1472,7 +1475,7 @@ export default function PPCPage() {
 
                           {open && (
                             <TableRow className="bg-muted/40 hover:bg-muted/40">
-                              <TableCell colSpan={7} className="p-3">
+                              <TableCell colSpan={8} className="p-3">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <p className="text-xs font-medium">
                                     &ldquo;{s.search_term}&rdquo; — {s.campaign_count} campaign

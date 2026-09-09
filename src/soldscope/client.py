@@ -31,6 +31,8 @@ _ALLOWED_GET_EXACT = frozenset({
     "/common/sales-history",
     "/common/bsr-history",
     "/common/price-history",
+    "/common/search-volume",
+    "/common/ratings-history",
     "/rank-tracker/groups",
 })
 _ALLOWED_GET_PATTERNS = (
@@ -126,7 +128,7 @@ def assert_read_only(method: str, path: str) -> None:
     if not _is_allowed_get(path):
         raise SoldScopeError(
             f"Refusing GET {path} — not in the SoldScope v1 allowlist "
-            "(history + Rank Tracker read)."
+            "(history + search-volume + ratings + Rank Tracker read)."
         )
 
 
@@ -163,6 +165,32 @@ def build_price_history_params(
     return {
         "marketplace": marketplace,
         "asin": asin,
+    }
+
+
+def build_search_volume_params(
+    *, marketplace: str, keyword: str,
+) -> dict[str, str]:
+    """OAS: marketplace + keyword. Metered. No days param."""
+    kw = (keyword or "").strip()
+    if not kw:
+        raise SoldScopeError("search-volume requires a non-empty keyword")
+    return {
+        "marketplace": marketplace,
+        "keyword": kw,
+    }
+
+
+def build_ratings_history_params(
+    *, marketplace: str, asin: str, days: int,
+) -> dict[str, str | int]:
+    """OAS: marketplace + asin + days (required; 30 or 365 typical)."""
+    if days is None or int(days) < 1:
+        raise SoldScopeError("ratings-history requires days >= 1")
+    return {
+        "marketplace": marketplace,
+        "asin": asin,
+        "days": int(days),
     }
 
 
@@ -263,6 +291,24 @@ def get_price_history(*, marketplace: str, asin: str) -> dict:
     body, _ = request(
         "GET", "/common/price-history",
         params=build_price_history_params(marketplace=marketplace, asin=asin),
+    )
+    return body if isinstance(body, dict) else {}
+
+
+def get_search_volume(*, marketplace: str, keyword: str) -> dict:
+    body, _ = request(
+        "GET", "/common/search-volume",
+        params=build_search_volume_params(marketplace=marketplace, keyword=keyword),
+    )
+    return body if isinstance(body, dict) else {}
+
+
+def get_ratings_history(*, marketplace: str, asin: str, days: int) -> dict:
+    body, _ = request(
+        "GET", "/common/ratings-history",
+        params=build_ratings_history_params(
+            marketplace=marketplace, asin=asin, days=days,
+        ),
     )
     return body if isinstance(body, dict) else {}
 

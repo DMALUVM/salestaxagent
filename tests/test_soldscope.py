@@ -42,6 +42,15 @@ def test_client_param_building_days_required_except_price():
     assert "days" not in price
     with pytest.raises(ss.SoldScopeError, match="days"):
         ss.build_sales_history_params(marketplace="US", asin="X", days=-1)
+    sv = ss.build_search_volume_params(marketplace="US", keyword="tallow lip balm")
+    ratings = ss.build_ratings_history_params(
+        marketplace="US", asin="B0CLHTF8YN", days=365)
+    assert sv == {"marketplace": "US", "keyword": "tallow lip balm"}
+    assert ratings == {"marketplace": "US", "asin": "B0CLHTF8YN", "days": 365}
+    with pytest.raises(ss.SoldScopeError, match="keyword"):
+        ss.build_search_volume_params(marketplace="US", keyword="  ")
+    with pytest.raises(ss.SoldScopeError, match="days"):
+        ss.build_ratings_history_params(marketplace="US", asin="X", days=0)
 
 
 def test_observe_only_refuses_writes_and_discovery():
@@ -59,8 +68,12 @@ def test_observe_only_refuses_writes_and_discovery():
             ss.assert_read_only(method, path)
     ss.assert_read_only("GET", "/auth/check")
     ss.assert_read_only("GET", "/common/sales-history")
+    ss.assert_read_only("GET", "/common/search-volume")
+    ss.assert_read_only("GET", "/common/ratings-history")
     ss.assert_read_only("GET", "/rank-tracker/groups")
     ss.assert_read_only("GET", "/rank-tracker/groups/12/products/7/phrases/v2")
+    with pytest.raises(ss.SoldScopeError, match="Refusing"):
+        ss.assert_read_only("GET", "/rank-tracker/groups/1/heatmap")
 
 
 def test_no_wait_loops_or_retries_in_client():
@@ -144,6 +157,9 @@ def test_empty_rt_groups_is_clean_noop(monkeypatch):
                         lambda **k: {"data": {"bsr": []}})
     monkeypatch.setattr(syn, "get_price_history",
                         lambda **k: {"data": {"price": []}})
+    monkeypatch.setattr(syn, "get_ratings_history",
+                        lambda **k: {"data": {"ratings": []}})
+    monkeypatch.setattr(syn, "collect_existing_keywords", lambda **k: [])
     monkeypatch.setattr(syn, "list_rank_groups",
                         lambda **k: {"data": [], "meta": {"last_page": 1}})
 
@@ -159,7 +175,12 @@ def test_empty_rt_groups_is_clean_noop(monkeypatch):
     assert r["counts"]["rank"] == 0
     assert syn.RT_EMPTY_NOTE in r["notes"]
     assert syn.EMPTY_HISTORY_NOTE in r["notes"]
-    assert r["written"] == {"sales": 0, "bsr": 0, "price": 0, "rank": 0}
+    assert r["written"] == {
+        "sales": 0, "bsr": 0, "price": 0, "rank": 0,
+        "ratings": 0, "search_volume": 0,
+    }
+    assert r["counts"]["ratings"] == 0
+    assert r["counts"]["search_volume"] == 0
 
 
 def test_missing_token_fails_soft_without_http(monkeypatch):
@@ -196,6 +217,14 @@ def test_402_during_sync_stops_remaining_asins(monkeypatch):
         raise AssertionError("RT must not run after 402")
 
     monkeypatch.setattr(syn, "collect_rank_groups", rt_boom)
+    monkeypatch.setattr(
+        syn, "get_ratings_history",
+        lambda **k: (_ for _ in ()).throw(AssertionError("ratings after 402")),
+    )
+    monkeypatch.setattr(
+        syn, "collect_existing_keywords",
+        lambda **k: (_ for _ in ()).throw(AssertionError("SV after 402")),
+    )
 
     r = syn.sync_weekly(dry_run=True)
     assert seen == [HEROES[0], HEROES[1]]
@@ -274,3 +303,105 @@ def test_sync_module_never_creates_groups_or_product_research():
     assert "keyword-research" not in src
     assert "create_groups" in inspect.getsource(syn)
     assert syn.load_config()["rank_tracker"]["create_groups"] is False
+    assert syn.load_config()["search_volume"]["max_keywords"] == 20
+    assert syn.load_config()["ratings"]["days"] == 365
+
+
+def test_ratings_and_search_volume_parsers():
+    pulled = "2026-09-09T12:00:00+00:00"
+    morning = 1705334400
+    evening = 1705377600
+    ratings = syn.ratings_rows_from_payload(
+        {"data": {"ratings": [
+            {"rating": 4.4, "count": 10, "time": morning},
+            {"rating": 4.6, "count": 12, "time": evening},
+        ]}},
+        asin="B0CLHTF8YN", marketplace="US", pulled_at=pulled,
+    )
+    assert len(ratings) == 1
+    assert ratings[0]["date"] == "2024-01-15"
+    assert ratings[0]["rating"] == 4.6
+    assert ratings[0]["ratings_count"] == 12
+    assert syn.ratings_rows_from_payload(
+        {"data": {"ratings": []}},
+        asin="B0CLHTF8YN", marketplace="US", pulled_at=pulled,
+    ) == []
+
+    row = syn.search_volume_row_from_payload(
+        {"data": {
+            "svHistory": [
+                {"event_date": "2026-08-01", "search_volume": 100},
+                {"event_date": "2026-09-01", "search_volume": 140},
+            ],
+            "sv30Days": 520,
+        }},
+        keyword_normalized="tallow lip balm",
+        marketplace="US",
+        pulled_at=pulled,
+    )
+    assert row is not None
+    assert row["as_of"] == "2026-09-01"
+    assert row["search_volume"] == 140
+    assert row["sv30"] == 520
+    assert syn.search_volume_row_from_payload(
+        {"data": {"svHistory": []}},
+        keyword_normalized="tallow lip balm",
+        marketplace="US",
+        pulled_at=pulled,
+    ) is None
+
+
+def test_search_volume_skips_keywords_already_on_rt(monkeypatch):
+    monkeypatch.setattr(syn, "token_present", lambda: True)
+    monkeypatch.setattr(syn, "check_auth", lambda: {"account": {"name": "T"}})
+    monkeypatch.setattr(syn, "get_sales_history",
+                        lambda **k: {"data": {"sales": []}})
+    monkeypatch.setattr(syn, "get_bsr_history",
+                        lambda **k: {"data": {"bsr": []}})
+    monkeypatch.setattr(syn, "get_price_history",
+                        lambda **k: {"data": {"price": []}})
+    monkeypatch.setattr(syn, "get_ratings_history",
+                        lambda **k: {"data": {"ratings": []}})
+    monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [])
+    monkeypatch.setattr(syn, "collect_existing_keywords",
+                        lambda **k: ["tallow lip balm", "beef tallow"])
+
+    def sv(**kwargs):
+        return {"data": {
+            "svHistory": [{"event_date": "2026-09-01", "search_volume": 88}],
+            "sv30Days": 200,
+        }}
+
+    monkeypatch.setattr(syn, "get_search_volume", sv)
+    r = syn.sync_weekly(dry_run=True)
+    assert r["status"] == "success"
+    assert r["counts"]["search_volume"] == 2
+    assert r["counts"]["ratings"] == 0
+
+
+def test_402_on_ratings_stops_search_volume(monkeypatch):
+    monkeypatch.setattr(syn, "token_present", lambda: True)
+    monkeypatch.setattr(syn, "check_auth", lambda: {"account": {"id": 1}})
+    monkeypatch.setattr(syn, "get_sales_history",
+                        lambda **k: {"data": {"sales": []}})
+    monkeypatch.setattr(syn, "get_bsr_history",
+                        lambda **k: {"data": {"bsr": []}})
+    monkeypatch.setattr(syn, "get_price_history",
+                        lambda **k: {"data": {"price": []}})
+
+    def ratings(**kwargs):
+        raise ss.QuotaExceeded("quota", remaining="0")
+
+    monkeypatch.setattr(syn, "get_ratings_history", ratings)
+    monkeypatch.setattr(
+        syn, "collect_rank_groups",
+        lambda **k: (_ for _ in ()).throw(AssertionError("RT after 402")),
+    )
+    monkeypatch.setattr(
+        syn, "collect_existing_keywords",
+        lambda **k: (_ for _ in ()).throw(AssertionError("SV after 402")),
+    )
+    r = syn.sync_weekly(dry_run=True)
+    assert r["status"] == "fail"
+    assert r["quota_remaining"] == "0"
+    assert any("402" in n for n in r["notes"])

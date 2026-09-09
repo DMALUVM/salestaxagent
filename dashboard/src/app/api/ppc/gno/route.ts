@@ -19,6 +19,8 @@ import {
 } from "@/lib/gno-ppc-watch";
 import { evaluateExportNeed } from "@/lib/gno-export-state";
 import { loadGnoExportState, loadGnoLedger } from "@/lib/gno-store";
+import { loadSoldScopeKeywordIntel, loadSoldScopeRankStatus } from "@/lib/soldscope-load";
+import { attachKeywordIntel } from "@/lib/soldscope-status";
 
 /**
  * GET /api/ppc/gno — GNO PPC Watch payload from stored Ads tables.
@@ -207,7 +209,16 @@ export async function GET() {
       keywordTargets,
       campaignMeta,
     });
-    const harvest = harvestQueue(searchTerms, campaigns, asOf, { keywordTargets, ledger });
+    const harvestRaw = harvestQueue(searchTerms, campaigns, asOf, { keywordTargets, ledger });
+    const [ssIntel, ssRank] = await Promise.all([
+      loadSoldScopeKeywordIntel(sb),
+      loadSoldScopeRankStatus(sb),
+    ]);
+    const harvest = attachKeywordIntel(
+      harvestRaw as unknown as Record<string, unknown>[],
+      (t) => String(t.customer_search_term ?? ""),
+      ssIntel,
+    );
     const p0 = alerts.filter((a) => a.priority === "P0");
     const p1 = alerts.filter((a) => a.priority === "P1");
     const exportBanner = evaluateExportNeed({
@@ -255,6 +266,12 @@ export async function GET() {
       harvestQueue: harvest.filter((t) => t.proposed_tag === "HARVEST_CANDIDATE"),
       junkQueue: harvest.filter((t) => t.proposed_tag === "JUNK_CANDIDATE"),
       harvestAll: harvest,
+      soldscope: {
+        observeOnly: true,
+        rankTrackerCopy: ssRank.copy,
+        groups: ssRank.groups,
+        phrases: ssRank.phrases,
+      },
       acks,
       lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
       sbL7: [...sbByName.entries()].map(([campaign_name, m]) => ({

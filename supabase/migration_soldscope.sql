@@ -77,7 +77,42 @@ comment on table soldscope_price_history is
 comment on table soldscope_rank_snapshots is
     'SoldScope Rank Tracker phrase snapshot when an existing group matches a hero ASIN. Observe-only — never created by this agent.';
 
-alter table if exists public.soldscope_sales_history   enable row level security;
-alter table if exists public.soldscope_bsr_history     enable row level security;
-alter table if exists public.soldscope_price_history   enable row level security;
-alter table if exists public.soldscope_rank_snapshots  enable row level security;
+-- Latest search-volume snapshot for keywords we already show (GNO / search
+-- terms / bleeders). Weekly overwrite. Not a keyword-research desk.
+create table if not exists soldscope_search_volume (
+    keyword_normalized text not null,
+    marketplace        text not null default 'US',
+    as_of              date not null,
+    search_volume      integer,
+    sv30               integer,
+    pulled_at          timestamptz not null default now(),
+    primary key (keyword_normalized, marketplace)
+);
+
+-- Review count + average stars for hero parent ASINs. Not a new page.
+create table if not exists soldscope_ratings_history (
+    asin          text not null,
+    marketplace   text not null default 'US',
+    date          date not null,
+    rating        numeric,
+    ratings_count integer,
+    pulled_at     timestamptz not null default now(),
+    primary key (asin, marketplace, date)
+);
+
+create index if not exists idx_soldscope_sv_as_of
+    on soldscope_search_volume (as_of desc);
+create index if not exists idx_soldscope_ratings_date
+    on soldscope_ratings_history (date desc, asin);
+
+comment on table soldscope_search_volume is
+    'SoldScope search volume for keywords already on PPC/GNO surfaces. Capped weekly pull. Never invents queries.';
+comment on table soldscope_ratings_history is
+    'SoldScope review count and average stars for hero parent ASINs. Enriches Amazon Ops product rows.';
+
+alter table if exists public.soldscope_sales_history    enable row level security;
+alter table if exists public.soldscope_bsr_history      enable row level security;
+alter table if exists public.soldscope_price_history    enable row level security;
+alter table if exists public.soldscope_rank_snapshots   enable row level security;
+alter table if exists public.soldscope_search_volume    enable row level security;
+alter table if exists public.soldscope_ratings_history  enable row level security;

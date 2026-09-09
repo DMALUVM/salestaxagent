@@ -1,4 +1,5 @@
 import { getServerSupabase } from "@/lib/supabase-server";
+import { loadSoldScopeRankStatus } from "@/lib/soldscope-load";
 import {
   EMPTY_STATE_COPY,
   RT_EMPTY_COPY,
@@ -29,11 +30,10 @@ export async function GET() {
     const sb = getServerSupabase();
     const asins = heroes.map((h) => h.asin);
 
-    const countOf = async (table: string) => {
-      const { count, error } = await sb
-        .from(table)
-        .select("asin", { count: "exact", head: true })
-        .in("asin", asins);
+    const countOf = async (table: string, filterAsins = true) => {
+      let q = sb.from(table).select("*", { count: "exact", head: true });
+      if (filterAsins) q = q.in("asin", asins);
+      const { count, error } = await q;
       if (error) {
         if (/soldscope_|does not exist|PGRST/i.test(error.message ?? "")) {
           return { missing: true as const, count: 0 };
@@ -55,11 +55,13 @@ export async function GET() {
       return row.date != null ? String(row.date) : null;
     };
 
-    const [sales, bsr, price, rank] = await Promise.all([
+    const [sales, bsr, price, rank, ratings, volume] = await Promise.all([
       countOf("soldscope_sales_history"),
       countOf("soldscope_bsr_history"),
       countOf("soldscope_price_history"),
       countOf("soldscope_rank_snapshots"),
+      countOf("soldscope_ratings_history"),
+      countOf("soldscope_search_volume", false),
     ]);
 
     if (sales.missing && bsr.missing && price.missing) {
@@ -78,6 +80,8 @@ export async function GET() {
       bsrRows: bsr.count,
       priceRows: price.count,
       rankRows: rank.count,
+      ratingsRows: ratings.count,
+      volumeRows: volume.count,
       newestDate,
     });
 
@@ -90,6 +94,15 @@ export async function GET() {
       .limit(1);
     if (!job.error && job.data?.[0]) lastJob = job.data[0];
 
+    try {
+      const rt = await loadSoldScopeRankStatus(sb);
+      out.rankTrackerCopy = rt.copy;
+      out.rankGroups = rt.groups;
+      out.rankPhrases = rt.phrases;
+    } catch {
+      out.rankTrackerCopy = RT_EMPTY_COPY;
+    }
+
     out.available = true;
     out.empty = freshness.empty;
     out.stored = freshness.stored;
@@ -99,6 +112,8 @@ export async function GET() {
       bsr: bsr.count,
       price: price.count,
       rank: rank.count,
+      ratings: ratings.count,
+      search_volume: volume.count,
     };
     out.lastJob = lastJob;
     return Response.json(out);

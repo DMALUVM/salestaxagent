@@ -104,7 +104,7 @@ separate rule and is unaffected.
 | ads_campaigns_backfill | Sun 03:00 | 90d campaigns (3 × 30d chunks) for long trends |
 | source_monitoring | Mon 07:00 | Rule-source change detection |
 | github_backup | Sun 09:00 | Backup branch push |
-| soldscope_weekly_sync | Sun 10:30 | SoldScope hero history + Rank Tracker read (observe-only) |
+| soldscope_weekly_sync | Sun 10:30 | SoldScope hero history + ratings + capped SV + Rank Tracker read (observe-only) |
 
 The three ads jobs are deliberately separate. Campaign reports are quick and
 feed the /ppc KPI cards and trend chart; search-term reports are heavy and can

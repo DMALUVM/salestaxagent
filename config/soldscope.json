@@ -1,5 +1,5 @@
 {
-  "_doc": "SoldScope v1 — additive research warehouse for three parent hero ASINs. Weekly sales/BSR/price history when the API has data. Rank Tracker is read-only (0 groups = no-op; never POST create). Not a Pulse/Ads/sales_daily source and not a second Dashboard chart. Token is SOLDSCOPE_API_TOKEN only.",
+  "_doc": "SoldScope v1 — additive warehouse that enriches existing /ppc, /ppc/gno, and Amazon Ops surfaces. Weekly sales/BSR/price (research only), ratings-history, capped search-volume for keywords we already show, Rank Tracker read-only. Never POST create. Not a Pulse/Ads/sales_daily source and not a second sales desk. Token is SOLDSCOPE_API_TOKEN only.",
   "marketplace": "US",
   "days": 90,
   "asins": [
@@ -16,5 +16,13 @@
   "rank_tracker": {
     "enabled": true,
     "create_groups": false
+  },
+  "search_volume": {
+    "enabled": true,
+    "max_keywords": 20
+  },
+  "ratings": {
+    "enabled": true,
+    "days": 365
   }
 }

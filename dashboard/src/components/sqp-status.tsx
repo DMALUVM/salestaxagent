@@ -33,6 +33,9 @@ interface Status {
     report_period?: string;
     schedule?: { day_of_week?: string; hour?: number; minute?: number; timezone?: string };
   } | null;
+  soldscopeRankTracker?: string | null;
+  soldscopeGroups?: number;
+  soldscopePhrases?: number;
 }
 
 export function SqpStatus() {
@@ -201,6 +204,13 @@ export function SqpStatus() {
           SQP reports click/impression <span className="font-medium">share</span>,
           not SERP position — rank is a derived band used to restrain bid
           increases only. Never blocks negatives, pauses or bid cuts.
+        </p>
+        <p className="text-[10px] text-muted-foreground">
+          {s.soldscopeRankTracker
+            ?? "SoldScope Rank Tracker: 0 groups / 0 phrases — observe-only, nothing created."}
+          {s.soldscopePhrases
+            ? " Organic + sponsored ranks join the GNO harvest table when stored."
+            : " Empty groups stay empty — this card does not create Rank Tracker groups."}
         </p>
         {msg && (
           <pre className="whitespace-pre-wrap rounded bg-muted p-2 text-[10px]">{msg}</pre>

@@ -23,7 +23,9 @@ from src.soldscope.client import (
     check_auth,
     get_bsr_history,
     get_price_history,
+    get_ratings_history,
     get_sales_history,
+    get_search_volume,
     list_group_products,
     list_product_phrases,
     list_rank_groups,
@@ -44,11 +46,18 @@ SALES_TABLE = "soldscope_sales_history"
 BSR_TABLE = "soldscope_bsr_history"
 PRICE_TABLE = "soldscope_price_history"
 RANK_TABLE = "soldscope_rank_snapshots"
+RATINGS_TABLE = "soldscope_ratings_history"
+VOLUME_TABLE = "soldscope_search_volume"
 
 SALES_CONFLICT = "asin,marketplace,date"
 BSR_CONFLICT = "asin,marketplace,date,category_id"
 PRICE_CONFLICT = "asin,marketplace,date"
 RANK_CONFLICT = "asin,marketplace,group_id,phrase,as_of"
+RATINGS_CONFLICT = "asin,marketplace,date"
+VOLUME_CONFLICT = "keyword_normalized,marketplace"
+
+DEFAULT_SV_MAX_KEYWORDS = 20
+DEFAULT_RATINGS_DAYS = 365
 
 MISSING_TOKEN_MESSAGE = (
     "SOLDSCOPE_API_TOKEN is not set. Add it to the Mini .env (launchd) "
@@ -103,6 +112,17 @@ def load_config() -> dict:
         "rank_tracker": {
             "enabled": bool(rt.get("enabled", True)),
             "create_groups": False,
+        },
+        "search_volume": {
+            "enabled": bool((raw.get("search_volume") or {}).get("enabled", True)),
+            "max_keywords": int(
+                (raw.get("search_volume") or {}).get("max_keywords")
+                or DEFAULT_SV_MAX_KEYWORDS
+            ),
+        },
+        "ratings": {
+            "enabled": bool((raw.get("ratings") or {}).get("enabled", True)),
+            "days": int((raw.get("ratings") or {}).get("days") or DEFAULT_RATINGS_DAYS),
         },
     }
 
@@ -255,6 +275,126 @@ def price_rows_from_payload(
     ]
 
 
+def ratings_rows_from_payload(
+    body: dict,
+    *,
+    asin: str,
+    marketplace: str,
+    pulled_at: str,
+) -> list[dict]:
+    data = (body or {}).get("data") or {}
+    series = data.get("ratings") if isinstance(data, dict) else None
+    if not isinstance(series, list):
+        return []
+    pairs: list[tuple[date, tuple[float | None, int | None]]] = []
+    for pt in series:
+        if not isinstance(pt, dict):
+            continue
+        d = unix_to_amazon_date(pt.get("time"))
+        if d is None:
+            continue
+        pairs.append((d, (_num(pt.get("rating")), _int(pt.get("count")))))
+    collapsed: dict[date, tuple[float | None, int | None]] = {}
+    for d, value in pairs:
+        collapsed[d] = value
+    return [
+        {
+            "asin": asin,
+            "marketplace": marketplace,
+            "date": d.isoformat(),
+            "rating": rating,
+            "ratings_count": count,
+            "pulled_at": pulled_at,
+        }
+        for d, (rating, count) in sorted(collapsed.items())
+    ]
+
+
+def search_volume_row_from_payload(
+    body: dict,
+    *,
+    keyword_normalized: str,
+    marketplace: str,
+    pulled_at: str,
+) -> dict | None:
+    """Latest weekly point + sv30. Empty history → None (no invented volume)."""
+    key = (keyword_normalized or "").strip()
+    if not key:
+        return None
+    data = (body or {}).get("data") or {}
+    if not isinstance(data, dict):
+        return None
+    weekly = data.get("svHistory")
+    as_of: str | None = None
+    sv: int | None = None
+    if isinstance(weekly, list):
+        best: tuple[str, int | None] | None = None
+        for pt in weekly:
+            if not isinstance(pt, dict):
+                continue
+            event = str(pt.get("event_date") or "").strip()
+            if not event:
+                continue
+            if best is None or event > best[0]:
+                best = (event, _int(pt.get("search_volume")))
+        if best:
+            as_of, sv = best
+    sv30 = _int(data.get("sv30Days"))
+    if as_of is None and sv30 is None and sv is None:
+        return None
+    return {
+        "keyword_normalized": key,
+        "marketplace": marketplace,
+        "as_of": as_of or date.today().isoformat(),
+        "search_volume": sv,
+        "sv30": sv30,
+        "pulled_at": pulled_at,
+    }
+
+
+def collect_existing_keywords(*, limit: int = DEFAULT_SV_MAX_KEYWORDS) -> list[str]:
+    """Keywords we already show (targets + search terms). Never invent queries."""
+    from src.amazon_ads.organic_rank import normalize_keyword
+
+    scored: dict[str, float] = {}
+    try:
+        from src.db import get_client
+
+        client = get_client()
+        try:
+            kw = (
+                client.table("ads_keyword_targets")
+                .select("keyword_text")
+                .limit(2000)
+                .execute()
+            )
+            for row in kw.data or []:
+                n = normalize_keyword((row or {}).get("keyword_text"))
+                if n:
+                    scored[n] = scored.get(n, 0) + 1.0
+        except Exception as e:
+            log.info("SoldScope keyword-target collect skipped: %s", e)
+        try:
+            terms = (
+                client.table("ads_search_terms_daily")
+                .select("search_term,spend")
+                .order("date", desc=True)
+                .limit(2000)
+                .execute()
+            )
+            for row in terms.data or []:
+                n = normalize_keyword((row or {}).get("search_term"))
+                if n:
+                    scored[n] = scored.get(n, 0) + float((row or {}).get("spend") or 0)
+        except Exception as e:
+            log.info("SoldScope search-term collect skipped: %s", e)
+    except Exception as e:
+        log.info("SoldScope keyword collect skipped (no warehouse): %s", e)
+        return []
+    ranked = sorted(scored.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [k for k, _ in ranked[: max(0, int(limit))]]
+
+
 def upsert_key(table: str, row: dict) -> tuple:
     """Stable unique key matching the warehouse primary key."""
     if table == SALES_TABLE:
@@ -268,6 +408,10 @@ def upsert_key(table: str, row: dict) -> tuple:
             row["asin"], row["marketplace"], int(row["group_id"]),
             row["phrase"], row["as_of"],
         )
+    if table == RATINGS_TABLE:
+        return (row["asin"], row["marketplace"], row["date"])
+    if table == VOLUME_TABLE:
+        return (row["keyword_normalized"], row["marketplace"])
     raise KeyError(table)
 
 
@@ -390,7 +534,10 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
     """Pull hero history + optional RT snapshots. Fail soft on missing token / 402."""
     notes: list[str] = []
     errors: list[str] = []
-    written = {"sales": 0, "bsr": 0, "price": 0, "rank": 0}
+    written = {
+        "sales": 0, "bsr": 0, "price": 0, "rank": 0,
+        "ratings": 0, "search_volume": 0,
+    }
     pulled_at = datetime.now(timezone.utc).isoformat()
     cfg = load_config()
 
@@ -445,7 +592,10 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
     bsr_rows: list[dict] = []
     price_rows: list[dict] = []
     rank_rows: list[dict] = []
+    ratings_rows: list[dict] = []
+    volume_rows: list[dict] = []
     quota: QuotaExceeded | None = None
+    ratings_days = int(cfg["ratings"]["days"])
 
     for asin in cfg["asins"]:
         try:
@@ -473,6 +623,27 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
             errors.append(f"{asin} history: {e}")
         except Exception as e:
             errors.append(f"{asin} history: {e}")
+
+    if quota is None and cfg["ratings"]["enabled"]:
+        for asin in cfg["asins"]:
+            try:
+                ratings_rows.extend(ratings_rows_from_payload(
+                    get_ratings_history(
+                        marketplace=marketplace, asin=asin, days=ratings_days,
+                    ),
+                    asin=asin, marketplace=marketplace, pulled_at=pulled_at,
+                ))
+            except QuotaExceeded as e:
+                quota = e
+                notes.append(
+                    f"402 on ratings-history for {asin}; stopping "
+                    f"(Remaining={e.remaining})."
+                )
+                break
+            except (SoldScopeError, AuthError) as e:
+                errors.append(f"{asin} ratings: {e}")
+            except Exception as e:
+                errors.append(f"{asin} ratings: {e}")
 
     if quota is None and cfg["rank_tracker"]["enabled"]:
         try:
@@ -521,6 +692,50 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
         except Exception as e:
             errors.append(f"rank tracker: {e}")
 
+    if quota is None and cfg["search_volume"]["enabled"]:
+        from src.amazon_ads.organic_rank import normalize_keyword
+
+        already = {
+            normalize_keyword(str(r.get("phrase") or ""))
+            for r in rank_rows
+            if r.get("search_volume") is not None
+        }
+        already.discard("")
+        keywords = [
+            k for k in collect_existing_keywords(
+                limit=int(cfg["search_volume"]["max_keywords"]),
+            )
+            if k not in already
+        ]
+        pulled_sv = 0
+        for keyword in keywords:
+            try:
+                row = search_volume_row_from_payload(
+                    get_search_volume(marketplace=marketplace, keyword=keyword),
+                    keyword_normalized=keyword,
+                    marketplace=marketplace,
+                    pulled_at=pulled_at,
+                )
+                if row:
+                    volume_rows.append(row)
+                    pulled_sv += 1
+            except QuotaExceeded as e:
+                quota = e
+                notes.append(
+                    f"402 on search-volume for '{keyword}'; stopping "
+                    f"(Remaining={e.remaining})."
+                )
+                break
+            except (SoldScopeError, AuthError) as e:
+                errors.append(f"search-volume '{keyword}': {e}")
+            except Exception as e:
+                errors.append(f"search-volume '{keyword}': {e}")
+        notes.append(
+            f"Search volume: {pulled_sv} keyword(s) stored"
+            + (f", skipped {len(already)} already on RT phrases" if already else "")
+            + "."
+        )
+
     if not dry_run:
         from src.db import upsert_rows
 
@@ -528,8 +743,17 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
         written["bsr"] = upsert_rows(BSR_TABLE, bsr_rows, on_conflict=BSR_CONFLICT)
         written["price"] = upsert_rows(PRICE_TABLE, price_rows, on_conflict=PRICE_CONFLICT)
         written["rank"] = upsert_rows(RANK_TABLE, rank_rows, on_conflict=RANK_CONFLICT)
+        written["ratings"] = upsert_rows(
+            RATINGS_TABLE, ratings_rows, on_conflict=RATINGS_CONFLICT,
+        )
+        written["search_volume"] = upsert_rows(
+            VOLUME_TABLE, volume_rows, on_conflict=VOLUME_CONFLICT,
+        )
 
-    total_in = len(sales_rows) + len(bsr_rows) + len(price_rows) + len(rank_rows)
+    total_in = (
+        len(sales_rows) + len(bsr_rows) + len(price_rows) + len(rank_rows)
+        + len(ratings_rows) + len(volume_rows)
+    )
     history_empty = not (sales_rows or bsr_rows or price_rows)
     if history_empty and quota is None:
         notes.append(EMPTY_HISTORY_NOTE)
@@ -545,7 +769,8 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
     message = (
         f"{len(cfg['asins'])} hero ASIN(s), {len(sales_rows)} sales / "
         f"{len(bsr_rows)} bsr / {len(price_rows)} price / "
-        f"{len(rank_rows)} rank row(s)"
+        f"{len(rank_rows)} rank / {len(ratings_rows)} ratings / "
+        f"{len(volume_rows)} search-volume row(s)"
     )
     if dry_run:
         message = "DRY RUN — " + message
@@ -563,6 +788,8 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
             "bsr": len(bsr_rows),
             "price": len(price_rows),
             "rank": len(rank_rows),
+            "ratings": len(ratings_rows),
+            "search_volume": len(volume_rows),
         },
         "pulled_at": pulled_at,
         "asins": cfg["asins"],

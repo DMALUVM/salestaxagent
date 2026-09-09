@@ -68,6 +68,7 @@ export interface Bleeders10Row {
   suggested_action: string;
   status: "open" | "done" | "skipped";
   decision_id: string | null;
+  soldscope_sv?: number | null;
 }
 
 export interface Bleeders10Payload {
