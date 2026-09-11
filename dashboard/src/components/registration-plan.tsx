@@ -27,19 +27,24 @@ interface PlanRow {
   short_reason: string;
   confidence: string;
   entity_note: string;
+  documentation_status?: string;
+  citation?: string;
+  packet_date?: string;
+  authority_source?: string;
 }
 
 type Tab =
-  | "register_now" | "review_contested" | "monitor"
+  | "register_now" | "needs_statute_review" | "review_contested" | "monitor"
   | "already_registered" | "no_sales_tax";
 
 const TABS: Tab[] = [
-  "register_now", "review_contested", "monitor",
+  "register_now", "needs_statute_review", "review_contested", "monitor",
   "already_registered", "no_sales_tax",
 ];
 
 const TAB_LABELS: Record<Tab, string> = {
   register_now: "Register now",
+  needs_statute_review: "Needs statute review",
   review_contested: "Contested",
   monitor: "Monitor",
   already_registered: "Already registered",
@@ -48,9 +53,11 @@ const TAB_LABELS: Record<Tab, string> = {
 
 const TAB_HELP: Record<Tab, string> = {
   register_now:
-    "A nexus trigger is met: the economic threshold is exceeded, or FBA inventory is held in a state whose rules treat that as creating nexus.",
+    "A documented trigger is met: the economic threshold is exceeded, or FBA inventory is held in a state with a Tess-documented assert (or a researched state_rules true). Citations shown. Not legal advice — do not auto-register.",
+  needs_statute_review:
+    "FBA inventory is flagged, but Tess has no statute-backed assert (unknown default or partial — FBA not named). This is not a quiet register-now.",
   review_contested:
-    "Inventory is held here, but the state's rule says FBA stock does not (or may not) create nexus. Registering creates filing obligations that are awkward to unwind — confirm with a CPA first.",
+    "Inventory is held here, but Tess documented a carve-out (IL/NY) or a fact-specific partial (AZ), or state_rules says FBA stock does not / may not create nexus. Confirm with a CPA first.",
   monitor:
     "No trigger yet. Approaching states show their percentage of the economic threshold.",
   already_registered: "Registered to collect, per nexus_status.",
@@ -60,6 +67,8 @@ const TAB_HELP: Record<Tab, string> = {
 const ACTION_STYLES: Record<string, string> = {
   register_now:
     "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900",
+  needs_statute_review:
+    "bg-sky-50 text-sky-800 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-900",
   review_contested:
     "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
   monitor:
@@ -74,6 +83,15 @@ const CONFIDENCE_STYLES: Record<string, string> = {
   high: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
   medium: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
   low: "bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-700",
+};
+
+const DOC_STYLES: Record<string, string> = {
+  documented:
+    "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
+  partial:
+    "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
+  unknown:
+    "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-900/60 dark:text-slate-400 dark:border-slate-700",
 };
 
 function money(v: string): string {
@@ -194,6 +212,7 @@ export function RegistrationPlan() {
                       <th className="py-1 pr-3 text-right">Shopify</th>
                       <th className="py-1 pr-3 text-right">Amazon</th>
                       <th className="py-1 pr-3 text-right">Total</th>
+                      <th className="py-1 pr-3">Doc.</th>
                       <th className="py-1 pr-3">Conf.</th>
                       <th className="py-1">Why</th>
                     </tr>
@@ -208,7 +227,9 @@ export function RegistrationPlan() {
                             className={`text-[9px] ${
                               r.physical_nexus === "contested"
                                 ? ACTION_STYLES.review_contested
-                                : ""
+                                : r.physical_nexus === "flagged"
+                                  ? ACTION_STYLES.needs_statute_review
+                                  : ""
                             }`}
                           >
                             {r.physical_nexus}
@@ -232,6 +253,14 @@ export function RegistrationPlan() {
                         <td className="py-1 pr-3">
                           <Badge
                             variant="outline"
+                            className={`text-[9px] ${DOC_STYLES[r.documentation_status ?? "unknown"] ?? DOC_STYLES.unknown}`}
+                          >
+                            {r.documentation_status || "unknown"}
+                          </Badge>
+                        </td>
+                        <td className="py-1 pr-3">
+                          <Badge
+                            variant="outline"
                             className={`text-[9px] ${CONFIDENCE_STYLES[r.confidence] ?? ""}`}
                           >
                             {r.confidence}
@@ -239,6 +268,13 @@ export function RegistrationPlan() {
                         </td>
                         <td className="py-1 text-muted-foreground">
                           {r.short_reason}
+                          {r.citation && (
+                            <p className="mt-0.5 text-[10px] text-foreground/80">
+                              Cite: {r.citation}
+                              {r.packet_date ? ` · Tess ${r.packet_date}` : ""}
+                              {r.authority_source ? ` · ${r.authority_source}` : ""}
+                            </p>
+                          )}
                           {r.entity_note && (
                             <p className="text-[10px]">
                               <a href="/entity" className="text-blue-600 hover:underline dark:text-blue-400">
@@ -251,7 +287,7 @@ export function RegistrationPlan() {
                     ))}
                     {shown.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="py-2 text-muted-foreground">
+                        <td colSpan={10} className="py-2 text-muted-foreground">
                           Nothing in this bucket.
                         </td>
                       </tr>
@@ -283,8 +319,9 @@ export function RegistrationPlan() {
           <a href="/entity" className="text-blue-600 hover:underline dark:text-blue-400">
             Entity &amp; compliance
           </a>
-          . Monitoring aid — <span className="font-medium">not legal advice</span>;
-          confirm positions with a CPA before registering or filing.
+          . Tess FBA citation packets dated 2026-09-11. Monitoring aid —{" "}
+          <span className="font-medium">not legal advice</span>;
+          confirm positions with a CPA before registering or filing. Do not auto-register.
         </p>
       </CardContent>
     </Card>

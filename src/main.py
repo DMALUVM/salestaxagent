@@ -2884,8 +2884,8 @@ def _usd_or(v) -> str:
 
 @cli.command("registration-plan")
 @click.option("--csv", "csv_path", default=None, help="Write the full plan to CSV")
-@click.option("--action", type=click.Choice(["all", "register_now", "review_contested",
-              "monitor", "already_registered", "no_sales_tax"]), default="all")
+@click.option("--action", type=click.Choice(["all", "register_now", "needs_statute_review",
+              "review_contested", "monitor", "already_registered", "no_sales_tax"]), default="all")
 def registration_plan_cmd(csv_path, action):
     """Ranked, auditable sales-tax registration plan from live data.
 
@@ -2902,9 +2902,9 @@ def registration_plan_cmd(csv_path, action):
     counts = counts_by_action(rows)
 
     click.echo("Sales-tax registration plan — live data")
-    for a in ("register_now", "review_contested", "monitor",
+    for a in ("register_now", "needs_statute_review", "review_contested", "monitor",
               "already_registered", "no_sales_tax"):
-        click.echo(f"  {a:<20}: {counts.get(a, 0)}")
+        click.echo(f"  {a:<22}: {counts.get(a, 0)}")
     click.echo(f"  {'TOTAL':<20}: {len(rows)}")
 
     residual = next((r.residual_risk for r in rows if r.residual_risk), "")
@@ -2916,7 +2916,7 @@ def registration_plan_cmd(csv_path, action):
     for r in shown:
         groups.setdefault(r.decision.action, []).append(r)
 
-    for a in ("register_now", "review_contested", "monitor",
+    for a in ("register_now", "needs_statute_review", "review_contested", "monitor",
               "already_registered", "no_sales_tax"):
         grp = groups.get(a)
         if not grp:

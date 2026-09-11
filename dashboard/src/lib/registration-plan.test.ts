@@ -5,8 +5,10 @@ import path from "node:path";
 
 import {
   ACTIONS,
+  TESS_PACKET_DATE,
   aggregateSales12m,
   buildPlan,
+  bundledCitations,
   bundledStateRules,
   countsByAction,
   decide,
@@ -31,8 +33,29 @@ function facts(overrides: Partial<StateFacts> = {}): StateFacts {
     shopify_sales: 0,
     amazon_sales: 0,
     entity_exposure: false,
+    documentation_status: "",
+    tess_posture: "",
+    tess_confidence: "",
+    tess_citation: "",
+    tess_packet_date: "",
     ...overrides,
   };
+}
+
+function tessFacts(state: string, overrides: Partial<StateFacts> = {}): StateFacts {
+  const pkt = bundledCitations()[state];
+  assert.ok(pkt, `missing Tess packet for ${state}`);
+  return facts({
+    state_code: state,
+    inventory_events: 100,
+    inventory_first: "2024-01-01",
+    documentation_status: pkt.documentation_status,
+    tess_posture: pkt.posture,
+    tess_confidence: pkt.confidence,
+    tess_citation: pkt.short_citation,
+    tess_packet_date: pkt.packet_date ?? TESS_PACKET_DATE,
+    ...overrides,
+  });
 }
 
 function row(f: StateFacts): PlanRow {
@@ -116,15 +139,19 @@ test("inventory with a true rule is high-confidence register_now", () => {
   assert.equal(d.physical_nexus, "Y");
 });
 
-test("unresearched rule registers but only at medium confidence", () => {
+test("unknown default with inventory is not register_now", () => {
   const d = decide(facts({
     fba_rule: "unknown_default_true",
     inventory_events: 800,
     inventory_first: "2024-03-01",
   }));
-  assert.equal(d.action, "register_now");
-  assert.equal(d.confidence, "medium");
-  assert.match(d.reason, /unresearched/);
+  assert.equal(d.action, "needs_statute_review");
+  assert.notEqual(d.action, "register_now");
+  assert.equal(d.confidence, "low");
+  assert.equal(d.documentation_status, "unknown");
+  assert.equal(d.authority_source, "unknown_default");
+  assert.doesNotMatch(d.reason, /unresearched/);
+  assert.match(d.reason, /Insufficient authority/);
 });
 
 test("rule saying no nexus is review, never register", () => {
@@ -156,7 +183,7 @@ test("no inventory means no physical nexus", () => {
 });
 
 test("contested never becomes register_now silently", () => {
-  for (const rule of ["false", "contested", "conditional"]) {
+  for (const rule of ["false", "contested", "conditional", "unknown_default_true"]) {
     for (const events of [1, 100, 99_999]) {
       const d = decide(facts({
         fba_rule: rule,
@@ -181,7 +208,7 @@ test("entity exposure does not change the action", () => {
 
 test("work comes first in sort order", () => {
   const registered = facts({ state_code: "Z", is_registered: true });
-  const work = facts({ state_code: "Y", amazon_sales: 1, inventory_events: 1, inventory_first: "2024-01-01" });
+  const work = facts({ state_code: "Y", amazon_sales: 1, fba_rule: "true", inventory_events: 1, inventory_first: "2024-01-01" });
   const sorted = sortRows([row(registered), row(work)]);
   assert.equal(sorted[0].decision.action, "register_now");
 });
@@ -258,7 +285,7 @@ test("bundled rules match Python state_rules on FBA and no-tax invariants", () =
   }
 });
 
-test("live-shaped inventory reproduces Dave Sep 11 register_now / contested buckets", () => {
+test("live-shaped inventory uses Tess packets, not unknown_default register_now", () => {
   const inventory: Record<string, { events: number; min_date: string; max_date: string }> = {};
   for (const sc of ["MO", "ID", "AL", "LA", "NM", "MS", "NY", "IL", "AZ"]) {
     inventory[sc] = { events: 100, min_date: "2024-01-01", max_date: "2026-09-01" };
@@ -277,13 +304,18 @@ test("live-shaped inventory reproduces Dave Sep 11 register_now / contested buck
     entityStates: [],
   });
   const c = countsByAction(rows);
-  assert.equal(c.register_now, 6);
+  assert.equal(c.register_now, 3);
+  assert.equal(c.needs_statute_review, 3);
   assert.equal(c.review_contested, 3);
   assert.equal(c.no_sales_tax, 5);
   assert.equal(c.already_registered, 35);
   assert.deepEqual(
     rows.filter((r) => r.decision.action === "register_now").map((r) => r.facts.state_code).sort(),
-    ["AL", "ID", "LA", "MO", "MS", "NM"],
+    ["ID", "LA", "NM"],
+  );
+  assert.deepEqual(
+    rows.filter((r) => r.decision.action === "needs_statute_review").map((r) => r.facts.state_code).sort(),
+    ["AL", "MO", "MS"],
   );
   assert.deepEqual(
     rows.filter((r) => r.decision.action === "review_contested").map((r) => r.facts.state_code).sort(),
@@ -305,7 +337,7 @@ test("buildPlan uses bundled no-tax / contested rules even if warehouse omits th
   });
   const by = Object.fromEntries(rows.map((r) => [r.facts.state_code, r.decision.action]));
   assert.equal(by.NY, "review_contested");
-  assert.equal(by.MO, "register_now");
+  assert.equal(by.MO, "needs_statute_review");
   assert.equal(by.OR, "no_sales_tax");
 });
 
@@ -328,4 +360,84 @@ test("Nexus card does not tell operators to run the CLI", () => {
   assert.doesNotMatch(ui, /Run it in a terminal/);
   assert.match(ui, /useEffect/);
   assert.match(ui, /warehouse/);
+});
+
+test("documented carve-outs IL/NY are not register_now", () => {
+  for (const state of ["IL", "NY"] as const) {
+    const d = decide(tessFacts(state));
+    assert.equal(d.action, "review_contested", state);
+    assert.equal(d.documentation_status, "documented");
+    assert.equal(d.confidence, "high");
+    assert.equal(d.authority_source, "tess_packet");
+    assert.equal(d.packet_date, TESS_PACKET_DATE);
+    assert.doesNotMatch(d.citation, /35 ILCS 105\/2\(1\.1\)/);
+  }
+  const il = decide(tessFacts("IL"));
+  assert.match(il.citation, /35 ILCS 105\/2\(1\)/);
+  assert.match(il.citation, /131\.105/);
+  const ny = decide(tessFacts("NY"));
+  assert.match(ny.citation, /1101\(b\)\(8\)\(v\)/);
+  assert.match(ny.citation, /TSB-A-24\(45\)S/);
+});
+
+test("documented asserts ID/LA/NM are register_now with citation", () => {
+  const needles: Record<string, RegExp> = {
+    ID: /63-3611\(3\)\(a\)/,
+    LA: /47:301\(4\)\(h\)/,
+    NM: /7-9-3\.3/,
+  };
+  for (const [state, needle] of Object.entries(needles)) {
+    const d = decide(tessFacts(state));
+    assert.equal(d.action, "register_now", state);
+    assert.equal(d.documentation_status, "documented");
+    assert.equal(d.confidence, "high");
+    assert.equal(d.packet_date, TESS_PACKET_DATE);
+    assert.match(d.citation, needle);
+    assert.match(d.reason, /tess_packet/);
+  }
+});
+
+test("partial MO/AL/MS/AZ are not register_now", () => {
+  for (const state of ["MO", "AL", "MS"] as const) {
+    const d = decide(tessFacts(state));
+    assert.equal(d.action, "needs_statute_review", state);
+    assert.equal(d.documentation_status, "partial");
+    assert.match(d.reason, /partial — FBA not named; CPA confirm/);
+  }
+  const az = decide(tessFacts("AZ"));
+  assert.equal(az.action, "review_contested");
+  assert.equal(az.documentation_status, "partial");
+  assert.match(az.citation, /ADOR FAQ/);
+});
+
+test("economic-only path is unchanged", () => {
+  const d = decide(facts({ economic_exceeded: true, economic_pct: 145, amazon_sales: 250_000 }));
+  assert.equal(d.action, "register_now");
+  assert.equal(d.authority_source, "economic");
+  assert.match(d.reason, /economic threshold exceeded/);
+});
+
+test("bundled Tess citations match config JSON", () => {
+  const parent = path.join(process.cwd(), "..", "config", "fba_inventory_nexus_citations.json");
+  if (!existsSync(parent)) return;
+  const src = JSON.parse(readFileSync(parent, "utf8")) as {
+    states: Record<string, { documentation_status: string; posture: string; short_citation: string }>;
+  };
+  const bundled = bundledCitations();
+  for (const [sc, pkt] of Object.entries(src.states)) {
+    assert.equal(bundled[sc]?.documentation_status, pkt.documentation_status, sc);
+    assert.equal(bundled[sc]?.posture, pkt.posture, sc);
+    assert.equal(bundled[sc]?.short_citation, pkt.short_citation, sc);
+  }
+  assert.doesNotMatch(src.states.IL.short_citation, /105\/2\(1\.1\)/);
+});
+
+test("Nexus card shows documentation status and Tess packet date", () => {
+  const ui = readFileSync(
+    path.join(process.cwd(), "src/components/registration-plan.tsx"),
+    "utf8",
+  );
+  assert.match(ui, /documentation_status/);
+  assert.match(ui, /2026-09-11/);
+  assert.match(ui, /needs_statute_review/);
 });

@@ -191,7 +191,7 @@
       "confidence": "high",
       "effective_date": "2015-01-01",
       "primary_sources": [
-        {"type": "statute", "citation": "35 ILCS 105/2(1.1)", "description": "Use tax nexus — maintaining a place of business"},
+        {"type": "statute", "citation": "35 ILCS 105/2(1)", "description": "Use tax nexus — maintaining a place of business. Click-through 35 ILCS 105/2(1.1) is not the FBA-inventory cite."},
         {"type": "regulation", "citation": "86 Ill. Adm. Code 150.201", "description": "Nexus regulations"}
       ],
       "notes": "IL has been among the states that expressly treat inventory storage as nexus-creating. Multiple FBA warehouses (MDW, ORD). Illinois has a complex tax structure with separate Retailers' Occupation Tax and Use Tax.",

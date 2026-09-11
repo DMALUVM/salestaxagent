@@ -7,8 +7,8 @@
  *
  * The ranked Nexus card ("Sales-tax registration plan") does NOT use this
  * model. It uses `registration-plan.ts`, which is the TypeScript port of
- * `src/exports/registration_plan.py` (register_now / review_contested /
- * monitor / already_registered / no_sales_tax).
+ * `src/exports/registration_plan.py` (register_now / needs_statute_review /
+ * review_contested / monitor / already_registered / no_sales_tax).
  */
 
 import type { NexusStatus, StateRule, SalesByState } from "@/lib/types";
