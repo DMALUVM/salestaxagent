@@ -642,6 +642,9 @@ def test_collect_kr_results_reads_data_keywords_envelope(monkeypatch):
     assert [r["keyword_normalized"] for r in parsed] == [
         "tallow lip balm", "grass fed tallow",
     ]
+    src = inspect.getsource(ss.get_kr_asin_results)
+    assert "searchVolume" in src
+    assert "sortDesc" in src
 
 
 def test_kr_create_only_when_download_ready_and_no_rt(monkeypatch):

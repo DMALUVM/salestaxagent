@@ -6,6 +6,7 @@
   "blake_family_cap": 5,
   "blake_total_cap": 15,
   "max_keywords": 80,
+  "min_search_volume": 1,
   "opportunity_floor": 100,
   "excluded_asins": ["B0CLF5B27Y"],
   "families": {
