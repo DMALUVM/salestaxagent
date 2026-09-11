@@ -12,14 +12,16 @@ Three boundaries this module holds:
    recommendation. Those are a different tax, a different agency and a different
    decision; they live in the entity matrix and appear here only as a footnote.
 
-2. **Contested physical nexus is never a silent register_now.** Where the state
-   rules say FBA inventory does not (or may not) create nexus, holding stock
-   there produces `review_contested`. The conservative-sounding action is not
-   automatically the correct one, and registering creates filing obligations
-   that are awkward to unwind.
+2. **Contested / carve-out / partial physical nexus is never a silent
+   register_now.** Tess citation packets (2026-09-11) are SoT for FBA inventory.
+   Documented carve-outs (IL/NY) and partial packets (MO/AL/MS/AZ) never become
+   `register_now` from inventory alone. `unknown_default_true` is not a
+   researched assert.
 
 3. **A state without sales tax can never be `register_now`.** Enforced
    structurally by ordering, not by remembering to check.
+
+Avalara/GT/STI seed in `fba_nexus_posture.json` must not override Tess packets.
 """
 from __future__ import annotations
 
@@ -29,23 +31,25 @@ from datetime import date
 # Recommended actions, in the order the UI should present them.
 ACTIONS = (
     "register_now",
+    "needs_statute_review",
     "review_contested",
     "monitor",
     "already_registered",
     "no_sales_tax",
 )
 
-# `fba_inventory_creates_nexus` values that support acting on inventory alone.
-# `unknown_default_true` is the seed default: the repo's stated posture is that
-# an unresearched state is assumed to create nexus, which is the conservative
-# reading and is why it belongs here rather than with the contested values.
-FBA_CREATES_NEXUS = frozenset({"true", "unknown_default_true", "True"})
+TESS_PACKET_DATE = "2026-09-11"
+
+# Documented `true` in state_rules (CA/WA/MI). `unknown_default_true` is NOT
+# an assert — it is a repo default and must not quiet-register.
+FBA_CREATES_NEXUS = frozenset({"true", "True"})
 
 # Values that mean "do not act on inventory alone". `false` is a positive
 # finding that FBA stock does not create nexus; `contested` and `conditional`
 # mean the answer depends on facts this system does not hold.
 FBA_NEEDS_REVIEW = frozenset({"contested", "conditional"})
 FBA_NO_NEXUS = frozenset({"false", "False"})
+FBA_UNKNOWN = frozenset({"unknown_default_true", ""})
 
 
 @dataclass
@@ -64,6 +68,12 @@ class StateFacts:
     amazon_sales: float = 0.0
     # Present only so the row can carry a footnote; never an input to `decide`.
     entity_exposure: bool = False
+    # Tess citation packet (2026-09-11). Empty documentation_status = no packet.
+    documentation_status: str = ""
+    tess_posture: str = ""
+    tess_confidence: str = ""
+    tess_citation: str = ""
+    tess_packet_date: str = ""
 
     @property
     def total_relevant_sales(self) -> float:
@@ -79,8 +89,12 @@ class Decision:
     action: str
     reason: str
     confidence: str
-    physical_nexus: str          # "Y" | "N" | "contested"
+    physical_nexus: str          # "Y" | "N" | "contested" | "flagged"
     economic_nexus: str          # "Y" | "N" | "approaching NN%"
+    documentation_status: str = "unknown"   # documented | partial | unknown
+    citation: str = ""
+    packet_date: str = ""
+    authority_source: str = "none"          # tess_packet | state_rule | unknown_default | economic | none
 
 
 @dataclass
@@ -92,12 +106,49 @@ class PlanRow:
     extra: dict = field(default_factory=dict)
 
 
+def _has_tess_packet(f: StateFacts) -> bool:
+    return f.documentation_status in ("documented", "partial")
+
+
+def _packet_date(f: StateFacts) -> str:
+    return f.tess_packet_date or TESS_PACKET_DATE
+
+
 def _physical_label(f: StateFacts) -> str:
     if not f.has_inventory:
         return "N"
+    if f.documentation_status == "documented" and f.tess_posture == "asserts":
+        return "Y"
+    if f.documentation_status == "documented" and f.tess_posture == "carve_out":
+        return "contested"
+    if f.documentation_status == "partial":
+        return "flagged"
     if f.fba_rule in FBA_CREATES_NEXUS:
         return "Y"
-    return "contested"
+    if f.fba_rule in FBA_NO_NEXUS or f.fba_rule in FBA_NEEDS_REVIEW:
+        return "contested"
+    return "flagged"
+
+
+def _decision(
+    action: str,
+    reason: str,
+    confidence: str,
+    phys: str,
+    econ: str,
+    *,
+    documentation_status: str = "unknown",
+    citation: str = "",
+    packet_date: str = "",
+    authority_source: str = "none",
+) -> Decision:
+    return Decision(
+        action, reason, confidence, phys, econ,
+        documentation_status=documentation_status,
+        citation=citation,
+        packet_date=packet_date,
+        authority_source=authority_source,
+    )
 
 
 def _economic_label(f: StateFacts, warn_pct: float) -> str:
@@ -123,56 +174,129 @@ def decide(f: StateFacts, warn_pct: float = 80.0) -> Decision:
         note = ("no state sales tax"
                 + (" (entity/gross-receipts exposure may still exist — see /entity)"
                    if f.entity_exposure else ""))
-        return Decision("no_sales_tax", note, "high", phys, econ)
+        return _decision("no_sales_tax", note, "high", phys, econ)
 
     # 2. Already done.
     if f.is_registered:
-        return Decision("already_registered", "already registered to collect",
-                        "high", phys, econ)
+        return _decision("already_registered", "already registered to collect",
+                         "high", phys, econ)
 
     # 3. Economic nexus is independent of how inventory is treated, so it wins
     #    over a contested FBA position: the threshold is met either way.
     if f.economic_exceeded:
-        return Decision(
+        return _decision(
             "register_now",
             f"economic threshold exceeded ({f.economic_pct:.0f}% of threshold, "
             f"${f.total_relevant_sales:,.0f} relevant sales)",
-            "high", phys, econ)
+            "high", phys, econ,
+            documentation_status=f.documentation_status or "unknown",
+            citation=f.tess_citation,
+            packet_date=_packet_date(f) if _has_tess_packet(f) else "",
+            authority_source="economic",
+        )
 
-    # 4. Inventory present, and the state's rule supports acting on it.
+    inv_prefix = (
+        f"FBA inventory since {f.inventory_first} "
+        f"({f.inventory_events:,} events)"
+    )
+
+    # 4. Tess packet — SoT for FBA inventory. Documented asserts may
+    #    register_now; carve-out and partial never quiet-register.
+    if f.has_inventory and _has_tess_packet(f):
+        date = _packet_date(f)
+        cite = f.tess_citation
+        conf = f.tess_confidence or "medium"
+        status = f.documentation_status
+        if status == "documented" and f.tess_posture == "asserts":
+            return _decision(
+                "register_now",
+                f"{inv_prefix}; documented Tess packet ({date}): "
+                f"asserts/{conf} — {cite} [source: tess_packet].",
+                conf, phys, econ,
+                documentation_status="documented",
+                citation=cite,
+                packet_date=date,
+                authority_source="tess_packet",
+            )
+        if status == "documented" and f.tess_posture == "carve_out":
+            return _decision(
+                "review_contested",
+                f"{inv_prefix}, but documented Tess packet ({date}): "
+                f"carve_out/{conf} — {cite}. MF-only FBA inventory is not a "
+                f"silent register_now. Confirm with a CPA before registering.",
+                conf, phys, econ,
+                documentation_status="documented",
+                citation=cite,
+                packet_date=date,
+                authority_source="tess_packet",
+            )
+        # partial (AZ contested, or MO/AL/MS asserts-without-FBA-name)
+        action = (
+            "review_contested" if f.tess_posture == "contested"
+            else "needs_statute_review"
+        )
+        extra = (
+            " Fact-specific; confirm with a CPA before registering."
+            if f.tess_posture == "contested"
+            else ""
+        )
+        return _decision(
+            action,
+            f"{inv_prefix}; partial — FBA not named; CPA confirm. "
+            f"Tess packet ({date}): {f.tess_posture}/{conf} — {cite} "
+            f"[source: tess_packet].{extra}",
+            conf, phys, econ,
+            documentation_status="partial",
+            citation=cite,
+            packet_date=date,
+            authority_source="tess_packet",
+        )
+
+    # 5. Documented state_rules true (no Tess packet) — CA/WA/MI.
     if f.has_inventory and f.fba_rule in FBA_CREATES_NEXUS:
-        confidence = "high" if f.fba_rule in ("true", "True") else "medium"
-        basis = ("state rule: FBA inventory creates nexus"
-                 if f.fba_rule in ("true", "True")
-                 else "state rule unresearched — repo default assumes FBA inventory "
-                      "creates nexus (conservative)")
-        return Decision(
+        return _decision(
             "register_now",
-            f"FBA inventory since {f.inventory_first} "
-            f"({f.inventory_events:,} events); {basis}",
-            confidence, phys, econ)
+            f"{inv_prefix}; documented: FBA inventory creates nexus "
+            f"[source: state_rule].",
+            "high", phys, econ,
+            documentation_status="documented",
+            authority_source="state_rule",
+        )
 
-    # 5. Inventory present, but the rule says otherwise or is unsettled.
+    # 6. Inventory present, but the rule says otherwise or is unsettled.
     if f.has_inventory and (f.fba_rule in FBA_NEEDS_REVIEW or f.fba_rule in FBA_NO_NEXUS):
         why = ("state rule says FBA inventory does NOT create nexus"
                if f.fba_rule in FBA_NO_NEXUS
                else f"state rule is {f.fba_rule} — depends on facts not held here")
-        return Decision(
+        return _decision(
             "review_contested",
-            f"FBA inventory since {f.inventory_first} "
-            f"({f.inventory_events:,} events), but {why}. Confirm with a CPA "
-            f"before registering.",
-            "medium" if f.fba_rule in FBA_NEEDS_REVIEW else "high", phys, econ)
+            f"{inv_prefix}, but {why}. Confirm with a CPA before registering.",
+            "medium" if f.fba_rule in FBA_NEEDS_REVIEW else "high",
+            phys, econ,
+            documentation_status="documented",
+            authority_source="state_rule",
+        )
 
-    # 6. Approaching the threshold.
+    # 7. Inventory + unknown default — never quiet register_now.
+    if f.has_inventory:
+        return _decision(
+            "needs_statute_review",
+            f"{inv_prefix}; needs statute review. Insufficient authority "
+            f"(unknown_default, not Tess-researched).",
+            "low", phys, econ,
+            documentation_status="unknown",
+            authority_source="unknown_default",
+        )
+
+    # 8. Approaching the threshold.
     if f.economic_pct >= warn_pct:
-        return Decision(
+        return _decision(
             "monitor",
             f"{f.economic_pct:.0f}% of economic threshold "
             f"(${f.total_relevant_sales:,.0f}) — no nexus trigger yet",
             "high", phys, econ)
 
-    return Decision(
+    return _decision(
         "monitor",
         f"no nexus trigger (${f.total_relevant_sales:,.0f} relevant sales, "
         f"{f.economic_pct:.0f}% of threshold)",
@@ -196,7 +320,7 @@ def sort_rows(rows: list[PlanRow]) -> list[PlanRow]:
 
 def build_rows(reference_date: date | None = None) -> list[PlanRow]:
     """Gather live facts and decide for every jurisdiction in state_rules."""
-    from src.config import load_state_rules, settings
+    from src.config import load_fba_inventory_nexus_citations, load_state_rules, settings
     from src.db import fetch_all
     from src.exports.registration_triage import (
         _gather_inventory_presence, _gather_sales_12m,
@@ -204,6 +328,7 @@ def build_rows(reference_date: date | None = None) -> list[PlanRow]:
 
     ref = reference_date or date.today()
     rules = load_state_rules().get("states", {})
+    packets = load_fba_inventory_nexus_citations()
     inventory = _gather_inventory_presence()
     sales = _gather_sales_12m(ref)
     nexus = {n["state_code"]: n for n in fetch_all("nexus_status")}
@@ -220,6 +345,7 @@ def build_rows(reference_date: date | None = None) -> list[PlanRow]:
         inv = inventory.get(sc) or {}
         sale = sales.get(sc) or {}
         nx = nexus.get(sc) or {}
+        pkt = packets.get(sc) or {}
 
         f = StateFacts(
             state_code=sc,
@@ -234,6 +360,11 @@ def build_rows(reference_date: date | None = None) -> list[PlanRow]:
             shopify_sales=float(sale.get("shopify") or 0),
             amazon_sales=float(sale.get("amazon") or 0),
             entity_exposure=sc in entity_states,
+            documentation_status=str(pkt.get("documentation_status") or ""),
+            tess_posture=str(pkt.get("posture") or ""),
+            tess_confidence=str(pkt.get("confidence") or ""),
+            tess_citation=str(pkt.get("short_citation") or ""),
+            tess_packet_date=str(pkt.get("packet_date") or ""),
         )
         d = decide(f, warn_pct)
         note = ""
@@ -294,7 +425,8 @@ CSV_COLUMNS = [
     "state", "sales_tax", "already_registered", "physical_nexus",
     "first_inventory_date", "economic_nexus", "shopify_sales", "amazon_sales",
     "total_relevant_sales", "recommended_action", "short_reason", "confidence",
-    "entity_note",
+    "entity_note", "documentation_status", "citation", "packet_date",
+    "authority_source",
 ]
 
 
@@ -316,6 +448,10 @@ def to_csv_rows(rows: list[PlanRow]) -> list[list]:
             d.reason,
             d.confidence,
             r.entity_note,
+            d.documentation_status,
+            d.citation,
+            d.packet_date,
+            d.authority_source,
         ])
     return out
 
@@ -332,18 +468,21 @@ def digest_line() -> str | None:
         return None
     c = counts_by_action(rows)
     now = c.get("register_now", 0)
+    flagged = c.get("needs_statute_review", 0)
     contested = c.get("review_contested", 0)
     approaching = sum(
         1 for r in rows
         if r.decision.action == "monitor" and r.decision.economic_nexus.startswith("approaching")
     )
-    if not (now or contested or approaching):
+    if not (now or flagged or contested or approaching):
         return None
 
     bits = []
     if now:
         top = [r.facts.state_code for r in rows if r.decision.action == "register_now"][:5]
         bits.append(f"{now} to register ({', '.join(top)}{'…' if now > 5 else ''})")
+    if flagged:
+        bits.append(f"{flagged} need statute review")
     if contested:
         bits.append(f"{contested} contested — CPA review")
     if approaching:

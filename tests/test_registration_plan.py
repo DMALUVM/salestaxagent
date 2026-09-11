@@ -5,12 +5,18 @@ a state without sales tax can never be a registration target, contested FBA
 nexus never becomes a silent register_now, and entity taxes never leak into a
 sales-tax recommendation.
 """
+import json
+
 import pytest
 
+from src.config import load_fba_inventory_nexus_citations
 from src.exports.registration_plan import (
-    ACTIONS, PlanRow, StateFacts, counts_by_action, decide, sort_rows,
-    to_csv_rows,
+    ACTIONS, TESS_PACKET_DATE, PlanRow, StateFacts, counts_by_action, decide,
+    sort_rows, to_csv_rows,
 )
+
+
+PACKETS = load_fba_inventory_nexus_citations()
 
 
 def facts(**kw) -> StateFacts:
@@ -20,6 +26,23 @@ def facts(**kw) -> StateFacts:
                 shopify_sales=0.0, amazon_sales=0.0)
     base.update(kw)
     return StateFacts(**base)
+
+
+def tess_facts(state: str, **kw) -> StateFacts:
+    """Facts with the Tess 2026-09-11 packet applied (and inventory present)."""
+    pkt = PACKETS[state]
+    merged = dict(
+        state_code=state,
+        inventory_events=kw.pop("inventory_events", 100),
+        inventory_first=kw.pop("inventory_first", "2024-01-01"),
+        documentation_status=pkt["documentation_status"],
+        tess_posture=pkt["posture"],
+        tess_confidence=pkt["confidence"],
+        tess_citation=pkt["short_citation"],
+        tess_packet_date=pkt["packet_date"],
+    )
+    merged.update(kw)
+    return facts(**merged)
 
 
 class TestNoSalesTax:
@@ -87,14 +110,18 @@ class TestPhysicalNexus:
         assert d.confidence == "high"
         assert d.physical_nexus == "Y"
 
-    def test_unresearched_rule_registers_but_only_at_medium_confidence(self):
-        """The repo default is conservative; the row must say so."""
+    def test_unknown_default_with_inventory_is_not_register_now(self):
+        """unknown_default_true is a repo default, not Tess-researched."""
         f = facts(fba_rule="unknown_default_true", inventory_events=800,
                   inventory_first="2024-03-01")
         d = decide(f)
-        assert d.action == "register_now"
-        assert d.confidence == "medium"
-        assert "unresearched" in d.reason
+        assert d.action == "needs_statute_review"
+        assert d.action != "register_now"
+        assert d.confidence == "low"
+        assert d.documentation_status == "unknown"
+        assert d.authority_source == "unknown_default"
+        assert "unresearched" not in d.reason
+        assert "Insufficient authority" in d.reason
 
     @pytest.mark.parametrize("rule", ["false", "False"])
     def test_rule_saying_no_nexus_is_review_never_register(self, rule):
@@ -116,7 +143,7 @@ class TestPhysicalNexus:
 
     def test_contested_never_becomes_register_now_silently(self):
         """Guard the whole class of inputs, not just one example."""
-        for rule in ("false", "contested", "conditional"):
+        for rule in ("false", "contested", "conditional", "unknown_default_true"):
             for events in (1, 100, 99_999):
                 d = decide(facts(fba_rule=rule, inventory_events=events,
                                  inventory_first="2024-01-01"))
@@ -142,7 +169,8 @@ class TestOrdering:
         rows = [
             PlanRow(facts(state_code="Z"), decide(facts(state_code="Z", is_registered=True))),
             PlanRow(facts(state_code="Y", amazon_sales=1),
-                    decide(facts(state_code="Y", inventory_events=1, inventory_first="2024-01-01"))),
+                    decide(facts(state_code="Y", fba_rule="true",
+                                inventory_events=1, inventory_first="2024-01-01"))),
         ]
         assert sort_rows(rows)[0].decision.action == "register_now"
 
@@ -162,6 +190,9 @@ class TestOrdering:
                                      has_sales_tax=tax, inventory_events=3,
                                      inventory_first="2024-01-01"))
                     assert d.action in ACTIONS
+        for sc in PACKETS:
+            d = decide(tess_facts(sc))
+            assert d.action in ACTIONS
 
 
 class TestCsv:
@@ -173,3 +204,81 @@ class TestCsv:
     def test_totals_are_the_sum_of_channels(self):
         f = facts(shopify_sales=100.25, amazon_sales=200.75)
         assert f.total_relevant_sales == 301.0
+
+
+class TestTessPackets:
+    @pytest.mark.parametrize("state", ["IL", "NY"])
+    def test_documented_carve_out_is_not_register_now(self, state):
+        d = decide(tess_facts(state))
+        assert d.action == "review_contested"
+        assert d.documentation_status == "documented"
+        assert d.confidence == "high"
+        assert d.authority_source == "tess_packet"
+        assert d.packet_date == TESS_PACKET_DATE
+        assert d.citation
+        assert "35 ILCS 105/2(1.1)" not in d.citation
+        assert "35 ILCS 105/2(1.1)" not in d.reason
+
+    def test_il_uses_use_tax_not_click_through_cite(self):
+        d = decide(tess_facts("IL"))
+        assert "35 ILCS 105/2(1)" in d.citation
+        assert "131.105" in d.citation
+        assert "PIO-125" in d.citation
+
+    def test_ny_uses_fulfillment_safe_harbor(self):
+        d = decide(tess_facts("NY"))
+        assert "1101(b)(8)(v)" in d.citation
+        assert "TSB-A-24(45)S" in d.citation
+
+    @pytest.mark.parametrize("state,needle", [
+        ("ID", "63-3611(3)(a)"),
+        ("LA", "47:301(4)(h)"),
+        ("NM", "7-9-3.3"),
+    ])
+    def test_documented_asserts_register_now_with_citation(self, state, needle):
+        d = decide(tess_facts(state))
+        assert d.action == "register_now"
+        assert d.documentation_status == "documented"
+        assert d.confidence == "high"
+        assert d.authority_source == "tess_packet"
+        assert d.packet_date == TESS_PACKET_DATE
+        assert needle in d.citation
+        assert "tess_packet" in d.reason
+
+    @pytest.mark.parametrize("state", ["MO", "AL", "MS"])
+    def test_partial_asserts_are_not_register_now(self, state):
+        d = decide(tess_facts(state))
+        assert d.action == "needs_statute_review"
+        assert d.action != "register_now"
+        assert d.documentation_status == "partial"
+        assert d.confidence == "medium"
+        assert "partial — FBA not named; CPA confirm" in d.reason
+        assert d.packet_date == TESS_PACKET_DATE
+        assert d.citation
+
+    def test_az_partial_is_review_contested(self):
+        d = decide(tess_facts("AZ"))
+        assert d.action == "review_contested"
+        assert d.action != "register_now"
+        assert d.documentation_status == "partial"
+        assert d.confidence == "medium"
+        assert "partial — FBA not named; CPA confirm" in d.reason
+        assert "ADOR FAQ" in d.citation
+
+    def test_economic_only_path_unchanged(self):
+        d = decide(facts(economic_exceeded=True, economic_pct=145.0,
+                         amazon_sales=250_000))
+        assert d.action == "register_now"
+        assert d.authority_source == "economic"
+        assert "economic threshold exceeded" in d.reason
+
+    def test_economic_outranks_a_tess_carve_out(self):
+        d = decide(tess_facts("IL", economic_exceeded=True, economic_pct=130.0))
+        assert d.action == "register_now"
+        assert d.authority_source == "economic"
+
+    def test_il_click_through_cite_is_dropped_from_packet_file(self):
+        il = PACKETS["IL"]
+        cites = [c["cite"] for c in il["citations"]] + [il["short_citation"]]
+        assert all("105/2(1.1)" not in c for c in cites)
+        assert any(c == "35 ILCS 105/2(1)" for c in cites)
