@@ -4,6 +4,7 @@
   "observe_only": true,
   "launched_at": "2026-09-07T12:00:00-04:00",
   "next_human_review_at": "2026-09-09T18:00:00-07:00",
+  "next_human_review_note": "Optional seed only — ignored once past. Live SoT is next Wednesday 18:00 America/Los_Angeles (Amazon/Ads desk TZ).",
   "auto_loose_budget": 303,
   "new_exact_zero_order_spend_alert": 15,
   "shell_daily_budget_cap": 25,

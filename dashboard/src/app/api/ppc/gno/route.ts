@@ -4,7 +4,6 @@ import {
   AUTO_LOOSE_NAME,
   GNO_DESK_SPEND_LOOKBACK_DAYS,
   GNO_LAUNCHED_AT,
-  GNO_NEXT_REVIEW_AT,
   GNO_OBSERVE_ONLY,
   evaluateGnoAlerts,
   harvestQueue,
@@ -17,7 +16,7 @@ import {
   type PlacementRow,
   type SearchTermRow,
 } from "@/lib/gno-ppc-watch";
-import { evaluateExportNeed } from "@/lib/gno-export-state";
+import { exportBannerFromState } from "@/lib/gno-export-state";
 import { loadGnoExportState, loadGnoLedger } from "@/lib/gno-store";
 import { loadSoldScopeKeywordIntel, loadSoldScopeOutlierSources, loadSoldScopeRankStatus } from "@/lib/soldscope-load";
 import { attachKeywordIntel } from "@/lib/soldscope-status";
@@ -232,16 +231,7 @@ export async function GET() {
     );
     const p0 = alerts.filter((a) => a.priority === "P0");
     const p1 = alerts.filter((a) => a.priority === "P1");
-    const exportBanner = evaluateExportNeed({
-      now,
-      nextReviewAt: GNO_NEXT_REVIEW_AT,
-      p0,
-      p1,
-      lastExportAt: exportState?.last_export_at,
-      lastExportReason: exportState?.last_export_reason,
-      ackedP0Keys: exportState?.acked_p0_keys,
-      ackedP1Keys: exportState?.acked_p1_keys,
-    });
+    const exportBanner = exportBannerFromState(exportState, { now, p0, p1 });
     const sbL7 = campaigns.filter((c) => {
       const t = String(c.campaign_type ?? "SP").toUpperCase();
       return t === "SB" && c.date >= windowStart(asOf, 7) && c.date <= asOf;
@@ -262,7 +252,7 @@ export async function GET() {
       asOf,
       today,
       launchedAt: GNO_LAUNCHED_AT,
-      nextReviewAt: GNO_NEXT_REVIEW_AT,
+      nextReviewAt: exportBanner.nextReviewAt,
       hoursSinceLaunch: hoursSinceLaunch(now),
       autoLooseName: AUTO_LOOSE_NAME,
       alerts,
@@ -301,16 +291,17 @@ export async function GET() {
       loadErrors,
     });
   } catch (e) {
-    const exportBanner = evaluateExportNeed({
-      now: new Date(),
-      nextReviewAt: GNO_NEXT_REVIEW_AT,
-      p0: [],
-      p1: [],
-    });
+    let exportState = null;
+    try {
+      exportState = await loadGnoExportState();
+    } catch { /* last_export_* stays null */ }
+    const exportBanner = exportBannerFromState(exportState);
     return Response.json({
       observeOnly: true,
       error: e instanceof Error ? e.message : String(e),
-      nextReviewAt: GNO_NEXT_REVIEW_AT,
+      nextReviewAt: exportBanner.nextReviewAt,
+      lastExportAt: exportState?.last_export_at ?? null,
+      lastExportReason: exportState?.last_export_reason ?? null,
       exportBanner,
       alerts: [],
       p0: [],
