@@ -67,6 +67,7 @@ export const SQP_SLICE_CSV_HEADERS = [
   "week_start", "week_end", "asin", "search_query", "query_normalized",
   "search_query_volume", "impression_share", "click_share", "purchase_share",
   "asin_impressions", "asin_clicks", "asin_purchases", "source",
+  "stale_pre_raise",
 ] as const;
 
 export const SQP_SLICE_QUERIES = [
@@ -99,8 +100,13 @@ export const ST_CAMPAIGN_SOT_NOTE =
 /** 1-day ST stamp vs campaign daily — slack so rounding is not treated as a 7d SUMMARY. */
 export const ST_DAILY_SPEND_SLACK = 1.25;
 export const ST_DAILY_SPEND_ABS = 2;
-/** TBM 1-child Exact shells on B0CLF5B27Y (config names may omit | TOS). */
-const TBM_NEW_EXACT_RE = /^sp \| tbm \| b0clf5b27y \| ex \|/;
+/**
+ * Live TBM Exact shells on balm ASIN B0CLF5B27Y (ads_campaign_meta, Sep 11).
+ * Only these two keywords. Balm-ASIN + deodorant name is never NEW_EXACT.
+ */
+const TBM_ALLOWED_EXACT_RE =
+  /^sp \| tbm \| b0clf5b27y \| ex \| (tallow balm|beef tallow balm)(?:\s*\|\s*tos)?$/;
+const TBM_FORBIDDEN_DEO_RE = /^sp \| tbm \| b0clf5b27y \| ex \| .*\bdeodorant\b/;
 
 export interface ContributionFrame {
   family: GnoFamily;
@@ -381,6 +387,8 @@ export interface SqpSliceRow {
   asin_clicks?: number | null;
   asin_purchases?: number | null;
   source?: string | null;
+  /** true when the packed week does not cover Sep 7–10. Never imply currency. */
+  stale_pre_raise?: boolean;
 }
 
 export interface AsinCatalogRow {
@@ -490,15 +498,25 @@ export function extractExactKeyword(campaignName: string): string | null {
   return m ? normalizeTerm(m[1]) : null;
 }
 
-/** Config NEW_EXACT names, plus live TBM B0CLF5B27Y Exact shells (optional | TOS). */
+/** Drop a trailing `| TOS` so config and live ads_campaign_meta names match. */
+export function stripOptionalTos(name: string): string {
+  return normalizeName(name).replace(/\s*\|\s*tos$/, "");
+}
+
+/**
+ * Config NEW_EXACT names (optional live `| TOS`), plus the two allowed TBM
+ * B0CLF5B27Y Exact shells. Never treat balm-ASIN + deodorant as NEW_EXACT.
+ */
 export function isNewExactName(campaignName: string): boolean {
-  if (NEW_EXACT.some((n) => namesEqual(n, campaignName))) return true;
   const n = normalizeName(campaignName);
   if (!n) return false;
-  if (TBM_NEW_EXACT_RE.test(n)) return true;
+  if (TBM_FORBIDDEN_DEO_RE.test(n)) return false;
+  if (NEW_EXACT.some((cfg) => stripOptionalTos(cfg) === stripOptionalTos(n))) return true;
+  if (TBM_ALLOWED_EXACT_RE.test(n)) return true;
   return NEW_EXACT.some((cfg) => {
-    const base = normalizeName(cfg);
-    return n === base || n.startsWith(`${base} |`) || n.startsWith(`${base}|`);
+    const base = stripOptionalTos(cfg);
+    const live = stripOptionalTos(n);
+    return live === base || live.startsWith(`${base} |`) || live.startsWith(`${base}|`);
   });
 }
 
@@ -1686,12 +1704,17 @@ export function weekCoversSqpTarget(
 
 export function sqpSliceStaleNote(weekStart: string, weekEnd: string): string {
   if (weekCoversSqpTarget(weekStart, weekEnd)) {
-    return `SQP slice week ${weekStart}–${weekEnd} covers Sep 7–10 (bid-raise window).`;
+    return (
+      `SQP slice week ${weekStart}–${weekEnd} covers Sep 7–10 (bid-raise window). `
+      + `stale_pre_raise=false.`
+    );
   }
   return (
-    `SQP slice week ${weekStart}–${weekEnd} is the latest stored week — it does NOT cover `
-    + `${SQP_SLICE_COVER_START}–${SQP_SLICE_COVER_END} (bid raises). Do not treat this as `
-    + `the current / post-raise week.`
+    `SQP week covering Sep 7–10 not in warehouse yet; slice is ${weekStart}–${weekEnd} `
+    + `(pre-raise). stale_pre_raise=true. Amazon SQP is weekly (Sun–Sat); the week that `
+    + `includes Sep 7–10 is 2026-09-06→2026-09-12 and is not published until that Saturday `
+    + `closes (plus ~24–48h). Do not poll daily. After 2026-09-12 upload Brand Analytics `
+    + `SQP CSV on /ppc/gno or run \`python -m src.main sqp-sync --apply --ref 2026-09-13\`.`
   );
 }
 
@@ -1732,11 +1755,13 @@ export function sqpWeeklySliceRows(rows: SqpSliceRow[]): SqpSliceRow[] {
   const picked = selectSqpSliceWeek(rows);
   if (!picked) return [];
   const wanted = new Set<string>(SQP_SLICE_QUERIES);
+  const stale = !picked.coversTarget;
   return rows
     .filter((r) => {
       const q = normalizeTerm(r.query_normalized || r.search_query);
       return wanted.has(q) && String(r.week_end ?? "") === picked.weekEnd;
     })
+    .map((r) => ({ ...r, stale_pre_raise: stale }))
     .sort((a, b) => {
       const qa = normalizeTerm(a.query_normalized || a.search_query);
       const qb = normalizeTerm(b.query_normalized || b.search_query);
@@ -1760,6 +1785,7 @@ export function sqpWeeklySliceCsv(rows: SqpSliceRow[]): string {
     asin_clicks: r.asin_clicks ?? null,
     asin_purchases: r.asin_purchases ?? null,
     source: r.source ?? "",
+    stale_pre_raise: r.stale_pre_raise === true,
   })));
 }
 
@@ -1771,11 +1797,14 @@ export function gnoPackReadme(input: {
   files: string[];
   sqpIncluded: boolean;
   sqpNote?: string;
+  sqpStale?: boolean;
   organicIncluded: boolean;
 }): string {
   const sqpLine = input.sqpIncluded
-    ? `- sqp_weekly_slice.csv — one stored week for ${SQP_SLICE_QUERIES.join(" / ")} (from sqp_weekly). Shares are reported, never invented.`
-    : "- sqp_weekly_slice.csv — OMITTED. No sqp_weekly / Brand Analytics rows for the slice queries. Do not invent SQP rows.";
+    ? (input.sqpStale
+      ? `- sqp_weekly_slice.csv — STALE PRE-RAISE (stale_pre_raise=true). SQP week covering Sep 7–10 not in warehouse yet; slice is Aug 30–Sep 5 (pre-raise). Do not treat as the post-raise week. Shares are reported, never invented.`
+      : `- sqp_weekly_slice.csv — week covering Sep 7–10 for ${SQP_SLICE_QUERIES.join(" / ")} (from sqp_weekly). stale_pre_raise=false. Shares are reported, never invented.`)
+    : "- sqp_weekly_slice.csv — OMITTED. SQP week covering Sep 7–10 not in warehouse yet (and no other slice rows). Do not invent SQP rows. After 2026-09-12 upload Brand Analytics SQP CSV on /ppc/gno or run `python -m src.main sqp-sync --apply --ref 2026-09-13`.";
   const sqpStatus = input.sqpNote ? `SQP week: ${input.sqpNote}` : "";
   const organicLine = input.organicIncluded
     ? "- organic_rank_snapshot.csv — hero ASINs B0CLHTF8YN (lip) / B0DQFKMJFY (balm) / B0HBSZ71XQ (deo). Rank from soldscope_rank_snapshots. aba_sfr is Brand Analytics SFR only."
@@ -1916,6 +1945,7 @@ export function buildGnoPack(input: {
       files: files.map((f) => f.name).concat("README.txt"),
       sqpIncluded: sqp.length > 0,
       sqpNote: sqpWeek?.note,
+      sqpStale: sqpWeek ? !sqpWeek.coversTarget : undefined,
       organicIncluded: organicRows.length > 0,
     }),
   });

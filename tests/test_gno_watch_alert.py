@@ -140,9 +140,11 @@ def test_alert_module_is_observe_only_no_wait():
     assert "amazonads" not in src.lower()
 
 
-def test_extract_exact_keyword_reads_tbm_shells_without_trailing_tos():
+def test_extract_exact_keyword_reads_tbm_and_deo_shells_with_optional_tos():
     assert extract_exact_keyword("SP | TBM | B0CLF5B27Y | EX | tallow balm") == "tallow balm"
     assert extract_exact_keyword(
-        "SP | TBM | B0CLF5B27Y | EX | tallow deodorant for men") == "tallow deodorant for men"
+        "SP | TBM | B0CLF5B27Y | EX | tallow balm | TOS") == "tallow balm"
+    assert extract_exact_keyword(
+        "SP | DEO | B0CLHYY3BB | EX | tallow deodorant for men | TOS") == "tallow deodorant for men"
     assert extract_exact_keyword(
         "SP | TBL | B0CLHVCPL5 | EX | tallow lip balm | TOS") == "tallow lip balm"
