@@ -24,7 +24,7 @@ async function selectAll(sb: Sb, table: string): Promise<Record<string, unknown>
   try {
     const { data, error } = await sb.from(table).select("*").limit(5000);
     if (error) return [];
-    return (data ?? []) as Record<string, unknown>[];
+    return (data ?? []) as unknown as Record<string, unknown>[];
   } catch {
     return [];
   }
@@ -108,7 +108,7 @@ async function pageTable(
         .order(orderCol, { ascending: false })
         .range(offset, offset + 999);
       if (error) return rows;
-      const page = (data ?? []) as Record<string, unknown>[];
+      const page = (data ?? []) as unknown as Record<string, unknown>[];
       rows.push(...page);
       if (page.length < 1000) break;
       offset += 1000;
