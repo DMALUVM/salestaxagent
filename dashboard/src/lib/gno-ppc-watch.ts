@@ -415,6 +415,7 @@ export const DEO_BE_ACOS = spec.family_break_even_acos.deo;
 export const BALM_BE_ACOS = spec.family_break_even_acos.balm;
 export const CORE_NEGATIVES = spec.core_negatives as readonly string[];
 export const GNO_LAUNCHED_AT = spec.launched_at;
+/** Historical first 48h slot from config. Not live SoT — use resolveGnoReviewClock. */
 export const GNO_NEXT_REVIEW_AT = spec.next_human_review_at;
 
 /**
@@ -1213,13 +1214,8 @@ export function evaluateGnoAlerts(input: {
     }
   }
 
-  if (now.getTime() >= Date.parse(GNO_NEXT_REVIEW_AT)) {
-    alerts.push(alert("P2", "REVIEW_48H", "Wednesday / 48h pack is due",
-      `Next human review target ${GNO_NEXT_REVIEW_AT}. Export GNO pack and send to Grok. Observe only.`));
-  } else {
-    alerts.push(alert("P2", "REVIEW_48H_PENDING", "48h pack pending",
-      `New Exact launched ${GNO_LAUNCHED_AT}. Export GNO pack after ${GNO_NEXT_REVIEW_AT}.`));
-  }
+  alerts.push(alert("P2", "REVIEW_48H_CADENCE", "Wednesday 6pm PT / 48h pack",
+    "Standing cadence: export the GNO pack Wednesday evenings (6:00 PM America/Los_Angeles). Observe only."));
 
   return alerts;
 }

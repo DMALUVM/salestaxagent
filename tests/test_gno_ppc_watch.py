@@ -99,6 +99,7 @@ def test_gno_dashboard_never_auto_writes_amazon():
         ROOT / "dashboard" / "src" / "lib" / "gno-export-state.ts",
         ROOT / "dashboard" / "src" / "lib" / "gno-learning.ts",
         ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno" / "route.ts",
+        ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno-state" / "route.ts",
         ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno-export" / "route.ts",
         ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno-outcome" / "route.ts",
         ROOT / "dashboard" / "src" / "app" / "api" / "ppc" / "gno-ack" / "route.ts",
@@ -157,3 +158,4 @@ def test_gno_json_pins_export_and_learning_knobs():
     assert spec["observe_only"] is True
     assert spec["launched_at"] == "2026-09-07T12:00:00-04:00"
     assert spec["next_human_review_at"] == "2026-09-09T18:00:00-07:00"
+    assert "Live SoT is next Wednesday" in spec["next_human_review_note"]

@@ -498,7 +498,7 @@ describe("per-campaign New Exact launch clock", () => {
     ];
   }
 
-  test("config launched_at fallback is Dave midday ET, Wed review unchanged", () => {
+  test("config launched_at fallback is Dave midday ET, Wed review seed only", () => {
     assert.equal(GNO_LAUNCHED_AT, middayEt);
     assert.equal(GNO_NEXT_REVIEW_AT, "2026-09-09T18:00:00-07:00");
     assert.ok(hoursSinceLaunch(tue7amEt) < 24);
@@ -707,6 +707,7 @@ describe("widgets + safety rails", () => {
       "src/app/ppc/gno/page.tsx",
       "src/components/ppc-gno-watch.tsx",
       "src/app/api/ppc/gno-export/route.ts",
+      "src/app/api/ppc/gno-state/route.ts",
       "src/app/api/ppc/gno-outcome/route.ts",
       "src/app/api/ppc/gno-ack/route.ts",
     ];
@@ -738,6 +739,7 @@ describe("widgets + safety rails", () => {
     assert.equal(existsSync(path.join(process.cwd(), "src/app/ppc/gno/error.tsx")), true);
     assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno/route.ts")), true);
     assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno-export/route.ts")), true);
+    assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno-state/route.ts")), true);
     assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno-ack/route.ts")), true);
     assert.equal(existsSync(path.join(process.cwd(), "src/app/api/ppc/gno-outcome/route.ts")), true);
   });

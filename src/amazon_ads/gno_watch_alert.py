@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from src.rules import (
     GNO_AUTO_LOOSE_BUDGET,
@@ -15,8 +16,12 @@ from src.rules import (
     GNO_KEEP_ALIVE,
     GNO_LAUNCHED_AT,
     GNO_NEW_EXACT,
-    GNO_NEXT_REVIEW_AT,
 )
+
+# Wednesday 18:00 America/Los_Angeles — Amazon/Ads desk TZ (original GNO_NEXT_REVIEW slot).
+GNO_REVIEW_TZ = ZoneInfo("America/Los_Angeles")
+GNO_REVIEW_HOUR = 18
+GNO_REVIEW_WEEKDAY = 2  # Monday=0
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +108,59 @@ def extract_exact_keyword(campaign_name: str) -> str:
 
     m = re.search(r"\|\s*EX\s*\|\s*([^|]+?)(?:\s*\||\s*$)", str(campaign_name or ""), re.I)
     return normalize_name(m.group(1) if m else "")
+
+
+def _aware(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _wednesday_at(d, hour: int = GNO_REVIEW_HOUR) -> datetime:
+    return datetime(d.year, d.month, d.day, hour, 0, 0, tzinfo=GNO_REVIEW_TZ)
+
+
+def first_gno_review_at() -> datetime:
+    launch = parse_iso(GNO_LAUNCHED_AT)
+    origin = launch or datetime(2026, 9, 7, 12, 0, tzinfo=ZoneInfo("America/New_York"))
+    local = origin.astimezone(GNO_REVIEW_TZ)
+    days_since_wed = (local.weekday() - GNO_REVIEW_WEEKDAY) % 7
+    wed_date = local.date() - timedelta(days=days_since_wed)
+    wed = _wednesday_at(wed_date)
+    if wed < origin.astimezone(GNO_REVIEW_TZ):
+        wed = wed + timedelta(days=7)
+    return wed
+
+
+def resolve_gno_review_at(
+    now: datetime,
+    last_export_at: datetime | None = None,
+    lead_hours: int = GNO_EXPORT_REVIEW_LEAD_HOURS,
+) -> str:
+    """Live Wednesday 18:00 PT. Past config seed is ignored."""
+    now = _aware(now).astimezone(GNO_REVIEW_TZ)
+    days_since_wed = (now.weekday() - GNO_REVIEW_WEEKDAY) % 7
+    this_wed_date = now.date() - timedelta(days=days_since_wed)
+    this_wed = _wednesday_at(this_wed_date)
+    last_wed = this_wed - timedelta(days=7)
+    nxt = this_wed + timedelta(days=7)
+    this_window = this_wed - timedelta(hours=lead_hours)
+    last_window = last_wed - timedelta(hours=lead_hours)
+    exported = last_export_at
+    if exported is not None:
+        exported = _aware(exported).astimezone(GNO_REVIEW_TZ)
+
+    def covered(window: datetime) -> bool:
+        return exported is not None and exported >= window
+
+    first = first_gno_review_at()
+    if now < this_window:
+        if last_wed >= first and not covered(last_window):
+            return last_wed.isoformat()
+        return this_wed.isoformat()
+    if covered(this_window):
+        return nxt.isoformat()
+    return this_wed.isoformat()
 
 
 def review_due(
@@ -338,9 +396,10 @@ def maybe_send_gno_export_alert(now: datetime | None = None) -> dict[str, Any]:
     p0s = cheap_p0s_from_campaigns(campaigns)
     p0s.extend(new_exact_zero_impr_p0s(
         campaigns, moment, meta=_load_campaign_meta()))
+    next_review = resolve_gno_review_at(moment, last_export)
     reasons = ping_reasons(
         now=moment,
-        next_review_at=GNO_NEXT_REVIEW_AT,
+        next_review_at=next_review,
         last_export_at=last_export,
         p0s=p0s,
         acked_p0_keys=[str(x) for x in acked],
@@ -362,7 +421,7 @@ def maybe_send_gno_export_alert(now: datetime | None = None) -> dict[str, Any]:
         )
     else:
         message = (
-            f"GNO pack due — 48h review {GNO_NEXT_REVIEW_AT}. "
+            f"GNO pack due — 48h review {next_review}. "
             f"Export /ppc/gno even if quiet. Observe only.\nkey:{key}"
         )
 
