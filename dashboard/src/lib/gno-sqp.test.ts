@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   findSqpHeaderRowIndex,
   isAmazonSqpPreamble,
@@ -165,4 +167,33 @@ test("Reporting Date alone derives week_start = week_end − 6 when preamble mis
   assert.equal(r.weekStart, "2026-08-23");
   assert.equal(r.weekly[0].week_start, "2026-08-23");
   assert.equal(r.weekly[0].week_end, "2026-08-29");
+});
+
+test("GNO + SQP status copy: SP-API weekly auto, CSV fallback — not Ads API / not manual-only", () => {
+  const root = process.cwd();
+  const gno = readFileSync(path.join(root, "src/components/ppc-gno-watch.tsx"), "utf8");
+  const status = readFileSync(path.join(root, "src/components/sqp-status.tsx"), "utf8");
+  const route = readFileSync(path.join(root, "src/app/api/ppc/gno/route.ts"), "utf8");
+
+  for (const src of [gno, status, route]) {
+    assert.match(src, /not in the Ads API/i);
+    assert.match(src, /SP-API/);
+    assert.match(src, /CSV/);
+    assert.match(src, /fallback/);
+    assert.doesNotMatch(src, /manual upload/);
+    assert.doesNotMatch(src, /Drop the official SQP CSV/);
+    assert.doesNotMatch(src, /stays a manual CSV upload/);
+  }
+
+  assert.match(gno, /GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT/);
+  assert.match(gno, /complete Sun–Sat weeks only/);
+  assert.match(gno, /Newest stored week/);
+  assert.match(gno, /rankTrackerCopy/);
+  assert.match(gno, /Impression \/ purchase share is never invented/);
+  assert.match(gno, /CSV fallback/);
+
+  assert.match(status, /GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT/);
+  assert.match(status, /SoldScope Rank Tracker/);
+
+  assert.match(route, /Shares are never invented/);
 });

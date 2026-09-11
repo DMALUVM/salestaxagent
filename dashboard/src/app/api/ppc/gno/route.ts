@@ -170,7 +170,7 @@ export async function GET() {
         };
       }
     } catch {
-      /* SQP stays a manual slot — do not fake shares */
+      /* SQP load failed — do not fake shares */
     }
 
     let lastSync: { at: string | null; job: string | null; status: string | null } = {
@@ -307,7 +307,7 @@ export async function GET() {
       gaps: [
         "Keyword bids / portfolio / placement modifiers come from ads_campaign_meta (Campaigns API snapshot). Missing snapshot is empty, not invented.",
         "Campaign / ad-group negatives live in ads_negatives after the GNO snapshot. Core-negative P0 stays skipped until that table is populated.",
-        "SQP Brand Analytics stays a manual CSV upload. Shares are never invented.",
+        "SQP Brand Analytics is not in the Ads API — weekly SP-API pull for complete Sun–Sat weeks. CSV is fallback. Shares are never invented.",
       ],
       loadErrors,
     });
