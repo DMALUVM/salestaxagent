@@ -201,6 +201,13 @@ export function SqpStatus() {
           {s.sqpAuto?.asins?.length ? ` · ${s.sqpAuto.asins.length} ASIN(s) configured` : ""}
         </p>
         <p className="text-[10px] text-muted-foreground">
+          Not in the Ads API. Weekly SP-API pull{" "}
+          <code>GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT</code>
+          {" "}for complete Sun–Sat weeks. CSV on{" "}
+          <a href="/ppc/gno" className="underline underline-offset-2">GNO Watch</a>
+          {" "}is fallback if SP-API is late/FATAL.
+        </p>
+        <p className="text-[10px] text-muted-foreground">
           SQP reports click/impression <span className="font-medium">share</span>,
           not SERP position — rank is a derived band used to restrain bid
           increases only. Never blocks negatives, pauses or bid cuts.
