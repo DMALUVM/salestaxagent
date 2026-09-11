@@ -142,7 +142,11 @@ export function RegistrationPlan() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {loading && <p className="text-xs text-muted-foreground">Loading plan from the warehouse…</p>}
+        {loading && (
+          <p className="text-xs text-muted-foreground">
+            {rows.length > 0 ? "Refreshing plan from the warehouse…" : "Loading plan from the warehouse…"}
+          </p>
+        )}
         {err && (
           <div className="space-y-2">
             <p className="text-xs text-amber-700 dark:text-amber-400">{err}</p>
@@ -154,7 +158,7 @@ export function RegistrationPlan() {
           </div>
         )}
 
-        {!loading && rows.length > 0 && (
+        {rows.length > 0 && (
           <>
             <div className="flex flex-wrap items-center gap-1">
               {TABS.map((t) => (
