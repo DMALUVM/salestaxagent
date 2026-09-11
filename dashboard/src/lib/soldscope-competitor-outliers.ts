@@ -23,7 +23,7 @@ export function extractExactKeyword(campaignName: string): string | null {
 }
 
 export const COMPETITOR_OUTLIER_EMPTY_COPY =
-  "No net-new unused Exact competitor keywords this week (cap 5/family, 15 total). Real-traffic only — missing/zero search volume is dropped. Weekly job reads cached reverse-ASIN snapshots unless missing or stale. Reuse existing searchType0; do not POST more KR creates. This desk does not create Rank Tracker groups or Product Research. Em dash means empty, not zero.";
+  "No net-new unused Exact competitor keywords this week (cap 5/family, 15 total). Competitor-on-SERP only (organic_asin or sponsored_asin equals that row’s competitor_asin) plus family-fit — rank>0 alone is not presence. Real-traffic only — missing/zero search volume is dropped. Weekly job reads cached reverse-ASIN snapshots unless missing or stale. Reuse existing searchType0; do not POST more KR creates. This desk does not create Rank Tracker groups or Product Research. Em dash means empty, not zero.";
 
 export const COMPETITOR_OUTLIER_CAP = 30;
 export const COMPETITOR_OPPORTUNITY_FLOOR = 100;
@@ -50,6 +50,8 @@ export const COMPETITOR_KR_CSV_HEADERS = [
   "suggested_lever",
 ] as const;
 
+type AllowAllOfRule = { require?: string; also?: string[] };
+
 type CompetitorCfg = {
   opportunity_floor?: number;
   blake_family_cap?: number;
@@ -57,11 +59,150 @@ type CompetitorCfg = {
   stale_after_days?: number;
   min_search_volume?: number;
   max_aba_sfr?: number | null;
+  blake_require_competitor_on_serp?: boolean;
+  blake_keyword_denylist?: string[];
+  blake_family_denylist?: Partial<Record<CompetitorFamily, string[]>>;
+  blake_family_allow?: Partial<Record<CompetitorFamily, string[]>>;
+  blake_family_allow_all_of?: Partial<Record<CompetitorFamily, AllowAllOfRule[]>>;
+  blake_moisturizer_requires?: string[];
+  blake_deo_hero_women_first?: boolean;
+  blake_soft_watch?: Partial<Record<CompetitorFamily | "any_family", string[]>>;
+  blake_soft_watch_brands?: string[];
+  blake_harvest_brands?: string[];
   excluded_asins?: string[];
   competitors?: Array<{ asin?: string; family?: string }>;
 };
 
+export type BlakeFilters = {
+  requireCompetitorOnSerp: boolean;
+  denylist: string[];
+  familyDenylist: Record<CompetitorFamily, string[]>;
+  familyAllow: Record<CompetitorFamily, string[]>;
+  familyAllowAllOf: Record<CompetitorFamily, AllowAllOfRule[]>;
+  moisturizerRequires: string[];
+  deoHeroWomenFirst: boolean;
+  softWatch: Record<CompetitorFamily | "any_family", string[]>;
+  softWatchBrands: string[];
+  harvestBrands: string[];
+};
+
+export type FamilyFit = {
+  fit: boolean;
+  softWatch: boolean;
+  harvestBias: boolean;
+  reason: string;
+};
+
 const cfg = bundled as CompetitorCfg;
+
+function asStrList(value: unknown, fallback: string[] = []): string[] {
+  if (!Array.isArray(value)) return [...fallback];
+  return value.map((x) => String(x ?? "").trim()).filter(Boolean);
+}
+
+export function blakeFiltersFromCfg(raw: CompetitorCfg = cfg): BlakeFilters {
+  const denyFam = raw.blake_family_denylist ?? {};
+  const allow = raw.blake_family_allow ?? {};
+  const allowAll = raw.blake_family_allow_all_of ?? {};
+  const soft = raw.blake_soft_watch ?? {};
+  return {
+    requireCompetitorOnSerp: raw.blake_require_competitor_on_serp !== false,
+    denylist: asStrList(raw.blake_keyword_denylist),
+    familyDenylist: {
+      lip: asStrList(denyFam.lip),
+      balm: asStrList(denyFam.balm),
+      deo: asStrList(denyFam.deo),
+    },
+    familyAllow: {
+      lip: asStrList(allow.lip),
+      balm: asStrList(allow.balm),
+      deo: asStrList(allow.deo),
+    },
+    familyAllowAllOf: {
+      lip: Array.isArray(allowAll.lip) ? allowAll.lip : [],
+      balm: Array.isArray(allowAll.balm) ? allowAll.balm : [],
+      deo: Array.isArray(allowAll.deo) ? allowAll.deo : [],
+    },
+    moisturizerRequires: asStrList(raw.blake_moisturizer_requires, [
+      "tallow", "balm", "butter", "skin for men",
+    ]),
+    deoHeroWomenFirst: raw.blake_deo_hero_women_first === true,
+    softWatch: {
+      any_family: asStrList(soft.any_family),
+      lip: asStrList(soft.lip),
+      balm: asStrList(soft.balm),
+      deo: asStrList(soft.deo),
+    },
+    softWatchBrands: asStrList(raw.blake_soft_watch_brands),
+    harvestBrands: asStrList(raw.blake_harvest_brands),
+  };
+}
+
+export const BLAKE_FILTERS = blakeFiltersFromCfg();
+
+export function keywordMatchesAny(
+  keyword: string,
+  patterns: Iterable<string> | null | undefined,
+): boolean {
+  const text = String(keyword ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!text) return false;
+  for (const raw of patterns ?? []) {
+    const pat = String(raw ?? "").trim();
+    if (!pat) continue;
+    try {
+      if (new RegExp(pat, "i").test(text)) return true;
+    } catch {
+      if (text.includes(pat.toLowerCase())) return true;
+    }
+  }
+  return false;
+}
+
+export function classifyFamilyFit(
+  keyword: string,
+  family: CompetitorFamily,
+  filters: BlakeFilters = BLAKE_FILTERS,
+): FamilyFit {
+  if (keywordMatchesAny(keyword, filters.denylist)) {
+    return { fit: false, softWatch: false, harvestBias: false, reason: "denylist" };
+  }
+  if (keywordMatchesAny(keyword, filters.familyDenylist[family] ?? [])) {
+    return { fit: false, softWatch: false, harvestBias: false, reason: "family_denylist" };
+  }
+  if (family === "balm" && keywordMatchesAny(keyword, ["moisturizer"])) {
+    if (!keywordMatchesAny(keyword, filters.moisturizerRequires)) {
+      return { fit: false, softWatch: false, harvestBias: false, reason: "moisturizer_off_family" };
+    }
+  }
+  let allowed = keywordMatchesAny(keyword, filters.familyAllow[family] ?? []);
+  if (!allowed) {
+    for (const rule of filters.familyAllowAllOf[family] ?? []) {
+      if (
+        keywordMatchesAny(keyword, [rule.require ?? ""])
+        && keywordMatchesAny(keyword, rule.also ?? [])
+      ) {
+        allowed = true;
+        break;
+      }
+    }
+  }
+  if (!allowed) {
+    return { fit: false, softWatch: false, harvestBias: false, reason: "family_allow" };
+  }
+  let soft = keywordMatchesAny(keyword, filters.softWatch.any_family)
+    || keywordMatchesAny(keyword, filters.softWatch[family] ?? [])
+    || keywordMatchesAny(keyword, filters.softWatchBrands);
+  if (family === "deo" && !filters.deoHeroWomenFirst && keywordMatchesAny(keyword, ["lume.*for women"])) {
+    soft = true;
+  }
+  const harvestBias = keywordMatchesAny(keyword, filters.harvestBrands);
+  return {
+    fit: true,
+    softWatch: soft,
+    harvestBias,
+    reason: soft ? "soft_watch" : harvestBias ? "harvest_brand" : "allow",
+  };
+}
 
 export const COMPETITOR_ASINS: readonly string[] = (cfg.competitors ?? [])
   .map((c) => String(c.asin ?? "").trim().toUpperCase())
@@ -101,6 +242,7 @@ export type CompetitorOutlierRow = {
   our_organic_rank: number | null;
   already_bidding: "Y" | "N";
   suggested_lever: SuggestedLever;
+  harvest_bias?: boolean;
   as_of: string | null;
 };
 
@@ -125,16 +267,14 @@ function asInt(value: number | null | undefined): number | null {
 export function competitorPresent(
   row: CompetitorKrRow,
   competitorAsin: string,
+  requireSerp: boolean = BLAKE_FILTERS.requireCompetitorOnSerp,
 ): boolean {
   const want = String(competitorAsin ?? "").trim().toUpperCase();
+  if (!want) return false;
   const orgAsin = String(row.organic_asin ?? "").trim().toUpperCase();
   const spAsin = String(row.sponsored_asin ?? "").trim().toUpperCase();
-  const orgRank = asInt(row.organic_rank);
-  const spRank = asInt(row.sponsored_rank);
-  if (want && orgAsin === want) return true;
-  if (want && spAsin === want) return true;
-  if (orgRank != null && orgRank > 0) return true;
-  if (spRank != null && spRank > 0) return true;
+  if (orgAsin === want || spAsin === want) return true;
+  if (requireSerp) return false;
   return false;
 }
 
@@ -203,8 +343,10 @@ export function suggestLever(args: {
   familyFit: boolean;
   opportunity: number | null;
   opportunityFloor?: number;
+  softWatch?: boolean;
 }): SuggestedLever {
   if (args.alreadyExact || !args.present || !args.familyFit) return "skip";
+  if (args.softWatch) return "watch";
   const floor = args.opportunityFloor ?? COMPETITOR_OPPORTUNITY_FLOOR;
   if (args.opportunity != null && args.opportunity >= floor) return "harvest_exact";
   return "watch";
@@ -243,8 +385,10 @@ export function buildCompetitorOutliers(args: {
     const family = asFamily(row.family);
     const keyword = String(row.keyword ?? "").trim();
     if (!family || !keyword) continue;
-    const present = competitorPresent(row, asin);
+    const present = competitorPresent(row, asin, BLAKE_FILTERS.requireCompetitorOnSerp);
     if (!present) continue;
+    const fit = classifyFamilyFit(keyword, family, BLAKE_FILTERS);
+    if (!fit.fit) continue;
     const bid = classifyExactBidding(keyword, args.targets ?? [], extra);
     const opp = asInt(row.opportunity_score);
     const hero = familyHeroAsin(family);
@@ -269,7 +413,9 @@ export function buildCompetitorOutliers(args: {
         familyFit: true,
         opportunity: opp,
         opportunityFloor: floor,
+        softWatch: fit.softWatch,
       }),
+      harvest_bias: fit.harvestBias,
       as_of: row.as_of ?? null,
     });
   }
@@ -282,6 +428,8 @@ export function buildCompetitorOutliers(args: {
   rows.sort((a, b) => {
     const lever = leverRank[a.suggested_lever] - leverRank[b.suggested_lever];
     if (lever !== 0) return lever;
+    const bias = Number(Boolean(b.harvest_bias)) - Number(Boolean(a.harvest_bias));
+    if (bias !== 0) return bias;
     const opp = (b.opportunity ?? -1) - (a.opportunity ?? -1);
     if (opp !== 0) return opp;
     return (b.volume ?? -1) - (a.volume ?? -1);

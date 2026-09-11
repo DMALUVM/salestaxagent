@@ -1,5 +1,5 @@
 {
-  "_doc": "Competitor reverse-ASIN Keyword Research — observe/recommend only. Weekly reuse of saved searchType0 KR. Create missing only via CLI --create-missing with a hard cap. Never Rank Tracker writes. Never Product Research. Our 1oz balm B0CLF5B27Y is ours, not a competitor.",
+  "_doc": "Competitor reverse-ASIN Keyword Research — observe/recommend only. Weekly reuse of saved searchType0 KR. Create missing only via CLI --create-missing with a hard cap. Never Rank Tracker writes. Never Product Research. Our 1oz balm B0CLF5B27Y is ours, not a competitor. Blake surface + competitor_kr_outliers.csv require competitor-on-SERP (organic_asin or sponsored_asin == competitor_asin). Rank>0 alone is not presence. Family-fit allow/deny and soft-watch live here — keep dashboard/config/ in sync.",
   "marketplace": "US",
   "create_missing_max": 5,
   "stale_after_days": 8,
@@ -8,6 +8,64 @@
   "max_keywords": 80,
   "min_search_volume": 1,
   "opportunity_floor": 100,
+  "blake_require_competitor_on_serp": true,
+  "blake_keyword_denylist": [
+    "ground beef",
+    "heavy cream",
+    "beef tallow for cooking",
+    "tallow for cooking",
+    "eos lotion",
+    "sol de janeiro",
+    "shampoo",
+    "perfume",
+    "body mist",
+    "neosporin"
+  ],
+  "blake_family_denylist": {
+    "lip": [],
+    "balm": [
+      "la roche posay",
+      "cerave",
+      "olay",
+      "illiyoon",
+      "medicube",
+      "drmtlgy"
+    ],
+    "deo": []
+  },
+  "blake_family_allow": {
+    "lip": ["lip", "chapstick", "chap stick", "lip balm", "carmex", "blistex", "lanolips", "eadem", "eos lip"],
+    "deo": ["deodorant", "antiperspirant", "aluminum", "underarm", "pit stick"],
+    "balm": ["tallow", "suet", "grass.?fed", "body butter", "body balm"]
+  },
+  "blake_family_allow_all_of": {
+    "lip": [],
+    "deo": [],
+    "balm": [
+      {"require": "moisturizer", "also": ["tallow", "balm", "butter", "skin for men"]}
+    ]
+  },
+  "blake_moisturizer_requires": ["tallow", "balm", "butter", "skin for men"],
+  "blake_deo_hero_women_first": false,
+  "blake_soft_watch": {
+    "any_family": [],
+    "lip": [],
+    "balm": [],
+    "deo": ["lume.*for women"]
+  },
+  "blake_soft_watch_brands": [
+    "tree hut",
+    "palmers",
+    "shea moisture"
+  ],
+  "blake_harvest_brands": [
+    "native",
+    "carpe",
+    "eos lip",
+    "eadem",
+    "lanolips",
+    "blistex"
+  ],
   "excluded_asins": ["B0CLF5B27Y"],
   "families": {
     "lip": {
