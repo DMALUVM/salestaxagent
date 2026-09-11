@@ -173,6 +173,95 @@ def _int(value: Any) -> int | None:
     return int(n)
 
 
+def _first_present(payload: dict, *keys: str) -> Any:
+    """Return the first non-empty value among SoldScope aliases."""
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if value is None or value == "":
+            continue
+        return value
+    return None
+
+
+def phrase_organic_position(p: dict) -> int | None:
+    """phrases/v2 SoT is organicPosition. Sample rows omit organicRank."""
+    n = _int(_first_present(p, "organicPosition", "organic_position", "organicRank"))
+    if n is None or n <= 0:
+        return None
+    return n
+
+
+def phrase_organic_previous(p: dict) -> int | None:
+    """SoldScope RT previous organic slot — WoW when we only have one snapshot."""
+    n = _int(_first_present(
+        p,
+        "organicPreviousPosition",
+        "organic_previous_position",
+        "previousOrganicPosition",
+        "organicPreviousRank",
+    ))
+    if n is None or n <= 0:
+        return None
+    return n
+
+
+def phrase_sfr(p: dict) -> int | None:
+    """Brand Analytics Search Frequency Rank via SoldScope RT.
+
+    SoldScope joins ABA onto phrases/v2 as abaSearchFrequencyRank. That is the
+    SFR source of truth. Never invent SFR from SoldScope searchVolume.
+    Dashboard may also join sqp_weekly / keyword_organic_rank for shares and
+    derived SQP rank — those are corroboration, not a fabricated SFR.
+    """
+    n = _int(_first_present(
+        p,
+        "abaSearchFrequencyRank",
+        "aba_search_frequency_rank",
+        "searchFrequencyRank",
+    ))
+    if n is None or n <= 0:
+        return None
+    return n
+
+
+def phrase_share(p: dict, *keys: str) -> float | None:
+    return _num(_first_present(p, *keys))
+
+
+def group_primary_asin(g: dict) -> str | None:
+    """Read the hero ASIN off a Rank Tracker group. Nested keys are common."""
+    if not isinstance(g, dict):
+        return None
+    for key in ("asin", "mainAsin", "seedAsin", "primaryAsin"):
+        a = str(g.get(key) or "").strip().upper()
+        if a:
+            return a
+    asins = g.get("asins")
+    if isinstance(asins, list) and asins:
+        a = str(asins[0] or "").strip().upper()
+        if a:
+            return a
+    for nest_key in ("product", "mainProduct"):
+        nested = g.get(nest_key)
+        if isinstance(nested, dict):
+            a = str(nested.get("asin") or "").strip().upper()
+            if a:
+                return a
+    products = g.get("products")
+    if isinstance(products, list):
+        for prod in products:
+            if not isinstance(prod, dict):
+                continue
+            a = str(prod.get("asin") or "").strip().upper()
+            if a:
+                return a
+    return None
+
+
 def collapse_points(
     points: Iterable[tuple[date, Any]],
 ) -> dict[date, Any]:
@@ -533,13 +622,64 @@ def merge_upsert_rows(existing: list[dict], incoming: list[dict], table: str) ->
 def match_hero_groups(groups: list[dict], hero_asins: Iterable[str]) -> list[dict]:
     """Keep groups whose primary ASIN is a configured hero. Never create."""
     heroes = {str(a).strip().upper() for a in hero_asins}
-    matched = []
+    matched: list[dict] = []
+    seen: set[Any] = set()
     for g in groups:
         if not isinstance(g, dict):
             continue
-        asin = str(g.get("asin") or "").strip().upper()
-        if asin in heroes:
-            matched.append(g)
+        asin = group_primary_asin(g)
+        gid = g.get("id")
+        if asin in heroes and gid not in seen:
+            out = dict(g)
+            out["asin"] = asin
+            matched.append(out)
+            seen.add(gid)
+    return matched
+
+
+def attach_hero_asins_from_products(
+    groups: list[dict],
+    hero_asins: Iterable[str],
+    *,
+    already: list[dict],
+) -> list[dict]:
+    """Fill missing hero ASINs from group products. Observe-only GET. Never create."""
+    heroes = {str(a).strip().upper() for a in hero_asins}
+    have = {str(g.get("asin") or "").strip().upper() for g in already}
+    need = {a for a in heroes if a in LOCKED_HERO_ASINS} - have
+    if not need:
+        return already
+    matched = list(already)
+    have_ids = {g.get("id") for g in already}
+    for g in groups:
+        if not need:
+            break
+        if not isinstance(g, dict) or g.get("id") in have_ids:
+            continue
+        known = group_primary_asin(g)
+        if known and known not in need:
+            continue
+        gid = g.get("id")
+        if gid is None:
+            continue
+        try:
+            body = list_group_products(int(gid))
+        except Exception as e:
+            log.info("SoldScope RT group %s products skipped: %s", gid, e)
+            continue
+        products = [p for p in _page_items(body) if isinstance(p, dict)]
+        for prod in products:
+            asin = str(prod.get("asin") or "").strip().upper()
+            if asin not in need:
+                continue
+            out = dict(g)
+            out["asin"] = asin
+            if prod.get("id") is not None:
+                out["_product_id"] = int(prod["id"])
+            matched.append(out)
+            have_ids.add(gid)
+            need.discard(asin)
+            break
     return matched
 
 
@@ -612,15 +752,31 @@ def rank_rows_from_phrases(
             "product_id": product_id,
             "phrase_id": _int(p.get("id")),
             "phrase": phrase,
-            "organic_position": _int(p.get("organicPosition")),
-            "sponsored_position": _int(p.get("sponsoredPosition")),
+            "organic_position": phrase_organic_position(p),
+            "organic_previous_position": phrase_organic_previous(p),
+            "sponsored_position": _int(_first_present(
+                p, "sponsoredPosition", "sponsored_position",
+            )),
             "search_volume": _int(p.get("searchVolume")),
+            # SFR SoT = ABA via SoldScope. search_volume stays a separate estimate.
+            "aba_search_frequency_rank": phrase_sfr(p),
+            "aba_total_click_share": phrase_share(
+                p, "abaTotalClickShare", "aba_total_click_share",
+            ),
+            "aba_total_conv_share": phrase_share(
+                p, "abaTotalConvShare", "aba_total_conv_share",
+            ),
+            "organic_page": _int(_first_present(p, "organicPage", "organic_page")),
             "as_of": as_of.isoformat(),
             "pulled_at": pulled_at,
             "raw": {
                 "organicPage": p.get("organicPage"),
                 "sponsoredPage": p.get("sponsoredPage"),
                 "cpc": p.get("cpc"),
+                "organicPreviousPosition": p.get("organicPreviousPosition"),
+                "abaSearchFrequencyRank": p.get("abaSearchFrequencyRank"),
+                "abaTotalClickShare": p.get("abaTotalClickShare"),
+                "abaTotalConvShare": p.get("abaTotalConvShare"),
             },
         })
     return rows
@@ -760,6 +916,9 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
                 notes.append(RT_EMPTY_NOTE)
             else:
                 matched = match_hero_groups(groups, cfg["asins"])
+                matched = attach_hero_asins_from_products(
+                    groups, cfg["asins"], already=matched,
+                )
                 if not matched:
                     notes.append(
                         f"Rank Tracker has {len(groups)} group(s) but none "
@@ -770,9 +929,10 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
                     for g in matched:
                         asin = str(g.get("asin") or "").strip().upper()
                         gid = int(g["id"])
+                        pid_hint = g.get("_product_id")
                         products_body = list_group_products(gid)
                         products = [p for p in _page_items(products_body) if isinstance(p, dict)]
-                        pid = _pick_product_id(products, asin)
+                        pid = int(pid_hint) if pid_hint is not None else _pick_product_id(products, asin)
                         if pid is None:
                             notes.append(f"RT group {gid} ({asin}) has no product id — skipped phrases.")
                             continue
@@ -786,10 +946,20 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
                             as_of=as_of,
                             pulled_at=pulled_at,
                         ))
+                    missing = [
+                        a for a in cfg["asins"]
+                        if a not in {str(g.get("asin") or "").strip().upper() for g in matched}
+                    ]
                     notes.append(
                         f"Rank Tracker matched {len(matched)} hero group(s), "
                         f"{len(rank_rows)} phrase snapshot(s)."
                     )
+                    if missing:
+                        notes.append(
+                            "No Rank Tracker group for "
+                            + ", ".join(missing)
+                            + " — empty snapshots, not creating groups."
+                        )
         except QuotaExceeded as e:
             quota = e
             notes.append(

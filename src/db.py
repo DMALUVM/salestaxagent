@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -10,6 +11,8 @@ from supabase import create_client, Client
 from src.config import settings
 
 log = logging.getLogger(__name__)
+
+_PGRST_MISSING_COL = re.compile(r"Could not find the '([^']+)' column", re.I)
 
 _client: Client | None = None
 
@@ -61,6 +64,14 @@ def upsert_rows(
             )
         except Exception as e:
             err = str(e)
+            missing = _PGRST_MISSING_COL.search(err)
+            if "PGRST204" in err and missing and missing.group(1) not in drop:
+                col = missing.group(1)
+                log.warning("Retrying %s upsert without %s column: %s", table, col, err[:120])
+                return upsert_rows(
+                    table, rows, on_conflict=on_conflict, batch_size=batch_size,
+                    drop_columns=drop | frozenset({col}),
+                )
             if "PGRST204" in err and "raw" in err.lower() and "raw" not in drop:
                 log.warning("Retrying %s upsert without raw column: %s", table, err[:120])
                 return upsert_rows(

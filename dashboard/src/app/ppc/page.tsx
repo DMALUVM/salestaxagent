@@ -12,6 +12,7 @@ import { LoadingState } from "@/components/loading";
 import { SectionNav } from "@/components/section-nav";
 import { rankBadgeOf } from "@/lib/ppc-actions";
 import { SqpStatus } from "@/components/sqp-status";
+import { OrganicRankHeatmap } from "@/components/organic-rank-heatmap";
 import { formatSoldScopeVol } from "@/lib/soldscope-status";
 import { BrandShare } from "@/components/brand-share";
 import { PpcPlaybook } from "@/components/ppc-playbook";
@@ -931,6 +932,7 @@ export default function PPCPage() {
           { id: "ppc-kpis", label: "KPIs" },
           { id: "ppc-playbook", label: "Top 10" },
           { id: "ppc-sku-ads", label: "SKU ads" },
+          { id: "organic-rank", label: "Org rank" },
           { id: "ppc-budget", label: "Budget" },
           { id: "ppc-placement", label: "Placement" },
           { id: "ppc-bleeders-10", label: "Bleeders 1.0" },
@@ -954,6 +956,7 @@ export default function PPCPage() {
           while the real fault stays invisible. */}
       {!hasData && (data?.fatalError || (data?.loadErrors?.length ?? 0) > 0) ? (
         <div className="space-y-6">
+        <OrganicRankHeatmap />
         <Card className="border-red-200 dark:border-red-900">
           <CardContent className="py-8 text-center">
             <p className="text-sm font-medium text-red-700 dark:text-red-300">
@@ -988,6 +991,8 @@ export default function PPCPage() {
         ) : null}
         </div>
       ) : !hasData ? (
+        <div className="space-y-6">
+        <OrganicRankHeatmap />
         <Card>
           <CardContent className="py-12 text-center">
             <Target className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
@@ -997,6 +1002,7 @@ export default function PPCPage() {
             </p>
           </CardContent>
         </Card>
+        </div>
       ) : (
         <>
           {/* Data freshness + range toggle */}
@@ -1081,6 +1087,8 @@ export default function PPCPage() {
           <BrandShare />
 
           <SqpStatus />
+
+          <OrganicRankHeatmap />
 
           <PpcReconcile summary={data?.dailyReconcile ?? null} asOfLabel={asOf} />
 

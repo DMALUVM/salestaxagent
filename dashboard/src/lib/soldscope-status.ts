@@ -52,8 +52,13 @@ export type SoldScopeRankRow = {
   phrase?: string | null;
   asin?: string | null;
   organic_position?: number | null;
+  organic_previous_position?: number | null;
   sponsored_position?: number | null;
   search_volume?: number | null;
+  aba_search_frequency_rank?: number | null;
+  aba_total_click_share?: number | null;
+  aba_total_conv_share?: number | null;
+  organic_page?: number | null;
   as_of?: string | null;
   group_id?: number | null;
 };

@@ -11,6 +11,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { evaluateExportNeed } from "@/lib/gno-export-state";
 import { GNO_NEXT_REVIEW_AT, CM_NOTE } from "@/lib/gno-ppc-watch";
+import { OrganicRankHeatmap } from "@/components/organic-rank-heatmap";
 import { RT_EMPTY_COPY, formatSoldScopeRank, formatSoldScopeVol } from "@/lib/soldscope-status";
 import { OUTLIER_EMPTY_COPY } from "@/lib/soldscope-outliers";
 import { AlertTriangle, Check, CheckCircle, Download, RefreshCw, Shield } from "lucide-react";
@@ -590,6 +591,8 @@ export function PpcGnoWatch() {
           ))}
         </div>
       </div>
+
+      <OrganicRankHeatmap />
 
       <Card id="soldscope-outliers">
         <CardHeader className="pb-2">

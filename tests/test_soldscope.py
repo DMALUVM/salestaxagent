@@ -296,6 +296,164 @@ def test_match_hero_groups_ignores_non_heroes():
     assert [g["id"] for g in matched] == [1, 3]
 
 
+def test_match_hero_groups_reads_nested_asin():
+    groups = [
+        {"id": 3537, "products": [{"asin": "B0CLHTF8YN", "id": 6051}]},
+        {"id": 3553, "product": {"asin": "B0DQFKMJFY"}},
+        {"id": 9, "asins": ["B00NOTHERO"]},
+    ]
+    matched = syn.match_hero_groups(groups, HEROES)
+    assert [g["id"] for g in matched] == [3537, 3553]
+    assert matched[0]["asin"] == "B0CLHTF8YN"
+    assert matched[1]["asin"] == "B0DQFKMJFY"
+
+
+def test_rank_rows_map_organic_position_sfr_and_previous():
+    """phrases/v2 SoT keys — organicRank is absent on real sample rows."""
+    rows = syn.rank_rows_from_phrases(
+        [{
+            "id": 11,
+            "phrase": "tallow lip balm",
+            "organicPosition": 7,
+            "organicPreviousPosition": 14,
+            "organicPage": 1,
+            "sponsoredPosition": 2,
+            "searchVolume": 8800,
+            "abaSearchFrequencyRank": 120,
+            "abaTotalClickShare": 0.18,
+            "abaTotalConvShare": 0.09,
+        }],
+        asin="B0CLHTF8YN",
+        marketplace="US",
+        group_id=3537,
+        product_id=6051,
+        as_of=date(2026, 9, 11),
+        pulled_at="2026-09-11T12:00:00+00:00",
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["organic_position"] == 7
+    assert row["organic_previous_position"] == 14
+    assert row["organic_page"] == 1
+    assert row["aba_search_frequency_rank"] == 120
+    assert row["aba_total_click_share"] == 0.18
+    assert row["aba_total_conv_share"] == 0.09
+    assert row["search_volume"] == 8800
+    assert row["search_volume"] != row["aba_search_frequency_rank"]
+
+
+def test_rank_rows_do_not_invent_sfr_from_search_volume():
+    rows = syn.rank_rows_from_phrases(
+        [{
+            "phrase": "tallow balm",
+            "organicPosition": 22,
+            "searchVolume": 4400,
+        }],
+        asin="B0DQFKMJFY",
+        marketplace="US",
+        group_id=3553,
+        product_id=6090,
+        as_of=date(2026, 9, 11),
+        pulled_at="now",
+    )
+    assert rows[0]["search_volume"] == 4400
+    assert rows[0]["aba_search_frequency_rank"] is None
+    assert rows[0]["organic_previous_position"] is None
+
+
+def test_rank_rows_ignore_organic_rank_alias_when_position_present():
+    rows = syn.rank_rows_from_phrases(
+        [{
+            "phrase": "tallow lip balm",
+            "organicPosition": 4,
+            "organicRank": 99,
+            "aba_search_frequency_rank": 50,
+        }],
+        asin="B0CLHTF8YN",
+        marketplace="US",
+        group_id=3537,
+        product_id=6051,
+        as_of=date(2026, 9, 11),
+        pulled_at="now",
+    )
+    assert rows[0]["organic_position"] == 4
+    assert rows[0]["aba_search_frequency_rank"] == 50
+
+
+def test_rank_rows_empty_phrases_are_honest_empty():
+    rows = syn.rank_rows_from_phrases(
+        [{}, {"phrase": "  "}, {"phrase": None}],
+        asin="B0HBSZ71XQ",
+        marketplace="US",
+        group_id=1,
+        product_id=1,
+        as_of=date(2026, 9, 11),
+        pulled_at="now",
+    )
+    assert rows == []
+
+
+def test_phrase_helpers_treat_zero_and_blank_as_missing():
+    assert syn.phrase_organic_position({"organicPosition": 0}) is None
+    assert syn.phrase_organic_position({"organicRank": 3}) == 3
+    assert syn.phrase_sfr({"searchVolume": 900}) is None
+    assert syn.phrase_sfr({"abaSearchFrequencyRank": ""}) is None
+    assert syn.phrase_organic_previous({"organicPreviousPosition": None}) is None
+
+
+def test_attach_hero_asins_from_products_skips_known_non_heroes(monkeypatch):
+    called: list[int] = []
+
+    def products(gid):
+        called.append(gid)
+        return {"data": [{"id": 6051, "asin": "B0CLHTF8YN"}]}
+
+    monkeypatch.setattr(syn, "list_group_products", products)
+    out = syn.attach_hero_asins_from_products(
+        [{"id": 3537}, {"id": 99, "asin": "B00NOTHERO"}],
+        HEROES,
+        already=[],
+    )
+    assert [g["id"] for g in out] == [3537]
+    assert out[0]["asin"] == "B0CLHTF8YN"
+    assert out[0]["_product_id"] == 6051
+    assert 99 not in called
+
+
+def test_rt_matches_via_products_when_group_omits_asin(monkeypatch):
+    monkeypatch.setattr(syn, "token_present", lambda: True)
+    monkeypatch.setattr(syn, "check_auth", lambda: {"account": {"id": 1}})
+    monkeypatch.setattr(syn, "get_sales_history",
+                        lambda **k: {"data": {"sales": []}})
+    monkeypatch.setattr(syn, "get_bsr_history",
+                        lambda **k: {"data": {"bsr": []}})
+    monkeypatch.setattr(syn, "get_price_history",
+                        lambda **k: {"data": {"price": []}})
+    monkeypatch.setattr(syn, "get_ratings_history",
+                        lambda **k: {"data": {"ratings": []}})
+    monkeypatch.setattr(syn, "collect_existing_keywords", lambda **k: [])
+    monkeypatch.setattr(syn, "list_kr_searches", lambda **k: {"data": []})
+    monkeypatch.setattr(
+        syn, "create_single_asin_search",
+        lambda **k: (_ for _ in ()).throw(AssertionError("KR create")),
+    )
+    monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [{"id": 3537}])
+    monkeypatch.setattr(syn, "list_group_products", lambda gid: {
+        "data": [{"id": 6051, "asin": "B0CLHTF8YN"}],
+    })
+    monkeypatch.setattr(syn, "list_product_phrases", lambda *a, **k: {
+        "data": [{
+            "id": 1, "phrase": "tallow lip balm",
+            "organicPosition": 5, "organicPreviousPosition": 11,
+            "abaSearchFrequencyRank": 44,
+        }],
+    })
+    r = syn.sync_weekly(dry_run=True)
+    assert r["counts"]["rank"] == 1
+    assert any("B0HBSZ71XQ" in n and "not creating" in n for n in r["notes"])
+    assert r["status"] == "success"
+
+
 def test_price_rows_clip_to_lookback():
     # 2015-01-01 is before a 90d lookback from ~2026
     old = syn.price_rows_from_payload(
