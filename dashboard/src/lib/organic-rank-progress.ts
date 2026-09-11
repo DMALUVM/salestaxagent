@@ -25,6 +25,9 @@ export const DEO_EMPTY_COPY =
 export const FAMILY_EMPTY_COPY =
   "No Rank Tracker snapshots for this hero yet. Empty is real — nothing invented, and no group is created from this desk.";
 
+export const BASELINE_WEEK_COPY =
+  "First baseline week — one snapshot column so far. Movement is vs SoldScope previous position when stored, not a second week column yet.";
+
 export type HeroFamilyId = "lip" | "balm" | "deo";
 
 export type HeroFamily = {
@@ -42,6 +45,8 @@ export const HERO_FAMILIES: HeroFamily[] = [
 
 export type WowDirection = "improved" | "worsened";
 export type WowReason = "moved" | "entered_top_n" | "exited_top_n";
+export type MoveDirection = "improved" | "worsened" | "unchanged" | "unknown";
+export type HeatmapSortKey = "sfr" | "keyword" | "rank" | "moved";
 
 export type WowFlag = {
   direction: WowDirection;
@@ -102,7 +107,18 @@ export type OrganicRankProgress = {
   rows: HeatmapRow[];
   movers: HeatmapRow[];
   thresholds: { movePositions: number; topN: number };
+  /** True when the grid has rows but only one snapshot week. */
+  baselineOnly: boolean;
 };
+
+export type Movement = {
+  delta: number | null;
+  direction: MoveDirection;
+  anyMove: boolean;
+  meaningful: boolean;
+};
+
+export type SparkPoint = { x: number; y: number; v: number };
 
 export function familyOfAsin(asin: string | null | undefined): HeroFamily | null {
   const key = String(asin ?? "").trim().toUpperCase();
@@ -158,6 +174,171 @@ export function classifyWowDelta(
     if (delta <= -move) return { direction: "worsened", reason: "moved", delta };
   }
   return null;
+}
+
+/** Positive = better rank (moved toward #1). Both sides must be stored. */
+export function rankDelta(
+  previous: number | null | undefined,
+  current: number | null | undefined,
+): number | null {
+  const prev = asRank(previous);
+  const cur = asRank(current);
+  if (prev == null || cur == null) return null;
+  return prev - cur;
+}
+
+/**
+ * Any-move vs meaningful. Grid uses anyMove (even 1–4); flag lists use
+ * classifyWowDelta. Never invents a numeric Δ when either rank is missing.
+ */
+export function classifyMovement(
+  previous: number | null | undefined,
+  current: number | null | undefined,
+): Movement {
+  const wow = classifyWowDelta(previous, current);
+  const delta = rankDelta(previous, current);
+  if (delta == null) {
+    return {
+      delta: null,
+      direction: wow?.direction ?? "unknown",
+      anyMove: false,
+      meaningful: wow != null,
+    };
+  }
+  const direction: MoveDirection =
+    delta > 0 ? "improved" : delta < 0 ? "worsened" : "unchanged";
+  return {
+    delta,
+    direction,
+    anyMove: delta !== 0,
+    meaningful: wow != null,
+  };
+}
+
+export function formatSignedDelta(delta: number | null | undefined): string {
+  if (delta == null || !Number.isFinite(Number(delta))) return "";
+  const n = Math.trunc(Number(delta));
+  if (n === 0) return "0";
+  return n > 0 ? `↑${n}` : `↓${Math.abs(n)}`;
+}
+
+export function formatCellRank(n: number | null | undefined): string {
+  const r = asRank(n);
+  return r == null ? "—" : `#${r}`;
+}
+
+export function cellHoverTitle(args: {
+  previous: number | null | undefined;
+  current: number | null | undefined;
+  sfr?: number | null;
+}): string {
+  const prev = asRank(args.previous);
+  const cur = asRank(args.current);
+  const delta = rankDelta(prev, cur);
+  const left = prev == null ? "—" : String(prev);
+  const right = cur == null ? "—" : String(cur);
+  const move = delta == null ? "" : ` (${formatSignedDelta(delta)})`;
+  const sfr = args.sfr === undefined ? "" : ` · SFR ${formatSfr(args.sfr)}`;
+  return `${left} → ${right}${move}${sfr}`;
+}
+
+/**
+ * Prior rank for a cell: previous week column when the grid has ≥2 weeks,
+ * else SoldScope organic_previous_position (row.previous).
+ */
+export function cellPriorRank(
+  row: Pick<HeatmapRow, "positions" | "previous">,
+  week: string,
+  weeks: string[],
+): number | null {
+  const idx = weeks.indexOf(week);
+  if (idx > 0) return asRank(row.positions[weeks[idx - 1]]);
+  if (weeks.length === 1) return asRank(row.previous);
+  return null;
+}
+
+/** Chronological ranks for the sparkline. One week → prior→current. */
+export function sparklineSeries(
+  row: Pick<HeatmapRow, "positions" | "previous" | "current">,
+  weeks: string[],
+): Array<number | null> {
+  if (weeks.length >= 2) {
+    return weeks.map((w) => asRank(row.positions[w]));
+  }
+  if (row.previous != null || row.current != null) {
+    return [asRank(row.previous), asRank(row.current)];
+  }
+  return [];
+}
+
+export function sparklineGeometry(
+  values: Array<number | null>,
+  opts?: { width?: number; height?: number; pad?: number },
+): { points: SparkPoint[]; polyline: string; direction: MoveDirection } {
+  const width = opts?.width ?? 56;
+  const height = opts?.height ?? 18;
+  const pad = opts?.pad ?? 2.5;
+  const indexed = values
+    .map((v, i) => ({ i, v: asRank(v) }))
+    .filter((p): p is { i: number; v: number } => p.v != null);
+  if (indexed.length === 0) {
+    return { points: [], polyline: "", direction: "unknown" };
+  }
+  const nums = indexed.map((p) => p.v);
+  const lo = Math.min(...nums);
+  const hi = Math.max(...nums);
+  const n = Math.max(values.length - 1, 1);
+  const yFor = (v: number) => (
+    hi === lo ? height / 2 : pad + ((v - lo) / (hi - lo)) * (height - pad * 2)
+  );
+  const points = indexed.map(({ i, v }) => ({
+    x: pad + (i * (width - pad * 2)) / n,
+    y: yFor(v),
+    v,
+  }));
+  const polyline = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const first = nums[0];
+  const last = nums[nums.length - 1];
+  const direction: MoveDirection =
+    last < first ? "improved" : last > first ? "worsened" : "unchanged";
+  return { points, polyline, direction };
+}
+
+export function sortHeatmapRows(rows: HeatmapRow[], sort: HeatmapSortKey): HeatmapRow[] {
+  const copy = [...rows];
+  if (sort === "keyword") {
+    return copy.sort((a, b) => a.keyword_normalized.localeCompare(b.keyword_normalized));
+  }
+  if (sort === "rank") {
+    return copy.sort((a, b) => {
+      if (a.current != null && b.current != null && a.current !== b.current) {
+        return a.current - b.current;
+      }
+      if (a.current != null && b.current == null) return -1;
+      if (a.current == null && b.current != null) return 1;
+      return a.keyword_normalized.localeCompare(b.keyword_normalized);
+    });
+  }
+  if (sort === "moved") {
+    return copy.sort((a, b) => {
+      const am = classifyMovement(a.previous, a.current);
+      const bm = classifyMovement(b.previous, b.current);
+      const as = am.meaningful ? 2 : am.anyMove ? 1 : 0;
+      const bs = bm.meaningful ? 2 : bm.anyMove ? 1 : 0;
+      if (as !== bs) return bs - as;
+      const ad = Math.abs(am.delta ?? 0);
+      const bd = Math.abs(bm.delta ?? 0);
+      if (ad !== bd) return bd - ad;
+      if (a.sfr != null && b.sfr != null && a.sfr !== b.sfr) return a.sfr - b.sfr;
+      return a.keyword_normalized.localeCompare(b.keyword_normalized);
+    });
+  }
+  return copy.sort((a, b) => {
+    if (a.sfr != null && b.sfr != null && a.sfr !== b.sfr) return a.sfr - b.sfr;
+    if (a.sfr != null && b.sfr == null) return -1;
+    if (a.sfr == null && b.sfr != null) return 1;
+    return a.keyword_normalized.localeCompare(b.keyword_normalized);
+  });
 }
 
 /** Brand Analytics SFR only. searchVolume is never a substitute. */
@@ -337,6 +518,7 @@ export function buildOrganicRankProgress(input: {
     rows,
     movers,
     thresholds: { movePositions: WOW_MOVE_POSITIONS, topN: WOW_TOP_N },
+    baselineOnly: rows.length > 0 && shownWeeks.length === 1,
   };
 }
 
@@ -347,12 +529,14 @@ export function filterProgress(
   if (family === "all") return progress;
   const rows = progress.rows.filter((r) => r.family === family);
   const movers = progress.movers.filter((r) => r.family === family);
+  const empty = rows.length === 0;
   return {
     ...progress,
-    empty: rows.length === 0,
-    emptyCopy: emptyCopyForFamily(family),
+    empty,
+    emptyCopy: empty ? emptyCopyForFamily(family) : progress.emptyCopy,
     rows,
     movers,
+    baselineOnly: rows.length > 0 && progress.weeks.length === 1,
   };
 }
 
