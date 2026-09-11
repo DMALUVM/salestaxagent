@@ -956,6 +956,7 @@ export default function PPCPage() {
           while the real fault stays invisible. */}
       {!hasData && (data?.fatalError || (data?.loadErrors?.length ?? 0) > 0) ? (
         <div className="space-y-6">
+        <OrganicRankHeatmap />
         <Card className="border-red-200 dark:border-red-900">
           <CardContent className="py-8 text-center">
             <p className="text-sm font-medium text-red-700 dark:text-red-300">
@@ -990,6 +991,8 @@ export default function PPCPage() {
         ) : null}
         </div>
       ) : !hasData ? (
+        <div className="space-y-6">
+        <OrganicRankHeatmap />
         <Card>
           <CardContent className="py-12 text-center">
             <Target className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
@@ -999,6 +1002,7 @@ export default function PPCPage() {
             </p>
           </CardContent>
         </Card>
+        </div>
       ) : (
         <>
           {/* Data freshness + range toggle */}
