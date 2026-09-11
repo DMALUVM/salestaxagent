@@ -678,9 +678,11 @@ describe("widgets + safety rails", () => {
     assert.equal(tiles[0].break_even_acos, 42);
     assert.equal(tiles[6].family, "deo");
     assert.equal(tiles[6].break_even_acos, 36);
-    assert.equal(tiles[7].family, "balm");
-    assert.equal(tiles[7].break_even_acos, BALM_BE_ACOS);
-    assert.equal(tiles[9].family, "deo");
+    assert.equal(tiles[7].family, "deo");
+    assert.equal(tiles[7].break_even_acos, 36);
+    assert.equal(tiles[8].family, "balm");
+    assert.equal(tiles[8].break_even_acos, BALM_BE_ACOS);
+    assert.equal(tiles[9].family, "balm");
   });
 
   test("keeper heartbeat marks Auto Loose enabled + sparkline length 7", () => {
