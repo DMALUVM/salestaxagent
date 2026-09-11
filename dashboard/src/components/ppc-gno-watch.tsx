@@ -984,17 +984,23 @@ export function PpcGnoWatch() {
           <CardTitle className="flex items-center gap-2 text-sm">
             <Shield className="h-4 w-4" /> SQP Brand Analytics — SP-API weekly
           </CardTitle>
-          <p className="text-[11px] text-muted-foreground">
-            Brand Analytics SQP is not in the Ads API — we pull it weekly via
-            SP-API (<code>GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT</code>)
-            for complete Sun–Sat weeks only.
-            CSV upload is fallback if SP-API is late/FATAL or for a one-off.
-            Impression / purchase share is never invented.
-            {data?.sqp?.newestAsOf
-              ? ` Newest stored week: ${data.sqp.newestAsOf}.`
-              : " No SQP rows stored."}
-            {" "}{data?.soldscope?.rankTrackerCopy ?? RT_EMPTY_COPY}
-          </p>
+          <div className="space-y-1 text-[11px] text-muted-foreground">
+            <p>
+              Brand Analytics SQP is not in the Ads API — we pull it weekly via
+              SP-API (<code>GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT</code>)
+              for complete Sun–Sat weeks only.
+            </p>
+            <p>
+              CSV upload is fallback if SP-API is late/FATAL or for a one-off.
+              Impression / purchase share is never invented.
+            </p>
+            <p>
+              {data?.sqp?.newestAsOf
+                ? `Newest stored week: ${data.sqp.newestAsOf}.`
+                : "No SQP rows stored."}
+              {" "}{data?.soldscope?.rankTrackerCopy ?? RT_EMPTY_COPY}
+            </p>
+          </div>
         </CardHeader>
         <CardContent className="space-y-2">
           <div className="flex flex-wrap items-center gap-3">
