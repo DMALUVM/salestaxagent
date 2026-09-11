@@ -41,6 +41,7 @@ FAMILIES = frozenset({"lip", "balm", "deo"})
 EXCLUDED_OURS = frozenset({"B0CLF5B27Y"})
 DEFAULT_CREATE_CAP = 5
 DEFAULT_KR_MAX_KEYWORDS = 80
+DEFAULT_MIN_SEARCH_VOLUME = 1
 DEFAULT_OPPORTUNITY_FLOOR = 100
 DEFAULT_STALE_AFTER_DAYS = 8
 DEFAULT_BLAKE_FAMILY_CAP = 5
@@ -126,7 +127,22 @@ def load_config() -> dict:
         "blake_total_cap": int(
             raw.get("blake_total_cap") or DEFAULT_BLAKE_TOTAL_CAP
         ),
-        "max_keywords": int(raw.get("max_keywords") or DEFAULT_KR_MAX_KEYWORDS),
+        "max_keywords": max(
+            1,
+            min(
+                int(raw.get("max_keywords") or DEFAULT_KR_MAX_KEYWORDS),
+                DEFAULT_KR_MAX_KEYWORDS,
+            ),
+        ),
+        "min_search_volume": max(
+            1,
+            int(raw.get("min_search_volume") or DEFAULT_MIN_SEARCH_VOLUME),
+        ),
+        "max_aba_sfr": (
+            int(raw["max_aba_sfr"])
+            if raw.get("max_aba_sfr") not in (None, "", 0)
+            else None
+        ),
         "opportunity_floor": int(
             raw.get("opportunity_floor") or DEFAULT_OPPORTUNITY_FLOOR
         ),
@@ -245,6 +261,41 @@ def our_organic_rank(
     return newest[1] if newest else None
 
 
+def _volume(row: dict):
+    return _int(
+        row.get("search_volume")
+        if row.get("search_volume") is not None
+        else row.get("volume") if row.get("volume") is not None
+        else row.get("searchVolume")
+    )
+
+
+def _sfr(row: dict):
+    return _int(
+        row.get("aba_search_frequency_rank")
+        if row.get("aba_search_frequency_rank") is not None
+        else row.get("sfr") if row.get("sfr") is not None
+        else row.get("abaSearchFrequencyRank")
+    )
+
+
+def has_real_traffic(
+    row: dict,
+    *,
+    min_search_volume: int = DEFAULT_MIN_SEARCH_VOLUME,
+    max_aba_sfr: int | None = None,
+) -> bool:
+    """True when the keyword has real search volume. Missing/zero → skip."""
+    vol = _volume(row)
+    if vol is None or vol < int(min_search_volume):
+        return False
+    if max_aba_sfr is not None:
+        sfr = _sfr(row)
+        if sfr is not None and sfr > int(max_aba_sfr):
+            return False
+    return True
+
+
 def competitor_kr_rows_from_payload(
     items: list[dict],
     *,
@@ -254,16 +305,23 @@ def competitor_kr_rows_from_payload(
     search_id: int,
     pulled_at: str,
     as_of: str | None = None,
+    min_search_volume: int = DEFAULT_MIN_SEARCH_VOLUME,
+    max_aba_sfr: int | None = None,
 ) -> list[dict]:
     from src.amazon_ads.organic_rank import normalize_keyword
 
     rows: list[dict] = []
     seen: set[str] = set()
     day = as_of or date.today().isoformat()
+    floor = max(1, int(min_search_volume))
     for p in items:
         keyword = str(p.get("keyword") or "").strip()
         key = normalize_keyword(keyword)
         if not keyword or key in seen:
+            continue
+        if not has_real_traffic(
+            p, min_search_volume=floor, max_aba_sfr=max_aba_sfr,
+        ):
             continue
         seen.add(key)
         match_types = p.get("matchTypes")
@@ -307,6 +365,8 @@ def build_competitor_outliers(args: dict) -> list[dict]:
     extra_exact = list(args.get("extra_exact") or [])
     rank_rows = list(args.get("rank_rows") or [])
     floor = int(args.get("opportunity_floor") or DEFAULT_OPPORTUNITY_FLOOR)
+    min_vol = int(args.get("min_search_volume") or DEFAULT_MIN_SEARCH_VOLUME)
+    max_sfr = args.get("max_aba_sfr")
     cap = int(args.get("cap") or OUTLIER_CAP)
     families = FAMILIES
 
@@ -318,6 +378,10 @@ def build_competitor_outliers(args: dict) -> list[dict]:
         if not asin or not key or family not in families:
             continue
         if asin in EXCLUDED_OURS or is_sentinel_row(row):
+            continue
+        if not has_real_traffic(
+            row, min_search_volume=min_vol, max_aba_sfr=max_sfr,
+        ):
             continue
         cur = latest.get((asin, key))
         if cur is None or str(row.get("as_of") or "") >= str(cur.get("as_of") or ""):
@@ -489,7 +553,7 @@ def asin_cache_status(
     cutoff = today - timedelta(days=int(stale_after_days))
     latest_real: dict[str, str] = {}
     for row in rows:
-        if is_sentinel_row(row):
+        if is_sentinel_row(row) or not has_real_traffic(row):
             continue
         asin = _asin(row)
         as_of = str(row.get("as_of") or "")
@@ -520,7 +584,7 @@ def latest_real_rows_for_asins(
     wanted = {str(a).strip().upper() for a in asins if str(a).strip()}
     latest_as_of: dict[str, str] = {}
     for row in rows:
-        if is_sentinel_row(row):
+        if is_sentinel_row(row) or not has_real_traffic(row):
             continue
         asin = _asin(row)
         as_of = str(row.get("as_of") or "")
@@ -530,7 +594,7 @@ def latest_real_rows_for_asins(
             latest_as_of[asin] = as_of
     out: list[dict] = []
     for row in rows:
-        if is_sentinel_row(row):
+        if is_sentinel_row(row) or not has_real_traffic(row):
             continue
         asin = _asin(row)
         if asin in latest_as_of and str(row.get("as_of") or "") == latest_as_of[asin]:
@@ -707,6 +771,8 @@ def _blake_from_rows(
         "kr_rows": kr_rows,
         "previous_kr_rows": previous,
         "opportunity_floor": cfg["opportunity_floor"],
+        "min_search_volume": cfg["min_search_volume"],
+        "max_aba_sfr": cfg.get("max_aba_sfr"),
         "family_cap": cfg["blake_family_cap"],
         "total_cap": cfg["blake_total_cap"],
     })
@@ -987,6 +1053,8 @@ def sync_competitor_kr(
                 marketplace=marketplace,
                 search_id=sid,
                 pulled_at=pulled_at,
+                min_search_volume=int(cfg["min_search_volume"]),
+                max_aba_sfr=cfg.get("max_aba_sfr"),
             )
             new_rows.extend(batch)
             reused.append(asin)
@@ -1019,6 +1087,8 @@ __all__ = [
     "DEFAULT_BLAKE_FAMILY_CAP",
     "DEFAULT_BLAKE_TOTAL_CAP",
     "DEFAULT_CREATE_CAP",
+    "DEFAULT_KR_MAX_KEYWORDS",
+    "DEFAULT_MIN_SEARCH_VOLUME",
     "DEFAULT_STALE_AFTER_DAYS",
     "EMPTY_SNAPSHOT_NOTE",
     "EXCLUDED_OURS",
@@ -1031,6 +1101,7 @@ __all__ = [
     "competitor_present",
     "digest_should_ping",
     "exact_keywords_from_targets",
+    "has_real_traffic",
     "is_sentinel_row",
     "load_cached_kr",
     "load_config",

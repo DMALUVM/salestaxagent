@@ -23,13 +23,14 @@ export function extractExactKeyword(campaignName: string): string | null {
 }
 
 export const COMPETITOR_OUTLIER_EMPTY_COPY =
-  "No net-new unused Exact competitor keywords this week (cap 5/family, 15 total). Weekly job reads cached reverse-ASIN snapshots unless missing or stale. First fill is `soldscope-competitor-kr --create-missing` (max 1 POST per ASIN, cap 5/run). This desk does not create Rank Tracker groups or Product Research. Em dash means empty, not zero.";
+  "No net-new unused Exact competitor keywords this week (cap 5/family, 15 total). Real-traffic only — missing/zero search volume is dropped. Weekly job reads cached reverse-ASIN snapshots unless missing or stale. Reuse existing searchType0; do not POST more KR creates. This desk does not create Rank Tracker groups or Product Research. Em dash means empty, not zero.";
 
 export const COMPETITOR_OUTLIER_CAP = 30;
 export const COMPETITOR_OPPORTUNITY_FLOOR = 100;
 export const SENTINEL_KEYWORD = "__kr_created__";
 export const BLAKE_FAMILY_CAP = 5;
 export const BLAKE_TOTAL_CAP = 15;
+export const MIN_SEARCH_VOLUME = 1;
 export const EXCLUDED_OURS = "B0CLF5B27Y";
 export const COMPETITOR_FAMILIES = ["lip", "balm", "deo"] as const;
 export type CompetitorFamily = (typeof COMPETITOR_FAMILIES)[number];
@@ -54,6 +55,8 @@ type CompetitorCfg = {
   blake_family_cap?: number;
   blake_total_cap?: number;
   stale_after_days?: number;
+  min_search_volume?: number;
+  max_aba_sfr?: number | null;
   excluded_asins?: string[];
   competitors?: Array<{ asin?: string; family?: string }>;
 };
@@ -177,6 +180,23 @@ export function classifyExactBidding(
   return { already: false, already_bidding: "N", note: "—" };
 }
 
+export function hasRealTraffic(
+  row: { search_volume?: number | null; aba_search_frequency_rank?: number | null },
+  args?: { minSearchVolume?: number; maxAbaSfr?: number | null },
+): boolean {
+  const raw = args?.minSearchVolume ?? cfg.min_search_volume;
+  const parsed = Number(raw);
+  const minVol = Number.isFinite(parsed) && parsed >= 1 ? parsed : MIN_SEARCH_VOLUME;
+  const vol = asInt(row.search_volume);
+  if (vol == null || vol < minVol) return false;
+  const maxSfr = args?.maxAbaSfr ?? cfg.max_aba_sfr ?? null;
+  if (maxSfr != null) {
+    const sfr = asInt(row.aba_search_frequency_rank);
+    if (sfr != null && sfr > maxSfr) return false;
+  }
+  return true;
+}
+
 export function suggestLever(args: {
   alreadyExact: boolean;
   present: boolean;
@@ -201,6 +221,7 @@ export function buildCompetitorOutliers(args: {
   const floor = args.opportunityFloor
     ?? Number(cfg.opportunity_floor)
     ?? COMPETITOR_OPPORTUNITY_FLOOR;
+  const minVol = Number(cfg.min_search_volume) || MIN_SEARCH_VOLUME;
   const extra = args.extraExact ?? extraExactFromWatch();
   const latest = new Map<string, CompetitorKrRow>();
   for (const row of args.krRows ?? []) {
@@ -209,6 +230,7 @@ export function buildCompetitorOutliers(args: {
     const keyword = String(row.keyword ?? "").trim();
     const key = `${asin}|${normalizeKeyword(keyword || row.keyword_normalized)}`;
     if (!asin || !family || !keyword || asin === EXCLUDED_OURS || isSentinelKrRow(row)) continue;
+    if (!hasRealTraffic(row, { minSearchVolume: minVol, maxAbaSfr: cfg.max_aba_sfr })) continue;
     const cur = latest.get(key);
     if (!cur || String(row.as_of ?? "") >= String(cur.as_of ?? "")) {
       latest.set(key, row);

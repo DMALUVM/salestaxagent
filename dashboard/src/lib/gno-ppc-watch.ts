@@ -1811,8 +1811,8 @@ export function gnoPackReadme(input: {
     ? "- organic_rank_snapshot.csv — hero ASINs B0CLHTF8YN (lip) / B0DQFKMJFY (balm) / B0HBSZ71XQ (deo). Rank from soldscope_rank_snapshots. aba_sfr is Brand Analytics SFR only."
     : "- organic_rank_snapshot.csv — headers only. No SoldScope Rank Tracker snapshots for the three heroes. Empty is real — this desk never creates RT groups.";
   const competitorLine = input.competitorIncluded
-    ? "- competitor_kr_outliers.csv — net-new unused Exact only (already_bidding=N). Cap 5/family, 15 total. suggested_lever is recommend-only (harvest_exact / watch / skip). Never writes Amazon Ads."
-    : "- competitor_kr_outliers.csv — headers only. No net-new unused Exact outliers this week. Weekly job uses cached snapshots unless missing/stale; first fill is `soldscope-competitor-kr --create-missing` (max 1 POST per ASIN, cap 5/run). Empty is real.";
+    ? "- competitor_kr_outliers.csv — net-new unused Exact only (already_bidding=N). Real-traffic only (search volume ≥ min_search_volume). Cap 5/family, 15 total. suggested_lever is recommend-only (harvest_exact / watch / skip). Never writes Amazon Ads."
+    : "- competitor_kr_outliers.csv — headers only. No net-new unused Exact outliers this week. Real-traffic only; weekly job uses cached snapshots unless missing/stale. Do not POST more KR creates. Empty is real.";
   return [
     "GNO Export pack — observe only. Never writes to Amazon.",
     "",

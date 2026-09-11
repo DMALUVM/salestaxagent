@@ -35,6 +35,9 @@ def test_config_lists_30_competitors_and_excludes_our_balm():
     assert raw["stale_after_days"] == 8
     assert raw["blake_family_cap"] == 5
     assert raw["blake_total_cap"] == 15
+    assert raw["max_keywords"] == 80
+    assert raw["min_search_volume"] == 1
+    assert raw.get("max_keywords") <= 80
     asins = [c["asin"] for c in raw["competitors"]]
     assert len(asins) == 30
     assert len(set(asins)) == 30
@@ -51,6 +54,9 @@ def test_config_lists_30_competitors_and_excludes_our_balm():
     assert loaded["stale_after_days"] == 8
     assert loaded["blake_family_cap"] == 5
     assert loaded["blake_total_cap"] == 15
+    assert loaded["max_keywords"] == 80
+    assert loaded["min_search_volume"] == 1
+    assert loaded["max_aba_sfr"] is None
     assert loaded["families"]["lip"]["hero_asin"] == LIP
     assert loaded["families"]["balm"]["hero_asin"] == BALM
     assert loaded["families"]["deo"]["hero_asin"] == DEO
@@ -319,6 +325,54 @@ def test_kr_row_parser_maps_verified_fields():
     assert row["sponsored_rank"] == 1
     assert row["match_types"] == "EXACT,PHRASE"
     assert row["family"] == "lip"
+
+
+def test_kr_row_parser_drops_zero_and_missing_volume():
+    rows = ck.competitor_kr_rows_from_payload(
+        [
+            {"keyword": "has traffic", "searchVolume": 400, "organicRank": 2},
+            {"keyword": "zero traffic", "searchVolume": 0, "organicRank": 1},
+            {"keyword": "missing volume", "organicRank": 1},
+            {"keyword": "null volume", "searchVolume": None, "organicRank": 1},
+        ],
+        competitor_asin=LIP_COMP,
+        family="lip",
+        marketplace="US",
+        search_id=18838,
+        pulled_at="2026-09-11T12:00:00+00:00",
+        as_of="2026-09-11",
+    )
+    assert [r["keyword"] for r in rows] == ["has traffic"]
+    assert ck.has_real_traffic({"search_volume": 0}) is False
+    assert ck.has_real_traffic({"searchVolume": None}) is False
+    assert ck.has_real_traffic({"search_volume": 1}) is True
+
+
+def test_outliers_and_blake_drop_zero_volume():
+    payload = {
+        "kr_rows": [
+            {
+                "competitor_asin": LIP_COMP, "family": "lip",
+                "keyword": "zero traffic phrase", "search_volume": 0,
+                "opportunity_score": 900, "organic_rank": 1, "as_of": "2026-09-11",
+            },
+            {
+                "competitor_asin": LIP_COMP, "family": "lip",
+                "keyword": "no volume phrase",
+                "opportunity_score": 900, "organic_rank": 1, "as_of": "2026-09-11",
+            },
+            {
+                "competitor_asin": LIP_COMP, "family": "lip",
+                "keyword": "real traffic lip", "search_volume": 400,
+                "opportunity_score": 220, "organic_rank": 4, "as_of": "2026-09-11",
+            },
+        ],
+    }
+    outliers = ck.build_competitor_outliers(payload)
+    assert [r["keyword"] for r in outliers] == ["real traffic lip"]
+    surface = ck.build_blake_competitor_surface(payload)
+    assert [r["keyword"] for r in surface] == ["real traffic lip"]
+    assert all(r["already_bidding"] == "N" for r in surface)
 
 
 def test_hero_weekly_sync_does_not_post_competitor_kr():

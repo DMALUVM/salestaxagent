@@ -600,6 +600,53 @@ def test_kr_rows_from_payload_and_single_asin_filter():
     assert syn.kr_search_asin({"mainAsin": "b0clhtf8yn"}) == "B0CLHTF8YN"
 
 
+def test_page_items_reads_kr_keywords_dict_without_breaking_list_data():
+    """KR results wrap keywords in data.keywords; RT lists stay data=[...]."""
+    listed = [{"id": 3537, "asin": "B0CLHTF8YN"}, {"id": 3553}]
+    assert syn._page_items({"data": listed}) == listed
+    assert syn._page_items({"data": {
+        "keywords": [
+            {"keyword": "tallow lip balm", "searchVolume": 8000},
+            {"keyword": "grass fed tallow", "searchVolume": 400},
+        ],
+        "productDetails": {"asin": "B0DVVDDR6Y"},
+    }, "meta": {"total": 2085}}) == [
+        {"keyword": "tallow lip balm", "searchVolume": 8000},
+        {"keyword": "grass fed tallow", "searchVolume": 400},
+    ]
+    assert syn._page_items({"data": {"productDetails": {}, "keywords": []}}) == []
+    assert syn._page_items({"data": {"productDetails": {}}}) == []
+    assert syn._page_items({"data": {}}) == []
+    assert syn._page_items({}) == []
+    assert syn._page_items({"data": None}) == []
+
+
+def test_collect_kr_results_reads_data_keywords_envelope(monkeypatch):
+    monkeypatch.setattr(syn, "get_kr_asin_results", lambda *a, **k: {
+        "data": {
+            "keywords": [
+                {"keyword": "tallow lip balm", "searchVolume": 8000},
+                {"keyword": "grass fed tallow", "searchVolume": 400},
+            ],
+            "productDetails": {"asin": "B0DVVDDR6Y"},
+        },
+        "meta": {"total": 2085, "current_page": 1},
+    })
+    items = syn.collect_kr_results(18838, cap=80)
+    assert len(items) == 2
+    assert items[0]["keyword"] == "tallow lip balm"
+    parsed = syn.kr_rows_from_payload(
+        items, asin="B0DVVDDR6Y", marketplace="US",
+        search_id=18838, pulled_at="2026-09-11T12:00:00+00:00",
+    )
+    assert [r["keyword_normalized"] for r in parsed] == [
+        "tallow lip balm", "grass fed tallow",
+    ]
+    src = inspect.getsource(ss.get_kr_asin_results)
+    assert "searchVolume" in src
+    assert "sortDesc" in src
+
+
 def test_kr_create_only_when_download_ready_and_no_rt(monkeypatch):
     created: list[str] = []
 
