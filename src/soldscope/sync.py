@@ -684,9 +684,19 @@ def attach_hero_asins_from_products(
 
 
 def _page_items(body: dict) -> list:
-    data = body.get("data")
+    """Unwrap SoldScope page payloads.
+
+    Rank Tracker / search lists use ``data: [...]``.
+    Keyword Research asin results use ``data: { keywords: [...], ... }``.
+    Do not treat a dict ``data`` as a list of items.
+    """
+    data = (body or {}).get("data")
     if isinstance(data, list):
         return data
+    if isinstance(data, dict):
+        keywords = data.get("keywords")
+        if isinstance(keywords, list):
+            return keywords
     return []
 
 
