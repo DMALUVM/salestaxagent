@@ -43,9 +43,9 @@
     "SP | TBL | B0CLHVLG2F | EX | chapstick | TOS",
     "SP | TBL | B0CLHV3V5C | EX | chapstick | TOS",
     "SP | DEO | B0CLHYY3BB | EX | tallow deodorant | TOS",
-    "SP | TBM | B0CLF5B27Y | EX | tallow balm",
-    "SP | TBM | B0CLF5B27Y | EX | beef tallow balm",
-    "SP | TBM | B0CLF5B27Y | EX | tallow deodorant for men"
+    "SP | DEO | B0CLHYY3BB | EX | tallow deodorant for men | TOS",
+    "SP | TBM | B0CLF5B27Y | EX | tallow balm | TOS",
+    "SP | TBM | B0CLF5B27Y | EX | beef tallow balm | TOS"
   ],
   "day5_pause": [
     "Catch-All Auto",
