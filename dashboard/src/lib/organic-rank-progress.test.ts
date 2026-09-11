@@ -10,7 +10,11 @@ import {
   RANK_EMPTY_COPY,
   WOW_MOVE_POSITIONS,
   WOW_TOP_N,
+  buildOrganicRankJoinIndex,
   buildOrganicRankProgress,
+  familyHeroAsin,
+  lookupOrganicRank,
+  organicRankSnapshotRows,
   cellHoverTitle,
   cellPriorRank,
   classifyMovement,
@@ -288,6 +292,43 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.equal(deo.rows[0].current, 104);
     assert.equal(deo.rows[0].previous, null);
     assert.notEqual(deo.emptyCopy, DEO_EMPTY_COPY);
+  });
+
+  test("GNO pack join uses ABA SFR only and prefers the family hero ASIN", () => {
+    const snapshots = [
+      {
+        phrase: "tallow balm", asin: "B0DQFKMJFY", as_of: "2026-09-07",
+        organic_position: 8, organic_previous_position: 14,
+        aba_search_frequency_rank: 540, search_volume: 777777,
+      },
+      {
+        phrase: "tallow balm", asin: "B0CLHTF8YN", as_of: "2026-09-07",
+        organic_position: 40, organic_previous_position: 41,
+        aba_search_frequency_rank: 540, search_volume: 777777,
+      },
+    ];
+    const index = buildOrganicRankJoinIndex(snapshots);
+    const balm = lookupOrganicRank(index, "Tallow Balm", "B0DQFKMJFY");
+    assert.equal(balm.organic_rank, 8);
+    assert.equal(balm.organic_rank_prev, 14);
+    assert.equal(balm.organic_rank_delta, 6);
+    assert.equal(balm.aba_sfr, 540);
+    assert.equal(balm.organic_as_of, "2026-09-07");
+    const missing = lookupOrganicRank(index, "not a stored phrase");
+    assert.equal(missing.organic_rank, null);
+    assert.equal(missing.aba_sfr, null);
+    const volumeOnly = buildOrganicRankJoinIndex([{
+      phrase: "chapstick", asin: "B0CLHTF8YN", as_of: "2026-09-07",
+      organic_position: null, search_volume: 256000,
+    }]);
+    const emptySfr = lookupOrganicRank(volumeOnly, "chapstick");
+    assert.equal(emptySfr.aba_sfr, null);
+    assert.equal(emptySfr.organic_rank, null);
+    const snap = organicRankSnapshotRows(snapshots);
+    assert.ok(snap.some((r) => r.asin === "B0DQFKMJFY" && r.organic_rank === 8));
+    assert.equal(familyHeroAsin("balm"), "B0DQFKMJFY");
+    assert.equal(familyHeroAsin("lip_3pk"), "B0CLHTF8YN");
+    assert.equal(familyHeroAsin("deo"), "B0HBSZ71XQ");
   });
 
   test("heatmap encodes Δ, sparkline, and drops the stale deo legend", () => {

@@ -23,8 +23,14 @@ import {
   LIP_BE_ACOS,
   NEW_EXACT,
   PLACEMENT_LAG_NOTE,
+  SQP_SLICE_COVER_END,
+  SQP_SLICE_COVER_START,
   SQP_SLICE_CSV_HEADERS,
   WATCH_CAMPAIGN_CSV_HEADERS,
+  isNewExactName,
+  selectSqpSliceWeek,
+  stDateLooksDaily,
+  sumHarvestSpend,
   acosVsBe,
   breakEvenAcosOf,
   familyOf,
@@ -101,7 +107,7 @@ describe("GNO watchlists and matching", () => {
 
   test("hard-coded names match Dave's spec", () => {
     assert.equal(KEEP_ALIVE.length, 11);
-    assert.equal(NEW_EXACT.length, 7);
+    assert.equal(NEW_EXACT.length, 10);
     assert.equal(FLAVOR_SHELL.length, 24);
     assert.equal(BROAD_M_NAME, "GG - Lip Balm - Broad M");
     assert.equal(isBroadM(BROAD_M_NAME), true);
@@ -109,6 +115,10 @@ describe("GNO watchlists and matching", () => {
     assert.ok(NEW_EXACT[0].includes("tallow lip balm"));
     assert.equal(extractExactKeyword(NEW_EXACT[0]), "tallow lip balm");
     assert.equal(extractExactKeyword(NEW_EXACT[3]), "chapstick");
+    assert.equal(extractExactKeyword(NEW_EXACT[7]), "tallow balm");
+    assert.equal(extractExactKeyword(NEW_EXACT[8]), "beef tallow balm");
+    assert.equal(extractExactKeyword(NEW_EXACT[9]), "tallow deodorant for men");
+    assert.ok(NEW_EXACT.some((n) => n.includes("B0CLF5B27Y") && n.includes("tallow balm")));
     assert.equal(LIP_BE_ACOS, 42);
     assert.equal(DEO_BE_ACOS, 36);
     assert.equal(BALM_BE_ACOS, 36);
@@ -162,6 +172,9 @@ describe("harvest / junk tags", () => {
     assert.equal(enabled.has("tallow lip balm"), true);
     assert.equal(enabled.has("chapstick"), true);
     assert.equal(enabled.has("tallow deodorant"), true);
+    assert.equal(enabled.has("tallow balm"), true);
+    assert.equal(enabled.has("beef tallow balm"), true);
+    assert.equal(enabled.has("tallow deodorant for men"), true);
   });
 
   test("harvestQueue tags Auto Loose terms only", () => {
@@ -631,6 +644,7 @@ describe("export pack columns", () => {
     assert.ok(names.includes("broad_m_search_terms.csv"));
     assert.ok(names.includes("keyword_targets.csv"));
     assert.ok(names.includes("advertised_product_l7.csv"));
+    assert.ok(names.includes("organic_rank_snapshot.csv"));
     assert.ok(names.includes("README.txt"));
     assert.equal(names.includes("sqp_weekly_slice.csv"), false);
     assert.ok(names.length >= 5);
@@ -655,12 +669,15 @@ describe("widgets + safety rails", () => {
       "2026-09-08",
       new Date("2026-09-08T12:00:00-07:00"),
     );
-    assert.equal(tiles.length, 7);
+    assert.equal(tiles.length, NEW_EXACT.length);
     assert.ok(tiles.every((t) => t.zero_impr_after_24h));
     assert.equal(tiles[0].family, "lip_3pk");
     assert.equal(tiles[0].break_even_acos, 42);
     assert.equal(tiles[6].family, "deo");
     assert.equal(tiles[6].break_even_acos, 36);
+    assert.equal(tiles[7].family, "balm");
+    assert.equal(tiles[7].break_even_acos, BALM_BE_ACOS);
+    assert.equal(tiles[9].family, "deo");
   });
 
   test("keeper heartbeat marks Auto Loose enabled + sparkline length 7", () => {
@@ -753,7 +770,7 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
       })),
     });
     const today = rows.filter((r) => r.date_start === "2026-09-07" && r.watch_list === "NEW_EXACT");
-    assert.equal(today.length, 7);
+    assert.equal(today.length, NEW_EXACT.length);
     assert.ok(today.every((r) => r.state === "ENABLED"));
     assert.ok(today.every((r) => r.daily_budget === 25));
     assert.ok(today.every((r) => r.impressions === 0 && r.spend === 0));
@@ -913,6 +930,8 @@ describe("GNO pack v2 — Dave 7 Sep feedback", () => {
       impressions: 90, clicks: 6, spend: 12, orders: 2, sales: 40, acos: 30,
       metrics_complete: false,
       family: "lip_3pk", break_even_acos: 42, acos_vs_be: -12, cm_note: CM_NOTE,
+      organic_rank: null, organic_rank_prev: null, organic_rank_delta: null,
+      aba_sfr: null, organic_as_of: null,
     }]);
     assert.match(csv, /2.45/);
     assert.match(csv, /metrics_complete/);
@@ -1074,7 +1093,7 @@ describe("GNO pack v3 — Wed review upgrades", () => {
     });
     const today = rows.filter((r) => r.date_start === "2026-09-07");
     assert.ok(today.some((r) => r.watch_list === "FLAVOR_SHELL" && r.campaign_name === orangeChapstick));
-    assert.equal(today.filter((r) => r.watch_list === "NEW_EXACT").length, 7);
+    assert.equal(today.filter((r) => r.watch_list === "NEW_EXACT").length, NEW_EXACT.length);
     assert.ok(today.filter((r) => r.watch_list === "KEEPER").length >= KEEP_ALIVE.length);
     assert.ok(today.some((r) => r.watch_list === "DAY5_PAUSE"));
     const flavor = today.find((r) => r.campaign_name === orangeChapstick);
@@ -1267,9 +1286,234 @@ describe("GNO pack v3 — Wed review upgrades", () => {
     assert.doesNotMatch(sqp!.body, /2026-08-22/);
     assert.match(sqp!.body, /chapstick/);
     assert.doesNotMatch(sqp!.body, /beef tallow moisturizer/);
-    assert.match(withSqp.files.find((f) => f.name === "README.txt")!.body, /sqp_weekly_slice\.csv — latest week/);
+    assert.match(withSqp.files.find((f) => f.name === "README.txt")!.body, /sqp_weekly_slice\.csv — one stored week/);
 
     const empty = sqpWeeklySliceRows([]);
     assert.deepEqual(empty, []);
+  });
+});
+
+describe("GNO pack — NEW_EXACT TBM shells + SQP week + ST L2 SoT + organic rank", () => {
+  const tbmBalm = "SP | TBM | B0CLF5B27Y | EX | tallow balm";
+  const tbmBeef = "SP | TBM | B0CLF5B27Y | EX | beef tallow balm";
+  const tbmDeo = "SP | TBM | B0CLF5B27Y | EX | tallow deodorant for men";
+  const tbmLive = "SP | TBM | B0CLF5B27Y | EX | tallow balm | TOS";
+
+  test("NEW_EXACT includes the three TBM B0CLF5B27Y shells and live TOS variants", () => {
+    assert.ok(NEW_EXACT.includes(tbmBalm));
+    assert.ok(NEW_EXACT.includes(tbmBeef));
+    assert.ok(NEW_EXACT.includes(tbmDeo));
+    assert.equal(watchListOf(tbmBalm), "NEW_EXACT");
+    assert.equal(watchListOf(tbmLive), "NEW_EXACT");
+    assert.equal(isNewExactName(tbmLive), true);
+    assert.equal(extractExactKeyword(tbmBalm), "tallow balm");
+    assert.equal(extractExactKeyword(tbmLive), "tallow balm");
+    const rows = watchCampaignExportRows({
+      asOf: "2026-09-10",
+      today: "2026-09-11",
+      campaigns: [],
+      placements: [],
+      campaignMeta: [
+        { campaign_name: tbmLive, state: "ENABLED", daily_budget: 25 },
+        { campaign_name: tbmBeef, state: "ENABLED", daily_budget: 25 },
+        { campaign_name: tbmDeo, state: "ENABLED", daily_budget: 25 },
+      ],
+    });
+    const today = rows.filter((r) => r.date_start === "2026-09-11" && r.watch_list === "NEW_EXACT");
+    assert.ok(today.some((r) => r.campaign_name === tbmLive || r.campaign_name === tbmBalm));
+    assert.ok(today.some((r) => /beef tallow balm/i.test(r.campaign_name)));
+    assert.ok(today.some((r) => /tallow deodorant for men/i.test(r.campaign_name)));
+    assert.equal(today.filter((r) => /b0clf5b27y/i.test(r.campaign_name)).length, 3);
+  });
+
+  test("SQP slice prefers the week covering Sep 7-10 over a pre-raise week", () => {
+    assert.equal(SQP_SLICE_COVER_START, "2026-09-07");
+    assert.equal(SQP_SLICE_COVER_END, "2026-09-10");
+    const rows = [
+      {
+        week_start: "2026-08-30", week_end: "2026-09-05",
+        search_query: "lip balm", query_normalized: "lip balm",
+        search_query_volume: 90000, click_share: 0.1, source: "sqp_brand_csv",
+      },
+      {
+        week_start: "2026-09-06", week_end: "2026-09-12",
+        search_query: "lip balm", query_normalized: "lip balm",
+        search_query_volume: 92000, click_share: 0.12, source: "sqp_brand_csv",
+      },
+      {
+        week_start: "2026-09-06", week_end: "2026-09-12",
+        search_query: "chapstick", query_normalized: "chapstick",
+        search_query_volume: 78000, click_share: 0.3, source: "sqp_brand_csv",
+      },
+    ];
+    const picked = selectSqpSliceWeek(rows);
+    assert.equal(picked?.weekEnd, "2026-09-12");
+    assert.equal(picked?.coversTarget, true);
+    const slice = sqpWeeklySliceRows(rows);
+    assert.ok(slice.every((r) => r.week_end === "2026-09-12"));
+    assert.doesNotMatch(slice.map((r) => r.week_end).join(","), /2026-09-05/);
+  });
+
+  test("SQP slice ships latest week with an honest pre-raise note when Sep 7-10 is missing", () => {
+    const rows = [
+      {
+        week_start: "2026-08-30", week_end: "2026-09-05",
+        search_query: "lip balm", query_normalized: "lip balm",
+        search_query_volume: 90000, source: "sqp_brand_csv",
+      },
+    ];
+    const picked = selectSqpSliceWeek(rows);
+    assert.equal(picked?.weekEnd, "2026-09-05");
+    assert.equal(picked?.coversTarget, false);
+    assert.match(picked?.note ?? "", /does NOT cover 2026-09-07–2026-09-10/);
+    const pack = buildGnoPack({
+      asOf: "2026-09-10", today: "2026-09-11",
+      campaigns: [], searchTerms: [], placements: [],
+      sqpWeekly: rows,
+    });
+    assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /does NOT cover/);
+    assert.match(pack.files.find((f) => f.name === "sqp_weekly_slice.csv")!.body, /2026-09-05/);
+  });
+
+  test("Auto Loose L2 ST sum does not inflate vs campaign L2 (SUMMARY grain)", () => {
+    assert.equal(stDateLooksDaily(658, 144), false);
+    assert.equal(stDateLooksDaily(70, 72), true);
+    const campaigns = [
+      camp(AUTO_LOOSE_NAME, { date: "2026-09-09", spend: 70, impressions: 400, clicks: 40 }),
+      camp(AUTO_LOOSE_NAME, { date: "2026-09-10", spend: 74, impressions: 420, clicks: 42 }),
+    ];
+    const terms: SearchTermRow[] = [
+      {
+        date: "2026-09-10",
+        campaign_name: AUTO_LOOSE_NAME,
+        search_term: "tallow lip balm organic",
+        match_type: "TARGETING_EXPRESSION",
+        spend: 300, sales_14d: 400, orders_14d: 8, clicks: 80, impressions: 2000,
+      },
+      {
+        date: "2026-09-10",
+        campaign_name: AUTO_LOOSE_NAME,
+        search_term: "chapstick 3 pack",
+        match_type: "TARGETING_EXPRESSION",
+        spend: 358, sales_14d: 200, orders_14d: 4, clicks: 90, impressions: 1800,
+      },
+    ];
+    const st = searchTermExportRows(terms, campaigns, "2026-09-10", isAutoLoose);
+    const l2 = sumHarvestSpend(st, "L2");
+    const campL2 = 144;
+    assert.ok(l2 <= campL2 * 1.25 + 2, `Auto Loose L2 ST $${l2} ≫ campaign L2 $${campL2}`);
+    assert.equal(l2, 0);
+    assert.equal(st.filter((r) => r.label === "L2").length, 0);
+    const l7 = sumHarvestSpend(st, "L7");
+    assert.ok(l7 > 0);
+    assert.match(st.find((r) => r.label === "L7")?.cm_note ?? "", /watch_campaigns is SoT/);
+  });
+
+  test("Auto Loose L2 ST sums 1-day stamps and stays near campaign L2", () => {
+    const campaigns = [
+      camp(AUTO_LOOSE_NAME, { date: "2026-09-09", spend: 70 }),
+      camp(AUTO_LOOSE_NAME, { date: "2026-09-10", spend: 74 }),
+    ];
+    const terms: SearchTermRow[] = [
+      {
+        date: "2026-09-09",
+        campaign_name: AUTO_LOOSE_NAME,
+        search_term: "tallow lip balm organic",
+        match_type: "TARGETING_EXPRESSION",
+        spend: 40, sales_14d: 80, orders_14d: 2, clicks: 10, impressions: 200,
+      },
+      {
+        date: "2026-09-09",
+        campaign_name: AUTO_LOOSE_NAME,
+        search_term: "chapstick 3 pack",
+        match_type: "TARGETING_EXPRESSION",
+        spend: 28, sales_14d: 40, orders_14d: 1, clicks: 8, impressions: 160,
+      },
+      {
+        date: "2026-09-10",
+        campaign_name: AUTO_LOOSE_NAME,
+        search_term: "tallow lip balm organic",
+        match_type: "TARGETING_EXPRESSION",
+        spend: 44, sales_14d: 90, orders_14d: 2, clicks: 12, impressions: 220,
+      },
+      {
+        date: "2026-09-10",
+        campaign_name: AUTO_LOOSE_NAME,
+        search_term: "chapstick 3 pack",
+        match_type: "TARGETING_EXPRESSION",
+        spend: 30, sales_14d: 50, orders_14d: 1, clicks: 9, impressions: 170,
+      },
+    ];
+    const st = searchTermExportRows(terms, campaigns, "2026-09-10", isAutoLoose);
+    const l2 = sumHarvestSpend(st, "L2");
+    assert.equal(l2, 142);
+    assert.ok(l2 <= 144 * 1.25 + 2);
+    assert.ok(st.some((r) => r.label === "L2" && r.customer_search_term === "tallow lip balm organic"));
+  });
+
+  test("organic rank/SFR join onto keyword + ST files; empty stays blank; volume is not SFR", () => {
+    const snapshots = [
+      {
+        phrase: "tallow lip balm",
+        asin: "B0CLHTF8YN",
+        organic_position: 4,
+        organic_previous_position: 9,
+        aba_search_frequency_rank: 120,
+        search_volume: 999999,
+        as_of: "2026-09-07",
+      },
+    ];
+    const pack = buildGnoPack({
+      asOf: "2026-09-10", today: "2026-09-11",
+      campaigns: [camp(FAT_PARENT_NAME, { date: "2026-09-10", spend: 12 })],
+      searchTerms: [{
+        date: "2026-09-10",
+        campaign_name: FAT_PARENT_NAME,
+        search_term: "tallow lip balm",
+        keyword: "tallow lip balm",
+        match_type: "EXACT",
+        spend: 12, sales_14d: 40, orders_14d: 2, clicks: 6, impressions: 90,
+      }],
+      placements: [],
+      keywordTargets: [{
+        campaign_name: FAT_PARENT_NAME,
+        keyword_text: "tallow lip balm",
+        match_type: "EXACT",
+        state: "ENABLED",
+        bid: 2.45,
+      }],
+      organicSnapshots: snapshots,
+    });
+    const kw = pack.files.find((f) => f.name === "keyword_targets.csv")!.body;
+    const fat = pack.files.find((f) => f.name === "fat_parent_search_terms.csv")!.body;
+    const snap = pack.files.find((f) => f.name === "organic_rank_snapshot.csv")!.body;
+    const readme = pack.files.find((f) => f.name === "README.txt")!.body;
+    assert.match(kw.split("\n")[0], /organic_rank,organic_rank_prev,organic_rank_delta,aba_sfr,organic_as_of/);
+    assert.match(kw, /tallow lip balm/);
+    assert.match(kw, /,4,9,5,120,2026-09-07/);
+    assert.doesNotMatch(kw, /999999/);
+    assert.match(fat, /,4,9,5,120,2026-09-07/);
+    assert.match(snap, /B0CLHTF8YN/);
+    assert.match(snap, /120/);
+    assert.match(readme, /Brand Analytics SFR/);
+    assert.match(readme, /never creates SoldScope Rank Tracker groups/);
+    assert.match(readme, /Exact protect/);
+
+    const emptyPack = buildGnoPack({
+      asOf: "2026-09-10", today: "2026-09-11",
+      campaigns: [camp(NEW_EXACT[0])],
+      searchTerms: [],
+      placements: [],
+      organicSnapshots: [{
+        phrase: "tallow lip balm",
+        asin: "B0CLHTF8YN",
+        organic_position: null,
+        search_volume: 888888,
+        as_of: "2026-09-07",
+      }],
+    });
+    const emptyKw = emptyPack.files.find((f) => f.name === "watch_campaigns.csv")!.body;
+    assert.match(emptyKw.split("\n")[0], /organic_rank/);
+    assert.doesNotMatch(emptyKw, /888888/);
   });
 });
