@@ -13,6 +13,7 @@ import {
   buildBlakeCompetitorSurface,
   buildCompetitorOutliers,
   classifyExactBidding,
+  hasRealTraffic,
   competitorKrOutliersCsv,
   competitorPresent,
   digestShouldPing,
@@ -37,6 +38,8 @@ describe("Competitor reverse-ASIN outliers", () => {
     ));
     assert.equal(root.competitors.length, 30);
     assert.deepEqual(root.excluded_asins, [EXCLUDED_OURS]);
+    assert.equal(root.min_search_volume, 1);
+    assert.equal(root.max_keywords, 80);
   });
 
   test("already_bidding is enabled Exact only — Phrase/paused do not count", () => {
@@ -165,6 +168,49 @@ describe("Competitor reverse-ASIN outliers", () => {
     assert.match(COMPETITOR_OUTLIER_EMPTY_COPY, /does not create Rank Tracker/);
     assert.match(COMPETITOR_OUTLIER_EMPTY_COPY, /net-new unused Exact/);
     assert.match(COMPETITOR_OUTLIER_EMPTY_COPY, /15 total/);
+    assert.match(COMPETITOR_OUTLIER_EMPTY_COPY, /Real-traffic only/);
+  });
+
+  test("zero and missing search volume never hit outliers or Blake surface", () => {
+    assert.equal(hasRealTraffic({ search_volume: 0 }), false);
+    assert.equal(hasRealTraffic({ search_volume: null }), false);
+    assert.equal(hasRealTraffic({ search_volume: 1 }), true);
+    const rows = buildCompetitorOutliers({
+      krRows: [
+        {
+          competitor_asin: LIP_COMP, family: "lip",
+          keyword: "zero traffic phrase", search_volume: 0,
+          opportunity_score: 900, organic_rank: 1, as_of: "2026-09-11",
+        },
+        {
+          competitor_asin: LIP_COMP, family: "lip",
+          keyword: "no volume phrase",
+          opportunity_score: 900, organic_rank: 1, as_of: "2026-09-11",
+        },
+        {
+          competitor_asin: LIP_COMP, family: "lip",
+          keyword: "real traffic lip", search_volume: 400,
+          opportunity_score: 220, organic_rank: 4, as_of: "2026-09-11",
+        },
+      ],
+    });
+    assert.deepEqual(rows.map((r) => r.keyword), ["real traffic lip"]);
+    const surface = buildBlakeCompetitorSurface({
+      krRows: [
+        {
+          competitor_asin: LIP_COMP, family: "lip",
+          keyword: "zero traffic phrase", search_volume: 0,
+          opportunity_score: 900, organic_rank: 1, as_of: "2026-09-11",
+        },
+        {
+          competitor_asin: LIP_COMP, family: "lip",
+          keyword: "real traffic lip", search_volume: 400,
+          opportunity_score: 220, organic_rank: 4, as_of: "2026-09-11",
+        },
+      ],
+    });
+    assert.deepEqual(surface.map((r) => r.keyword), ["real traffic lip"]);
+    assert.equal(surface.every((r) => r.already_bidding === "N"), true);
   });
 
   test("Blake surface is unused Exact only and capped 5/family or 15 total", () => {
@@ -216,20 +262,20 @@ describe("Competitor reverse-ASIN outliers", () => {
       krRows: [
         {
           competitor_asin: LIP_COMP, family: "lip",
-          keyword: "repeat lip", opportunity_score: 220, organic_rank: 3,
-          as_of: "2026-09-11",
+          keyword: "repeat lip", search_volume: 400, opportunity_score: 220,
+          organic_rank: 3, as_of: "2026-09-11",
         },
         {
           competitor_asin: LIP_COMP, family: "lip",
-          keyword: "brand new lip", opportunity_score: 210, organic_rank: 4,
-          as_of: "2026-09-11",
+          keyword: "brand new lip", search_volume: 380, opportunity_score: 210,
+          organic_rank: 4, as_of: "2026-09-11",
         },
       ],
       previousKrRows: [
         {
           competitor_asin: LIP_COMP, family: "lip",
-          keyword: "repeat lip", opportunity_score: 220, organic_rank: 3,
-          as_of: "2026-09-04",
+          keyword: "repeat lip", search_volume: 400, opportunity_score: 220,
+          organic_rank: 3, as_of: "2026-09-04",
         },
       ],
     });
