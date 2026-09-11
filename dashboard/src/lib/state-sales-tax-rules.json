@@ -1,0 +1,209 @@
+{
+  "_comment": "Slim extract of config/state_rules.json for Vercel. has_sales_tax + fba_inventory_creates_nexus only. Keep in lockstep with the Python file \u2014 tests compare them.",
+  "states": {
+    "AL": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "AZ": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "AR": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "CA": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "true"
+    },
+    "CO": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "CT": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "FL": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "GA": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "HI": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "ID": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "IL": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "IN": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "IA": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "KS": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "KY": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "LA": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "ME": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "MD": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "MA": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "MI": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "true"
+    },
+    "MN": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "MS": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "MO": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "NE": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "NV": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "NJ": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "NM": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "NY": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "NC": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "ND": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "OH": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "OK": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "PA": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "contested"
+    },
+    "RI": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "SC": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "SD": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "TN": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "TX": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "conditional"
+    },
+    "UT": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "VT": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "VA": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "WA": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "true"
+    },
+    "WV": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "WI": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "WY": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "DC": {
+      "has_sales_tax": true,
+      "fba_inventory_creates_nexus": "unknown_default_true"
+    },
+    "AK": {
+      "has_sales_tax": false,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "DE": {
+      "has_sales_tax": false,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "MT": {
+      "has_sales_tax": false,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "NH": {
+      "has_sales_tax": false,
+      "fba_inventory_creates_nexus": "false"
+    },
+    "OR": {
+      "has_sales_tax": false,
+      "fba_inventory_creates_nexus": "false"
+    }
+  }
+}

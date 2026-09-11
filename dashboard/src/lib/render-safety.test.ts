@@ -6,10 +6,11 @@ import path from "node:path";
 /**
  * A page must render without any subprocess.
  *
- * Live regression: the playbook and registration-plan panels fetched routes that
- * shell out to the Python CLI from a mount effect. On a serverless deploy the
- * venv does not exist, so every page view spawned a doomed subprocess and an
- * optional panel became a hard dependency of the route rendering at all.
+ * Live regression: the playbook panel fetched a route that shells out to the
+ * Python CLI from a mount effect. On a serverless deploy the venv does not
+ * exist, so every page view spawned a doomed subprocess and an optional
+ * panel became a hard dependency of the route rendering at all.
+ * `/api/registration-plan` no longer shells out — it reads the warehouse.
  *
  * Shell-out routes are fine — they just have to be triggered by a click.
  */
