@@ -31,7 +31,8 @@ surfaces in the card as a visible failure state, not a blank panel.
 | `/api/paid-ads/decision` | Supabase server creds + `paid_intel_decisions` | 409 naming the migration if the table is missing |
 | `/api/paid-ads/ingest` | Supabase server creds (POST, Basic Auth) | 400 on bad payload; upserts those two tables on their production uniques |
 | `/api/data-freshness` | Supabase server creds | Layout strip hidden (fail-soft) |
-| `/api/ppc-export`, `/api/ppc-playbook`, `/api/registration-plan` | a Python venv **on the same machine** | JSON `{available:false}` — these cannot work on Vercel; `ppc-export` falls back to the stored `ppc_briefs` row |
+| `/api/ppc-export`, `/api/ppc-playbook` | a Python venv **on the same machine** | JSON `{available:false}` — these cannot work on Vercel; `ppc-export` falls back to the stored `ppc_briefs` row |
+| `/api/registration-plan` | Supabase server creds + warehouse tables (`nexus_status`, `sales_by_state`, `inventory_events`, `state_rules`) | JSON `{available:false}` with a warehouse hint — computed in-process, no Python venv |
 
 ## Verifying a deploy
 

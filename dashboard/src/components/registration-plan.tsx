@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,15 +85,14 @@ export function RegistrationPlan() {
   const [rows, setRows] = useState<PlanRow[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [tab, setTab] = useState<Tab>("register_now");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [residual, setResidual] = useState<string>("");
 
   /**
-   * Loaded ON DEMAND. This route shells out to the Python CLI, so fetching it
-   * from a mount effect spawned a subprocess on every page view — impossible on
-   * a serverless deploy where the venv does not exist, and it made an optional
-   * panel a hard dependency of the page rendering at all.
+   * Warehouse read — safe to load on mount. The old Python CLI path required
+   * a click because it spawned a subprocess that does not exist on Vercel.
    */
   async function load() {
     setLoading(true);
@@ -105,17 +104,28 @@ export function RegistrationPlan() {
         throw new Error(`Unexpected ${res.status} response from the plan route.`);
       }
       const d = await res.json();
-      if (!d.available) setErr(d.hint ?? d.error ?? "Plan unavailable.");
+      if (!d.available) {
+        setErr(
+          d.error === "warehouse_empty"
+            ? (d.hint ?? "The warehouse has no nexus or sales rows yet.")
+            : (d.hint ?? d.error ?? "Could not load the registration plan from the warehouse."),
+        );
+      }
       setRows(d.rows ?? []);
       setCounts(d.counts ?? {});
+      setResidual(typeof d.residual_risk === "string" ? d.residual_risk : "");
       setLoaded(true);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not load the registration plan.");
+      setErr(e instanceof Error ? e.message : "Could not load the registration plan from the warehouse.");
       setLoaded(true);
     } finally {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    void load();
+  }, []);
 
   const shown = rows.filter((r) => r.recommended_action === tab);
   const compact = tab === "already_registered" || tab === "no_sales_tax";
@@ -132,20 +142,16 @@ export function RegistrationPlan() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {!loaded && !loading && (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Ranks every state from live inventory and sales. Built on demand so
-              the page never waits on it.
-            </p>
-            <Button variant="outline" size="sm" className="text-xs" onClick={load}>
-              Build registration plan
-            </Button>
-          </div>
-        )}
-        {loading && <p className="text-xs text-muted-foreground">Building plan…</p>}
+        {loading && <p className="text-xs text-muted-foreground">Loading plan from the warehouse…</p>}
         {err && (
-          <p className="text-xs text-amber-700 dark:text-amber-400">{err}</p>
+          <div className="space-y-2">
+            <p className="text-xs text-amber-700 dark:text-amber-400">{err}</p>
+            {loaded && (
+              <Button variant="outline" size="sm" className="text-xs" onClick={load}>
+                Retry
+              </Button>
+            )}
+          </div>
         )}
 
         {!loading && rows.length > 0 && (
@@ -255,10 +261,15 @@ export function RegistrationPlan() {
               <p className="text-[10px] text-muted-foreground">
                 No official registration URLs are stored in{" "}
                 <code>state_rules.json</code>, so none are linked here rather than
-                guessed. Unmapped fulfilment-centre codes can hide inventory in a
-                state — check <code>inventory-health</code> for residual risk.
+                guessed.
+                {residual
+                  ? ` ${residual}`
+                  : " Unmapped fulfilment-centre codes can hide inventory in a state — check inventory health for residual risk."}
               </p>
             )}
+            <Button variant="outline" size="sm" className="text-xs" onClick={load} disabled={loading}>
+              Refresh plan
+            </Button>
           </>
         )}
 

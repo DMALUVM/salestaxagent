@@ -365,8 +365,9 @@ export default function NexusRegistrationsPage() {
         </div>
       </div>
 
-      {/* Ranked plan from the Python decision engine — the auditable version of
-          the per-state cards below, with reasons and confidence on every row. */}
+      {/* Ranked plan from warehouse facts + the same decide() rules as
+          src/exports/registration_plan.py. The tabbed cards below are a
+          coarser triage (registration-model.ts) and may differ in count. */}
       <RegistrationPlan />
 
       {/* Summary strip */}
