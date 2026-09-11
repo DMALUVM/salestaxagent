@@ -14,6 +14,7 @@ import { CM_NOTE } from "@/lib/gno-ppc-watch";
 import { OrganicRankHeatmap } from "@/components/organic-rank-heatmap";
 import { RT_EMPTY_COPY, formatSoldScopeRank, formatSoldScopeVol } from "@/lib/soldscope-status";
 import { OUTLIER_EMPTY_COPY } from "@/lib/soldscope-outliers";
+import { COMPETITOR_OUTLIER_EMPTY_COPY } from "@/lib/soldscope-competitor-outliers";
 import { AlertTriangle, Check, CheckCircle, Download, RefreshCw, Shield } from "lucide-react";
 import {
   gnoAlertKey,
@@ -121,6 +122,20 @@ interface GnoData {
       note: string;
     }>;
     outlierEmptyCopy?: string;
+    competitorOutliers?: Array<{
+      keyword: string;
+      competitor_asin: string;
+      our_hero_family: string;
+      volume: number | null;
+      sfr: number | null;
+      opportunity: number | null;
+      competitor_organic_rank: number | null;
+      competitor_sponsored_rank: number | null;
+      our_organic_rank: number | null;
+      already_bidding: "Y" | "N";
+      suggested_lever: "harvest_exact" | "watch" | "skip";
+    }>;
+    competitorEmptyCopy?: string;
   };
   lastSync?: { at: string | null; job: string | null; status: string | null };
   exportBanner?: {
@@ -863,6 +878,78 @@ export function PpcGnoWatch() {
                     )}
                   </TableCell>
                   <TableCell className="text-[10px] text-muted-foreground">{row.note}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card id="competitor-kr-outliers">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Competitor reverse-ASIN keywords — recommend only</CardTitle>
+          <p className="text-[11px] text-muted-foreground">
+            Net-new unused Exact only (<code>already_bidding = N</code>). Cap ~5 per
+            family / ~15 total — not a dump of all 30 ASINs. Lever is harvest_exact
+            / watch / skip — nothing writes to Amazon. Weekly job uses cached
+            reverse snapshots unless missing or stale. First fill is CLI{" "}
+            <code>--create-missing</code> (max 1 POST per ASIN, cap 5/run).
+          </p>
+        </CardHeader>
+        <CardContent className="p-0 overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Keyword</TableHead>
+                <TableHead>Competitor</TableHead>
+                <TableHead>Family</TableHead>
+                <TableHead className="text-right">Vol / SFR / Opp</TableHead>
+                <TableHead className="text-right">Comp org / sp</TableHead>
+                <TableHead className="text-right">Our org</TableHead>
+                <TableHead>Exact</TableHead>
+                <TableHead>Lever</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(data?.soldscope?.competitorOutliers ?? []).length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-xs text-muted-foreground">
+                    {data?.soldscope?.competitorEmptyCopy ?? COMPETITOR_OUTLIER_EMPTY_COPY}
+                  </TableCell>
+                </TableRow>
+              )}
+              {(data?.soldscope?.competitorOutliers ?? []).map((row) => (
+                <TableRow key={`${row.competitor_asin}-${row.keyword}`}>
+                  <TableCell className="text-xs">{row.keyword}</TableCell>
+                  <TableCell className="text-[10px] tabular-nums text-muted-foreground">
+                    {row.competitor_asin}
+                  </TableCell>
+                  <TableCell className="text-[10px]">{row.our_hero_family}</TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">
+                    {formatSoldScopeVol(row.volume)}
+                    {" / "}
+                    {formatSoldScopeVol(row.sfr)}
+                    {" / "}
+                    {formatSoldScopeVol(row.opportunity)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">
+                    {formatSoldScopeRank(row.competitor_organic_rank)}
+                    {" / "}
+                    {formatSoldScopeRank(row.competitor_sponsored_rank)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">
+                    {formatSoldScopeRank(row.our_organic_rank)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-[9px]">
+                      {row.already_bidding}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-[9px]">
+                      {row.suggested_lever}
+                    </Badge>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

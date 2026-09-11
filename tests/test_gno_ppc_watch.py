@@ -131,6 +131,7 @@ def test_gno_dashboard_never_auto_writes_amazon():
     assert "FLAVOR_SHELL" in lib
     assert "broad_m_search_terms.csv" in lib
     assert "advertised_product_l7.csv" in lib
+    assert "competitor_kr_outliers.csv" in lib
     assert "placement report lag" in lib
     assert "isBroadM" in lib
     assert 'n.includes("lip")' in lib
