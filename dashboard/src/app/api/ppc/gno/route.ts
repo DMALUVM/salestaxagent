@@ -5,6 +5,7 @@ import {
   GNO_DESK_SPEND_LOOKBACK_DAYS,
   GNO_LAUNCHED_AT,
   GNO_OBSERVE_ONLY,
+  NEW_EXACT,
   evaluateGnoAlerts,
   harvestQueue,
   hoursSinceLaunch,
@@ -18,9 +19,20 @@ import {
 } from "@/lib/gno-ppc-watch";
 import { exportBannerFromState } from "@/lib/gno-export-state";
 import { loadGnoExportState, loadGnoLedger } from "@/lib/gno-store";
-import { loadSoldScopeKeywordIntel, loadSoldScopeOutlierSources, loadSoldScopeRankStatus } from "@/lib/soldscope-load";
+import {
+  loadSoldScopeCompetitorKr,
+  loadSoldScopeKeywordIntel,
+  loadSoldScopeOutlierSources,
+  loadSoldScopeRankStatus,
+} from "@/lib/soldscope-load";
 import { attachKeywordIntel } from "@/lib/soldscope-status";
 import { OUTLIER_EMPTY_COPY, buildKeywordOutliers } from "@/lib/soldscope-outliers";
+import { buildOrganicRankJoinIndex } from "@/lib/organic-rank-progress";
+import {
+  COMPETITOR_OUTLIER_EMPTY_COPY,
+  buildCompetitorOutliers,
+  extraExactFromWatch,
+} from "@/lib/soldscope-competitor-outliers";
 
 /**
  * GET /api/ppc/gno — GNO PPC Watch payload from stored Ads tables.
@@ -210,10 +222,11 @@ export async function GET() {
       campaignMeta,
     });
     const harvestRaw = harvestQueue(searchTerms, campaigns, asOf, { keywordTargets, ledger });
-    const [ssIntel, ssRank, ssOutlierSrc] = await Promise.all([
+    const [ssIntel, ssRank, ssOutlierSrc, ssCompetitorKr] = await Promise.all([
       loadSoldScopeKeywordIntel(sb),
       loadSoldScopeRankStatus(sb),
       loadSoldScopeOutlierSources(sb),
+      loadSoldScopeCompetitorKr(sb),
     ]);
     const keywordOutliers = buildKeywordOutliers({
       rankRows: ssOutlierSrc.rankRows,
@@ -223,6 +236,12 @@ export async function GET() {
         search_term: t.search_term,
         campaign_name: t.campaign_name,
       })),
+    });
+    const competitorOutliers = buildCompetitorOutliers({
+      krRows: ssCompetitorKr,
+      targets: keywordTargets,
+      extraExact: extraExactFromWatch(NEW_EXACT),
+      organicIndex: buildOrganicRankJoinIndex(ssOutlierSrc.rankRows),
     });
     const harvest = attachKeywordIntel(
       harvestRaw as unknown as Record<string, unknown>[],
@@ -274,6 +293,8 @@ export async function GET() {
         phrases: ssRank.phrases,
         keywordOutliers,
         outlierEmptyCopy: OUTLIER_EMPTY_COPY,
+        competitorOutliers,
+        competitorEmptyCopy: COMPETITOR_OUTLIER_EMPTY_COPY,
       },
       acks,
       lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,

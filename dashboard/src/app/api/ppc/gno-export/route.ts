@@ -2,6 +2,7 @@ import { getServerSupabase } from "@/lib/supabase-server";
 import { amazonAsOf, amazonToday, windowStart } from "@/lib/as-of";
 import { zipStore } from "@/lib/zip-store";
 import {
+  NEW_EXACT,
   buildGnoPack,
   evaluateGnoAlerts,
   GNO_DESK_SPEND_LOOKBACK_DAYS,
@@ -17,13 +18,19 @@ import {
 } from "@/lib/gno-ppc-watch";
 import { ackPayload, exportBannerFromState } from "@/lib/gno-export-state";
 import { loadGnoExportState, loadGnoLedger, saveGnoExportAck } from "@/lib/gno-store";
-import { loadOrganicRankSources } from "@/lib/soldscope-load";
+import { loadOrganicRankSources, loadSoldScopeCompetitorKr } from "@/lib/soldscope-load";
+import { buildOrganicRankJoinIndex } from "@/lib/organic-rank-progress";
+import {
+  buildCompetitorOutliers,
+  extraExactFromWatch,
+} from "@/lib/soldscope-competitor-outliers";
 
 /**
  * GET /api/ppc/gno-export — Export GNO pack zip.
  * watch_campaigns.csv + auto_loose / fat_parent / broad_m search terms
  * + keyword_targets.csv + advertised_product_l7.csv + organic_rank_snapshot.csv
- * + README.txt (+ optional sqp_weekly_slice.csv, negatives_snapshot.csv).
+ * + competitor_kr_outliers.csv + README.txt
+ * (+ optional sqp_weekly_slice.csv, negatives_snapshot.csv).
  * Today = config only (metrics_complete=false). L2/L7 = closed days
  * ending yesterday. Campaigns API snapshot fills 0-impr shells.
  * Observe / export only. Never writes to Amazon.
@@ -159,7 +166,7 @@ export async function GET() {
     const today = amazonToday();
     const start = windowStart(today, 14);
     const sb = getServerSupabase();
-    const [campaigns, searchTerms, placements, metaLoaded, keywords, negatives, sqpWeekly, asinCatalog, organicSources] = await Promise.all([
+    const [campaigns, searchTerms, placements, metaLoaded, keywords, negatives, sqpWeekly, asinCatalog, organicSources, competitorKr] = await Promise.all([
       pageRows(sb, "ads_campaigns_daily", CAMP_COLS, start, today, "campaign_id"),
       pageRows(sb, "ads_search_terms_daily", TERM_COLS, start, today, "campaign_id", "search_term"),
       pageRows(sb, "ads_placement_daily", PLACE_COLS, start, today, "campaign_id", "placement"),
@@ -169,6 +176,7 @@ export async function GET() {
       pageSqpSlice(sb),
       pageAsinCatalog(sb),
       loadOrganicRankSources(sb),
+      loadSoldScopeCompetitorKr(sb),
     ]);
     const meta = metaLoaded.length
       ? metaLoaded
@@ -194,6 +202,12 @@ export async function GET() {
       sqpWeekly,
       asinCatalog,
       organicSnapshots: organicSources.snapshots,
+      competitorOutliers: buildCompetitorOutliers({
+        krRows: competitorKr,
+        targets: keywords as unknown as KeywordTarget[],
+        extraExact: extraExactFromWatch(NEW_EXACT),
+        organicIndex: buildOrganicRankJoinIndex(organicSources.snapshots),
+      }),
     });
     const now = new Date();
     const alerts = evaluateGnoAlerts({

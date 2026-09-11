@@ -25,6 +25,10 @@ import {
   type OrganicRankJoin,
   type RankSnapshot,
 } from "./organic-rank-progress";
+import {
+  competitorKrOutliersCsv,
+  type CompetitorOutlierRow,
+} from "./soldscope-competitor-outliers";
 
 export const GNO_OBSERVE_ONLY = true as const;
 
@@ -1795,6 +1799,7 @@ export function gnoPackReadme(input: {
   sqpNote?: string;
   sqpStale?: boolean;
   organicIncluded: boolean;
+  competitorIncluded?: boolean;
 }): string {
   const sqpLine = input.sqpIncluded
     ? (input.sqpStale
@@ -1805,6 +1810,9 @@ export function gnoPackReadme(input: {
   const organicLine = input.organicIncluded
     ? "- organic_rank_snapshot.csv — hero ASINs B0CLHTF8YN (lip) / B0DQFKMJFY (balm) / B0HBSZ71XQ (deo). Rank from soldscope_rank_snapshots. aba_sfr is Brand Analytics SFR only."
     : "- organic_rank_snapshot.csv — headers only. No SoldScope Rank Tracker snapshots for the three heroes. Empty is real — this desk never creates RT groups.";
+  const competitorLine = input.competitorIncluded
+    ? "- competitor_kr_outliers.csv — reverse-ASIN KR on the 30 competitor ASINs. already_bidding is Exact-only. suggested_lever is recommend-only (harvest_exact / watch / skip). Never writes Amazon Ads."
+    : "- competitor_kr_outliers.csv — headers only. No competitor KR snapshots yet. Weekly job reuses saved searchType0; first fill is `soldscope-competitor-kr --create-missing` (cap 5/run). Empty is real.";
   return [
     "GNO Export pack — observe only. Never writes to Amazon.",
     "",
@@ -1840,6 +1848,7 @@ export function gnoPackReadme(input: {
     "- advertised_product_l7.csv — L7 by ASIN from campaign names. No advertised-product report is synced; mixed-ASIN spend is campaign-level (not split).",
     sqpLine,
     organicLine,
+    competitorLine,
     "- negatives_snapshot.csv — optional",
     "- README.txt — this file",
     "",
@@ -1881,6 +1890,7 @@ export function buildGnoPack(input: {
   sqpWeekly?: SqpSliceRow[] | null;
   asinCatalog?: AsinCatalogRow[];
   organicSnapshots?: RankSnapshot[] | null;
+  competitorOutliers?: CompetitorOutlierRow[] | null;
 }): { files: { name: string; body: string }[]; filename: string } {
   const today = input.today || input.asOf;
   const asOf = input.asOf;
@@ -1927,6 +1937,11 @@ export function buildGnoPack(input: {
     name: "organic_rank_snapshot.csv",
     body: organicRankSnapshotCsv(organicRows),
   });
+  const competitorRows = input.competitorOutliers ?? [];
+  files.push({
+    name: "competitor_kr_outliers.csv",
+    body: competitorKrOutliersCsv(competitorRows),
+  });
   if (input.negatives && input.negatives.length) {
     const wanted = input.negatives.filter((n) =>
       isAutoLoose(n.campaign_name) || isFatParent(n.campaign_name)
@@ -1943,6 +1958,7 @@ export function buildGnoPack(input: {
       sqpNote: sqpWeek?.note,
       sqpStale: sqpWeek ? !sqpWeek.coversTarget : undefined,
       organicIncluded: organicRows.length > 0,
+      competitorIncluded: competitorRows.length > 0,
     }),
   });
   return { files, filename: `gno-pack-${gnoPackStamp(input.now)}.zip` };

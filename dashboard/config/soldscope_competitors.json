@@ -1,0 +1,65 @@
+{
+  "_doc": "Dashboard copy of repo-root config/soldscope_competitors.json. Vercel cwd=dashboard/. Competitor reverse-ASIN KR outliers on /ppc/gno — not a new research page. Keep in sync with the root file. Our 1oz balm B0CLF5B27Y is ours, not a competitor.",
+  "marketplace": "US",
+  "create_missing_max": 5,
+  "max_keywords": 80,
+  "opportunity_floor": 100,
+  "excluded_asins": ["B0CLF5B27Y"],
+  "families": {
+    "lip": {
+      "hero_asin": "B0CLHTF8YN",
+      "rt_group_id": 3537,
+      "kr_search_id": 17990
+    },
+    "balm": {
+      "hero_asin": "B0DQFKMJFY",
+      "also_ours": ["B0CLF5B27Y"],
+      "rt_group_id": 3553,
+      "kr_search_id": 17991
+    },
+    "deo": {
+      "hero_asin": "B0HBSZ71XQ",
+      "exact_watch_asin": "B0CLHYY3BB",
+      "rt_group_id": 3624,
+      "kr_search_id": 17992
+    }
+  },
+  "competitors": [
+    {"asin": "B0DVVDDR6Y", "family": "lip"},
+    {"asin": "B0CP89MPH3", "family": "lip"},
+    {"asin": "B0H7F3G21K", "family": "lip"},
+    {"asin": "B0CV4MRKHG", "family": "lip"},
+    {"asin": "B0CGMJNMHR", "family": "lip"},
+    {"asin": "B0GSCHMDG2", "family": "lip"},
+    {"asin": "B0GVW25F8P", "family": "lip"},
+    {"asin": "B0DPLMLRGG", "family": "lip"},
+    {"asin": "B0GGDX2X36", "family": "lip"},
+    {"asin": "B0FY4FXMD7", "family": "lip"},
+    {"asin": "B0BJMSH4JX", "family": "balm"},
+    {"asin": "B0FFW9SQRW", "family": "balm"},
+    {"asin": "B0D1NGHSZ8", "family": "balm"},
+    {"asin": "B0DT44BCPM", "family": "balm"},
+    {"asin": "B0DZCPGHCJ", "family": "balm"},
+    {"asin": "B0DTQ8FGQX", "family": "balm"},
+    {"asin": "B0F2GVFVVV", "family": "balm"},
+    {"asin": "B0DYJYKDZS", "family": "balm"},
+    {"asin": "B0DNC9QZPH", "family": "balm"},
+    {"asin": "B0DGVP5LDS", "family": "balm"},
+    {"asin": "B0FTS2DC7Y", "family": "deo"},
+    {"asin": "B0F3D7QPR4", "family": "deo"},
+    {"asin": "B0F3D4KN4W", "family": "deo"},
+    {"asin": "B08WYXNVQ7", "family": "deo"},
+    {"asin": "B0G16FR6SC", "family": "deo"},
+    {"asin": "B0791XWCCK", "family": "deo"},
+    {"asin": "B07GB3NVN1", "family": "deo"},
+    {"asin": "B0CQ74BQ7Y", "family": "deo"},
+    {"asin": "B0F4M4XHKT", "family": "deo"},
+    {"asin": "B07P167QPP", "family": "deo"}
+  ],
+  "schedule": {
+    "day_of_week": "sun",
+    "hour": 10,
+    "minute": 45,
+    "timezone": "America/New_York"
+  }
+}

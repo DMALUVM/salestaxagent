@@ -2269,6 +2269,70 @@ def soldscope_weekly_sync_cmd(dry_run):
         click.echo(f"  ✗ {e}")
 
 
+@cli.command("soldscope-competitor-kr")
+@click.option("--dry-run/--apply", default=False,
+              help="Parse + call API but skip warehouse upserts")
+@click.option("--create-missing", is_flag=True, default=False,
+              help="POST searchType0 KR for competitors with no saved search "
+                   "(hard cap, default 5/run). Never polls.")
+@click.option("--max-create", type=int, default=None,
+              help="Override create-missing cap (cannot exceed config max, default 5)")
+def soldscope_competitor_kr_cmd(dry_run, create_missing, max_create):
+    """Weekly competitor reverse-ASIN KR — reuse saved searchType0.
+
+    Observe / recommend only. Never Rank Tracker create. Never Product
+    Research. First fill: --create-missing (cap 5/run, no wait-loop).
+    HTTP 402 stops clean. Surfaces on /ppc/gno + GNO export.
+    """
+    from src.db import job_finish, job_start
+    from src.soldscope.competitor_kr import sync_competitor_kr
+
+    run_id = None if dry_run else job_start("soldscope_competitor_kr_sync")
+    try:
+        r = sync_competitor_kr(
+            dry_run=dry_run,
+            create_missing=create_missing,
+            max_create=max_create,
+        )
+    except Exception as e:
+        if run_id:
+            job_finish(run_id, "fail", str(e)[:500])
+        raise click.ClickException(str(e)[:400])
+
+    status = r.get("status") or "fail"
+    msg = r.get("message") or status
+    if run_id:
+        job_finish(run_id, status, msg, stats={
+            "written": r.get("written"),
+            "counts": r.get("counts"),
+            "created": r.get("created"),
+            "reused": r.get("reused"),
+            "missing": r.get("missing"),
+            "digest": r.get("digest"),
+            "quota_remaining": r.get("quota_remaining"),
+        })
+
+    click.echo(f"{'DRY RUN — ' if dry_run else ''}Competitor KR sync: {status}")
+    click.echo(f"  {msg}")
+    click.echo(
+        f"  reused={len(r.get('reused') or [])} "
+        f"created={len(r.get('created') or [])} "
+        f"missing={len(r.get('missing') or [])} "
+        f"rows={((r.get('counts') or {}).get('competitor_kr') or 0)}"
+    )
+    digest = r.get("digest") or {}
+    click.echo(
+        f"  digest hook: net_new={digest.get('net_new', 0)} "
+        f"ping={digest.get('should_ping', False)} (email not sent)"
+    )
+    if r.get("quota_remaining") is not None:
+        click.echo(f"  quota rem : {r.get('quota_remaining')} (reset {r.get('quota_reset')})")
+    for n in r.get("notes") or []:
+        click.echo(f"  note      : {n}")
+    for e in r.get("errors") or []:
+        click.echo(f"  ✗ {e}")
+
+
 @cli.command("sqp-import")
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--asin", default=None, help="ASIN when the export has no ASIN column")
@@ -5454,6 +5518,40 @@ def run():
             "(hero history + RT observe-only)"
         )
 
+        # Competitor reverse-ASIN KR — Sunday after hero SoldScope.
+        # Reuse saved searchType0 only. First fill is the CLI flag.
+        _ck_sched = {
+            "day_of_week": "sun",
+            "hour": 10,
+            "minute": 45,
+            "timezone": AGENT_TZ_NAME,
+        }
+        try:
+            from src.soldscope.competitor_kr import load_config as _ck_cfg
+            _ck_sched = (_ck_cfg().get("schedule") or _ck_sched)
+        except Exception:
+            pass
+        scheduler.add_job(
+            _run_soldscope_competitor_kr_sync,
+            "cron",
+            day_of_week=_ck_sched.get("day_of_week", "sun"),
+            hour=int(_ck_sched.get("hour", 10)),
+            minute=int(_ck_sched.get("minute", 45)),
+            timezone=_ck_sched.get("timezone", AGENT_TZ_NAME),
+            id="soldscope_competitor_kr_sync",
+            misfire_grace_time=7200,
+            coalesce=True,
+            max_instances=1,
+        )
+        click.echo(
+            f"[Scheduler] SoldScope competitor KR "
+            f"{_ck_sched.get('day_of_week', 'sun')} "
+            f"{int(_ck_sched.get('hour', 10)):02d}:"
+            f"{int(_ck_sched.get('minute', 45)):02d} "
+            f"{_ck_sched.get('timezone', AGENT_TZ_NAME)} "
+            "(reuse saved searchType0; no create)"
+        )
+
         # Agent job worker: poll every 45 seconds
         scheduler.add_job(
             _run_job_worker,
@@ -6988,6 +7086,31 @@ def _run_pnl_sync():
         "shopify_contribution": shop.get("total_contribution", 0),
         "shopify_days": shop.get("days", 0),
     })
+
+
+def _run_soldscope_competitor_kr_sync():
+    """Sunday competitor reverse-ASIN KR. Reuse-only. Fail soft on 402."""
+    from src.db import job_finish, job_start
+    from src.soldscope.competitor_kr import sync_competitor_kr
+
+    run_id = job_start("soldscope_competitor_kr_sync")
+    try:
+        r = sync_competitor_kr(create_missing=False)
+        status = r.get("status") or "fail"
+        msg = r.get("message") or status
+        print(f"[SoldScope competitor KR] {status}: {msg}")
+        job_finish(run_id, status, msg, stats={
+            "written": r.get("written"),
+            "counts": r.get("counts"),
+            "created": r.get("created"),
+            "reused": r.get("reused"),
+            "missing": r.get("missing"),
+            "digest": r.get("digest"),
+            "quota_remaining": r.get("quota_remaining"),
+        })
+    except Exception as e:
+        print(f"[SoldScope competitor KR] Error: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
 
 
 def _run_soldscope_weekly_sync():

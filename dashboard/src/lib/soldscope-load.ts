@@ -91,6 +91,22 @@ export async function loadSoldScopeOutlierSources(
   };
 }
 
+export async function loadSoldScopeCompetitorKr(
+  sb: Sb = getServerSupabase(),
+): Promise<Record<string, unknown>[]> {
+  try {
+    const { data, error } = await sb
+      .from("soldscope_competitor_kr")
+      .select("*")
+      .order("as_of", { ascending: false })
+      .limit(5000);
+    if (error) return [];
+    return (data ?? []) as unknown as Record<string, unknown>[];
+  } catch {
+    return [];
+  }
+}
+
 async function pageTable(
   sb: Sb,
   table: string,
