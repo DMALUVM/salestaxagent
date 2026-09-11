@@ -18,12 +18,13 @@ import {
 } from "@/lib/gno-ppc-watch";
 import { ackPayload, evaluateExportNeed } from "@/lib/gno-export-state";
 import { loadGnoExportState, loadGnoLedger, saveGnoExportAck } from "@/lib/gno-store";
+import { loadOrganicRankSources } from "@/lib/soldscope-load";
 
 /**
  * GET /api/ppc/gno-export — Export GNO pack zip.
  * watch_campaigns.csv + auto_loose / fat_parent / broad_m search terms
- * + keyword_targets.csv + advertised_product_l7.csv + README.txt
- * (+ optional sqp_weekly_slice.csv, negatives_snapshot.csv).
+ * + keyword_targets.csv + advertised_product_l7.csv + organic_rank_snapshot.csv
+ * + README.txt (+ optional sqp_weekly_slice.csv, negatives_snapshot.csv).
  * Today = config only (metrics_complete=false). L2/L7 = closed days
  * ending yesterday. Campaigns API snapshot fills 0-impr shells.
  * Observe / export only. Never writes to Amazon.
@@ -159,7 +160,7 @@ export async function GET() {
     const today = amazonToday();
     const start = windowStart(today, 14);
     const sb = getServerSupabase();
-    const [campaigns, searchTerms, placements, metaLoaded, keywords, negatives, sqpWeekly, asinCatalog] = await Promise.all([
+    const [campaigns, searchTerms, placements, metaLoaded, keywords, negatives, sqpWeekly, asinCatalog, organicSources] = await Promise.all([
       pageRows(sb, "ads_campaigns_daily", CAMP_COLS, start, today, "campaign_id"),
       pageRows(sb, "ads_search_terms_daily", TERM_COLS, start, today, "campaign_id", "search_term"),
       pageRows(sb, "ads_placement_daily", PLACE_COLS, start, today, "campaign_id", "placement"),
@@ -168,6 +169,7 @@ export async function GET() {
       pageAll(sb, "ads_negatives", NEG_COLS, "negative_id"),
       pageSqpSlice(sb),
       pageAsinCatalog(sb),
+      loadOrganicRankSources(sb),
     ]);
     const meta = metaLoaded.length
       ? metaLoaded
@@ -192,6 +194,7 @@ export async function GET() {
       ledger,
       sqpWeekly,
       asinCatalog,
+      organicSnapshots: organicSources.snapshots,
     });
     const now = new Date();
     const alerts = evaluateGnoAlerts({

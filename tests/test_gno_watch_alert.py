@@ -6,6 +6,7 @@ from datetime import datetime
 from src.amazon_ads.gno_watch_alert import (
     campaign_launched_at,
     cheap_p0s_from_campaigns,
+    extract_exact_keyword,
     hours_since_campaign_launch,
     hours_since_launch,
     new_exact_zero_impr_p0s,
@@ -137,3 +138,11 @@ def test_alert_module_is_observe_only_no_wait():
     assert "await" not in src.lower()
     assert "time.sleep" not in src
     assert "amazonads" not in src.lower()
+
+
+def test_extract_exact_keyword_reads_tbm_shells_without_trailing_tos():
+    assert extract_exact_keyword("SP | TBM | B0CLF5B27Y | EX | tallow balm") == "tallow balm"
+    assert extract_exact_keyword(
+        "SP | TBM | B0CLF5B27Y | EX | tallow deodorant for men") == "tallow deodorant for men"
+    assert extract_exact_keyword(
+        "SP | TBL | B0CLHVCPL5 | EX | tallow lip balm | TOS") == "tallow lip balm"

@@ -13,6 +13,18 @@ import {
   lastCallForCampaign,
   type GnoLedgerRow,
 } from "./gno-learning";
+import {
+  ORGANIC_RANK_EMPTY_CELL_NOTE,
+  ORGANIC_RANK_EXPORT_HEADERS,
+  ORGANIC_RANK_SNAPSHOT_CSV_HEADERS,
+  buildOrganicRankJoinIndex,
+  emptyOrganicRankJoin,
+  familyHeroAsin,
+  lookupOrganicRank,
+  organicRankSnapshotRows,
+  type OrganicRankJoin,
+  type RankSnapshot,
+} from "./organic-rank-progress";
 
 export const GNO_OBSERVE_ONLY = true as const;
 
@@ -22,6 +34,7 @@ export const WATCH_CAMPAIGN_CSV_HEADERS = [
   "tos_spend_share", "ros_spend_share", "pp_spend_share", "impressions",
   "clicks", "spend", "cpc", "orders", "sales", "acos", "watch_list",
   "metrics_complete", "family", "break_even_acos", "acos_vs_be", "cm_note",
+  ...ORGANIC_RANK_EXPORT_HEADERS,
 ] as const;
 
 export const AUTO_LOOSE_TERM_CSV_HEADERS = [
@@ -29,6 +42,7 @@ export const AUTO_LOOSE_TERM_CSV_HEADERS = [
   "match_type", "impressions", "clicks", "spend", "orders", "sales", "acos",
   "cvr", "has_enabled_exact_elsewhere", "proposed_tag",
   "family", "break_even_acos", "acos_vs_be", "cm_note",
+  ...ORGANIC_RANK_EXPORT_HEADERS,
 ] as const;
 
 export const KEYWORD_TARGET_CSV_HEADERS = [
@@ -36,6 +50,7 @@ export const KEYWORD_TARGET_CSV_HEADERS = [
   "match_type", "keyword_state", "bid", "impressions", "clicks", "spend",
   "orders", "sales", "acos", "metrics_complete",
   "family", "break_even_acos", "acos_vs_be", "cm_note",
+  ...ORGANIC_RANK_EXPORT_HEADERS,
 ] as const;
 
 export const NEGATIVES_CSV_HEADERS = [
@@ -54,7 +69,13 @@ export const SQP_SLICE_CSV_HEADERS = [
   "asin_impressions", "asin_clicks", "asin_purchases", "source",
 ] as const;
 
-export const SQP_SLICE_QUERIES = ["lip balm", "tallow lip balm", "chapstick"] as const;
+export const SQP_SLICE_QUERIES = [
+  "lip balm", "tallow lip balm", "chapstick",
+  "tallow balm", "beef tallow balm", "tallow deodorant", "tallow deodorant for men",
+] as const;
+/** Bid-raise window Dave needs in the SQP slice (Amazon week covering these dates). */
+export const SQP_SLICE_COVER_START = "2026-09-07";
+export const SQP_SLICE_COVER_END = "2026-09-10";
 
 export type WatchList = "NEW_EXACT" | "KEEPER" | "DAY5_PAUSE" | "FLAVOR_SHELL" | "OTHER";
 export type ProposedTag = "KEEP" | "HARVEST_CANDIDATE" | "JUNK_CANDIDATE";
@@ -72,6 +93,14 @@ export const KEYWORD_ST_NOTE =
   "search-term performance stays in fat_parent_search_terms.csv; keyword_targets are not search-term rollups";
 export const ADVERTISED_PRODUCT_NOTE =
   "campaign-level L7; no advertised-product report synced — spend not split by ASIN";
+/** Campaign daily L2/L7 on watch_campaigns is SoT. ST files are term-level only. */
+export const ST_CAMPAIGN_SOT_NOTE =
+  "campaign L2/L7 on watch_campaigns is SoT for spend; ST file is term-level negate/harvest only";
+/** 1-day ST stamp vs campaign daily — slack so rounding is not treated as a 7d SUMMARY. */
+export const ST_DAILY_SPEND_SLACK = 1.25;
+export const ST_DAILY_SPEND_ABS = 2;
+/** TBM 1-child Exact shells on B0CLF5B27Y (config names may omit | TOS). */
+const TBM_NEW_EXACT_RE = /^sp \| tbm \| b0clf5b27y \| ex \|/;
 
 export interface ContributionFrame {
   family: GnoFamily;
@@ -247,6 +276,11 @@ export interface HarvestTerm {
   break_even_acos: number;
   acos_vs_be: number | null;
   cm_note: string;
+  organic_rank: number | null;
+  organic_rank_prev: number | null;
+  organic_rank_delta: number | null;
+  aba_sfr: number | null;
+  organic_as_of: string | null;
   /** UI-only. Not a CSV column. */
   learning_note?: string;
 }
@@ -279,6 +313,11 @@ export interface WatchCampaignExportRow {
   break_even_acos: number;
   acos_vs_be: number | null;
   cm_note: string;
+  organic_rank: number | null;
+  organic_rank_prev: number | null;
+  organic_rank_delta: number | null;
+  aba_sfr: number | null;
+  organic_as_of: string | null;
 }
 
 export interface KeywordTargetExportRow {
@@ -302,6 +341,11 @@ export interface KeywordTargetExportRow {
   break_even_acos: number;
   acos_vs_be: number | null;
   cm_note: string;
+  organic_rank: number | null;
+  organic_rank_prev: number | null;
+  organic_rank_delta: number | null;
+  aba_sfr: number | null;
+  organic_as_of: string | null;
 }
 
 export interface AdvertisedProductL7Row {
@@ -407,7 +451,7 @@ export function isFlavorShellName(campaignName: string): boolean {
 
 /** Collapse whitespace so Dave's extra-space names still match stored rows. */
 export function watchListOf(campaignName: string): WatchList {
-  if (NEW_EXACT.some((n) => namesEqual(n, campaignName))) return "NEW_EXACT";
+  if (isNewExactName(campaignName)) return "NEW_EXACT";
   if (KEEP_ALIVE.some((n) => namesEqual(n, campaignName))) return "KEEPER";
   if (DAY5_PAUSE.some((n) => namesEqual(n, campaignName) || nameContains(campaignName, n))) {
     return "DAY5_PAUSE";
@@ -442,8 +486,20 @@ export function isEnabledStatus(status: string | null | undefined): boolean {
 }
 
 export function extractExactKeyword(campaignName: string): string | null {
-  const m = String(campaignName ?? "").match(/\|\s*EX\s*\|\s*([^|]+?)\s*\|/i);
+  const m = String(campaignName ?? "").match(/\|\s*EX\s*\|\s*([^|]+?)(?:\s*\||\s*$)/i);
   return m ? normalizeTerm(m[1]) : null;
+}
+
+/** Config NEW_EXACT names, plus live TBM B0CLF5B27Y Exact shells (optional | TOS). */
+export function isNewExactName(campaignName: string): boolean {
+  if (NEW_EXACT.some((n) => namesEqual(n, campaignName))) return true;
+  const n = normalizeName(campaignName);
+  if (!n) return false;
+  if (TBM_NEW_EXACT_RE.test(n)) return true;
+  return NEW_EXACT.some((cfg) => {
+    const base = normalizeName(cfg);
+    return n === base || n.startsWith(`${base} |`) || n.startsWith(`${base}|`);
+  });
 }
 
 /** ASINs embedded in campaign names, including mixed keepers (B0…/B0…). */
@@ -806,6 +862,60 @@ function splitHarvestExtra(
   };
 }
 
+function organicExportFields(hit: OrganicRankJoin = emptyOrganicRankJoin()) {
+  return {
+    organic_rank: hit.organic_rank,
+    organic_rank_prev: hit.organic_rank_prev,
+    organic_rank_delta: hit.organic_rank_delta,
+    aba_sfr: hit.aba_sfr,
+    organic_as_of: hit.organic_as_of,
+  };
+}
+
+function attachOrganicFields<T extends Record<string, unknown>>(
+  row: T,
+  keyword: string,
+  family: string,
+  index?: Map<string, OrganicRankJoin[]>,
+): T & ReturnType<typeof organicExportFields> {
+  const hit = index
+    ? lookupOrganicRank(index, keyword, familyHeroAsin(family))
+    : emptyOrganicRankJoin();
+  return { ...row, ...organicExportFields(hit) };
+}
+
+/**
+ * ads_search_terms_daily is timeUnit=SUMMARY stamped on chunk END.
+ * A 7-day SUMMARY dated yesterday is not L2. Compare that date's ST
+ * total to campaign daily (SoT) — ST ≫ campaign daily means multi-day.
+ */
+export function stDateLooksDaily(stSpend: number, campaignSpend: number): boolean {
+  if (campaignSpend <= 0) return true;
+  return stSpend <= campaignSpend * ST_DAILY_SPEND_SLACK + ST_DAILY_SPEND_ABS;
+}
+
+export function campaignSpendOnDate(
+  campaigns: CampaignDailyRow[],
+  predicate: (name: string) => boolean,
+  date: string,
+): number {
+  return sumMetrics(campaigns.filter((r) => r.date === date && predicate(r.campaign_name))).spend;
+}
+
+export function searchTermSpendOnDate(
+  terms: SearchTermRow[],
+  predicate: (name: string) => boolean,
+  date: string,
+): number {
+  return sumMetrics(terms.filter((r) => r.date === date && predicate(r.campaign_name))).spend;
+}
+
+export function sumHarvestSpend(rows: HarvestTerm[], label?: TermWindowLabel): number {
+  return rows
+    .filter((r) => (label ? r.label === label : true))
+    .reduce((s, r) => s + n(r.spend), 0);
+}
+
 function rollSearchTerms(input: {
   termRows: SearchTermRow[];
   campaignRows: CampaignDailyRow[];
@@ -815,14 +925,41 @@ function rollSearchTerms(input: {
   campaignPredicate: (name: string) => boolean;
   keywordTargets: KeywordTarget[];
   ledger?: GnoLedgerRow[];
+  organicIndex?: Map<string, OrganicRankJoin[]>;
 }): HarvestTerm[] {
   const { termRows, campaignRows, start, end, label, campaignPredicate, keywordTargets } = input;
   const ledger = input.ledger ?? [];
+  const organicIndex = input.organicIndex;
   const enabled = enabledExactKeywords(campaignRows, termRows, end, keywordTargets);
-  const latest = latestSearchTerms(termRows, start, end)
-    .filter((r) => campaignPredicate(r.campaign_name));
+  const scoped = inWindow(termRows, start, end).filter((r) => campaignPredicate(r.campaign_name));
+  const dates = [...new Set(scoped.map((r) => r.date))].sort();
+  const dailyDates = dates.filter((d) => stDateLooksDaily(
+    searchTermSpendOnDate(scoped, campaignPredicate, d),
+    campaignSpendOnDate(campaignRows, campaignPredicate, d),
+  ));
+  const hasSummaryDate = dates.some((d) => !dailyDates.includes(d));
+
+  let source: SearchTermRow[] = [];
+  const extraNotes: string[] = [ST_CAMPAIGN_SOT_NOTE];
+  if (hasSummaryDate && label === "L2") {
+    if (!dailyDates.length) {
+      // 7d SUMMARY is not L2. Campaign L2 on watch_campaigns is SoT.
+      return [];
+    }
+    for (const d of dailyDates) {
+      source.push(...latestSearchTerms(scoped, d, d));
+    }
+  } else if (hasSummaryDate) {
+    // L7: one SUMMARY row per term (chunk END), do not sum overlapping weeks.
+    source = latestSearchTerms(scoped, start, end);
+  } else {
+    for (const d of dailyDates.length ? dailyDates : dates) {
+      source.push(...latestSearchTerms(scoped, d, d));
+    }
+  }
+
   const rolled = new Map<string, SearchTermRow[]>();
-  for (const r of latest) {
+  for (const r of source) {
     const key = `${normalizeTerm(r.search_term)}\t${normalizeName(r.match_type)}`;
     const list = rolled.get(key) ?? [];
     list.push(r);
@@ -846,8 +983,8 @@ function rollSearchTerms(input: {
       { orders: m.orders, spend: m.spend, search_term: term },
       ledger,
     );
-    const frame = contributionFrame(campaignName, m.acos);
-    out.push({
+    const frame = contributionFrame(campaignName, m.acos, extraNotes);
+    const row = attachOrganicFields({
       date_start: start,
       date_end: end,
       label,
@@ -865,7 +1002,8 @@ function rollSearchTerms(input: {
       proposed_tag: learned.tag,
       learning_note: learned.note,
       ...frame,
-    });
+    }, term, frame.family, organicIndex);
+    out.push(row);
   }
   return out.sort((a, b) => b.spend - a.spend);
 }
@@ -878,6 +1016,7 @@ export function searchTermExportRows(
   campaignPredicate: (name: string) => boolean,
   keywordTargets: KeywordTarget[] = [],
   ledger: GnoLedgerRow[] = [],
+  organicIndex?: Map<string, OrganicRankJoin[]>,
 ): HarvestTerm[] {
   const windows: Array<{ start: string; end: string; label: TermWindowLabel }> = [
     { start: windowStart(closedEnd, 2), end: closedEnd, label: "L2" },
@@ -887,7 +1026,7 @@ export function searchTermExportRows(
   for (const w of windows) {
     out.push(...rollSearchTerms({
       termRows, campaignRows, start: w.start, end: w.end,
-      label: w.label, campaignPredicate, keywordTargets, ledger,
+      label: w.label, campaignPredicate, keywordTargets, ledger, organicIndex,
     }));
   }
   return out;
@@ -1177,15 +1316,32 @@ export function keeperHeartbeats(
   });
 }
 
+function newExactAliasKey(name: string): string {
+  const kw = extractExactKeyword(name);
+  return `${extractAsin(name)}\t${kw || normalizeName(name)}`;
+}
+
 function uniqueWatchNames(
   campaigns: CampaignDailyRow[],
   extraNames: string[] = [],
 ): { name: string; list: WatchList }[] {
   const seen = new Set<string>();
+  const seenExact = new Set<string>();
   const out: { name: string; list: WatchList }[] = [];
   const add = (name: string, list: WatchList) => {
     const key = normalizeName(name);
     if (!key || seen.has(key)) return;
+    if (list === "NEW_EXACT") {
+      const alias = newExactAliasKey(name);
+      if (seenExact.has(alias)) {
+        const idx = out.findIndex((x) =>
+          x.list === "NEW_EXACT" && newExactAliasKey(x.name) === alias);
+        if (idx >= 0) out[idx] = { name, list };
+        seen.add(key);
+        return;
+      }
+      seenExact.add(alias);
+    }
     seen.add(key);
     out.push({ name, list });
   };
@@ -1239,12 +1395,14 @@ export function watchCampaignExportRows(input: {
   campaigns: CampaignDailyRow[];
   placements: PlacementRow[];
   campaignMeta?: CampaignMeta[];
+  organicIndex?: Map<string, OrganicRankJoin[]>;
 }): WatchCampaignExportRow[] {
   const { campaigns, placements } = input;
   const today = input.today || input.asOf;
   const windows = packWindows(today, input.asOf);
   const latest = latestByCampaign(campaigns);
   const meta = input.campaignMeta ?? [];
+  const organicIndex = input.organicIndex;
   const names = uniqueWatchNames(campaigns, meta.map((m) => m.campaign_name));
   const rows: WatchCampaignExportRow[] = [];
   for (const w of windows) {
@@ -1274,7 +1432,8 @@ export function watchCampaignExportRows(input: {
         && place.tos_spend_share == null
         && place.ros_spend_share == null
         && place.pp_spend_share == null;
-      rows.push({
+      const frame = contributionFrame(storedName, m.acos, placementLag ? [PLACEMENT_LAG_NOTE] : []);
+      rows.push(attachOrganicFields({
         date_start: w.start,
         date_end: w.end,
         campaign_name: storedName,
@@ -1297,8 +1456,8 @@ export function watchCampaignExportRows(input: {
         acos: m.acos,
         watch_list: list,
         metrics_complete: w.metrics_complete,
-        ...contributionFrame(storedName, m.acos, placementLag ? [PLACEMENT_LAG_NOTE] : []),
-      });
+        ...frame,
+      }, extractExactKeyword(storedName) ?? "", frame.family, organicIndex));
     }
   }
   return rows;
@@ -1386,6 +1545,7 @@ export function keywordTargetExportRows(input: {
   asOf: string;
   keywordTargets: KeywordTarget[];
   searchTerms: SearchTermRow[];
+  organicIndex?: Map<string, OrganicRankJoin[]>;
 }): KeywordTargetExportRow[] {
   // Include PAUSED + ENABLED. Today rows are config-only (bid / state).
   const wanted = input.keywordTargets.filter((t) => {
@@ -1399,7 +1559,8 @@ export function keywordTargetExportRows(input: {
       const m = w.metrics_complete
         ? keywordWindowMetrics(input.searchTerms, t, w.start, w.end)
         : emptyMetrics();
-      windowRows.push({
+      const frame = contributionFrame(t.campaign_name, m.acos);
+      windowRows.push(attachOrganicFields({
         date_start: w.start,
         date_end: w.end,
         campaign_name: t.campaign_name,
@@ -1415,8 +1576,8 @@ export function keywordTargetExportRows(input: {
         sales: m.sales,
         acos: m.acos,
         metrics_complete: w.metrics_complete,
-        ...contributionFrame(t.campaign_name, m.acos),
-      });
+        ...frame,
+      }, t.keyword_text, frame.family, input.organicIndex));
     }
     if (w.metrics_complete) {
       const byCamp = new Map<string, KeywordTargetExportRow[]>();
@@ -1511,20 +1672,71 @@ export function advertisedProductL7Csv(rows: AdvertisedProductL7Row[]): string {
   return toCsv(ADVERTISED_PRODUCT_L7_CSV_HEADERS, rows.map((r) => ({ ...r })));
 }
 
-export function sqpWeeklySliceRows(rows: SqpSliceRow[]): SqpSliceRow[] {
+export function weekCoversSqpTarget(
+  weekStart: string,
+  weekEnd: string,
+  coverStart = SQP_SLICE_COVER_START,
+  coverEnd = SQP_SLICE_COVER_END,
+): boolean {
+  const start = String(weekStart ?? "");
+  const end = String(weekEnd ?? "");
+  if (!start || !end) return false;
+  return start <= coverEnd && end >= coverStart;
+}
+
+export function sqpSliceStaleNote(weekStart: string, weekEnd: string): string {
+  if (weekCoversSqpTarget(weekStart, weekEnd)) {
+    return `SQP slice week ${weekStart}–${weekEnd} covers Sep 7–10 (bid-raise window).`;
+  }
+  return (
+    `SQP slice week ${weekStart}–${weekEnd} is the latest stored week — it does NOT cover `
+    + `${SQP_SLICE_COVER_START}–${SQP_SLICE_COVER_END} (bid raises). Do not treat this as `
+    + `the current / post-raise week.`
+  );
+}
+
+export function selectSqpSliceWeek(rows: SqpSliceRow[]): {
+  weekStart: string;
+  weekEnd: string;
+  coversTarget: boolean;
+  note: string;
+} | null {
   const wanted = new Set<string>(SQP_SLICE_QUERIES);
   const filtered = rows.filter((r) => {
     const q = normalizeTerm(r.query_normalized || r.search_query);
     return wanted.has(q);
   });
-  if (!filtered.length) return [];
-  let latest = "";
+  if (!filtered.length) return null;
+  const weeks = new Map<string, { start: string; end: string }>();
   for (const r of filtered) {
     const end = String(r.week_end ?? "");
-    if (end > latest) latest = end;
+    const start = String(r.week_start ?? "");
+    if (!end) continue;
+    const prev = weeks.get(end);
+    if (!prev || start > prev.start) weeks.set(end, { start, end });
   }
-  return filtered
-    .filter((r) => String(r.week_end ?? "") === latest)
+  const covering = [...weeks.values()]
+    .filter((w) => weekCoversSqpTarget(w.start, w.end))
+    .sort((a, b) => b.end.localeCompare(a.end));
+  const picked = covering[0] ?? [...weeks.values()].sort((a, b) => b.end.localeCompare(a.end))[0];
+  if (!picked) return null;
+  return {
+    weekStart: picked.start,
+    weekEnd: picked.end,
+    coversTarget: weekCoversSqpTarget(picked.start, picked.end),
+    note: sqpSliceStaleNote(picked.start, picked.end),
+  };
+}
+
+export function sqpWeeklySliceRows(rows: SqpSliceRow[]): SqpSliceRow[] {
+  const picked = selectSqpSliceWeek(rows);
+  if (!picked) return [];
+  const wanted = new Set<string>(SQP_SLICE_QUERIES);
+  return rows
+    .filter((r) => {
+      const q = normalizeTerm(r.query_normalized || r.search_query);
+      return wanted.has(q) && String(r.week_end ?? "") === picked.weekEnd;
+    })
     .sort((a, b) => {
       const qa = normalizeTerm(a.query_normalized || a.search_query);
       const qb = normalizeTerm(b.query_normalized || b.search_query);
@@ -1551,10 +1763,23 @@ export function sqpWeeklySliceCsv(rows: SqpSliceRow[]): string {
   })));
 }
 
-export function gnoPackReadme(input: { files: string[]; sqpIncluded: boolean }): string {
+export function organicRankSnapshotCsv(rows: ReturnType<typeof organicRankSnapshotRows>): string {
+  return toCsv(ORGANIC_RANK_SNAPSHOT_CSV_HEADERS, rows.map((r) => ({ ...r })));
+}
+
+export function gnoPackReadme(input: {
+  files: string[];
+  sqpIncluded: boolean;
+  sqpNote?: string;
+  organicIncluded: boolean;
+}): string {
   const sqpLine = input.sqpIncluded
-    ? "- sqp_weekly_slice.csv — latest week for lip balm / tallow lip balm / chapstick (from sqp_weekly). Shares are reported, never invented."
-    : "- sqp_weekly_slice.csv — OMITTED. No sqp_weekly / Brand Analytics rows for lip balm, tallow lip balm, or chapstick. Do not invent SQP rows.";
+    ? `- sqp_weekly_slice.csv — one stored week for ${SQP_SLICE_QUERIES.join(" / ")} (from sqp_weekly). Shares are reported, never invented.`
+    : "- sqp_weekly_slice.csv — OMITTED. No sqp_weekly / Brand Analytics rows for the slice queries. Do not invent SQP rows.";
+  const sqpStatus = input.sqpNote ? `SQP week: ${input.sqpNote}` : "";
+  const organicLine = input.organicIncluded
+    ? "- organic_rank_snapshot.csv — hero ASINs B0CLHTF8YN (lip) / B0DQFKMJFY (balm) / B0HBSZ71XQ (deo). Rank from soldscope_rank_snapshots. aba_sfr is Brand Analytics SFR only."
+    : "- organic_rank_snapshot.csv — headers only. No SoldScope Rank Tracker snapshots for the three heroes. Empty is real — this desk never creates RT groups.";
   return [
     "GNO Export pack — observe only. Never writes to Amazon.",
     "",
@@ -1562,28 +1787,44 @@ export function gnoPackReadme(input: { files: string[]; sqpIncluded: boolean }):
     "- Today = config only (metrics_complete=false). $0 is not a pause.",
     "- L2 / L7 = closed Amazon days ending yesterday.",
     "",
+    "Spend source of truth:",
+    "- watch_campaigns.csv campaign-level L2/L7 is SoT for spend (ads_campaigns_daily).",
+    "- auto_loose / fat_parent / broad_m search-term files are term-level negate/harvest only.",
+    "- ads_search_terms_daily is timeUnit=SUMMARY stamped on chunk END. A 7-day SUMMARY is not L2.",
+    "- Auto Loose L2 ST rows are omitted unless 1-day ST stamps exist for that window. Do not sum ST $ vs the campaign tile.",
+    "",
     "Family BE (config family_break_even_acos, not TACOS):",
     "- lip_3pk (lip campaigns, fat parent, GG Lip Broad M, lip Exact) = 42",
     "- deo = 36",
     "- balm (body tallow balm, not lip) = 36",
     "",
+    "Organic rank (SoldScope Rank Tracker — observe only):",
+    "- Columns organic_rank / organic_rank_prev / organic_rank_delta / aba_sfr / organic_as_of join by normalized keyword/phrase.",
+    "- aba_sfr is Brand Analytics SFR (`aba_search_frequency_rank`) only. Never from SoldScope searchVolume. Blank = not stored.",
+    `- ${ORGANIC_RANK_EMPTY_CELL_NOTE}`,
+    "- This desk never creates SoldScope Rank Tracker groups.",
+    "- Action (Blake): strong organic (low #) + high paid spend → harvest / negate / bid restraint.",
+    "- Action (Blake): weak or missing organic + converting ST → Exact protect.",
+    "",
     "Files:",
-    "- watch_campaigns.csv — NEW_EXACT + KEEPER + DAY5_PAUSE + FLAVOR_SHELL",
+    "- watch_campaigns.csv — NEW_EXACT + KEEPER + DAY5_PAUSE + FLAVOR_SHELL (incl. TBM B0CLF5B27Y Exact shells)",
     "- auto_loose_search_terms.csv",
     "- fat_parent_search_terms.csv",
     "- broad_m_search_terms.csv — campaign exactly GG - Lip Balm - Broad M",
     "- keyword_targets.csv — bid/state per keyword_id; Today config-only; L2/L7 attributed to the serving keyword (not copied across match types)",
     "- advertised_product_l7.csv — L7 by ASIN from campaign names. No advertised-product report is synced; mixed-ASIN spend is campaign-level (not split).",
     sqpLine,
+    organicLine,
     "- negatives_snapshot.csv — optional",
     "- README.txt — this file",
     "",
     `Pack files: ${input.files.join(", ")}`,
     "",
+    sqpStatus,
     "Placement shares on L2/L7 come from ads_placement_daily. If spend exists but shares are empty, cm_note says placement report lag.",
     "FLAVOR_SHELL = Orange / Assorted / Peppermint / Unscented 1-keyword Exact campaigns discovered from ads_campaign_meta (not invented).",
     "",
-  ].join("\n");
+  ].filter((line, i, arr) => line !== "" || arr[i - 1] !== "").join("\n");
 }
 
 /** `gno-pack-YYYY-MM-DD_HHMM` in America/Los_Angeles. */
@@ -1614,27 +1855,31 @@ export function buildGnoPack(input: {
   ledger?: GnoLedgerRow[];
   sqpWeekly?: SqpSliceRow[] | null;
   asinCatalog?: AsinCatalogRow[];
+  organicSnapshots?: RankSnapshot[] | null;
 }): { files: { name: string; body: string }[]; filename: string } {
   const today = input.today || input.asOf;
   const asOf = input.asOf;
   const closed = packClosedEnd(today, asOf);
   const targets = input.keywordTargets ?? [];
   const ledger = input.ledger ?? [];
+  const organicIndex = buildOrganicRankJoinIndex(input.organicSnapshots ?? []);
+  const organicRows = organicRankSnapshotRows(input.organicSnapshots ?? []);
   const watch = watchCampaignExportRows({
     asOf,
     today,
     campaigns: input.campaigns,
     placements: input.placements,
     campaignMeta: input.campaignMeta,
+    organicIndex,
   });
   const autoTerms = searchTermExportRows(
-    input.searchTerms, input.campaigns, closed, isAutoLoose, targets, ledger);
+    input.searchTerms, input.campaigns, closed, isAutoLoose, targets, ledger, organicIndex);
   const fatTerms = searchTermExportRows(
-    input.searchTerms, input.campaigns, closed, isFatParent, targets, ledger);
+    input.searchTerms, input.campaigns, closed, isFatParent, targets, ledger, organicIndex);
   const broadTerms = searchTermExportRows(
-    input.searchTerms, input.campaigns, closed, isBroadM, targets, ledger);
+    input.searchTerms, input.campaigns, closed, isBroadM, targets, ledger, organicIndex);
   const keywords = keywordTargetExportRows({
-    today, asOf, keywordTargets: targets, searchTerms: input.searchTerms,
+    today, asOf, keywordTargets: targets, searchTerms: input.searchTerms, organicIndex,
   });
   const advertised = advertisedProductL7Rows({
     today, asOf, campaigns: input.campaigns,
@@ -1649,9 +1894,14 @@ export function buildGnoPack(input: {
     { name: "advertised_product_l7.csv", body: advertisedProductL7Csv(advertised) },
   ];
   const sqp = sqpWeeklySliceRows(input.sqpWeekly ?? []);
+  const sqpWeek = selectSqpSliceWeek(input.sqpWeekly ?? []);
   if (sqp.length) {
     files.push({ name: "sqp_weekly_slice.csv", body: sqpWeeklySliceCsv(sqp) });
   }
+  files.push({
+    name: "organic_rank_snapshot.csv",
+    body: organicRankSnapshotCsv(organicRows),
+  });
   if (input.negatives && input.negatives.length) {
     const wanted = input.negatives.filter((n) =>
       isAutoLoose(n.campaign_name) || isFatParent(n.campaign_name)
@@ -1665,6 +1915,8 @@ export function buildGnoPack(input: {
     body: gnoPackReadme({
       files: files.map((f) => f.name).concat("README.txt"),
       sqpIncluded: sqp.length > 0,
+      sqpNote: sqpWeek?.note,
+      organicIncluded: organicRows.length > 0,
     }),
   });
   return { files, filename: `gno-pack-${gnoPackStamp(input.now)}.zip` };
