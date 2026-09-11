@@ -124,3 +124,11 @@ def load_fba_nexus_posture() -> dict[str, dict]:
     with open(path) as f:
         data = json.load(f)
     return data.get("postures", {})
+
+
+def load_fba_inventory_nexus_citations() -> dict[str, dict]:
+    """Tess FBA-inventory citation packets (2026-09-11). SoT for the plan."""
+    path = PROJECT_ROOT / "config" / "fba_inventory_nexus_citations.json"
+    with open(path) as f:
+        data = json.load(f)
+    return data.get("states", {})

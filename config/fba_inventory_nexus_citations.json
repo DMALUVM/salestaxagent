@@ -1,0 +1,123 @@
+{
+  "_metadata": {
+    "source": "Tess · Tax & Compliance",
+    "packet_date": "2026-09-11",
+    "description": "Tess-researched FBA inventory physical-nexus citation packets. Source of truth for registration-plan physical decisions. Avalara/GT/STI seed in fba_nexus_posture.json is a secondary footnote only and must not override these packets.",
+    "disclaimer": "Monitoring and research aid — not legal, tax, or CPA advice. Do not auto-register.",
+    "documentation_status_enum": ["documented", "partial", "unknown"],
+    "posture_enum": ["asserts", "carve_out", "contested"],
+    "confidence_enum": ["high", "medium", "low"],
+    "prose": "compliance/fba-inventory-nexus-citations-2026-09-11.md"
+  },
+  "states": {
+    "IL": {
+      "documentation_status": "documented",
+      "posture": "carve_out",
+      "confidence": "high",
+      "short_citation": "35 ILCS 105/2(1); 86 Ill. Adm. Code 131.105; PIO-125; IDOR MF FAQ",
+      "citations": [
+        {"type": "statute", "cite": "35 ILCS 105/2(1)"},
+        {"type": "regulation", "cite": "86 Ill. Adm. Code 131.105"},
+        {"type": "agency_guidance", "cite": "PIO-125"},
+        {"type": "agency_guidance", "cite": "IDOR MF FAQ"}
+      ],
+      "notes": "MF-only inventory at a marketplace facilitator location does not create physical presence for the seller. Own or mixed-channel inventory does.",
+      "dropped_cites": ["35 ILCS 105/2(1.1)"],
+      "packet_date": "2026-09-11"
+    },
+    "NY": {
+      "documentation_status": "documented",
+      "posture": "carve_out",
+      "confidence": "high",
+      "short_citation": "N.Y. Tax Law § 1101(b)(8)(v), (b)(18); TSB-A-24(45)S (10/10/2024)",
+      "citations": [
+        {"type": "statute", "cite": "N.Y. Tax Law § 1101(b)(8)(v)"},
+        {"type": "statute", "cite": "N.Y. Tax Law § 1101(b)(18)"},
+        {"type": "admin_ruling", "cite": "TSB-A-24(45)S (10/10/2024)"},
+        {"type": "regulation", "cite": "20 NYCRR 526.10", "note": "General vendor definition only — not the FBA fulfillment cite."}
+      ],
+      "notes": "Fulfillment safe harbor. 20 NYCRR 526.10 is the general vendor definition only.",
+      "packet_date": "2026-09-11"
+    },
+    "ID": {
+      "documentation_status": "documented",
+      "posture": "asserts",
+      "confidence": "high",
+      "short_citation": "Idaho Code § 63-3611(3)(a); ISTC online-seller guide",
+      "citations": [
+        {"type": "statute", "cite": "Idaho Code § 63-3611(3)(a)", "note": "Warehouse / stock of goods"},
+        {"type": "agency_guidance", "cite": "ISTC online-seller guide"}
+      ],
+      "notes": "Warehouse / stock-of-goods language is strong enough to support register_now when inventory is present.",
+      "packet_date": "2026-09-11"
+    },
+    "LA": {
+      "documentation_status": "documented",
+      "posture": "asserts",
+      "confidence": "high",
+      "short_citation": "La. R.S. 47:301(4)(h); LDR Remote Sellers FAQ",
+      "citations": [
+        {"type": "statute", "cite": "La. R.S. 47:301(4)(h)"},
+        {"type": "agency_guidance", "cite": "LDR Remote Sellers FAQ", "note": "Physical presence includes storage in a third-party facility."}
+      ],
+      "notes": "Physical presence includes storage in a third-party facility.",
+      "packet_date": "2026-09-11"
+    },
+    "NM": {
+      "documentation_status": "documented",
+      "posture": "asserts",
+      "confidence": "high",
+      "short_citation": "NMSA § 7-9-3.3; TRD Determining Nexus",
+      "citations": [
+        {"type": "statute", "cite": "NMSA § 7-9-3.3"},
+        {"type": "agency_guidance", "cite": "TRD Determining Nexus", "note": "Having property stored in New Mexico"}
+      ],
+      "notes": "TRD Determining Nexus: having property stored in New Mexico.",
+      "packet_date": "2026-09-11"
+    },
+    "AZ": {
+      "documentation_status": "partial",
+      "posture": "contested",
+      "confidence": "medium",
+      "short_citation": "ADOR FAQ (inventory-at-control vs 3PL no-control)",
+      "citations": [
+        {"type": "agency_guidance", "cite": "ADOR FAQ", "note": "Inventory at the seller's control vs 3PL with no control — 'likely not'. Contested / fact-specific."}
+      ],
+      "notes": "Partial — FBA not named; CPA confirm. ADOR FAQ is fact-specific (control vs no-control 3PL).",
+      "packet_date": "2026-09-11"
+    },
+    "MO": {
+      "documentation_status": "partial",
+      "posture": "asserts",
+      "confidence": "medium",
+      "short_citation": "12 CSR 10-114.100",
+      "citations": [
+        {"type": "regulation", "cite": "12 CSR 10-114.100", "note": "Owns TPP / warehouse. No FBA-named publication."}
+      ],
+      "notes": "Partial — FBA not named; CPA confirm.",
+      "packet_date": "2026-09-11"
+    },
+    "AL": {
+      "documentation_status": "partial",
+      "posture": "asserts",
+      "confidence": "medium",
+      "short_citation": "Ala. Code § 40-23-68",
+      "citations": [
+        {"type": "statute", "cite": "Ala. Code § 40-23-68", "note": "Warehouse / storage. FBA not named."}
+      ],
+      "notes": "Partial — FBA not named; CPA confirm.",
+      "packet_date": "2026-09-11"
+    },
+    "MS": {
+      "documentation_status": "partial",
+      "posture": "asserts",
+      "confidence": "medium",
+      "short_citation": "Miss. Code § 27-67-3(j)",
+      "citations": [
+        {"type": "statute", "cite": "Miss. Code § 27-67-3(j)", "note": "Owning personal property used by another. FBA not named."}
+      ],
+      "notes": "Partial — FBA not named; CPA confirm.",
+      "packet_date": "2026-09-11"
+    }
+  }
+}

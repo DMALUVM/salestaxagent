@@ -20,11 +20,13 @@ import path from "node:path";
 import { isQuarantinedSource } from "@/lib/channels";
 import { isRegistered } from "@/lib/compliance-status";
 import bundledRules from "./state-sales-tax-rules.json";
+import bundledCitationsDoc from "./fba-inventory-nexus-citations.json";
 import { fetchAllRows } from "@/lib/warehouse-snapshot";
 
 /** Recommended actions, in the order the UI should present them. */
 export const ACTIONS = [
   "register_now",
+  "needs_statute_review",
   "review_contested",
   "monitor",
   "already_registered",
@@ -34,8 +36,9 @@ export const ACTIONS = [
 export type PlanAction = (typeof ACTIONS)[number];
 
 export const DEFAULT_WARN_PCT = 80;
+export const TESS_PACKET_DATE = "2026-09-11";
 
-const FBA_CREATES_NEXUS = new Set(["true", "unknown_default_true", "True"]);
+const FBA_CREATES_NEXUS = new Set(["true", "True"]);
 const FBA_NEEDS_REVIEW = new Set(["contested", "conditional"]);
 const FBA_NO_NEXUS = new Set(["false", "False"]);
 
@@ -53,14 +56,27 @@ export interface StateFacts {
   amazon_sales: number;
   /** Footnote only — never an input to `decide`. */
   entity_exposure: boolean;
+  /** Tess packet 2026-09-11. Empty documentation_status = no packet. */
+  documentation_status: string;
+  tess_posture: string;
+  tess_confidence: string;
+  tess_citation: string;
+  tess_packet_date: string;
 }
+
+export type DocumentationStatus = "documented" | "partial" | "unknown";
+export type AuthoritySource = "tess_packet" | "state_rule" | "unknown_default" | "economic" | "none";
 
 export interface Decision {
   action: PlanAction;
   reason: string;
   confidence: "high" | "medium" | "low";
-  physical_nexus: "Y" | "N" | "contested";
+  physical_nexus: "Y" | "N" | "contested" | "flagged";
   economic_nexus: string;
+  documentation_status: DocumentationStatus;
+  citation: string;
+  packet_date: string;
+  authority_source: AuthoritySource;
 }
 
 export interface PlanRow {
@@ -84,6 +100,10 @@ export interface PlanApiRow {
   short_reason: string;
   confidence: string;
   entity_note: string;
+  documentation_status: string;
+  citation: string;
+  packet_date: string;
+  authority_source: string;
 }
 
 export interface PlanResult {
@@ -116,6 +136,15 @@ export interface NexusFact {
   economic_progress_percent?: unknown;
 }
 
+export interface CitationPacket {
+  documentation_status: DocumentationStatus;
+  posture: string;
+  confidence: string;
+  short_citation: string;
+  packet_date?: string;
+  notes?: string;
+}
+
 export interface PlanInputs {
   rules: Record<string, RuleFact>;
   nexus: Record<string, NexusFact>;
@@ -124,6 +153,7 @@ export interface PlanInputs {
   entityStates: Iterable<string>;
   warnPct?: number;
   unmappedInventoryEvents?: number;
+  citations?: Record<string, CitationPacket>;
 }
 
 export function totalRelevantSales(f: Pick<StateFacts, "shopify_sales" | "amazon_sales">): number {
@@ -153,10 +183,43 @@ function pyGroupedInt(n: number): string {
   return Math.round(n).toLocaleString("en-US");
 }
 
+function hasTessPacket(f: StateFacts): boolean {
+  return f.documentation_status === "documented" || f.documentation_status === "partial";
+}
+
+function packetDate(f: StateFacts): string {
+  return f.tess_packet_date || TESS_PACKET_DATE;
+}
+
 function physicalLabel(f: StateFacts): Decision["physical_nexus"] {
   if (!hasInventory(f)) return "N";
+  if (f.documentation_status === "documented" && f.tess_posture === "asserts") return "Y";
+  if (f.documentation_status === "documented" && f.tess_posture === "carve_out") return "contested";
+  if (f.documentation_status === "partial") return "flagged";
   if (FBA_CREATES_NEXUS.has(f.fba_rule)) return "Y";
-  return "contested";
+  if (FBA_NO_NEXUS.has(f.fba_rule) || FBA_NEEDS_REVIEW.has(f.fba_rule)) return "contested";
+  return "flagged";
+}
+
+function decision(
+  action: PlanAction,
+  reason: string,
+  confidence: Decision["confidence"],
+  physical_nexus: Decision["physical_nexus"],
+  economic_nexus: string,
+  extra: Partial<Pick<Decision, "documentation_status" | "citation" | "packet_date" | "authority_source">> = {},
+): Decision {
+  return {
+    action,
+    reason,
+    confidence,
+    physical_nexus,
+    economic_nexus,
+    documentation_status: extra.documentation_status ?? "unknown",
+    citation: extra.citation ?? "",
+    packet_date: extra.packet_date ?? "",
+    authority_source: extra.authority_source ?? "none",
+  };
 }
 
 function economicLabel(f: StateFacts, warnPct: number): string {
@@ -182,86 +245,116 @@ export function decide(f: StateFacts, warnPct: number = DEFAULT_WARN_PCT): Decis
       + (f.entity_exposure
         ? " (entity/gross-receipts exposure may still exist — see /entity)"
         : "");
-    return { action: "no_sales_tax", reason: note, confidence: "high", physical_nexus: phys, economic_nexus: econ };
+    return decision("no_sales_tax", note, "high", phys, econ);
   }
 
   if (f.is_registered) {
-    return {
-      action: "already_registered",
-      reason: "already registered to collect",
-      confidence: "high",
-      physical_nexus: phys,
-      economic_nexus: econ,
-    };
+    return decision("already_registered", "already registered to collect", "high", phys, econ);
   }
 
   if (f.economic_exceeded) {
-    return {
-      action: "register_now",
-      reason:
-        `economic threshold exceeded (${Math.round(f.economic_pct)}% of threshold, `
+    return decision(
+      "register_now",
+      `economic threshold exceeded (${Math.round(f.economic_pct)}% of threshold, `
         + `$${pyGroupedInt(total)} relevant sales)`,
-      confidence: "high",
-      physical_nexus: phys,
-      economic_nexus: econ,
-    };
+      "high",
+      phys,
+      econ,
+      {
+        documentation_status: (f.documentation_status as DocumentationStatus) || "unknown",
+        citation: f.tess_citation,
+        packet_date: hasTessPacket(f) ? packetDate(f) : "",
+        authority_source: "economic",
+      },
+    );
+  }
+
+  const invPrefix =
+    `FBA inventory since ${f.inventory_first} `
+    + `(${pyGroupedInt(f.inventory_events)} events)`;
+
+  if (hasInventory(f) && hasTessPacket(f)) {
+    const date = packetDate(f);
+    const cite = f.tess_citation;
+    const conf = (f.tess_confidence || "medium") as Decision["confidence"];
+    const status = f.documentation_status as DocumentationStatus;
+    if (status === "documented" && f.tess_posture === "asserts") {
+      return decision(
+        "register_now",
+        `${invPrefix}; documented Tess packet (${date}): asserts/${conf} — ${cite} [source: tess_packet].`,
+        conf, phys, econ,
+        { documentation_status: "documented", citation: cite, packet_date: date, authority_source: "tess_packet" },
+      );
+    }
+    if (status === "documented" && f.tess_posture === "carve_out") {
+      return decision(
+        "review_contested",
+        `${invPrefix}, but documented Tess packet (${date}): carve_out/${conf} — ${cite}. `
+          + `MF-only FBA inventory is not a silent register_now. Confirm with a CPA before registering.`,
+        conf, phys, econ,
+        { documentation_status: "documented", citation: cite, packet_date: date, authority_source: "tess_packet" },
+      );
+    }
+    const action: PlanAction = f.tess_posture === "contested" ? "review_contested" : "needs_statute_review";
+    const extra = f.tess_posture === "contested"
+      ? " Fact-specific; confirm with a CPA before registering."
+      : "";
+    return decision(
+      action,
+      `${invPrefix}; partial — FBA not named; CPA confirm. `
+        + `Tess packet (${date}): ${f.tess_posture}/${conf} — ${cite} [source: tess_packet].${extra}`,
+      conf, phys, econ,
+      { documentation_status: "partial", citation: cite, packet_date: date, authority_source: "tess_packet" },
+    );
   }
 
   if (hasInventory(f) && FBA_CREATES_NEXUS.has(f.fba_rule)) {
-    const researched = f.fba_rule === "true" || f.fba_rule === "True";
-    const confidence = researched ? "high" : "medium";
-    const basis = researched
-      ? "state rule: FBA inventory creates nexus"
-      : "state rule unresearched — repo default assumes FBA inventory "
-        + "creates nexus (conservative)";
-    return {
-      action: "register_now",
-      reason:
-        `FBA inventory since ${f.inventory_first} `
-        + `(${pyGroupedInt(f.inventory_events)} events); ${basis}`,
-      confidence,
-      physical_nexus: phys,
-      economic_nexus: econ,
-    };
+    return decision(
+      "register_now",
+      `${invPrefix}; documented: FBA inventory creates nexus [source: state_rule].`,
+      "high", phys, econ,
+      { documentation_status: "documented", authority_source: "state_rule" },
+    );
   }
 
   if (hasInventory(f) && (FBA_NEEDS_REVIEW.has(f.fba_rule) || FBA_NO_NEXUS.has(f.fba_rule))) {
     const why = FBA_NO_NEXUS.has(f.fba_rule)
       ? "state rule says FBA inventory does NOT create nexus"
       : `state rule is ${f.fba_rule} — depends on facts not held here`;
-    return {
-      action: "review_contested",
-      reason:
-        `FBA inventory since ${f.inventory_first} `
-        + `(${pyGroupedInt(f.inventory_events)} events), but ${why}. Confirm with a CPA `
-        + `before registering.`,
-      confidence: FBA_NEEDS_REVIEW.has(f.fba_rule) ? "medium" : "high",
-      physical_nexus: phys,
-      economic_nexus: econ,
-    };
+    return decision(
+      "review_contested",
+      `${invPrefix}, but ${why}. Confirm with a CPA before registering.`,
+      FBA_NEEDS_REVIEW.has(f.fba_rule) ? "medium" : "high",
+      phys, econ,
+      { documentation_status: "documented", authority_source: "state_rule" },
+    );
+  }
+
+  if (hasInventory(f)) {
+    return decision(
+      "needs_statute_review",
+      `${invPrefix}; needs statute review. Insufficient authority `
+        + `(unknown_default, not Tess-researched).`,
+      "low", phys, econ,
+      { documentation_status: "unknown", authority_source: "unknown_default" },
+    );
   }
 
   if (f.economic_pct >= warnPct) {
-    return {
-      action: "monitor",
-      reason:
-        `${Math.round(f.economic_pct)}% of economic threshold `
+    return decision(
+      "monitor",
+      `${Math.round(f.economic_pct)}% of economic threshold `
         + `($${pyGroupedInt(total)}) — no nexus trigger yet`,
-      confidence: "high",
-      physical_nexus: phys,
-      economic_nexus: econ,
-    };
+      "high", phys, econ,
+    );
   }
 
-  return {
-    action: "monitor",
-    reason:
-      `no nexus trigger ($${pyGroupedInt(total)} relevant sales, `
+  return decision(
+    "monitor",
+    `no nexus trigger ($${pyGroupedInt(total)} relevant sales, `
       + `${Math.round(f.economic_pct)}% of threshold)`,
-    confidence: "high",
-    physical_nexus: phys,
-    economic_nexus: econ,
-  };
+    "high", phys, econ,
+  );
 }
 
 const ACTION_ORDER = Object.fromEntries(ACTIONS.map((a, i) => [a, i])) as Record<PlanAction, number>;
@@ -280,6 +373,7 @@ export function sortRows(rows: PlanRow[]): PlanRow[] {
 export function emptyCounts(): Record<PlanAction, number> {
   return {
     register_now: 0,
+    needs_statute_review: 0,
     review_contested: 0,
     monitor: 0,
     already_registered: 0,
@@ -302,10 +396,27 @@ function residualRiskMessage(n: number): string {
   );
 }
 
+export function bundledCitations(): Record<string, CitationPacket> {
+  const states = (bundledCitationsDoc as { states?: Record<string, CitationPacket> }).states ?? {};
+  const out: Record<string, CitationPacket> = {};
+  for (const [sc, p] of Object.entries(states)) {
+    out[sc] = {
+      documentation_status: p.documentation_status,
+      posture: p.posture,
+      confidence: p.confidence,
+      short_citation: p.short_citation,
+      packet_date: p.packet_date || TESS_PACKET_DATE,
+      notes: p.notes,
+    };
+  }
+  return out;
+}
+
 export function buildPlan(inputs: PlanInputs): PlanRow[] {
   const entity = new Set(inputs.entityStates);
   const warnPct = inputs.warnPct ?? DEFAULT_WARN_PCT;
   const residual = residualRiskMessage(inputs.unmappedInventoryEvents ?? 0);
+  const citations = inputs.citations ?? bundledCitations();
 
   const states = new Set<string>([
     ...Object.keys(inputs.rules),
@@ -321,6 +432,7 @@ export function buildPlan(inputs: PlanInputs): PlanRow[] {
     const sale = inputs.sales[sc];
     const nx = inputs.nexus[sc] ?? {};
 
+    const pkt = citations[sc];
     const facts: StateFacts = {
       state_code: sc,
       has_sales_tax: coerceHasSalesTax(rule?.has_sales_tax ?? true),
@@ -334,6 +446,11 @@ export function buildPlan(inputs: PlanInputs): PlanRow[] {
       shopify_sales: Number(sale?.shopify ?? 0) || 0,
       amazon_sales: Number(sale?.amazon ?? 0) || 0,
       entity_exposure: entity.has(sc),
+      documentation_status: pkt?.documentation_status ?? "",
+      tess_posture: pkt?.posture ?? "",
+      tess_confidence: pkt?.confidence ?? "",
+      tess_citation: pkt?.short_citation ?? "",
+      tess_packet_date: pkt?.packet_date ?? "",
     };
     const decision = decide(facts, warnPct);
     const entity_note = facts.entity_exposure && decision.action !== "no_sales_tax"
@@ -362,6 +479,10 @@ export function toApiRows(rows: PlanRow[]): PlanApiRow[] {
       short_reason: d.reason,
       confidence: d.confidence,
       entity_note: r.entity_note,
+      documentation_status: d.documentation_status,
+      citation: d.citation,
+      packet_date: d.packet_date,
+      authority_source: d.authority_source,
     };
   });
 }
@@ -415,6 +536,33 @@ export function bundledStateRules(): Record<string, RuleFact> {
     };
   }
   return out;
+}
+
+async function overlayCitationsFromDisk(citations: Record<string, CitationPacket>): Promise<void> {
+  const candidates = [
+    path.join(process.cwd(), "..", "config", "fba_inventory_nexus_citations.json"),
+    path.join(process.cwd(), "config", "fba_inventory_nexus_citations.json"),
+  ];
+  for (const p of candidates) {
+    try {
+      const doc = JSON.parse(await readFile(p, "utf8")) as {
+        states?: Record<string, CitationPacket>;
+      };
+      for (const [sc, pkt] of Object.entries(doc.states ?? {})) {
+        citations[sc] = {
+          documentation_status: pkt.documentation_status,
+          posture: pkt.posture,
+          confidence: pkt.confidence,
+          short_citation: pkt.short_citation,
+          packet_date: pkt.packet_date || TESS_PACKET_DATE,
+          notes: pkt.notes,
+        };
+      }
+      return;
+    } catch {
+      /* try the next path */
+    }
+  }
 }
 
 async function overlayRulesFromDisk(rules: Record<string, RuleFact>): Promise<void> {
@@ -554,7 +702,9 @@ export async function loadRegistrationPlanFromWarehouse(
   opts?: { referenceDate?: string },
 ): Promise<PlanResult> {
   const rules = bundledStateRules();
+  const citations = bundledCitations();
   await overlayRulesFromDisk(rules);
+  await overlayCitationsFromDisk(citations);
 
   const [
     warehouseRules,
@@ -594,6 +744,7 @@ export async function loadRegistrationPlanFromWarehouse(
     sales,
     entityStates,
     unmappedInventoryEvents: inventory.unmapped,
+    citations,
   });
 
   const warehouse_empty =
