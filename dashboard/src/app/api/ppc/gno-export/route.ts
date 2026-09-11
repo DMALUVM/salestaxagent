@@ -5,7 +5,6 @@ import {
   buildGnoPack,
   evaluateGnoAlerts,
   GNO_DESK_SPEND_LOOKBACK_DAYS,
-  GNO_NEXT_REVIEW_AT,
   SQP_SLICE_QUERIES,
   type AsinCatalogRow,
   type CampaignDailyRow,
@@ -16,7 +15,7 @@ import {
   type SearchTermRow,
   type SqpSliceRow,
 } from "@/lib/gno-ppc-watch";
-import { ackPayload, evaluateExportNeed } from "@/lib/gno-export-state";
+import { ackPayload, exportBannerFromState } from "@/lib/gno-export-state";
 import { loadGnoExportState, loadGnoLedger, saveGnoExportAck } from "@/lib/gno-store";
 
 /**
@@ -203,16 +202,7 @@ export async function GET() {
     });
     const p0 = alerts.filter((a) => a.priority === "P0");
     const p1 = alerts.filter((a) => a.priority === "P1");
-    const banner = evaluateExportNeed({
-      now,
-      nextReviewAt: GNO_NEXT_REVIEW_AT,
-      p0,
-      p1,
-      lastExportAt: exportState?.last_export_at,
-      lastExportReason: exportState?.last_export_reason,
-      ackedP0Keys: exportState?.acked_p0_keys,
-      ackedP1Keys: exportState?.acked_p1_keys,
-    });
+    const banner = exportBannerFromState(exportState, { now, p0, p1 });
     await saveGnoExportAck(ackPayload(banner, p0, p1, pack.filename, now));
     const zip = zipStore(pack.files);
     return new Response(Buffer.from(zip), {

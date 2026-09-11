@@ -10,6 +10,7 @@ from src.amazon_ads.gno_watch_alert import (
     hours_since_launch,
     new_exact_zero_impr_p0s,
     ping_reasons,
+    resolve_gno_review_at,
     review_due,
     unacked_p0s,
 )
@@ -128,6 +129,29 @@ def test_tue_7am_nudge_quiet_without_meta_uses_midday_fallback():
         acked_p0_keys=[],
     )
     assert reasons == []
+
+
+def test_live_wednesday_clock_ignores_past_sep9_seed():
+    fri = datetime.fromisoformat("2026-09-11T10:00:00-07:00")
+    covered = datetime.fromisoformat("2026-09-09T13:00:00-07:00")
+    nxt = resolve_gno_review_at(fri, covered)
+    assert nxt.startswith("2026-09-16T18:00:00")
+    reasons = ping_reasons(
+        now=fri,
+        next_review_at=nxt,
+        last_export_at=covered,
+        p0s=[],
+        acked_p0_keys=[],
+    )
+    assert reasons == []
+    overdue = resolve_gno_review_at(fri, datetime.fromisoformat("2026-09-07T12:00:00-07:00"))
+    assert overdue.startswith("2026-09-09T18:00:00")
+    wed_am = datetime.fromisoformat("2026-09-16T10:00:00-07:00")
+    assert resolve_gno_review_at(wed_am, None).startswith("2026-09-09T18:00:00")
+    assert resolve_gno_review_at(
+        wed_am, datetime.fromisoformat("2026-09-09T19:00:00-07:00")
+    ).startswith("2026-09-16T18:00:00")
+    assert GNO_NEXT_REVIEW_AT == "2026-09-09T18:00:00-07:00"
 
 
 def test_alert_module_is_observe_only_no_wait():

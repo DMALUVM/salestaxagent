@@ -9,8 +9,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { evaluateExportNeed } from "@/lib/gno-export-state";
-import { GNO_NEXT_REVIEW_AT, CM_NOTE } from "@/lib/gno-ppc-watch";
+import { exportBannerFromState, mergeGnoAdsOntoState } from "@/lib/gno-export-state";
+import { CM_NOTE } from "@/lib/gno-ppc-watch";
 import { OrganicRankHeatmap } from "@/components/organic-rank-heatmap";
 import { RT_EMPTY_COPY, formatSoldScopeRank, formatSoldScopeVol } from "@/lib/soldscope-status";
 import { OUTLIER_EMPTY_COPY } from "@/lib/soldscope-outliers";
@@ -95,6 +95,7 @@ interface GnoData {
   today?: string;
   launchedAt?: string;
   nextReviewAt?: string;
+  upcomingReviewAt?: string;
   hoursSinceLaunch?: number;
   p0?: Alert[];
   p1?: Alert[];
@@ -130,8 +131,12 @@ interface GnoData {
     lastExportReason: string | null;
     nextReviewAt: string;
     nextReviewLabel: string;
+    upcomingReviewAt: string;
+    upcomingReviewLabel: string;
+    reviewLine: string;
     hoursSinceExport: number | null;
     reviewDue: boolean;
+    reviewOverdue: boolean;
     digestWindow: boolean;
   };
   lastExportAt?: string | null;
@@ -223,6 +228,7 @@ export function PpcGnoWatch() {
   const [data, setData] = useState<GnoData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [adsLoading, setAdsLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [sqpNotice, setSqpNotice] = useState<{ ok: boolean; text: string } | null>(null);
@@ -234,6 +240,18 @@ export function PpcGnoWatch() {
   const [logging, setLogging] = useState(false);
 
   const load = useCallback(async () => {
+    setAdsLoading(true);
+    let state: GnoData | null = null;
+    try {
+      const stateRes = await fetch("/api/ppc/gno-state");
+      const stateCt = stateRes.headers.get("content-type") ?? "";
+      if (stateCt.includes("application/json")) {
+        state = await stateRes.json() as GnoData;
+        setData((prev) => mergeGnoAdsOntoState(prev, state as GnoData));
+        setLoading(false);
+      }
+    } catch { /* ads path still runs; banner stays conservative */ }
+
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 8_000);
     try {
@@ -243,16 +261,17 @@ export function PpcGnoWatch() {
         throw new Error(`Unexpected ${res.status} response from /api/ppc/gno.`);
       }
       const d = await res.json() as GnoData;
-      setData(d);
+      setData(mergeGnoAdsOntoState(state, d));
       setError(d.error ?? null);
     } catch (e) {
       const aborted = e instanceof DOMException && e.name === "AbortError";
       setError(aborted
-        ? "GNO Watch timed out loading ads. Banner still shows whether a pack is due."
+        ? "Campaign tiles timed out. Export state is still on the banner — pack remains downloadable."
         : (e instanceof Error ? e.message : "Could not load GNO Watch."));
     } finally {
       clearTimeout(timer);
       setLoading(false);
+      setAdsLoading(false);
     }
   }, []);
 
@@ -392,12 +411,12 @@ export function PpcGnoWatch() {
   const keepers = data?.keepers ?? [];
   const harvest = data?.harvestQueue ?? [];
   const doneCount = p0Done.length + p1Done.length + lookbackNotes.done.length;
-  const banner = data?.exportBanner ?? evaluateExportNeed({
-    nextReviewAt: data?.nextReviewAt ?? GNO_NEXT_REVIEW_AT,
+  const banner = data?.exportBanner ?? exportBannerFromState({
+    last_export_at: data?.lastExportAt,
+    last_export_reason: data?.lastExportReason,
+  }, {
     p0: data?.p0 ?? [],
     p1: data?.p1 ?? [],
-    lastExportAt: data?.lastExportAt,
-    lastExportReason: data?.lastExportReason,
   });
   const exportDue = banner.state === "EXPORT_NEEDED";
 
@@ -410,6 +429,7 @@ export function PpcGnoWatch() {
             Tallowbourn US · observe + export + alert only · closed LA day {data?.asOf ?? "—"}
           </p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Campaign L2 = spend source of truth. Search-term files = negate / harvest.
             Family BE ACOS is the config contribution-margin target ({CM_NOTE}).
           </p>
         </div>
@@ -444,22 +464,31 @@ export function PpcGnoWatch() {
           {banner.reasons.length ? ` · ${banner.reasons.join(" + ")}` : ""}
         </p>
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Next human review: <strong className="text-foreground">{banner.nextReviewLabel}</strong>
+          {banner.reviewLine}
           {banner.lastExportReason ? ` · last export reason ${banner.lastExportReason}` : ""}
           {" · "}<Link href="/ppc" className="underline">Back to Recovery / This week</Link>
         </p>
       </div>
 
-      <div className="rounded-lg border border-amber-500/30 bg-amber-50/60 p-3 text-[11px] text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
+      <div
+        data-gno-region="howto"
+        className="rounded-lg border bg-muted/30 p-3 text-[11px] text-foreground"
+      >
         <p className="font-semibold">When to Export GNO pack</p>
         <ol className="mt-1.5 list-decimal space-y-1 pl-4">
           <li><strong>Anytime a P0 fires</strong> — download the zip, drop it in Grok immediately.</li>
           <li>
-            <strong>Wed evening ~48h review</strong>
-            {" "}({banner.nextReviewLabel})
-            {" "}— export even if quiet; that is the scheduled hold / bid / harvest pass.
+            <strong>Every Wednesday evening ~48h review</strong>
+            {" "}(6:00 PM PT — this Wed / next Wed).
+            {banner.reviewOverdue
+              ? ` This week's pass is overdue. Next scheduled after export: ${banner.upcomingReviewLabel}.`
+              : ` Next scheduled: ${banner.upcomingReviewLabel}.`}
+            {" "}Export even if quiet — that is the hold / bid / harvest pass.
           </li>
-          <li><strong>Optional daily</strong> — if you want a P1 digest reviewed; otherwise watch the page alerts.</li>
+          <li>
+            <strong>Optional Mon/Wed/Fri morning digest</strong>
+            {" "}for Auto Loose P1s (06:30–08:00 ET). Otherwise watch the page alerts.
+          </li>
         </ol>
         <p className="mt-2 text-muted-foreground">
           Observe only — export never writes to Amazon. One change per campaign per day still Dave/Grok.
@@ -467,11 +496,24 @@ export function PpcGnoWatch() {
       </div>
 
       {error && (
-        <Card className="border-red-200 dark:border-red-900">
-          <CardContent className="py-4 text-sm text-red-700 dark:text-red-300">
+        <Card className={banner.lastExportAt
+          ? "border-border"
+          : "border-red-200 dark:border-red-900"}>
+          <CardContent className={`py-4 text-sm ${banner.lastExportAt
+            ? "text-muted-foreground"
+            : "text-red-700 dark:text-red-300"}`}>
             {error}
+            {banner.lastExportAt && (
+              <p className="mt-1 text-xs">
+                Last export is on the banner. Export GNO pack still works.
+              </p>
+            )}
           </CardContent>
         </Card>
+      )}
+
+      {adsLoading && (
+        <p className="text-xs text-muted-foreground">Loading campaign tiles…</p>
       )}
 
       {notice && (
@@ -504,27 +546,19 @@ export function PpcGnoWatch() {
         </Card>
       )}
 
-      {lookbackNotes.open.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">KEEP-ALIVE not in this spend window</CardTitle>
-            <p className="text-[11px] text-muted-foreground">
-              The desk reads {data?.lookbackDays ?? 14} closed days. Ads reports omit $0 days,
-              so a missing keeper is <strong>not a P0</strong>. Confirm in Ads console if needed.
-              Observe only.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {lookbackNotes.open.map((a) => (
-              <AlertRow key={gnoAlertKey(a)} alert={a} done={false} tone="quiet" onToggle={markDone} />
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
       <div>
-        <h2 className="mb-2 text-sm font-semibold">New Exact strip</h2>
+        <h2 className="mb-1 text-sm font-semibold">New Exact — campaign L2 spend is SoT</h2>
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          Today is config-only. Read spend / ACOS from closed L2 (and L7), not from search-term files.
+        </p>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+          {tiles.length === 0 && (
+            <p className="col-span-full text-xs text-muted-foreground">
+              {adsLoading
+                ? "Loading New Exact tiles…"
+                : "No New Exact tiles in this payload. Export still works. Spend is never invented."}
+            </p>
+          )}
           {tiles.map((t) => (
             <Card key={t.campaign_name} className={t.zero_impr_after_24h ? "border-red-500/60" : ""}>
               <CardContent className="space-y-1 p-3">
@@ -567,8 +601,18 @@ export function PpcGnoWatch() {
       </div>
 
       <div>
-        <h2 className="mb-2 text-sm font-semibold">Keeper heartbeat</h2>
+        <h2 className="mb-1 text-sm font-semibold">Keepers — campaign L2 spend heartbeat</h2>
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          Campaign L2 / L7 spend is the source of truth. Missing $0 days in Ads reports are not a pause.
+        </p>
         <div className="grid gap-2 md:grid-cols-3">
+          {keepers.length === 0 && (
+            <p className="col-span-full text-xs text-muted-foreground">
+              {adsLoading
+                ? "Loading keeper heartbeats…"
+                : "No keeper rows in this payload. Confirm in Ads console if needed. Observe only."}
+            </p>
+          )}
           {keepers.map((k) => (
             <Card key={k.role} className={k.enabled ? "border-emerald-400/50" : "border-red-500/60"}>
               <CardContent className="space-y-1.5 p-3">
@@ -592,63 +636,11 @@ export function PpcGnoWatch() {
         </div>
       </div>
 
-      <OrganicRankHeatmap />
-
-      <Card id="soldscope-outliers">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">SoldScope keyword outliers — bid-base checklist</CardTitle>
-          <p className="text-[11px] text-muted-foreground">
-            High-opportunity phrases vs current Exact/Phrase/Broad targets and Auto Loose / Fat parent
-            search terms. Tags only — nothing writes to Amazon. Empty until Rank Tracker phrases or a
-            saved Keyword Research search land.
-          </p>
-        </CardHeader>
-        <CardContent className="p-0 overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Keyword</TableHead>
-                <TableHead>ASIN</TableHead>
-                <TableHead className="text-right">Vol</TableHead>
-                <TableHead className="text-right">Opp</TableHead>
-                <TableHead>Bidding</TableHead>
-                <TableHead>Note</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(data?.soldscope?.keywordOutliers ?? []).length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-xs text-muted-foreground">
-                    {data?.soldscope?.outlierEmptyCopy ?? OUTLIER_EMPTY_COPY}
-                  </TableCell>
-                </TableRow>
-              )}
-              {(data?.soldscope?.keywordOutliers ?? []).map((row) => (
-                <TableRow key={`${row.asin}-${row.keyword}`}>
-                  <TableCell className="text-xs">{row.keyword}</TableCell>
-                  <TableCell className="text-[10px] tabular-nums text-muted-foreground">{row.asin}</TableCell>
-                  <TableCell className="text-right tabular-nums text-xs">{formatSoldScopeVol(row.volume)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-xs">{formatSoldScopeVol(row.opportunity)}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="text-[9px]">
-                      {row.already_bidding}
-                    </Badge>
-                    {row.bidding_note && row.bidding_note !== "—" && (
-                      <p className="mt-0.5 text-[9px] text-muted-foreground">{row.bidding_note}</p>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-[10px] text-muted-foreground">{row.note}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Harvest queue — Auto Loose</CardTitle>
+          <CardTitle className="text-sm">Harvest / junk — search-term files (negate / harvest)</CardTitle>
           <p className="text-[11px] text-muted-foreground">
+            ST files drive term negate / harvest. Campaign L2 is spend SoT — do not mix them.
             Clicking a row does <strong>not</strong> negate. It adds the term to
             the next Grok pack selection ({queued.length} queued). Tags only.
             Log Grok outcome stores Dave&apos;s call — still no Amazon write.
@@ -786,7 +778,7 @@ export function PpcGnoWatch() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center justify-between gap-2 text-sm">
-              <span>P1 digest (flag only)</span>
+              <span>Mon/Wed/Fri morning digest — Auto Loose P1s</span>
               {doneCount > 0 && (
                 <Button type="button" variant="ghost" size="sm" className="h-7 text-[10px]"
                   onClick={() => setShowDone((v) => !v)}>
@@ -805,6 +797,78 @@ export function PpcGnoWatch() {
           </CardContent>
         </Card>
       )}
+
+      {lookbackNotes.open.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">KEEP-ALIVE not in this spend window</CardTitle>
+            <p className="text-[11px] text-muted-foreground">
+              The desk reads {data?.lookbackDays ?? 14} closed days. Ads reports omit $0 days,
+              so a missing keeper is <strong>not a P0</strong>. Confirm in Ads console if needed.
+              Observe only.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {lookbackNotes.open.map((a) => (
+              <AlertRow key={gnoAlertKey(a)} alert={a} done={false} tone="quiet" onToggle={markDone} />
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      <p className="text-[11px] font-medium text-muted-foreground">Supporting intel</p>
+      <OrganicRankHeatmap />
+
+      <Card id="soldscope-outliers">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">SoldScope keyword outliers — bid-base checklist</CardTitle>
+          <p className="text-[11px] text-muted-foreground">
+            High-opportunity phrases vs current Exact/Phrase/Broad targets and Auto Loose / Fat parent
+            search terms. Tags only — nothing writes to Amazon. Empty until stored Rank Tracker phrases
+            or a saved Keyword Research search land. This desk does not create SoldScope RT groups.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0 overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Keyword</TableHead>
+                <TableHead>ASIN</TableHead>
+                <TableHead className="text-right">Vol</TableHead>
+                <TableHead className="text-right">Opp</TableHead>
+                <TableHead>Bidding</TableHead>
+                <TableHead>Note</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(data?.soldscope?.keywordOutliers ?? []).length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-xs text-muted-foreground">
+                    {data?.soldscope?.outlierEmptyCopy ?? OUTLIER_EMPTY_COPY}
+                  </TableCell>
+                </TableRow>
+              )}
+              {(data?.soldscope?.keywordOutliers ?? []).map((row) => (
+                <TableRow key={`${row.asin}-${row.keyword}`}>
+                  <TableCell className="text-xs">{row.keyword}</TableCell>
+                  <TableCell className="text-[10px] tabular-nums text-muted-foreground">{row.asin}</TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">{formatSoldScopeVol(row.volume)}</TableCell>
+                  <TableCell className="text-right tabular-nums text-xs">{formatSoldScopeVol(row.opportunity)}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-[9px]">
+                      {row.already_bidding}
+                    </Badge>
+                    {row.bidding_note && row.bidding_note !== "—" && (
+                      <p className="mt-0.5 text-[9px] text-muted-foreground">{row.bidding_note}</p>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-[10px] text-muted-foreground">{row.note}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       {!!data?.sbL7?.length && (
         <Card>

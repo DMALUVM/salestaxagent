@@ -7,11 +7,14 @@ import {
   QUIET,
   ackPayload,
   evaluateExportNeed,
+  exportBannerFromState,
   formatHoursAgo,
   formatNextReview,
   isDigestWindow,
   isReviewDue,
+  mergeGnoAdsOntoState,
   p0Key,
+  resolveGnoReviewClock,
   reviewWindowStart,
 } from "./gno-export-state";
 import { GNO_NEXT_REVIEW_AT } from "./gno-ppc-watch";
@@ -142,20 +145,146 @@ describe("GNO export due-state", () => {
   });
 });
 
+describe("live Wednesday review clock", () => {
+  test("hardcoded Sep 9 seed does not force perpetual REVIEW after next Wed is computed", () => {
+    const fri = new Date("2026-09-11T10:00:00-07:00");
+    const covered = resolveGnoReviewClock(fri, "2026-09-09T13:00:00-07:00");
+    assert.match(covered.nextReviewAt, /2026-09-16T18:00:00/);
+    assert.equal(covered.reviewOverdue, false);
+    const banner = evaluateExportNeed({
+      now: fri,
+      nextReviewAt: covered.nextReviewAt,
+      upcomingReviewAt: covered.upcomingReviewAt,
+      p0: [],
+      lastExportAt: "2026-09-09T13:00:00-07:00",
+      lastExportReason: "REVIEW",
+    });
+    assert.equal(banner.reviewDue, false);
+    assert.equal(banner.state, QUIET);
+    assert.doesNotMatch(banner.reviewLine, /Sep 9/);
+    assert.match(banner.upcomingReviewLabel, /Sep 16/);
+    assert.equal(GNO_NEXT_REVIEW_AT, "2026-09-09T18:00:00-07:00");
+    assert.equal(
+      isReviewDue(fri, GNO_NEXT_REVIEW_AT, "2026-09-09T13:00:00-07:00"),
+      false,
+    );
+  });
+
+  test("next Wed advances after a REVIEW export covering this week's window", () => {
+    const thu = new Date("2026-09-10T09:00:00-07:00");
+    const before = resolveGnoReviewClock(thu, "2026-09-08T10:00:00-07:00");
+    assert.match(before.nextReviewAt, /2026-09-09T18:00:00/);
+    assert.equal(before.reviewOverdue, true);
+    const after = resolveGnoReviewClock(thu, "2026-09-09T19:00:00-07:00");
+    assert.match(after.nextReviewAt, /2026-09-16T18:00:00/);
+    assert.equal(after.reviewOverdue, false);
+    const due = exportBannerFromState({
+      last_export_at: "2026-09-09T19:00:00-07:00",
+      last_export_reason: "REVIEW",
+    }, { now: thu });
+    assert.equal(due.reviewDue, false);
+    assert.match(due.upcomingReviewAt, /2026-09-16/);
+  });
+
+  test("Fri Sep 11 without covering export says overdue, not Next: Sep 9", () => {
+    const fri = new Date("2026-09-11T15:00:00-07:00");
+    const clock = resolveGnoReviewClock(fri, "2026-09-07T12:00:00-07:00");
+    const banner = evaluateExportNeed({
+      now: fri,
+      nextReviewAt: clock.nextReviewAt,
+      upcomingReviewAt: clock.upcomingReviewAt,
+      p0: [],
+      lastExportAt: "2026-09-07T12:00:00-07:00",
+    });
+    assert.equal(banner.state, EXPORT_NEEDED);
+    assert.ok(banner.reasons.includes("REVIEW"));
+    assert.equal(banner.reviewOverdue, true);
+    assert.match(banner.headline, /overdue/);
+    assert.match(banner.headline, /last export/);
+    assert.doesNotMatch(banner.headline, /never exported/);
+    assert.match(banner.reviewLine, /overdue/);
+    assert.doesNotMatch(banner.reviewLine, /^Next human review:.*Sep 9/);
+    assert.match(banner.upcomingReviewLabel, /Sep 16/);
+  });
+
+  test("Wed morning still owes last week's REVIEW until an export covers it", () => {
+    const wedAm = new Date("2026-09-16T10:00:00-07:00");
+    const unpaid = resolveGnoReviewClock(wedAm, null);
+    assert.match(unpaid.nextReviewAt, /2026-09-09T18:00:00/);
+    assert.equal(unpaid.reviewOverdue, true);
+    assert.match(unpaid.upcomingReviewAt, /2026-09-16T18:00:00/);
+    const paid = resolveGnoReviewClock(wedAm, "2026-09-09T19:00:00-07:00");
+    assert.match(paid.nextReviewAt, /2026-09-16T18:00:00/);
+    assert.equal(paid.reviewOverdue, false);
+  });
+
+  test("Sunday still resolves this week's Wednesday, not next week's", () => {
+    const sun = new Date("2026-09-13T10:00:00-07:00");
+    const clock = resolveGnoReviewClock(sun, "2026-09-09T19:00:00-07:00");
+    assert.match(clock.nextReviewAt, /2026-09-16T18:00:00/);
+    const unpaid = resolveGnoReviewClock(sun, null);
+    assert.match(unpaid.nextReviewAt, /2026-09-09T18:00:00/);
+    assert.equal(unpaid.reviewOverdue, true);
+  });
+
+  test("never exported only when last_export_at is missing", () => {
+    const fri = new Date("2026-09-11T15:00:00-07:00");
+    const missing = exportBannerFromState(null, { now: fri });
+    assert.match(missing.headline, /never exported|needs export/);
+    const present = exportBannerFromState({
+      last_export_at: "2026-09-08T08:00:00-07:00",
+    }, { now: fri });
+    assert.match(present.headline, /last export/i);
+    assert.doesNotMatch(present.headline, /never exported/);
+  });
+});
+
+describe("ads timeout preserves lastExportAt", () => {
+  test("merge keeps store lastExportAt when ads payload omits it", () => {
+    const fri = new Date("2026-09-11T15:00:00-07:00");
+    const stateBanner = exportBannerFromState({
+      last_export_at: "2026-09-10T12:00:00-07:00",
+      last_export_reason: "P0",
+    }, { now: fri });
+    const merged = mergeGnoAdsOntoState({
+      lastExportAt: "2026-09-10T12:00:00-07:00",
+      lastExportReason: "P0",
+      exportBanner: stateBanner,
+      nextReviewAt: stateBanner.nextReviewAt,
+    }, {
+      error: "GNO Watch timed out loading ads.",
+      lastExportAt: null,
+      exportBanner: undefined,
+    });
+    assert.equal(merged.lastExportAt, "2026-09-10T12:00:00-07:00");
+    assert.ok(merged.exportBanner);
+    assert.equal(merged.exportBanner.lastExportAt, "2026-09-10T12:00:00-07:00");
+    assert.doesNotMatch(merged.exportBanner.headline, /never exported/);
+  });
+});
+
 describe("GNO export UI copy is wired", () => {
   test("banner + when-to-export sit on the watch page", () => {
     const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-gno-watch.tsx"), "utf8");
     assert.match(ui, /EXPORT NEEDED/);
     assert.match(ui, /When to Export GNO pack/);
     assert.match(ui, /Anytime a P0 fires/);
-    assert.match(ui, /Wed evening ~48h review/);
-    assert.match(ui, /Optional daily/);
+    assert.match(ui, /Every Wednesday evening ~48h review/);
+    assert.match(ui, /Optional Mon\/Wed\/Fri morning digest/);
     assert.match(ui, /export never writes to Amazon/);
     assert.match(ui, /data-export-state/);
     assert.match(ui, /Log Grok outcome/);
     assert.match(ui, /last call:/);
-    assert.match(ui, /evaluateExportNeed/);
+    assert.match(ui, /exportBannerFromState/);
+    assert.match(ui, /\/api\/ppc\/gno-state/);
+    assert.match(ui, /campaign L2/);
+    assert.match(ui, /search-term files/);
+    assert.doesNotMatch(ui, /2026-09-09T18:00:00/);
+    assert.doesNotMatch(ui, /Optional daily/);
     assert.doesNotMatch(ui, /if \(error && !data\?\.newExact\?\.length\)/);
     assert.doesNotMatch(ui, /autoPause\(/);
+    assert.doesNotMatch(ui, /evaluateExportNeed/);
+    const howto = ui.slice(ui.indexOf("When to Export GNO pack"));
+    assert.doesNotMatch(howto.slice(0, 800), /2026-09-09/);
   });
 });
