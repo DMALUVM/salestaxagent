@@ -12,6 +12,7 @@ import { LoadingState } from "@/components/loading";
 import { SectionNav } from "@/components/section-nav";
 import { rankBadgeOf } from "@/lib/ppc-actions";
 import { SqpStatus } from "@/components/sqp-status";
+import { OrganicRankHeatmap } from "@/components/organic-rank-heatmap";
 import { formatSoldScopeVol } from "@/lib/soldscope-status";
 import { BrandShare } from "@/components/brand-share";
 import { PpcPlaybook } from "@/components/ppc-playbook";
@@ -931,6 +932,7 @@ export default function PPCPage() {
           { id: "ppc-kpis", label: "KPIs" },
           { id: "ppc-playbook", label: "Top 10" },
           { id: "ppc-sku-ads", label: "SKU ads" },
+          { id: "organic-rank", label: "Org rank" },
           { id: "ppc-budget", label: "Budget" },
           { id: "ppc-placement", label: "Placement" },
           { id: "ppc-bleeders-10", label: "Bleeders 1.0" },
@@ -1081,6 +1083,8 @@ export default function PPCPage() {
           <BrandShare />
 
           <SqpStatus />
+
+          <OrganicRankHeatmap />
 
           <PpcReconcile summary={data?.dailyReconcile ?? null} asOfLabel={asOf} />
 
