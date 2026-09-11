@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_gno_spec_pins_dave_watchlists():
     assert GNO_OBSERVE_ONLY is True
     assert len(GNO_KEEP_ALIVE) == 11
-    assert len(GNO_NEW_EXACT) == 7
+    assert len(GNO_NEW_EXACT) == 10
     assert len(GNO_DAY5_PAUSE) == 13
     assert len(GNO_FLAVOR_SHELL) == 24
     assert any("Orange Lip Balm - SP -" in n for n in GNO_FLAVOR_SHELL)
@@ -36,6 +36,9 @@ def test_gno_spec_pins_dave_watchlists():
     assert GNO_BALM_BE_ACOS == 36
     assert GNO_AUTO_LOOSE_BUDGET == 303
     assert "SP | TBL | B0CLHVCPL5 | EX | tallow lip balm | TOS" in GNO_NEW_EXACT
+    assert "SP | TBM | B0CLF5B27Y | EX | tallow balm" in GNO_NEW_EXACT
+    assert "SP | TBM | B0CLF5B27Y | EX | beef tallow balm" in GNO_NEW_EXACT
+    assert "SP | TBM | B0CLF5B27Y | EX | tallow deodorant for men" in GNO_NEW_EXACT
     assert any("Loose Match-TOS" in n for n in GNO_KEEP_ALIVE)
     assert GNO_FORBIDDEN_AUTO_ACTIONS == frozenset(
         {"pause", "negate", "raise_budget", "raise_bid"})

@@ -101,7 +101,7 @@ def hours_since_campaign_launch(
 def extract_exact_keyword(campaign_name: str) -> str:
     import re
 
-    m = re.search(r"\|\s*EX\s*\|\s*([^|]+?)\s*\|", str(campaign_name or ""), re.I)
+    m = re.search(r"\|\s*EX\s*\|\s*([^|]+?)(?:\s*\||\s*$)", str(campaign_name or ""), re.I)
     return normalize_name(m.group(1) if m else "")
 
 

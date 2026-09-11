@@ -559,3 +559,114 @@ export function wowLabel(flag: WowFlag | null): string {
     ? `Up ${n} position${n === 1 ? "" : "s"}`
     : `Down ${n} position${n === 1 ? "" : "s"}`;
 }
+
+/** GNO pack columns — rank/SFR only. Never invent from SoldScope searchVolume. */
+export const ORGANIC_RANK_EXPORT_HEADERS = [
+  "organic_rank", "organic_rank_prev", "organic_rank_delta", "aba_sfr", "organic_as_of",
+] as const;
+
+export const ORGANIC_RANK_SNAPSHOT_CSV_HEADERS = [
+  "keyword", "asin", "family", "aba_sfr",
+  "organic_rank", "organic_rank_prev", "organic_rank_delta", "organic_as_of",
+] as const;
+
+export const ORGANIC_RANK_EMPTY_CELL_NOTE =
+  "Empty organic_rank / aba_sfr cells are missing SoldScope / Brand Analytics values — not zero, and never invented from searchVolume.";
+
+export type OrganicRankJoin = {
+  organic_rank: number | null;
+  organic_rank_prev: number | null;
+  organic_rank_delta: number | null;
+  aba_sfr: number | null;
+  organic_as_of: string | null;
+  organic_asin: string | null;
+  organic_family: string | null;
+};
+
+export function emptyOrganicRankJoin(): OrganicRankJoin {
+  return {
+    organic_rank: null,
+    organic_rank_prev: null,
+    organic_rank_delta: null,
+    aba_sfr: null,
+    organic_as_of: null,
+    organic_asin: null,
+    organic_family: null,
+  };
+}
+
+/** Hero ASIN for a GNO / heatmap family. Unknown family → no preference. */
+export function familyHeroAsin(family: string | null | undefined): string | undefined {
+  const f = String(family ?? "").trim().toLowerCase();
+  if (f === "lip" || f === "lip_3pk") return "B0CLHTF8YN";
+  if (f === "balm") return "B0DQFKMJFY";
+  if (f === "deo") return "B0HBSZ71XQ";
+  return undefined;
+}
+
+export type OrganicRankSnapshotRow = {
+  keyword: string;
+  asin: string;
+  family: HeroFamilyId;
+  aba_sfr: number | null;
+  organic_rank: number | null;
+  organic_rank_prev: number | null;
+  organic_rank_delta: number | null;
+  organic_as_of: string | null;
+};
+
+/**
+ * Latest SoldScope snapshot per (hero ASIN, normalized phrase).
+ * SFR is ABA only (`aba_search_frequency_rank`). searchVolume is ignored.
+ */
+export function buildOrganicRankJoinIndex(snapshots: RankSnapshot[]): Map<string, OrganicRankJoin[]> {
+  const progress = buildOrganicRankProgress({ snapshots });
+  const asOf = progress.weeks[progress.weeks.length - 1] ?? null;
+  const byKw = new Map<string, OrganicRankJoin[]>();
+  for (const row of progress.rows) {
+    const hit: OrganicRankJoin = {
+      organic_rank: row.current,
+      organic_rank_prev: row.previous,
+      organic_rank_delta: rankDelta(row.previous, row.current),
+      aba_sfr: row.sfr,
+      organic_as_of: asOf,
+      organic_asin: row.asin,
+      organic_family: row.family,
+    };
+    const list = byKw.get(row.keyword_normalized) ?? [];
+    list.push(hit);
+    byKw.set(row.keyword_normalized, list);
+  }
+  return byKw;
+}
+
+export function lookupOrganicRank(
+  index: Map<string, OrganicRankJoin[]>,
+  keyword: string | null | undefined,
+  preferAsin?: string | null,
+): OrganicRankJoin {
+  const key = normalizeKeyword(keyword);
+  const hits = key ? index.get(key) ?? [] : [];
+  if (!hits.length) return emptyOrganicRankJoin();
+  const prefer = String(preferAsin ?? "").trim().toUpperCase();
+  if (prefer) {
+    const preferred = hits.find((h) => String(h.organic_asin ?? "").toUpperCase() === prefer);
+    if (preferred) return preferred;
+  }
+  return hits[0];
+}
+
+export function organicRankSnapshotRows(snapshots: RankSnapshot[]): OrganicRankSnapshotRow[] {
+  const progress = buildOrganicRankProgress({ snapshots });
+  const asOf = progress.weeks[progress.weeks.length - 1] ?? null;
+  return progress.rows.map((row) => ({
+    keyword: row.keyword,
+    asin: row.asin,
+    family: row.family,
+    aba_sfr: row.sfr,
+    organic_rank: row.current,
+    organic_rank_prev: row.previous,
+    organic_rank_delta: rankDelta(row.previous, row.current),
+    organic_as_of: asOf,
+  }));
+}
