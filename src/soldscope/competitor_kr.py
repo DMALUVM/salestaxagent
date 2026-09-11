@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
 
@@ -49,6 +50,59 @@ DEFAULT_BLAKE_TOTAL_CAP = 15
 OUTLIER_CAP = 30
 LEVERS = frozenset({"harvest_exact", "watch", "skip"})
 SENTINEL_KEYWORD = "__kr_created__"
+DEFAULT_REQUIRE_COMPETITOR_ON_SERP = True
+DEFAULT_BLAKE_DENYLIST = [
+    "ground beef",
+    "heavy cream",
+    "beef tallow for cooking",
+    "tallow for cooking",
+    "eos lotion",
+    "sol de janeiro",
+    "shampoo",
+    "perfume",
+    "body mist",
+    "neosporin",
+]
+DEFAULT_BLAKE_FAMILY_DENYLIST = {
+    "lip": [],
+    "balm": [
+        "la roche posay",
+        "cerave",
+        "olay",
+        "illiyoon",
+        "medicube",
+        "drmtlgy",
+    ],
+    "deo": [],
+}
+DEFAULT_BLAKE_FAMILY_ALLOW = {
+    "lip": [
+        "lip", "chapstick", "chap stick", "lip balm", "carmex",
+        "blistex", "lanolips", "eadem", "eos lip",
+    ],
+    "deo": [
+        "deodorant", "antiperspirant", "aluminum", "underarm", "pit stick",
+    ],
+    "balm": ["tallow", "suet", "grass.?fed", "body butter", "body balm"],
+}
+DEFAULT_BLAKE_FAMILY_ALLOW_ALL_OF = {
+    "lip": [],
+    "deo": [],
+    "balm": [
+        {"require": "moisturizer", "also": ["tallow", "balm", "butter", "skin for men"]},
+    ],
+}
+DEFAULT_BLAKE_MOISTURIZER_REQUIRES = ["tallow", "balm", "butter", "skin for men"]
+DEFAULT_BLAKE_SOFT_WATCH = {
+    "any_family": [],
+    "lip": [],
+    "balm": [],
+    "deo": ["lume.*for women"],
+}
+DEFAULT_BLAKE_SOFT_WATCH_BRANDS = ["tree hut", "palmers", "shea moisture"]
+DEFAULT_BLAKE_HARVEST_BRANDS = [
+    "native", "carpe", "eos lip", "eadem", "lanolips", "blistex",
+]
 
 MISSING_TOKEN_MESSAGE = (
     "SOLDSCOPE_API_TOKEN is not set. Add it to the Mini .env (launchd). "
@@ -150,6 +204,10 @@ def load_config() -> dict:
         "families": families,
         "competitors": competitors,
         "dropped_asins": dropped,
+        "blake_require_competitor_on_serp": bool(
+            raw.get("blake_require_competitor_on_serp", DEFAULT_REQUIRE_COMPETITOR_ON_SERP)
+        ),
+        "blake_filters": blake_filters_from_raw(raw),
         "schedule": {
             "day_of_week": schedule.get("day_of_week", "sun"),
             "hour": int(schedule.get("hour", 10)),
@@ -159,21 +217,195 @@ def load_config() -> dict:
     }
 
 
-def competitor_present(row: dict, competitor_asin: str) -> bool:
-    """True when the competitor ranks organic or sponsored on the keyword."""
+def _str_list(value, fallback: list[str] | None = None) -> list[str]:
+    if value is None:
+        return list(fallback or [])
+    if not isinstance(value, list):
+        return list(fallback or [])
+    return [str(x).strip() for x in value if str(x).strip()]
+
+
+def _family_pattern_map(value, fallback: dict) -> dict[str, list[str]]:
+    raw = value if isinstance(value, dict) else {}
+    out: dict[str, list[str]] = {}
+    keys = set(FAMILIES) | {"any_family"}
+    for fam in keys:
+        if fam in raw:
+            out[fam] = _str_list(raw.get(fam), [])
+        else:
+            out[fam] = list(fallback.get(fam) or [])
+    return out
+
+
+def _allow_all_of_map(value, fallback: dict) -> dict[str, list[dict]]:
+    raw = value if isinstance(value, dict) else {}
+    out: dict[str, list[dict]] = {}
+    for fam in FAMILIES:
+        src = raw.get(fam) if fam in raw else fallback.get(fam)
+        rules: list[dict] = []
+        for item in src or []:
+            if not isinstance(item, dict):
+                continue
+            require = str(item.get("require") or "").strip()
+            also = _str_list(item.get("also"), [])
+            if require and also:
+                rules.append({"require": require, "also": also})
+        out[fam] = rules
+    return out
+
+
+def blake_filters_from_raw(raw: dict | None) -> dict:
+    """Blake SERP + family-fit filters. Missing keys fall back to defaults."""
+    src = raw if isinstance(raw, dict) else {}
+    soft = src.get("blake_soft_watch")
+    if not isinstance(soft, dict):
+        soft = DEFAULT_BLAKE_SOFT_WATCH
+    return {
+        "require_competitor_on_serp": bool(
+            src.get("blake_require_competitor_on_serp", DEFAULT_REQUIRE_COMPETITOR_ON_SERP)
+        ),
+        "denylist": (
+            _str_list(src["blake_keyword_denylist"])
+            if "blake_keyword_denylist" in src
+            else list(DEFAULT_BLAKE_DENYLIST)
+        ),
+        "family_denylist": _family_pattern_map(
+            src.get("blake_family_denylist"), DEFAULT_BLAKE_FAMILY_DENYLIST,
+        ),
+        "family_allow": _family_pattern_map(
+            src.get("blake_family_allow"), DEFAULT_BLAKE_FAMILY_ALLOW,
+        ),
+        "family_allow_all_of": _allow_all_of_map(
+            src.get("blake_family_allow_all_of"), DEFAULT_BLAKE_FAMILY_ALLOW_ALL_OF,
+        ),
+        "moisturizer_requires": (
+            _str_list(src["blake_moisturizer_requires"])
+            if "blake_moisturizer_requires" in src
+            else list(DEFAULT_BLAKE_MOISTURIZER_REQUIRES)
+        ),
+        "deo_hero_women_first": bool(src.get("blake_deo_hero_women_first", False)),
+        "soft_watch": _family_pattern_map(soft, DEFAULT_BLAKE_SOFT_WATCH),
+        "soft_watch_brands": (
+            _str_list(src["blake_soft_watch_brands"])
+            if "blake_soft_watch_brands" in src
+            else list(DEFAULT_BLAKE_SOFT_WATCH_BRANDS)
+        ),
+        "harvest_brands": (
+            _str_list(src["blake_harvest_brands"])
+            if "blake_harvest_brands" in src
+            else list(DEFAULT_BLAKE_HARVEST_BRANDS)
+        ),
+    }
+
+
+def resolve_blake_filters(args: dict | None = None) -> dict:
+    if args and isinstance(args.get("blake_filters"), dict) and args["blake_filters"]:
+        return args["blake_filters"]
+    if args and any(
+        k in args for k in (
+            "blake_keyword_denylist", "blake_family_allow", "blake_soft_watch",
+        )
+    ):
+        return blake_filters_from_raw(args)
+    return blake_filters_from_raw(None)
+
+
+def keyword_matches_any(keyword: str, patterns: Iterable[str] | None) -> bool:
+    """Case-insensitive regex/substring match. Invalid regex falls back to find()."""
+    text = re.sub(r"\s+", " ", str(keyword or "").strip().lower())
+    if not text:
+        return False
+    for raw in patterns or []:
+        pat = str(raw or "").strip()
+        if not pat:
+            continue
+        try:
+            if re.search(pat, text, flags=re.IGNORECASE):
+                return True
+        except re.error:
+            if pat.lower() in text:
+                return True
+    return False
+
+
+def classify_family_fit(
+    keyword: str,
+    family: str,
+    filters: dict | None = None,
+) -> dict:
+    """Family-fit + soft-watch + harvest-brand bias for a Blake keyword."""
+    fam = str(family or "").strip().lower()
+    flt = filters if isinstance(filters, dict) and filters else resolve_blake_filters()
+    if fam not in FAMILIES:
+        return {"fit": False, "soft_watch": False, "harvest_bias": False, "reason": "unknown_family"}
+    if keyword_matches_any(keyword, flt.get("denylist") or []):
+        return {"fit": False, "soft_watch": False, "harvest_bias": False, "reason": "denylist"}
+    family_deny = (flt.get("family_denylist") or {}).get(fam) or []
+    if keyword_matches_any(keyword, family_deny):
+        return {"fit": False, "soft_watch": False, "harvest_bias": False, "reason": "family_denylist"}
+    if fam == "balm" and keyword_matches_any(keyword, ["moisturizer"]):
+        requires = flt.get("moisturizer_requires") or DEFAULT_BLAKE_MOISTURIZER_REQUIRES
+        if not keyword_matches_any(keyword, requires):
+            return {
+                "fit": False, "soft_watch": False, "harvest_bias": False,
+                "reason": "moisturizer_off_family",
+            }
+    allow = (flt.get("family_allow") or {}).get(fam) or []
+    allowed = keyword_matches_any(keyword, allow)
+    if not allowed:
+        for rule in (flt.get("family_allow_all_of") or {}).get(fam) or []:
+            if keyword_matches_any(keyword, [rule.get("require") or ""]) and keyword_matches_any(
+                keyword, rule.get("also") or [],
+            ):
+                allowed = True
+                break
+    if not allowed:
+        return {"fit": False, "soft_watch": False, "harvest_bias": False, "reason": "family_allow"}
+    soft = False
+    soft_map = flt.get("soft_watch") or {}
+    if keyword_matches_any(keyword, soft_map.get("any_family") or []):
+        soft = True
+    if keyword_matches_any(keyword, soft_map.get(fam) or []):
+        soft = True
+    if keyword_matches_any(keyword, flt.get("soft_watch_brands") or []):
+        soft = True
+    if (
+        fam == "deo"
+        and not flt.get("deo_hero_women_first")
+        and keyword_matches_any(keyword, ["lume.*for women"])
+    ):
+        soft = True
+    harvest = keyword_matches_any(keyword, flt.get("harvest_brands") or [])
+    return {
+        "fit": True,
+        "soft_watch": soft,
+        "harvest_bias": harvest,
+        "reason": "soft_watch" if soft else ("harvest_brand" if harvest else "allow"),
+    }
+
+
+def competitor_present(
+    row: dict,
+    competitor_asin: str,
+    *,
+    require_serp: bool | None = None,
+) -> bool:
+    """True only when the competitor ASIN is organic or sponsored on the keyword.
+
+    organic_rank>0 / sponsored_rank>0 alone is not presence. Rank without
+    ASIN equality is reverse-ASIN universe noise, not competitor-on-SERP.
+    """
     want = str(competitor_asin or "").strip().upper()
+    if not want:
+        return False
     org_asin = str(row.get("organic_asin") or "").strip().upper()
     sp_asin = str(row.get("sponsored_asin") or "").strip().upper()
-    org_rank = _int(row.get("organic_rank"))
-    sp_rank = _int(row.get("sponsored_rank"))
-    if want and org_asin == want:
+    if org_asin == want or sp_asin == want:
         return True
-    if want and sp_asin == want:
-        return True
-    if org_rank is not None and org_rank > 0:
-        return True
-    if sp_rank is not None and sp_rank > 0:
-        return True
+    if require_serp is None:
+        require_serp = DEFAULT_REQUIRE_COMPETITOR_ON_SERP
+    if require_serp:
+        return False
     return False
 
 
@@ -225,9 +457,12 @@ def suggest_lever(
     family_fit: bool,
     opportunity: int | None,
     opportunity_floor: int = DEFAULT_OPPORTUNITY_FLOOR,
+    soft_watch: bool = False,
 ) -> str:
     if already_exact or not present or not family_fit:
         return "skip"
+    if soft_watch:
+        return "watch"
     if opportunity is not None and opportunity >= opportunity_floor:
         return "harvest_exact"
     return "watch"
@@ -369,6 +604,13 @@ def build_competitor_outliers(args: dict) -> list[dict]:
     max_sfr = args.get("max_aba_sfr")
     cap = int(args.get("cap") or OUTLIER_CAP)
     families = FAMILIES
+    filters = resolve_blake_filters(args)
+    require_serp = bool(
+        args.get(
+            "require_competitor_on_serp",
+            filters.get("require_competitor_on_serp", DEFAULT_REQUIRE_COMPETITOR_ON_SERP),
+        )
+    )
 
     latest: dict[tuple[str, str], dict] = {}
     for row in rows:
@@ -392,18 +634,22 @@ def build_competitor_outliers(args: dict) -> list[dict]:
         asin = str(row.get("competitor_asin") or "").strip().upper()
         family = str(row.get("family") or "").strip().lower()
         keyword = str(row.get("keyword") or "").strip()
-        present = competitor_present(row, asin)
+        present = competitor_present(row, asin, require_serp=require_serp)
+        if not present:
+            continue
+        fit = classify_family_fit(keyword, family, filters)
+        if not fit["fit"]:
+            continue
         bid = classify_exact_bidding(keyword, targets, extra_exact)
         opp = _int(row.get("opportunity_score"))
         lever = suggest_lever(
             already_exact=bid["already"],
             present=present,
-            family_fit=family in families,
+            family_fit=True,
             opportunity=opp,
             opportunity_floor=floor,
+            soft_watch=bool(fit["soft_watch"]),
         )
-        if not present:
-            continue
         out.append({
             "keyword": keyword,
             "keyword_normalized": normalize_keyword(keyword),
@@ -417,12 +663,14 @@ def build_competitor_outliers(args: dict) -> list[dict]:
             "our_organic_rank": our_organic_rank(keyword, family, rank_rows),
             "already_bidding": bid["already_bidding"],
             "suggested_lever": lever,
+            "harvest_bias": bool(fit["harvest_bias"]),
             "as_of": row.get("as_of"),
         })
 
     rank_lever = {"harvest_exact": 0, "watch": 1, "skip": 2}
     out.sort(key=lambda r: (
         rank_lever.get(r["suggested_lever"], 9),
+        0 if r.get("harvest_bias") else 1,
         -(r["opportunity"] if r["opportunity"] is not None else -1),
         -(r["volume"] if r["volume"] is not None else -1),
         r["keyword_normalized"],
@@ -775,6 +1023,8 @@ def _blake_from_rows(
         "max_aba_sfr": cfg.get("max_aba_sfr"),
         "family_cap": cfg["blake_family_cap"],
         "total_cap": cfg["blake_total_cap"],
+        "require_competitor_on_serp": cfg["blake_require_competitor_on_serp"],
+        "blake_filters": cfg["blake_filters"],
     })
     harvest = [r for r in surface if r.get("suggested_lever") == "harvest_exact"]
     digest = {
@@ -1096,10 +1346,13 @@ __all__ = [
     "asin_cache_status",
     "build_blake_competitor_surface",
     "build_competitor_outliers",
+    "blake_filters_from_raw",
     "classify_exact_bidding",
+    "classify_family_fit",
     "competitor_kr_rows_from_payload",
     "competitor_present",
     "digest_should_ping",
+    "keyword_matches_any",
     "exact_keywords_from_targets",
     "has_real_traffic",
     "is_sentinel_row",
