@@ -1811,8 +1811,8 @@ export function gnoPackReadme(input: {
     ? "- organic_rank_snapshot.csv — hero ASINs B0CLHTF8YN (lip) / B0DQFKMJFY (balm) / B0HBSZ71XQ (deo). Rank from soldscope_rank_snapshots. aba_sfr is Brand Analytics SFR only."
     : "- organic_rank_snapshot.csv — headers only. No SoldScope Rank Tracker snapshots for the three heroes. Empty is real — this desk never creates RT groups.";
   const competitorLine = input.competitorIncluded
-    ? "- competitor_kr_outliers.csv — net-new unused Exact only (already_bidding=N). Real-traffic only (search volume ≥ min_search_volume). Cap 5/family, 15 total. suggested_lever is recommend-only (harvest_exact / watch / skip). Never writes Amazon Ads."
-    : "- competitor_kr_outliers.csv — headers only. No net-new unused Exact outliers this week. Real-traffic only; weekly job uses cached snapshots unless missing/stale. Do not POST more KR creates. Empty is real.";
+    ? "- competitor_kr_outliers.csv — net-new unused Exact only (already_bidding=N). Competitor-on-SERP required (organic_asin or sponsored_asin == competitor_asin); rank>0 alone is not presence. Family-fit allow/deny; soft-watch never auto harvest_exact. Real-traffic only (search volume ≥ min_search_volume). Cap 5/family, 15 total. suggested_lever is recommend-only (harvest_exact / watch / skip). Never writes Amazon Ads."
+    : "- competitor_kr_outliers.csv — headers only. No net-new unused Exact outliers this week. Competitor-on-SERP + family-fit; real-traffic only; weekly job uses cached snapshots unless missing/stale. Do not POST more KR creates. Empty is real.";
   return [
     "GNO Export pack — observe only. Never writes to Amazon.",
     "",

@@ -38,6 +38,22 @@ def test_config_lists_30_competitors_and_excludes_our_balm():
     assert raw["max_keywords"] == 80
     assert raw["min_search_volume"] == 1
     assert raw.get("max_keywords") <= 80
+    assert raw["blake_require_competitor_on_serp"] is True
+    assert "ground beef" in raw["blake_keyword_denylist"]
+    assert "eos lotion" in raw["blake_keyword_denylist"]
+    assert "sol de janeiro" in raw["blake_keyword_denylist"]
+    assert "cerave" in raw["blake_family_denylist"]["balm"]
+    assert "eadem" in raw["blake_family_allow"]["lip"]
+    assert "deodorant" in raw["blake_family_allow"]["deo"]
+    assert "lume.*for women" in raw["blake_soft_watch"]["deo"]
+    assert "native" in raw["blake_harvest_brands"]
+    for key in (
+        "blake_require_competitor_on_serp", "blake_keyword_denylist",
+        "blake_family_denylist", "blake_family_allow", "blake_soft_watch",
+        "blake_soft_watch_brands", "blake_harvest_brands",
+        "blake_moisturizer_requires", "blake_deo_hero_women_first",
+    ):
+        assert dash[key] == raw[key]
     asins = [c["asin"] for c in raw["competitors"]]
     assert len(asins) == 30
     assert len(set(asins)) == 30
@@ -57,6 +73,8 @@ def test_config_lists_30_competitors_and_excludes_our_balm():
     assert loaded["max_keywords"] == 80
     assert loaded["min_search_volume"] == 1
     assert loaded["max_aba_sfr"] is None
+    assert loaded["blake_require_competitor_on_serp"] is True
+    assert "ground beef" in loaded["blake_filters"]["denylist"]
     assert loaded["families"]["lip"]["hero_asin"] == LIP
     assert loaded["families"]["balm"]["hero_asin"] == BALM
     assert loaded["families"]["deo"]["hero_asin"] == DEO
@@ -88,12 +106,19 @@ def test_never_creates_rt_or_product_research():
     assert "while True" not in inspect.getsource(ck)
 
 
-def test_competitor_present_requires_organic_or_sponsored():
+def test_competitor_present_requires_asin_equality_not_rank():
     assert ck.competitor_present(
         {"organic_asin": LIP_COMP, "organic_rank": 4}, LIP_COMP,
     )
-    assert ck.competitor_present({"sponsored_rank": 2}, LIP_COMP)
-    assert ck.competitor_present({"organic_rank": 11}, "B0OTHER")
+    assert ck.competitor_present(
+        {"sponsored_asin": LIP_COMP, "sponsored_rank": 2}, LIP_COMP,
+    )
+    assert not ck.competitor_present({"sponsored_rank": 2}, LIP_COMP)
+    assert not ck.competitor_present({"organic_rank": 11}, LIP_COMP)
+    assert not ck.competitor_present({"organic_rank": 11}, "B0OTHER")
+    assert not ck.competitor_present(
+        {"organic_asin": "B0OTHER", "organic_rank": 1}, LIP_COMP,
+    )
     assert not ck.competitor_present({"organic_rank": 0, "sponsored_rank": None}, LIP_COMP)
     assert not ck.competitor_present({}, LIP_COMP)
 
@@ -133,28 +158,35 @@ def test_levers_and_net_new_actionable():
     assert ck.suggest_lever(
         already_exact=False, present=False, family_fit=True, opportunity=900,
     ) == "skip"
+    assert ck.suggest_lever(
+        already_exact=False, present=True, family_fit=True, opportunity=900,
+        soft_watch=True,
+    ) == "watch"
 
     rows = ck.build_competitor_outliers({
         "kr_rows": [
             {
                 "competitor_asin": LIP_COMP, "family": "lip",
                 "keyword": "grass fed tallow lip", "search_volume": 400,
-                "opportunity_score": 220, "organic_rank": 6, "as_of": "2026-09-11",
+                "opportunity_score": 220, "organic_asin": LIP_COMP,
+                "organic_rank": 6, "as_of": "2026-09-11",
             },
             {
                 "competitor_asin": LIP_COMP, "family": "lip",
                 "keyword": "tallow lip balm", "search_volume": 8000,
-                "opportunity_score": 500, "organic_rank": 2, "as_of": "2026-09-11",
+                "opportunity_score": 500, "organic_asin": LIP_COMP,
+                "organic_rank": 2, "as_of": "2026-09-11",
             },
             {
                 "competitor_asin": BALM_COMP, "family": "balm",
                 "keyword": "long tail tallow", "search_volume": 90,
-                "opportunity_score": 40, "sponsored_rank": 8, "as_of": "2026-09-11",
+                "opportunity_score": 40, "sponsored_asin": BALM_COMP,
+                "sponsored_rank": 8, "as_of": "2026-09-11",
             },
             {
                 "competitor_asin": OURS, "family": "balm",
                 "keyword": "should drop", "opportunity_score": 900,
-                "organic_rank": 1, "as_of": "2026-09-11",
+                "organic_asin": OURS, "organic_rank": 1, "as_of": "2026-09-11",
             },
             {
                 "competitor_asin": DEO_COMP, "family": "deo",
@@ -354,17 +386,20 @@ def test_outliers_and_blake_drop_zero_volume():
             {
                 "competitor_asin": LIP_COMP, "family": "lip",
                 "keyword": "zero traffic phrase", "search_volume": 0,
-                "opportunity_score": 900, "organic_rank": 1, "as_of": "2026-09-11",
+                "opportunity_score": 900, "organic_asin": LIP_COMP,
+                "organic_rank": 1, "as_of": "2026-09-11",
             },
             {
                 "competitor_asin": LIP_COMP, "family": "lip",
                 "keyword": "no volume phrase",
-                "opportunity_score": 900, "organic_rank": 1, "as_of": "2026-09-11",
+                "opportunity_score": 900, "organic_asin": LIP_COMP,
+                "organic_rank": 1, "as_of": "2026-09-11",
             },
             {
                 "competitor_asin": LIP_COMP, "family": "lip",
                 "keyword": "real traffic lip", "search_volume": 400,
-                "opportunity_score": 220, "organic_rank": 4, "as_of": "2026-09-11",
+                "opportunity_score": 220, "organic_asin": LIP_COMP,
+                "organic_rank": 4, "as_of": "2026-09-11",
             },
         ],
     }
@@ -394,7 +429,8 @@ def test_weekly_job_is_reuse_only_and_cli_gates_create():
     assert "max-create" in src
 
 
-def _kw_row(asin, family, keyword, *, opp=200, vol=400, as_of="2026-09-11", search_id=99):
+def _kw_row(asin, family, keyword, *, opp=200, vol=400, as_of="2026-09-11", search_id=99,
+            organic_asin=None, sponsored_asin=None):
     return {
         "competitor_asin": asin,
         "family": family,
@@ -402,7 +438,9 @@ def _kw_row(asin, family, keyword, *, opp=200, vol=400, as_of="2026-09-11", sear
         "keyword_normalized": keyword,
         "search_volume": vol,
         "opportunity_score": opp,
+        "organic_asin": organic_asin if organic_asin is not None else asin,
         "organic_rank": 4,
+        "sponsored_asin": sponsored_asin,
         "as_of": as_of,
         "search_id": search_id,
         "marketplace": "US",
@@ -411,16 +449,16 @@ def _kw_row(asin, family, keyword, *, opp=200, vol=400, as_of="2026-09-11", sear
 
 def test_blake_surface_excludes_exact_y_caps_family_and_total():
     lip_rows = [
-        _kw_row(LIP_COMP, "lip", f"lip kw {i}", opp=400 - i)
+        _kw_row(LIP_COMP, "lip", f"lip balm kw {i}", opp=400 - i)
         for i in range(20)
     ]
     already = _kw_row(LIP_COMP, "lip", "tallow lip balm", opp=900)
     balm_rows = [
-        _kw_row(BALM_COMP, "balm", f"balm kw {i}", opp=300 - i)
+        _kw_row(BALM_COMP, "balm", f"tallow body balm {i}", opp=300 - i)
         for i in range(6)
     ]
     deo_rows = [
-        _kw_row(DEO_COMP, "deo", f"deo kw {i}", opp=250 - i)
+        _kw_row(DEO_COMP, "deo", f"tallow deodorant {i}", opp=250 - i)
         for i in range(6)
     ]
     ours = _kw_row(OURS, "balm", "our balm kw", opp=999)
@@ -568,3 +606,108 @@ def test_warehouse_search_id_blocks_second_post(monkeypatch):
     assert first["asin"] not in created
     assert first["asin"] in r["reused"]
     assert len(created) == 5  # remaining missing ASINs still fill up to the run cap
+
+
+def test_serp_match_kept_rank_only_and_wrong_asin_dropped():
+    kept = ck.build_competitor_outliers({
+        "kr_rows": [
+            _kw_row(LIP_COMP, "lip", "eadem lip balm", opp=220,
+                    organic_asin=LIP_COMP),
+            _kw_row(LIP_COMP, "lip", "native lip balm", opp=210,
+                    organic_asin="", sponsored_asin=LIP_COMP),
+            _kw_row(LIP_COMP, "lip", "rank only lip balm", opp=900,
+                    organic_asin=""),
+            {
+                **_kw_row(LIP_COMP, "lip", "wrong asin lip balm", opp=800),
+                "organic_asin": "B0OTHERASIN",
+                "organic_rank": 1,
+            },
+        ],
+    })
+    by_kw = {r["keyword"]: r for r in kept}
+    assert "eadem lip balm" in by_kw
+    assert "native lip balm" in by_kw
+    assert "rank only lip balm" not in by_kw
+    assert "wrong asin lip balm" not in by_kw
+    surface = ck.build_blake_competitor_surface({
+        "kr_rows": [
+            _kw_row(LIP_COMP, "lip", "eadem lip balm", opp=220),
+            {**_kw_row(LIP_COMP, "lip", "rank only lip", opp=900), "organic_asin": None},
+        ],
+    })
+    assert [r["keyword"] for r in surface] == ["eadem lip balm"]
+
+
+def test_hard_skip_and_family_allow_drop_noise():
+    rows = [
+        _kw_row(LIP_COMP, "lip", "eos lotion", opp=900),
+        _kw_row(LIP_COMP, "lip", "sol de janeiro", opp=880),
+        _kw_row(BALM_COMP, "balm", "ground beef", opp=870),
+        _kw_row(BALM_COMP, "balm", "heavy cream", opp=860),
+        _kw_row(BALM_COMP, "balm", "beef tallow for cooking", opp=850),
+        _kw_row(BALM_COMP, "balm", "tallow for cooking", opp=840),
+        _kw_row(DEO_COMP, "deo", "perfume", opp=830),
+        _kw_row(DEO_COMP, "deo", "body mist", opp=820),
+        _kw_row(DEO_COMP, "deo", "shampoo", opp=810),
+        _kw_row(BALM_COMP, "balm", "neosporin", opp=800),
+        _kw_row(BALM_COMP, "balm", "cerave moisturizer", opp=790),
+        _kw_row(BALM_COMP, "balm", "la roche posay moisturizer", opp=780),
+        _kw_row(BALM_COMP, "balm", "olay moisturizer", opp=770),
+        _kw_row(LIP_COMP, "lip", "face cream", opp=760),
+        _kw_row(LIP_COMP, "lip", "eos lip balm", opp=200),
+        _kw_row(BALM_COMP, "balm", "grass fed tallow body balm", opp=180),
+        _kw_row(DEO_COMP, "deo", "native deodorant", opp=170),
+        _kw_row(BALM_COMP, "balm", "moisturizer skin for men", opp=120),
+    ]
+    outliers = ck.build_competitor_outliers({"kr_rows": rows})
+    surface = ck.build_blake_competitor_surface({"kr_rows": rows})
+    kept = {r["keyword"] for r in outliers}
+    assert kept == {
+        "eos lip balm",
+        "grass fed tallow body balm",
+        "native deodorant",
+        "moisturizer skin for men",
+    }
+    assert kept == {r["keyword"] for r in surface}
+    assert "eos lotion" not in kept
+    assert "ground beef" not in kept
+    assert "cerave moisturizer" not in kept
+    assert ck.classify_family_fit("eos lotion", "lip")["fit"] is False
+    assert ck.classify_family_fit("eos lip balm", "lip")["fit"] is True
+    assert ck.classify_family_fit("cerave moisturizer", "balm")["fit"] is False
+    assert ck.classify_family_fit("tallow deodorant", "deo")["fit"] is True
+    assert ck.classify_family_fit("face cream", "lip")["fit"] is False
+
+
+def test_soft_watch_never_harvest_exact():
+    lume = _kw_row(DEO_COMP, "deo", "lume deodorant for women", opp=500)
+    body = _kw_row(BALM_COMP, "balm", "tree hut tallow body butter", opp=400)
+    harvest = _kw_row(LIP_COMP, "lip", "blistex lip balm", opp=300)
+    outliers = ck.build_competitor_outliers({"kr_rows": [lume, body, harvest]})
+    by_kw = {r["keyword"]: r for r in outliers}
+    assert by_kw["lume deodorant for women"]["suggested_lever"] == "watch"
+    assert by_kw["tree hut tallow body butter"]["suggested_lever"] == "watch"
+    assert by_kw["blistex lip balm"]["suggested_lever"] == "harvest_exact"
+    surface = ck.build_blake_competitor_surface({"kr_rows": [lume, body, harvest]})
+    assert {r["keyword"]: r["suggested_lever"] for r in surface} == {
+        "lume deodorant for women": "watch",
+        "tree hut tallow body butter": "watch",
+        "blistex lip balm": "harvest_exact",
+    }
+    fit = ck.classify_family_fit("lume unscented deodorant for women", "deo")
+    assert fit["fit"] is True
+    assert fit["soft_watch"] is True
+
+
+def test_harvest_brand_bias_outranks_higher_opp_generic():
+    generic = _kw_row(LIP_COMP, "lip", "generic lip balm phrase", opp=400, vol=9000)
+    ranked = _kw_row(LIP_COMP, "lip", "eadem lip balm", opp=150, vol=400)
+    outliers = ck.build_competitor_outliers({"kr_rows": [generic, ranked]})
+    assert [r["keyword"] for r in outliers] == ["eadem lip balm", "generic lip balm phrase"]
+    assert outliers[0]["harvest_bias"] is True
+    surface = ck.build_blake_competitor_surface({
+        "kr_rows": [generic, ranked],
+        "family_cap": 1,
+        "total_cap": 1,
+    })
+    assert [r["keyword"] for r in surface] == ["eadem lip balm"]

@@ -889,7 +889,10 @@ export function PpcGnoWatch() {
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Competitor reverse-ASIN keywords — recommend only</CardTitle>
           <p className="text-[11px] text-muted-foreground">
-            Net-new unused Exact only (<code>already_bidding = N</code>). Real-traffic
+            Net-new unused Exact only (<code>already_bidding = N</code>).
+            Competitor-on-SERP required (<code>organic_asin</code> or{" "}
+            <code>sponsored_asin</code> equals that row’s competitor ASIN) plus
+            family-fit — rank&gt;0 alone is not presence. Real-traffic
             keywords only — missing/zero search volume is dropped. Cap ~5 per family
             / ~15 total — not a dump of all 30 ASINs or ~3k zero-volume phrases.
             Lever is harvest_exact / watch / skip — nothing writes to Amazon. Weekly
