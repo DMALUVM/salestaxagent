@@ -21,7 +21,7 @@ import { loadGnoExportState, loadGnoLedger, saveGnoExportAck } from "@/lib/gno-s
 import { loadOrganicRankSources, loadSoldScopeCompetitorKr } from "@/lib/soldscope-load";
 import { buildOrganicRankJoinIndex } from "@/lib/organic-rank-progress";
 import {
-  buildCompetitorOutliers,
+  blakeSurfaceFromWarehouse,
   extraExactFromWatch,
 } from "@/lib/soldscope-competitor-outliers";
 
@@ -202,7 +202,7 @@ export async function GET() {
       sqpWeekly,
       asinCatalog,
       organicSnapshots: organicSources.snapshots,
-      competitorOutliers: buildCompetitorOutliers({
+      competitorOutliers: blakeSurfaceFromWarehouse({
         krRows: competitorKr,
         targets: keywords as unknown as KeywordTarget[],
         extraExact: extraExactFromWatch(NEW_EXACT),

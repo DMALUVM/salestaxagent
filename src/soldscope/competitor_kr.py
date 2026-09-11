@@ -3,15 +3,17 @@
 Observe / recommend only. Never writes Amazon Ads. Never Rank Tracker
 create. Never Product Research. HTTP 402 stops clean with no retry.
 
-Weekly job: reuse saved single-ASIN KR only.
-First fill: CLI `--create-missing` with a hard cap (default 5 / run).
-Created searches are not polled — the next weekly reuse reads them.
+Weekly job: cache-first. Cached reverse snapshots are enough unless an
+ASIN is missing or stale. No full KR re-hit of all 30 on a healthy week.
+First fill: CLI `--create-missing` — max 1 POST per ASIN (durable
+sentinel) and a hard cap (default 5 / run). Created searches are not
+polled — the next weekly reuse GETs them.
 """
 from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
 
 from src.config import PROJECT_ROOT
@@ -40,8 +42,12 @@ EXCLUDED_OURS = frozenset({"B0CLF5B27Y"})
 DEFAULT_CREATE_CAP = 5
 DEFAULT_KR_MAX_KEYWORDS = 80
 DEFAULT_OPPORTUNITY_FLOOR = 100
+DEFAULT_STALE_AFTER_DAYS = 8
+DEFAULT_BLAKE_FAMILY_CAP = 5
+DEFAULT_BLAKE_TOTAL_CAP = 15
 OUTLIER_CAP = 30
 LEVERS = frozenset({"harvest_exact", "watch", "skip"})
+SENTINEL_KEYWORD = "__kr_created__"
 
 MISSING_TOKEN_MESSAGE = (
     "SOLDSCOPE_API_TOKEN is not set. Add it to the Mini .env (launchd). "
@@ -50,8 +56,10 @@ MISSING_TOKEN_MESSAGE = (
 
 EMPTY_SNAPSHOT_NOTE = (
     "No competitor KR snapshots yet. Reuse saved searchType0 searches, "
-    "or run `soldscope-competitor-kr --create-missing` (cap 5/run). "
-    "This desk never creates Rank Tracker groups or Product Research."
+    "or run `soldscope-competitor-kr --create-missing` (max 1 POST per "
+    "ASIN, cap 5/run). Weekly jobs read cached snapshots unless missing "
+    "or stale. This desk never creates Rank Tracker groups or Product "
+    "Research."
 )
 
 HERO_ASINS = {
@@ -109,6 +117,15 @@ def load_config() -> dict:
     return {
         "marketplace": str(raw.get("marketplace") or "US"),
         "create_missing_max": int(raw.get("create_missing_max") or DEFAULT_CREATE_CAP),
+        "stale_after_days": int(
+            raw.get("stale_after_days") or DEFAULT_STALE_AFTER_DAYS
+        ),
+        "blake_family_cap": int(
+            raw.get("blake_family_cap") or DEFAULT_BLAKE_FAMILY_CAP
+        ),
+        "blake_total_cap": int(
+            raw.get("blake_total_cap") or DEFAULT_BLAKE_TOTAL_CAP
+        ),
         "max_keywords": int(raw.get("max_keywords") or DEFAULT_KR_MAX_KEYWORDS),
         "opportunity_floor": int(
             raw.get("opportunity_floor") or DEFAULT_OPPORTUNITY_FLOOR
@@ -300,7 +317,7 @@ def build_competitor_outliers(args: dict) -> list[dict]:
         family = str(row.get("family") or "").strip().lower()
         if not asin or not key or family not in families:
             continue
-        if asin in EXCLUDED_OURS:
+        if asin in EXCLUDED_OURS or is_sentinel_row(row):
             continue
         cur = latest.get((asin, key))
         if cur is None or str(row.get("as_of") or "") >= str(cur.get("as_of") or ""):
@@ -393,11 +410,313 @@ def digest_should_ping(net_new: Iterable[dict]) -> bool:
     )
 
 
+def is_sentinel_row(row: dict) -> bool:
+    kn = str(row.get("keyword_normalized") or "").strip().lower()
+    kw = str(row.get("keyword") or "").strip().lower()
+    return kn == SENTINEL_KEYWORD or kw == SENTINEL_KEYWORD
+
+
+def _asin(row: dict) -> str:
+    return str(row.get("competitor_asin") or "").strip().upper()
+
+
+def _valid_search_id(value) -> int | None:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def load_cached_kr() -> list[dict]:
+    """Warehouse reverse snapshots. Fail-soft — weekly jobs stay up."""
+    try:
+        from src.db import get_client
+
+        client = get_client()
+        resp = (
+            client.table(TABLE)
+            .select("*")
+            .order("as_of", desc=True)
+            .limit(8000)
+            .execute()
+        )
+    except Exception as e:
+        log.info("Competitor KR cache load skipped: %s", e)
+        return []
+    return [r for r in (resp.data or []) if isinstance(r, dict)]
+
+
+def search_ids_from_cache(rows: Iterable[dict]) -> dict[str, int]:
+    """Newest valid search_id per competitor ASIN (includes sentinel rows)."""
+    out: dict[str, int] = {}
+    newest: dict[str, str] = {}
+    for row in rows:
+        asin = _asin(row)
+        sid = _valid_search_id(row.get("search_id"))
+        if not asin or sid is None:
+            continue
+        as_of = str(row.get("as_of") or "")
+        if asin not in out or as_of >= newest.get(asin, ""):
+            out[asin] = sid
+            newest[asin] = as_of
+    return out
+
+
+def posted_asins_from_cache(rows: Iterable[dict]) -> set[str]:
+    """ASINs that already had a KR POST (search_id or durable sentinel)."""
+    out: set[str] = set()
+    for row in rows:
+        asin = _asin(row)
+        if not asin:
+            continue
+        if _valid_search_id(row.get("search_id")) or is_sentinel_row(row):
+            out.add(asin)
+    return out
+
+
+def asin_cache_status(
+    rows: Iterable[dict],
+    asins: Iterable[str],
+    stale_after_days: int,
+    as_of_today: str,
+) -> dict[str, str]:
+    """fresh = real keywords within stale_after_days; sentinel-only is missing."""
+    try:
+        today = date.fromisoformat(str(as_of_today)[:10])
+    except ValueError:
+        today = date.today()
+    cutoff = today - timedelta(days=int(stale_after_days))
+    latest_real: dict[str, str] = {}
+    for row in rows:
+        if is_sentinel_row(row):
+            continue
+        asin = _asin(row)
+        as_of = str(row.get("as_of") or "")
+        if not asin or not as_of:
+            continue
+        if asin not in latest_real or as_of > latest_real[asin]:
+            latest_real[asin] = as_of
+    out: dict[str, str] = {}
+    for raw in asins:
+        asin = str(raw or "").strip().upper()
+        as_of = latest_real.get(asin)
+        if not as_of:
+            out[asin] = "missing"
+            continue
+        try:
+            pulled = date.fromisoformat(as_of[:10])
+        except ValueError:
+            out[asin] = "stale"
+            continue
+        out[asin] = "fresh" if pulled >= cutoff else "stale"
+    return out
+
+
+def latest_real_rows_for_asins(
+    rows: Iterable[dict],
+    asins: Iterable[str],
+) -> list[dict]:
+    wanted = {str(a).strip().upper() for a in asins if str(a).strip()}
+    latest_as_of: dict[str, str] = {}
+    for row in rows:
+        if is_sentinel_row(row):
+            continue
+        asin = _asin(row)
+        as_of = str(row.get("as_of") or "")
+        if asin not in wanted or not as_of:
+            continue
+        if as_of > latest_as_of.get(asin, ""):
+            latest_as_of[asin] = as_of
+    out: list[dict] = []
+    for row in rows:
+        if is_sentinel_row(row):
+            continue
+        asin = _asin(row)
+        if asin in latest_as_of and str(row.get("as_of") or "") == latest_as_of[asin]:
+            out.append(row)
+    return out
+
+
+def previous_kr_rows(
+    cache: Iterable[dict],
+    current_rows: Iterable[dict],
+) -> list[dict]:
+    """Older as_of rows per ASIN — used to drop last week's keywords."""
+    latest: dict[str, str] = {}
+    for row in current_rows:
+        if is_sentinel_row(row):
+            continue
+        asin = _asin(row)
+        as_of = str(row.get("as_of") or "")
+        if asin and as_of > latest.get(asin, ""):
+            latest[asin] = as_of
+    prev: list[dict] = []
+    for row in cache:
+        if is_sentinel_row(row):
+            continue
+        asin = _asin(row)
+        as_of = str(row.get("as_of") or "")
+        if asin in latest and as_of and as_of < latest[asin]:
+            prev.append(row)
+    return prev
+
+
+def make_sentinel_row(
+    *,
+    competitor_asin: str,
+    family: str,
+    marketplace: str,
+    search_id: int | None,
+    pulled_at: str,
+    as_of: str,
+) -> dict:
+    return {
+        "competitor_asin": competitor_asin,
+        "marketplace": marketplace,
+        "family": family,
+        "search_id": _valid_search_id(search_id) or 0,
+        "keyword_normalized": SENTINEL_KEYWORD,
+        "keyword": SENTINEL_KEYWORD,
+        "search_volume": None,
+        "aba_search_frequency_rank": None,
+        "organic_asin": None,
+        "organic_rank": None,
+        "sponsored_asin": None,
+        "sponsored_rank": None,
+        "sponsored_products": None,
+        "opportunity_score": None,
+        "cpc": None,
+        "match_types": None,
+        "as_of": as_of,
+        "pulled_at": pulled_at,
+    }
+
+
+def build_blake_competitor_surface(args: dict) -> list[dict]:
+    """Net-new unused Exact only. Cap ~5 per family / ~15 total."""
+    family_cap = int(args.get("family_cap") or DEFAULT_BLAKE_FAMILY_CAP)
+    total_cap = int(args.get("total_cap") or DEFAULT_BLAKE_TOTAL_CAP)
+    kr_rows = [r for r in (args.get("kr_rows") or []) if not is_sentinel_row(r)]
+    outliers = build_competitor_outliers({
+        **args,
+        "kr_rows": kr_rows,
+        "cap": 10_000,
+    })
+    unused = [
+        r for r in outliers
+        if r.get("already_bidding") == "N"
+        and r.get("suggested_lever") in {"harvest_exact", "watch"}
+    ]
+    previous = [
+        r for r in (args.get("previous_kr_rows") or []) if not is_sentinel_row(r)
+    ]
+    if previous:
+        from src.amazon_ads.organic_rank import normalize_keyword
+
+        prev_keys = {
+            (
+                _asin(r),
+                normalize_keyword(r.get("keyword") or r.get("keyword_normalized")),
+            )
+            for r in previous
+        }
+        unused = [
+            r for r in unused
+            if (
+                str(r.get("competitor_asin") or "").strip().upper(),
+                str(r.get("keyword_normalized") or ""),
+            ) not in prev_keys
+        ]
+    by_family = {"lip": 0, "balm": 0, "deo": 0}
+    out: list[dict] = []
+    for row in unused:
+        fam = str(row.get("our_hero_family") or "")
+        if by_family.get(fam, family_cap) >= family_cap:
+            continue
+        by_family[fam] = by_family.get(fam, 0) + 1
+        out.append(row)
+        if len(out) >= total_cap:
+            break
+    return out
+
+
 def _create_cap(requested: int | None, cfg_max: int) -> int:
     cap = cfg_max if requested is None else int(requested)
     if cap < 0:
         return 0
     return min(cap, cfg_max)
+
+
+def _result(
+    *,
+    status: str,
+    message: str,
+    notes: list[str],
+    errors: list[str],
+    written: dict,
+    created: list[str],
+    reused: list[str],
+    cached: list[str],
+    missing: list[str],
+    pulled_at: str,
+    asins: list[str],
+    create_missing: bool,
+    create_cap: int,
+    kr_rows: list[dict],
+    persist_rows: list[dict],
+    dry_run: bool,
+    quota: QuotaExceeded | None,
+    digest: dict,
+    outliers: list[dict],
+) -> dict:
+    if dry_run:
+        message = "DRY RUN — " + message
+    if notes:
+        message = (message + " | " + "; ".join(notes))[:1000]
+    return {
+        "status": status,
+        "message": message,
+        "notes": notes,
+        "errors": errors,
+        "written": written,
+        "counts": {"competitor_kr": len(kr_rows)},
+        "created": created,
+        "reused": reused,
+        "cached": cached,
+        "missing": missing,
+        "create_missing": create_missing,
+        "create_cap": create_cap,
+        "pulled_at": pulled_at,
+        "asins": asins,
+        "persist_rows": len(persist_rows),
+        "quota_remaining": quota.remaining if quota else None,
+        "quota_reset": quota.reset if quota else None,
+        "digest": digest,
+        "outliers": outliers,
+    }
+
+
+def _blake_from_rows(
+    cfg: dict,
+    kr_rows: list[dict],
+    cache: list[dict],
+) -> tuple[list[dict], dict]:
+    previous = previous_kr_rows(cache, kr_rows)
+    surface = build_blake_competitor_surface({
+        "kr_rows": kr_rows,
+        "previous_kr_rows": previous,
+        "opportunity_floor": cfg["opportunity_floor"],
+        "family_cap": cfg["blake_family_cap"],
+        "total_cap": cfg["blake_total_cap"],
+    })
+    harvest = [r for r in surface if r.get("suggested_lever") == "harvest_exact"]
+    digest = {
+        "should_ping": digest_should_ping(harvest),
+        "net_new": len(surface),
+        "harvest_exact": len(harvest),
+    }
+    return surface, digest
 
 
 def sync_competitor_kr(
@@ -406,16 +725,19 @@ def sync_competitor_kr(
     create_missing: bool = False,
     max_create: int | None = None,
 ) -> dict:
-    """Pull competitor KR. Reuse saved searchType0. Create only when flagged."""
+    """Pull competitor KR. Cache-first. Reuse saved searchType0. Create gated."""
     notes: list[str] = []
     errors: list[str] = []
     created: list[str] = []
     reused: list[str] = []
+    cached: list[str] = []
     missing: list[str] = []
     written = {"competitor_kr": 0}
     pulled_at = datetime.now(timezone.utc).isoformat()
     cfg = load_config()
     create_cap = _create_cap(max_create, int(cfg["create_missing_max"]))
+    asins = [c["asin"] for c in cfg["competitors"]]
+    family_by_asin = {c["asin"]: c["family"] for c in cfg["competitors"]}
 
     if cfg["dropped_asins"]:
         notes.append(
@@ -423,84 +745,180 @@ def sync_competitor_kr(
             + ", ".join(cfg["dropped_asins"])
         )
     if not cfg["competitors"]:
-        return {
-            "status": "fail",
-            "message": "No competitor ASINs left after family/exclude filter.",
-            "notes": notes,
-            "errors": errors,
-            "written": written,
-            "created": created,
-            "reused": reused,
-            "missing": missing,
-            "pulled_at": pulled_at,
-            "quota": None,
-            "digest": {"should_ping": False, "net_new": 0},
-        }
+        return _result(
+            status="fail",
+            message="No competitor ASINs left after family/exclude filter.",
+            notes=notes, errors=errors, written=written,
+            created=created, reused=reused, cached=cached, missing=missing,
+            pulled_at=pulled_at, asins=asins, create_missing=create_missing,
+            create_cap=create_cap, kr_rows=[], persist_rows=[],
+            dry_run=dry_run, quota=None,
+            digest={"should_ping": False, "net_new": 0}, outliers=[],
+        )
+
+    today = date.today().isoformat()
+    cache = load_cached_kr()
+    stale_after = int(cfg["stale_after_days"])
+    status_by = asin_cache_status(cache, asins, stale_after, today)
+    fresh_asins = [a for a in asins if status_by.get(a) == "fresh"]
+    refresh_asins = [a for a in asins if status_by.get(a) != "fresh"]
+    cached_sids = search_ids_from_cache(cache)
+    already_posted = posted_asins_from_cache(cache)
+
+    def _finish(
+        *,
+        status: str,
+        kr_rows: list[dict],
+        persist_rows: list[dict],
+        quota: QuotaExceeded | None = None,
+        extra_status_from_cache: bool = False,
+    ) -> dict:
+        real_rows = [r for r in kr_rows if not is_sentinel_row(r)]
+        if not real_rows and quota is None and not created:
+            notes.append(EMPTY_SNAPSHOT_NOTE)
+        if not dry_run and persist_rows:
+            from src.db import upsert_rows
+
+            written["competitor_kr"] = upsert_rows(
+                TABLE, persist_rows, on_conflict=CONFLICT,
+            )
+        surface, digest = _blake_from_rows(cfg, real_rows, cache)
+        if digest["should_ping"]:
+            notes.append(
+                f"Blake digest hook: {digest['harvest_exact']} net-new "
+                "harvest_exact row(s) on the capped surface. "
+                "Email is not sent from this job."
+            )
+        total_in = len(real_rows)
+        if extra_status_from_cache:
+            pass
+        elif quota and total_in == 0 and not created and not any(written.values()):
+            status = "fail"
+        elif quota or errors:
+            status = (
+                "partial"
+                if total_in or created or cached or any(written.values())
+                else "fail"
+            )
+        message = (
+            f"{len(cfg['competitors'])} competitor ASIN(s), "
+            f"{len(cached)} cached / {len(reused)} reused / "
+            f"{len(created)} created / {len(missing)} missing, "
+            f"{len(real_rows)} KR row(s), {len(surface)} Blake net-new"
+        )
+        return _result(
+            status=status, message=message, notes=notes, errors=errors,
+            written=written, created=created, reused=reused, cached=cached,
+            missing=missing, pulled_at=pulled_at, asins=asins,
+            create_missing=create_missing, create_cap=create_cap,
+            kr_rows=real_rows, persist_rows=persist_rows, dry_run=dry_run,
+            quota=quota, digest=digest, outliers=surface,
+        )
+
+    if not refresh_asins:
+        notes.append(
+            f"cache_fresh — skipped SoldScope (all {len(fresh_asins)} ASIN(s) "
+            f"have real KR rows within {stale_after} days)."
+        )
+        cached.extend(fresh_asins)
+        return _finish(
+            status="success",
+            kr_rows=latest_real_rows_for_asins(cache, fresh_asins),
+            persist_rows=[],
+            extra_status_from_cache=True,
+        )
 
     if not token_present():
         notes.append("missing_token")
-        return {
-            "status": "fail",
-            "message": MISSING_TOKEN_MESSAGE,
-            "notes": notes,
-            "errors": errors,
-            "written": written,
-            "created": created,
-            "reused": reused,
-            "missing": [c["asin"] for c in cfg["competitors"]],
-            "pulled_at": pulled_at,
-            "quota": None,
-            "asins": [c["asin"] for c in cfg["competitors"]],
-            "digest": {"should_ping": False, "net_new": 0},
-        }
+        cached_rows = latest_real_rows_for_asins(cache, asins)
+        if cached_rows:
+            notes.append(
+                "cache_fallback — weekly job serving warehouse snapshots "
+                "(no SoldScope re-hit)."
+            )
+            cached.extend(fresh_asins)
+            missing.extend(refresh_asins)
+            return _finish(
+                status="partial",
+                kr_rows=cached_rows,
+                persist_rows=[],
+                extra_status_from_cache=True,
+            )
+        return _result(
+            status="fail",
+            message=MISSING_TOKEN_MESSAGE,
+            notes=notes, errors=errors, written=written,
+            created=created, reused=reused, cached=cached,
+            missing=asins, pulled_at=pulled_at, asins=asins,
+            create_missing=create_missing, create_cap=create_cap,
+            kr_rows=[], persist_rows=[], dry_run=dry_run, quota=None,
+            digest={"should_ping": False, "net_new": 0}, outliers=[],
+        )
 
     try:
         auth = check_auth()
         acct = ((auth.get("account") or {}) if isinstance(auth, dict) else {}) or {}
         notes.append(f"auth_ok account={acct.get('name') or acct.get('id') or '?'}")
     except AuthError as e:
-        return {
-            "status": "fail",
-            "message": str(e)[:500],
-            "notes": notes,
-            "errors": [str(e)[:300]],
-            "written": written,
-            "created": created,
-            "reused": reused,
-            "missing": [c["asin"] for c in cfg["competitors"]],
-            "pulled_at": pulled_at,
-            "quota": None,
-            "asins": [c["asin"] for c in cfg["competitors"]],
-            "digest": {"should_ping": False, "net_new": 0},
-        }
+        cached_rows = latest_real_rows_for_asins(cache, asins)
+        if cached_rows:
+            notes.append("auth_fail_cache_fallback")
+            errors.append(str(e)[:300])
+            cached.extend(fresh_asins)
+            missing.extend(refresh_asins)
+            return _finish(
+                status="partial",
+                kr_rows=cached_rows,
+                persist_rows=[],
+                extra_status_from_cache=True,
+            )
+        return _result(
+            status="fail",
+            message=str(e)[:500],
+            notes=notes, errors=[str(e)[:300]], written=written,
+            created=created, reused=reused, cached=cached,
+            missing=asins, pulled_at=pulled_at, asins=asins,
+            create_missing=create_missing, create_cap=create_cap,
+            kr_rows=[], persist_rows=[], dry_run=dry_run, quota=None,
+            digest={"should_ping": False, "net_new": 0}, outliers=[],
+        )
 
     marketplace = cfg["marketplace"]
     kr_cap = int(cfg["max_keywords"])
-    kr_rows: list[dict] = []
+    new_rows: list[dict] = []
+    sentinels: list[dict] = []
     quota: QuotaExceeded | None = None
     created_count = 0
+    cached.extend(fresh_asins)
 
-    asins = [c["asin"] for c in cfg["competitors"]]
+    need_list = [a for a in refresh_asins if a not in cached_sids]
     saved: dict[str, int] = {}
-    try:
-        saved = collect_saved_kr_search_ids(asins=asins)
-    except QuotaExceeded as e:
-        quota = e
-        notes.append(
-            f"402 listing KR searches; stopping (Remaining={e.remaining})."
-        )
-    except (SoldScopeError, AuthError) as e:
-        errors.append(f"list KR searches: {e}")
-    except Exception as e:
-        errors.append(f"list KR searches: {e}")
+    if need_list:
+        try:
+            saved = collect_saved_kr_search_ids(asins=need_list)
+        except QuotaExceeded as e:
+            quota = e
+            notes.append(
+                f"402 listing KR searches; stopping (Remaining={e.remaining})."
+            )
+        except (SoldScopeError, AuthError) as e:
+            errors.append(f"list KR searches: {e}")
+        except Exception as e:
+            errors.append(f"list KR searches: {e}")
 
-    for item in cfg["competitors"]:
+    for asin in refresh_asins:
         if quota is not None:
             break
-        asin = item["asin"]
-        family = item["family"]
-        sid = saved.get(asin)
+        family = family_by_asin[asin]
+        sid = cached_sids.get(asin) or saved.get(asin)
         if sid is None and create_missing:
+            if asin in already_posted:
+                notes.append(
+                    f"Skip POST for {asin} — warehouse already has a KR "
+                    "search_id/sentinel (max 1 POST per ASIN)."
+                )
+                missing.append(asin)
+                continue
             if created_count >= create_cap:
                 missing.append(asin)
                 notes.append(
@@ -515,17 +933,26 @@ def sync_competitor_kr(
                 new_id = (data or {}).get("id") if isinstance(data, dict) else None
                 created_count += 1
                 created.append(asin)
-                if new_id is None:
+                already_posted.add(asin)
+                sid = _valid_search_id(new_id)
+                sentinels.append(make_sentinel_row(
+                    competitor_asin=asin,
+                    family=family,
+                    marketplace=marketplace,
+                    search_id=sid,
+                    pulled_at=pulled_at,
+                    as_of=today,
+                ))
+                if sid is None:
                     notes.append(
                         f"KR create for competitor {asin} returned no search id "
-                        "(not polling — next weekly reuse will pick it up)."
+                        "(sentinel stored — never POST this ASIN again)."
                     )
                     missing.append(asin)
                     continue
-                sid = int(new_id)
                 notes.append(
                     f"Created single-ASIN KR search {sid} for competitor {asin} "
-                    "(no wait-loop; results on a later reuse)."
+                    "(no wait-loop; one POST per ASIN)."
                 )
             except QuotaExceeded as e:
                 quota = e
@@ -547,7 +974,7 @@ def sync_competitor_kr(
             if not create_missing:
                 notes.append(
                     f"No saved searchType0 KR for {asin} — reuse-only "
-                    "(pass --create-missing to POST, cap "
+                    "(pass --create-missing to POST, max 1 per ASIN, cap "
                     f"{create_cap}/run)."
                 )
             continue
@@ -561,7 +988,7 @@ def sync_competitor_kr(
                 search_id=sid,
                 pulled_at=pulled_at,
             )
-            kr_rows.extend(batch)
+            new_rows.extend(batch)
             reused.append(asin)
         except QuotaExceeded as e:
             quota = e
@@ -575,135 +1002,42 @@ def sync_competitor_kr(
         except Exception as e:
             errors.append(f"{asin} KR read: {e}")
 
-    if not kr_rows and quota is None and not created:
-        notes.append(EMPTY_SNAPSHOT_NOTE)
-
-    previous: list[dict] = []
-    if not dry_run:
-        from src.db import upsert_rows
-
-        written["competitor_kr"] = upsert_rows(
-            TABLE, kr_rows, on_conflict=CONFLICT,
-        )
-        previous = _load_previous_outliers(kr_rows)
-
-    current_outliers = build_competitor_outliers({
-        "kr_rows": kr_rows,
-        "opportunity_floor": cfg["opportunity_floor"],
-    })
-    # When we just wrote this week's rows, previous is last week's warehouse
-    # snapshot. Dry-run has no warehouse — net-new is the current harvest set.
-    prev_outliers = (
-        previous
-        if previous
-        else []
+    kr_rows = latest_real_rows_for_asins(cache, fresh_asins) + new_rows
+    persist_rows = new_rows + sentinels
+    return _finish(
+        status="success",
+        kr_rows=kr_rows,
+        persist_rows=persist_rows,
+        quota=quota,
     )
-    net_new = net_new_actionable(current_outliers, prev_outliers)
-    digest = {
-        "should_ping": digest_should_ping(net_new),
-        "net_new": len(net_new),
-    }
-    if digest["should_ping"]:
-        notes.append(
-            f"Blake digest hook: {digest['net_new']} net-new harvest_exact "
-            "row(s). Email is not sent from this job."
-        )
-
-    total_in = len(kr_rows)
-    if quota and total_in == 0 and not created and not any(written.values()):
-        status = "fail"
-    elif quota or errors:
-        status = "partial" if total_in or created or any(written.values()) else "fail"
-    else:
-        status = "success"
-
-    message = (
-        f"{len(cfg['competitors'])} competitor ASIN(s), "
-        f"{len(reused)} reused / {len(created)} created / "
-        f"{len(missing)} missing, {len(kr_rows)} KR row(s)"
-    )
-    if dry_run:
-        message = "DRY RUN — " + message
-    if notes:
-        message = (message + " | " + "; ".join(notes))[:1000]
-
-    return {
-        "status": status,
-        "message": message,
-        "notes": notes,
-        "errors": errors,
-        "written": written,
-        "counts": {"competitor_kr": len(kr_rows)},
-        "created": created,
-        "reused": reused,
-        "missing": missing,
-        "create_missing": create_missing,
-        "create_cap": create_cap,
-        "pulled_at": pulled_at,
-        "asins": asins,
-        "quota_remaining": quota.remaining if quota else None,
-        "quota_reset": quota.reset if quota else None,
-        "digest": digest,
-        "outliers": current_outliers,
-    }
-
-
-def _load_previous_outliers(current_rows: list[dict]) -> list[dict]:
-    """Prior as_of warehouse rows for the same competitor ASINs (net-new)."""
-    asins = sorted({
-        str(r.get("competitor_asin") or "").strip().upper()
-        for r in current_rows
-        if r.get("competitor_asin")
-    })
-    current_as_of = {
-        str(r.get("as_of") or "")
-        for r in current_rows
-        if r.get("as_of")
-    }
-    if not asins:
-        return []
-    try:
-        from src.db import get_client
-
-        client = get_client()
-        resp = (
-            client.table(TABLE)
-            .select("*")
-            .in_("competitor_asin", asins)
-            .order("as_of", desc=True)
-            .limit(5000)
-            .execute()
-        )
-    except Exception as e:
-        log.info("Competitor KR previous snapshot skipped: %s", e)
-        return []
-    prior = [
-        r for r in (resp.data or [])
-        if isinstance(r, dict) and str(r.get("as_of") or "") not in current_as_of
-    ]
-    if not prior:
-        return []
-    newest = max(str(r.get("as_of") or "") for r in prior)
-    return build_competitor_outliers({
-        "kr_rows": [r for r in prior if str(r.get("as_of") or "") == newest],
-    })
 
 
 # Re-export helpers the tests / client already use so callers stay local.
 __all__ = [
     "TABLE",
     "CONFLICT",
+    "DEFAULT_BLAKE_FAMILY_CAP",
+    "DEFAULT_BLAKE_TOTAL_CAP",
     "DEFAULT_CREATE_CAP",
+    "DEFAULT_STALE_AFTER_DAYS",
     "EMPTY_SNAPSHOT_NOTE",
     "EXCLUDED_OURS",
+    "SENTINEL_KEYWORD",
+    "asin_cache_status",
+    "build_blake_competitor_surface",
     "build_competitor_outliers",
     "classify_exact_bidding",
     "competitor_kr_rows_from_payload",
     "competitor_present",
     "digest_should_ping",
     "exact_keywords_from_targets",
+    "is_sentinel_row",
+    "load_cached_kr",
     "load_config",
+    "make_sentinel_row",
     "net_new_actionable",
+    "posted_asins_from_cache",
+    "search_ids_from_cache",
     "suggest_lever",
     "sync_competitor_kr",
 ]

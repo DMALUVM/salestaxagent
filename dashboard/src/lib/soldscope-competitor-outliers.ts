@@ -23,10 +23,13 @@ export function extractExactKeyword(campaignName: string): string | null {
 }
 
 export const COMPETITOR_OUTLIER_EMPTY_COPY =
-  "No competitor reverse-ASIN keywords yet. Waiting for a weekly SoldScope reuse of saved searchType0 KR on the 30 competitor ASINs. First fill is `soldscope-competitor-kr --create-missing` (cap 5/run). This desk does not create Rank Tracker groups or Product Research. Em dash means empty, not zero.";
+  "No net-new unused Exact competitor keywords this week (cap 5/family, 15 total). Weekly job reads cached reverse-ASIN snapshots unless missing or stale. First fill is `soldscope-competitor-kr --create-missing` (max 1 POST per ASIN, cap 5/run). This desk does not create Rank Tracker groups or Product Research. Em dash means empty, not zero.";
 
 export const COMPETITOR_OUTLIER_CAP = 30;
 export const COMPETITOR_OPPORTUNITY_FLOOR = 100;
+export const SENTINEL_KEYWORD = "__kr_created__";
+export const BLAKE_FAMILY_CAP = 5;
+export const BLAKE_TOTAL_CAP = 15;
 export const EXCLUDED_OURS = "B0CLF5B27Y";
 export const COMPETITOR_FAMILIES = ["lip", "balm", "deo"] as const;
 export type CompetitorFamily = (typeof COMPETITOR_FAMILIES)[number];
@@ -48,6 +51,9 @@ export const COMPETITOR_KR_CSV_HEADERS = [
 
 type CompetitorCfg = {
   opportunity_floor?: number;
+  blake_family_cap?: number;
+  blake_total_cap?: number;
+  stale_after_days?: number;
   excluded_asins?: string[];
   competitors?: Array<{ asin?: string; family?: string }>;
 };
@@ -98,6 +104,14 @@ export type CompetitorOutlierRow = {
 function asFamily(value: string | null | undefined): CompetitorFamily | null {
   const f = String(value ?? "").trim().toLowerCase();
   return f === "lip" || f === "balm" || f === "deo" ? f : null;
+}
+
+export function isSentinelKrRow(row: {
+  keyword?: string | null;
+  keyword_normalized?: string | null;
+}): boolean {
+  const key = normalizeKeyword(row.keyword || row.keyword_normalized);
+  return key === SENTINEL_KEYWORD;
 }
 
 function asInt(value: number | null | undefined): number | null {
@@ -194,7 +208,7 @@ export function buildCompetitorOutliers(args: {
     const family = asFamily(row.family);
     const keyword = String(row.keyword ?? "").trim();
     const key = `${asin}|${normalizeKeyword(keyword || row.keyword_normalized)}`;
-    if (!asin || !family || !keyword || asin === EXCLUDED_OURS) continue;
+    if (!asin || !family || !keyword || asin === EXCLUDED_OURS || isSentinelKrRow(row)) continue;
     const cur = latest.get(key);
     if (!cur || String(row.as_of ?? "") >= String(cur.as_of ?? "")) {
       latest.set(key, row);
@@ -251,6 +265,91 @@ export function buildCompetitorOutliers(args: {
     return (b.volume ?? -1) - (a.volume ?? -1);
   });
   return rows.slice(0, args.cap ?? COMPETITOR_OUTLIER_CAP);
+}
+
+export function splitCompetitorKrByAsOf(rows: CompetitorKrRow[]): {
+  latest: CompetitorKrRow[];
+  previous: CompetitorKrRow[];
+} {
+  const latestAsOf = new Map<string, string>();
+  for (const row of rows) {
+    if (isSentinelKrRow(row)) continue;
+    const asin = String(row.competitor_asin ?? "").trim().toUpperCase();
+    const asOf = String(row.as_of ?? "");
+    if (!asin || !asOf) continue;
+    const cur = latestAsOf.get(asin);
+    if (!cur || asOf > cur) latestAsOf.set(asin, asOf);
+  }
+  const latest: CompetitorKrRow[] = [];
+  const previous: CompetitorKrRow[] = [];
+  for (const row of rows) {
+    if (isSentinelKrRow(row)) continue;
+    const asin = String(row.competitor_asin ?? "").trim().toUpperCase();
+    const asOf = String(row.as_of ?? "");
+    const max = latestAsOf.get(asin);
+    if (max && asOf === max) latest.push(row);
+    else if (max && asOf && asOf < max) previous.push(row);
+  }
+  return { latest, previous };
+}
+
+export function buildBlakeCompetitorSurface(args: {
+  krRows?: CompetitorKrRow[];
+  previousKrRows?: CompetitorKrRow[];
+  targets?: CompetitorTarget[];
+  extraExact?: Iterable<string>;
+  organicIndex?: Map<string, OrganicRankJoin[]>;
+  opportunityFloor?: number;
+  familyCap?: number;
+  totalCap?: number;
+}): CompetitorOutlierRow[] {
+  const familyCap = args.familyCap
+    ?? Number(cfg.blake_family_cap)
+    ?? BLAKE_FAMILY_CAP;
+  const totalCap = args.totalCap
+    ?? Number(cfg.blake_total_cap)
+    ?? BLAKE_TOTAL_CAP;
+  const krRows = (args.krRows ?? []).filter((r) => !isSentinelKrRow(r));
+  const outliers = buildCompetitorOutliers({
+    ...args,
+    krRows,
+    cap: 10_000,
+  });
+  let unused = outliers.filter(
+    (r) => r.already_bidding === "N" && r.suggested_lever !== "skip",
+  );
+  const previous = (args.previousKrRows ?? []).filter((r) => !isSentinelKrRow(r));
+  if (previous.length) {
+    const prevKeys = new Set(previous.map(competitorOutlierKey));
+    unused = unused.filter((r) => !prevKeys.has(competitorOutlierKey(r)));
+  }
+  const byFamily: Record<CompetitorFamily, number> = { lip: 0, balm: 0, deo: 0 };
+  const out: CompetitorOutlierRow[] = [];
+  for (const row of unused) {
+    const fam = row.our_hero_family;
+    if (byFamily[fam] >= familyCap) continue;
+    byFamily[fam] += 1;
+    out.push(row);
+    if (out.length >= totalCap) break;
+  }
+  return out;
+}
+
+export function blakeSurfaceFromWarehouse(args: {
+  krRows?: CompetitorKrRow[];
+  targets?: CompetitorTarget[];
+  extraExact?: Iterable<string>;
+  organicIndex?: Map<string, OrganicRankJoin[]>;
+  opportunityFloor?: number;
+  familyCap?: number;
+  totalCap?: number;
+}): CompetitorOutlierRow[] {
+  const { latest, previous } = splitCompetitorKrByAsOf(args.krRows ?? []);
+  return buildBlakeCompetitorSurface({
+    ...args,
+    krRows: latest,
+    previousKrRows: previous,
+  });
 }
 
 export function competitorOutlierKey(row: {

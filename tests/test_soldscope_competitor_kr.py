@@ -32,6 +32,9 @@ def test_config_lists_30_competitors_and_excludes_our_balm():
     assert raw["competitors"] == dash["competitors"]
     assert raw["excluded_asins"] == ["B0CLF5B27Y"]
     assert raw["create_missing_max"] == 5
+    assert raw["stale_after_days"] == 8
+    assert raw["blake_family_cap"] == 5
+    assert raw["blake_total_cap"] == 15
     asins = [c["asin"] for c in raw["competitors"]]
     assert len(asins) == 30
     assert len(set(asins)) == 30
@@ -45,6 +48,9 @@ def test_config_lists_30_competitors_and_excludes_our_balm():
     assert len(loaded["competitors"]) == 30
     assert OURS in loaded["excluded_asins"]
     assert loaded["create_missing_max"] == 5
+    assert loaded["stale_after_days"] == 8
+    assert loaded["blake_family_cap"] == 5
+    assert loaded["blake_total_cap"] == 15
     assert loaded["families"]["lip"]["hero_asin"] == LIP
     assert loaded["families"]["balm"]["hero_asin"] == BALM
     assert loaded["families"]["deo"]["hero_asin"] == DEO
@@ -183,6 +189,12 @@ def test_levers_and_net_new_actionable():
     assert ck.digest_should_ping(net) is True
     assert ck.digest_should_ping([]) is False
     assert ck.net_new_actionable(prev, prev) == []
+
+
+@pytest.fixture(autouse=True)
+def _empty_kr_cache(monkeypatch):
+    """Default: no warehouse snapshot so existing sync tests stay SoldScope-path."""
+    monkeypatch.setattr(ck, "load_cached_kr", lambda: [])
 
 
 def test_reuse_saved_search_does_not_create(monkeypatch):
@@ -326,3 +338,179 @@ def test_weekly_job_is_reuse_only_and_cli_gates_create():
     assert "create_missing=True" not in runner
     assert "--create-missing" in src
     assert "max-create" in src
+
+
+def _kw_row(asin, family, keyword, *, opp=200, vol=400, as_of="2026-09-11", search_id=99):
+    return {
+        "competitor_asin": asin,
+        "family": family,
+        "keyword": keyword,
+        "keyword_normalized": keyword,
+        "search_volume": vol,
+        "opportunity_score": opp,
+        "organic_rank": 4,
+        "as_of": as_of,
+        "search_id": search_id,
+        "marketplace": "US",
+    }
+
+
+def test_blake_surface_excludes_exact_y_caps_family_and_total():
+    lip_rows = [
+        _kw_row(LIP_COMP, "lip", f"lip kw {i}", opp=400 - i)
+        for i in range(20)
+    ]
+    already = _kw_row(LIP_COMP, "lip", "tallow lip balm", opp=900)
+    balm_rows = [
+        _kw_row(BALM_COMP, "balm", f"balm kw {i}", opp=300 - i)
+        for i in range(6)
+    ]
+    deo_rows = [
+        _kw_row(DEO_COMP, "deo", f"deo kw {i}", opp=250 - i)
+        for i in range(6)
+    ]
+    ours = _kw_row(OURS, "balm", "our balm kw", opp=999)
+    surface = ck.build_blake_competitor_surface({
+        "kr_rows": lip_rows + [already, ours] + balm_rows + deo_rows,
+        "targets": [
+            {"keyword_text": "tallow lip balm", "match_type": "exact", "state": "enabled"},
+        ],
+        "family_cap": 5,
+        "total_cap": 15,
+    })
+    assert all(r["already_bidding"] == "N" for r in surface)
+    assert all(r["suggested_lever"] != "skip" for r in surface)
+    assert "tallow lip balm" not in {r["keyword"] for r in surface}
+    assert all(r["competitor_asin"] != OURS for r in surface)
+    assert sum(1 for r in surface if r["our_hero_family"] == "lip") == 5
+    assert sum(1 for r in surface if r["our_hero_family"] == "balm") == 5
+    assert sum(1 for r in surface if r["our_hero_family"] == "deo") == 5
+    assert len(surface) == 15
+
+
+def test_blake_surface_drops_last_week_keywords():
+    current = [
+        _kw_row(LIP_COMP, "lip", "repeat lip", opp=220, as_of="2026-09-11"),
+        _kw_row(LIP_COMP, "lip", "brand new lip", opp=210, as_of="2026-09-11"),
+    ]
+    previous = [
+        _kw_row(LIP_COMP, "lip", "repeat lip", opp=220, as_of="2026-09-04"),
+    ]
+    surface = ck.build_blake_competitor_surface({
+        "kr_rows": current,
+        "previous_kr_rows": previous,
+    })
+    assert [r["keyword"] for r in surface] == ["brand new lip"]
+
+
+def test_fresh_cache_skips_soldscope_entirely(monkeypatch):
+    listed = []
+    fetched = []
+    created = []
+    today = "2026-09-11"
+    cache = [
+        _kw_row(c["asin"], c["family"], f"cached {c['asin']}", as_of=today)
+        for c in ck.load_config()["competitors"]
+    ]
+    monkeypatch.setattr(ck, "load_cached_kr", lambda: cache)
+    monkeypatch.setattr(ck, "date", type("D", (), {
+        "today": staticmethod(lambda: __import__("datetime").date(2026, 9, 11)),
+        "fromisoformat": __import__("datetime").date.fromisoformat,
+    }))
+    monkeypatch.setattr(
+        ck, "collect_saved_kr_search_ids",
+        lambda **k: listed.append(k) or {},
+    )
+    monkeypatch.setattr(
+        ck, "collect_kr_results",
+        lambda *a, **k: fetched.append(a) or [],
+    )
+    monkeypatch.setattr(
+        ck, "create_single_asin_search",
+        lambda **k: created.append(k) or {"data": {"id": 1}},
+    )
+    monkeypatch.setattr(
+        ck, "token_present",
+        lambda: (_ for _ in ()).throw(AssertionError("token on cache-fresh week")),
+    )
+
+    r = ck.sync_competitor_kr(dry_run=True, create_missing=False)
+    assert listed == []
+    assert fetched == []
+    assert created == []
+    assert r["status"] == "success"
+    assert len(r["cached"]) == 30
+    assert r["reused"] == []
+    assert any("cache_fresh" in n for n in r["notes"])
+
+
+def test_one_stale_asin_gets_without_list_or_post(monkeypatch):
+    fetched = []
+    listed = []
+    created = []
+    cfg = ck.load_config()
+    stale = cfg["competitors"][0]
+    cache = []
+    for c in cfg["competitors"]:
+        as_of = "2026-08-01" if c["asin"] == stale["asin"] else "2026-09-11"
+        cache.append(_kw_row(
+            c["asin"], c["family"], f"kw {c['asin']}",
+            as_of=as_of, search_id=555 if c["asin"] == stale["asin"] else 99,
+        ))
+    monkeypatch.setattr(ck, "load_cached_kr", lambda: cache)
+    monkeypatch.setattr(ck, "date", type("D", (), {
+        "today": staticmethod(lambda: __import__("datetime").date(2026, 9, 11)),
+        "fromisoformat": __import__("datetime").date.fromisoformat,
+    }))
+    monkeypatch.setattr(ck, "token_present", lambda: True)
+    monkeypatch.setattr(ck, "check_auth", lambda: {"account": {"id": 1}})
+    monkeypatch.setattr(
+        ck, "collect_saved_kr_search_ids",
+        lambda **k: listed.append(k) or {},
+    )
+    monkeypatch.setattr(ck, "collect_kr_results", lambda sid, cap: fetched.append(sid) or [
+        {"keyword": "stale refresh kw", "searchVolume": 200,
+         "opportunityScore": 180, "organicRank": 3},
+    ])
+    monkeypatch.setattr(
+        ck, "create_single_asin_search",
+        lambda **k: created.append(k) or {"data": {"id": 1}},
+    )
+
+    r = ck.sync_competitor_kr(dry_run=True, create_missing=False)
+    assert listed == []
+    assert created == []
+    assert fetched == [555]
+    assert stale["asin"] in r["reused"]
+    assert len(r["cached"]) == 29
+
+
+def test_warehouse_search_id_blocks_second_post(monkeypatch):
+    created = []
+    cfg = ck.load_config()
+    first = cfg["competitors"][0]
+    cache = [ck.make_sentinel_row(
+        competitor_asin=first["asin"],
+        family=first["family"],
+        marketplace="US",
+        search_id=777,
+        pulled_at="2026-09-01T00:00:00+00:00",
+        as_of="2026-09-01",
+    )]
+    monkeypatch.setattr(ck, "load_cached_kr", lambda: cache)
+    monkeypatch.setattr(ck, "token_present", lambda: True)
+    monkeypatch.setattr(ck, "check_auth", lambda: {"account": {"id": 1}})
+    monkeypatch.setattr(ck, "collect_saved_kr_search_ids", lambda **k: {})
+    monkeypatch.setattr(ck, "collect_kr_results", lambda sid, cap: [
+        {"keyword": "from existing search", "searchVolume": 100,
+         "opportunityScore": 150, "organicRank": 2},
+    ] if sid == 777 else [])
+    monkeypatch.setattr(
+        ck, "create_single_asin_search",
+        lambda **k: created.append(k["asin"]) or {"data": {"id": 1}},
+    )
+
+    r = ck.sync_competitor_kr(dry_run=True, create_missing=True)
+    assert first["asin"] not in created
+    assert first["asin"] in r["reused"]
+    assert len(created) == 5  # remaining missing ASINs still fill up to the run cap

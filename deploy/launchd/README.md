@@ -105,7 +105,7 @@ separate rule and is unaffected.
 | source_monitoring | Mon 07:00 | Rule-source change detection |
 | github_backup | Sun 09:00 | Backup branch push |
 | soldscope_weekly_sync | Sun 10:30 | SoldScope hero history + ratings + capped SV + Rank Tracker read (observe-only) |
-| soldscope_competitor_kr_sync | Sun 10:45 | Competitor reverse-ASIN KR reuse (searchType0 only; no create) |
+| soldscope_competitor_kr_sync | Sun 10:45 | Competitor reverse-ASIN KR cache-first (searchType0 GET only if missing/stale; no create) |
 
 The three ads jobs are deliberately separate. Campaign reports are quick and
 feed the /ppc KPI cards and trend chart; search-term reports are heavy and can

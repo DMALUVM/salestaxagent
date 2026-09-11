@@ -30,7 +30,7 @@ import { OUTLIER_EMPTY_COPY, buildKeywordOutliers } from "@/lib/soldscope-outlie
 import { buildOrganicRankJoinIndex } from "@/lib/organic-rank-progress";
 import {
   COMPETITOR_OUTLIER_EMPTY_COPY,
-  buildCompetitorOutliers,
+  blakeSurfaceFromWarehouse,
   extraExactFromWatch,
 } from "@/lib/soldscope-competitor-outliers";
 
@@ -237,7 +237,7 @@ export async function GET() {
         campaign_name: t.campaign_name,
       })),
     });
-    const competitorOutliers = buildCompetitorOutliers({
+    const competitorOutliers = blakeSurfaceFromWarehouse({
       krRows: ssCompetitorKr,
       targets: keywordTargets,
       extraExact: extraExactFromWatch(NEW_EXACT),

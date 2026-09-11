@@ -10,6 +10,7 @@ import {
   COMPETITOR_KR_CSV_HEADERS,
   COMPETITOR_OUTLIER_EMPTY_COPY,
   EXCLUDED_OURS,
+  buildBlakeCompetitorSurface,
   buildCompetitorOutliers,
   classifyExactBidding,
   competitorKrOutliersCsv,
@@ -162,6 +163,77 @@ describe("Competitor reverse-ASIN outliers", () => {
     const empty = competitorKrOutliersCsv([]);
     assert.equal(empty.split("\n")[0], COMPETITOR_KR_CSV_HEADERS.join(","));
     assert.match(COMPETITOR_OUTLIER_EMPTY_COPY, /does not create Rank Tracker/);
+    assert.match(COMPETITOR_OUTLIER_EMPTY_COPY, /net-new unused Exact/);
+    assert.match(COMPETITOR_OUTLIER_EMPTY_COPY, /15 total/);
+  });
+
+  test("Blake surface is unused Exact only and capped 5/family or 15 total", () => {
+    const lip = Array.from({ length: 20 }, (_, i) => ({
+      competitor_asin: LIP_COMP, family: "lip" as const,
+      keyword: `lip kw ${i}`, search_volume: 400,
+      opportunity_score: 400 - i, organic_rank: 4, as_of: "2026-09-11",
+    }));
+    const balm = Array.from({ length: 6 }, (_, i) => ({
+      competitor_asin: BALM_COMP, family: "balm" as const,
+      keyword: `balm kw ${i}`, search_volume: 200,
+      opportunity_score: 300 - i, organic_rank: 5, as_of: "2026-09-11",
+    }));
+    const deo = Array.from({ length: 6 }, (_, i) => ({
+      competitor_asin: "B0FTS2DC7Y", family: "deo" as const,
+      keyword: `deo kw ${i}`, search_volume: 180,
+      opportunity_score: 250 - i, organic_rank: 6, as_of: "2026-09-11",
+    }));
+    const surface = buildBlakeCompetitorSurface({
+      krRows: [
+        ...lip,
+        {
+          competitor_asin: LIP_COMP, family: "lip",
+          keyword: "tallow lip balm", search_volume: 8000,
+          opportunity_score: 900, organic_rank: 1, as_of: "2026-09-11",
+        },
+        {
+          competitor_asin: EXCLUDED_OURS, family: "balm",
+          keyword: "should drop", opportunity_score: 900, organic_rank: 1,
+        },
+        ...balm,
+        ...deo,
+      ],
+      targets: [
+        { keyword_text: "tallow lip balm", match_type: "exact", state: "enabled" },
+      ],
+    });
+    assert.equal(surface.every((r) => r.already_bidding === "N"), true);
+    assert.equal(surface.some((r) => r.keyword === "tallow lip balm"), false);
+    assert.equal(surface.some((r) => r.competitor_asin === EXCLUDED_OURS), false);
+    assert.equal(surface.filter((r) => r.our_hero_family === "lip").length, 5);
+    assert.equal(surface.filter((r) => r.our_hero_family === "balm").length, 5);
+    assert.equal(surface.filter((r) => r.our_hero_family === "deo").length, 5);
+    assert.equal(surface.length, 15);
+  });
+
+  test("Blake surface drops last week's keywords — first week still capped", () => {
+    const surface = buildBlakeCompetitorSurface({
+      krRows: [
+        {
+          competitor_asin: LIP_COMP, family: "lip",
+          keyword: "repeat lip", opportunity_score: 220, organic_rank: 3,
+          as_of: "2026-09-11",
+        },
+        {
+          competitor_asin: LIP_COMP, family: "lip",
+          keyword: "brand new lip", opportunity_score: 210, organic_rank: 4,
+          as_of: "2026-09-11",
+        },
+      ],
+      previousKrRows: [
+        {
+          competitor_asin: LIP_COMP, family: "lip",
+          keyword: "repeat lip", opportunity_score: 220, organic_rank: 3,
+          as_of: "2026-09-04",
+        },
+      ],
+    });
+    assert.deepEqual(surface.map((r) => r.keyword), ["brand new lip"]);
   });
 
   test("GNO hosts the strip — no new research page or SoldScope desk", () => {
@@ -170,11 +242,18 @@ describe("Competitor reverse-ASIN outliers", () => {
     const gno = readFileSync(path.join(process.cwd(), "src/app/ppc/gno/page.tsx"), "utf8");
     assert.match(ui, /competitor-kr-outliers/);
     assert.match(ui, /suggested_lever/);
+    assert.match(ui, /5 per/);
+    assert.match(ui, /15 total/);
     assert.doesNotMatch(page, /href="\/ppc\/research"/);
     assert.doesNotMatch(gno, /href="\/ppc\/soldscope"/);
     assert.equal(existsSync(path.join(process.cwd(), "src/app/ppc/research")), false);
     const exp = readFileSync(path.join(process.cwd(), "src/app/api/ppc/gno-export/route.ts"), "utf8");
+    const api = readFileSync(path.join(process.cwd(), "src/app/api/ppc/gno/route.ts"), "utf8");
     assert.match(exp, /competitor_kr_outliers/);
+    assert.match(exp, /blakeSurfaceFromWarehouse/);
+    assert.match(api, /blakeSurfaceFromWarehouse/);
+    assert.doesNotMatch(exp, /buildCompetitorOutliers\(/);
+    assert.doesNotMatch(api, /buildCompetitorOutliers\(/);
     const pack = readFileSync(path.join(process.cwd(), "src/lib/gno-ppc-watch.ts"), "utf8");
     assert.match(pack, /competitor_kr_outliers\.csv/);
   });

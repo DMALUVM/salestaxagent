@@ -889,11 +889,11 @@ export function PpcGnoWatch() {
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Competitor reverse-ASIN keywords — recommend only</CardTitle>
           <p className="text-[11px] text-muted-foreground">
-            Keywords competitor ASINs rank or bid on, joined to our Exact{" "}
-            <code>keyword_targets</code>. Lever is harvest_exact / watch / skip —
-            nothing writes to Amazon. Weekly SoldScope reuse of saved searchType0 KR.
-            First fill is CLI <code>--create-missing</code> (cap 5/run). Empty until
-            snapshots land.
+            Net-new unused Exact only (<code>already_bidding = N</code>). Cap ~5 per
+            family / ~15 total — not a dump of all 30 ASINs. Lever is harvest_exact
+            / watch / skip — nothing writes to Amazon. Weekly job uses cached
+            reverse snapshots unless missing or stale. First fill is CLI{" "}
+            <code>--create-missing</code> (max 1 POST per ASIN, cap 5/run).
           </p>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
