@@ -29,6 +29,7 @@ export async function GET() {
       weeks: [],
       rows: [],
       movers: [],
+      baselineOnly: false,
       error: e instanceof Error ? e.message : String(e),
     });
   }

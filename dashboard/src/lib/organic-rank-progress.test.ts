@@ -4,16 +4,26 @@ import path from "node:path";
 import { describe, test } from "node:test";
 
 import {
+  BASELINE_WEEK_COPY,
   DEO_EMPTY_COPY,
   FAMILY_EMPTY_COPY,
   RANK_EMPTY_COPY,
   WOW_MOVE_POSITIONS,
   WOW_TOP_N,
   buildOrganicRankProgress,
+  cellHoverTitle,
+  cellPriorRank,
+  classifyMovement,
   classifyWowDelta,
   emptyCopyForFamily,
   filterProgress,
+  formatCellRank,
+  formatSignedDelta,
+  rankDelta,
   resolveSfr,
+  sortHeatmapRows,
+  sparklineGeometry,
+  sparklineSeries,
   wowLabel,
 } from "./organic-rank-progress";
 
@@ -143,5 +153,151 @@ describe("organic rank progress view", () => {
     assert.equal(existsSync(path.join(root, "src/app/ppc/soldscope")), false);
     assert.equal(existsSync(path.join(root, "src/app/ppc/organic-rank")), false);
     assert.doesNotMatch(ppc, /href="\/ppc\/soldscope"/);
+  });
+});
+
+describe("organic rank Δ display + any-move vs meaningful", () => {
+  test("rankDelta is prev − current and null when either side is missing", () => {
+    assert.equal(rankDelta(12, 9), 3);
+    assert.equal(rankDelta(9, 12), -3);
+    assert.equal(rankDelta(12, 12), 0);
+    assert.equal(rankDelta(null, 12), null);
+    assert.equal(rankDelta(12, null), null);
+    assert.equal(rankDelta(0, 4), null);
+  });
+
+  test("classifyMovement splits any-move (1–4) from meaningful (≥5 / top 50)", () => {
+    assert.deepEqual(classifyMovement(20, 18), {
+      delta: 2, direction: "improved", anyMove: true, meaningful: false,
+    });
+    assert.deepEqual(classifyMovement(18, 20), {
+      delta: -2, direction: "worsened", anyMove: true, meaningful: false,
+    });
+    assert.deepEqual(classifyMovement(12, 6), {
+      delta: 6, direction: "improved", anyMove: true, meaningful: true,
+    });
+    assert.deepEqual(classifyMovement(6, 14), {
+      delta: -8, direction: "worsened", anyMove: true, meaningful: true,
+    });
+    assert.deepEqual(classifyMovement(20, 20), {
+      delta: 0, direction: "unchanged", anyMove: false, meaningful: false,
+    });
+    assert.deepEqual(classifyMovement(null, 12), {
+      delta: null, direction: "improved", anyMove: false, meaningful: true,
+    });
+    assert.deepEqual(classifyMovement(null, 80), {
+      delta: null, direction: "unknown", anyMove: false, meaningful: false,
+    });
+    assert.deepEqual(classifyMovement(null, null), {
+      delta: null, direction: "unknown", anyMove: false, meaningful: false,
+    });
+  });
+
+  test("Δ labels and hover copy never invent ranks or SFR", () => {
+    assert.equal(formatSignedDelta(3), "↑3");
+    assert.equal(formatSignedDelta(-2), "↓2");
+    assert.equal(formatSignedDelta(0), "0");
+    assert.equal(formatSignedDelta(null), "");
+    assert.equal(formatCellRank(12), "#12");
+    assert.equal(formatCellRank(null), "—");
+    assert.equal(cellHoverTitle({ previous: 18, current: 12, sfr: 80 }), "18 → 12 (↑6) · SFR 80");
+    assert.equal(cellHoverTitle({ previous: 12, current: 12, sfr: 80 }), "12 → 12 (0) · SFR 80");
+    assert.equal(cellHoverTitle({ previous: null, current: 12, sfr: null }), "— → 12 · SFR —");
+    assert.equal(cellHoverTitle({ previous: 18, current: null }), "18 → —");
+  });
+
+  test("one-week sparkline is prior→current; cell prior uses SoldScope previous", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "eos lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-11",
+        organic_position: 119, organic_previous_position: 121,
+        aba_search_frequency_rank: 3715,
+      }],
+    });
+    assert.equal(progress.baselineOnly, true);
+    assert.match(BASELINE_WEEK_COPY, /First baseline week/);
+    const row = progress.rows[0];
+    assert.equal(row.previous, 121);
+    assert.equal(row.current, 119);
+    assert.equal(row.wow, null);
+    assert.equal(classifyMovement(row.previous, row.current).anyMove, true);
+    assert.equal(classifyMovement(row.previous, row.current).meaningful, false);
+    assert.deepEqual(sparklineSeries(row, progress.weeks), [121, 119]);
+    assert.equal(cellPriorRank(row, "2026-09-11", progress.weeks), 121);
+    const geo = sparklineGeometry([121, 119]);
+    assert.equal(geo.direction, "improved");
+    assert.equal(geo.points.length, 2);
+    assert.ok(geo.points[1].y < geo.points[0].y);
+  });
+
+  test("two-week cells use the prior week column, not API previous", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [
+        {
+          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-08-30",
+          organic_position: 18, aba_search_frequency_rank: 90,
+        },
+        {
+          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-06",
+          organic_position: 8, organic_previous_position: 99,
+          aba_search_frequency_rank: 80,
+        },
+      ],
+    });
+    const row = progress.rows[0];
+    assert.equal(progress.baselineOnly, false);
+    assert.deepEqual(sparklineSeries(row, progress.weeks), [18, 8]);
+    assert.equal(cellPriorRank(row, "2026-08-30", progress.weeks), null);
+    assert.equal(cellPriorRank(row, "2026-09-06", progress.weeks), 18);
+    assert.equal(row.previous, 18);
+  });
+
+  test("Moved sort puts meaningful, then any-move, then still", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [
+        {
+          phrase: "still", asin: "B0CLHTF8YN", as_of: "2026-09-11",
+          organic_position: 10, organic_previous_position: 10,
+          aba_search_frequency_rank: 1,
+        },
+        {
+          phrase: "nudge", asin: "B0CLHTF8YN", as_of: "2026-09-11",
+          organic_position: 18, organic_previous_position: 20,
+          aba_search_frequency_rank: 2,
+        },
+        {
+          phrase: "leap", asin: "B0CLHTF8YN", as_of: "2026-09-11",
+          organic_position: 8, organic_previous_position: 20,
+          aba_search_frequency_rank: 3,
+        },
+      ],
+    });
+    const sorted = sortHeatmapRows(progress.rows, "moved");
+    assert.deepEqual(sorted.map((r) => r.keyword_normalized), ["leap", "nudge", "still"]);
+  });
+
+  test("deo with snapshots is not the stale empty copy", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "natural deodorant", asin: "B0HBSZ71XQ", as_of: "2026-09-11",
+        organic_position: 104, aba_search_frequency_rank: 24985,
+      }],
+    });
+    const deo = filterProgress(progress, "deo");
+    assert.equal(deo.empty, false);
+    assert.equal(deo.rows[0].current, 104);
+    assert.equal(deo.rows[0].previous, null);
+    assert.notEqual(deo.emptyCopy, DEO_EMPTY_COPY);
+  });
+
+  test("heatmap encodes Δ, sparkline, and drops the stale deo legend", () => {
+    const root = process.cwd();
+    const heat = readFileSync(path.join(root, "src/components/organic-rank-heatmap.tsx"), "utf8");
+    assert.match(heat, /formatSignedDelta/);
+    assert.match(heat, /RankSpark/);
+    assert.match(heat, /BASELINE_WEEK_COPY/);
+    assert.match(heat, /Moved/);
+    assert.doesNotMatch(heat, /Deo stays empty/);
+    assert.doesNotMatch(heat, /until a Rank Tracker group exists/);
   });
 });
