@@ -324,6 +324,5 @@ def test_weekly_job_is_reuse_only_and_cli_gates_create():
     runner = inspect.getsource(main_mod._run_soldscope_competitor_kr_sync)
     assert "create_missing=False" in runner
     assert "create_missing=True" not in runner
-    cmd = inspect.getsource(main_mod.soldscope_competitor_kr_cmd)
-    assert "--create-missing" in cmd
-    assert "max-create" in cmd
+    assert "--create-missing" in src
+    assert "max-create" in src
