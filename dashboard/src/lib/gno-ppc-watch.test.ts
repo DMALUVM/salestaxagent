@@ -115,10 +115,13 @@ describe("GNO watchlists and matching", () => {
     assert.ok(NEW_EXACT[0].includes("tallow lip balm"));
     assert.equal(extractExactKeyword(NEW_EXACT[0]), "tallow lip balm");
     assert.equal(extractExactKeyword(NEW_EXACT[3]), "chapstick");
-    assert.equal(extractExactKeyword(NEW_EXACT[7]), "tallow balm");
-    assert.equal(extractExactKeyword(NEW_EXACT[8]), "beef tallow balm");
-    assert.equal(extractExactKeyword(NEW_EXACT[9]), "tallow deodorant for men");
-    assert.ok(NEW_EXACT.some((n) => n.includes("B0CLF5B27Y") && n.includes("tallow balm")));
+    assert.equal(extractExactKeyword(NEW_EXACT[6]), "tallow deodorant");
+    assert.equal(extractExactKeyword(NEW_EXACT[7]), "tallow deodorant for men");
+    assert.equal(extractExactKeyword(NEW_EXACT[8]), "tallow balm");
+    assert.equal(extractExactKeyword(NEW_EXACT[9]), "beef tallow balm");
+    assert.ok(NEW_EXACT.includes("SP | DEO | B0CLHYY3BB | EX | tallow deodorant for men | TOS"));
+    assert.ok(NEW_EXACT.some((n) => n.includes("B0CLF5B27Y") && n.includes("tallow balm") && n.includes("TOS")));
+    assert.equal(NEW_EXACT.some((n) => /tbm/i.test(n) && /deodorant/i.test(n)), false);
     assert.equal(LIP_BE_ACOS, 42);
     assert.equal(DEO_BE_ACOS, 36);
     assert.equal(BALM_BE_ACOS, 36);
@@ -675,9 +678,11 @@ describe("widgets + safety rails", () => {
     assert.equal(tiles[0].break_even_acos, 42);
     assert.equal(tiles[6].family, "deo");
     assert.equal(tiles[6].break_even_acos, 36);
-    assert.equal(tiles[7].family, "balm");
-    assert.equal(tiles[7].break_even_acos, BALM_BE_ACOS);
-    assert.equal(tiles[9].family, "deo");
+    assert.equal(tiles[7].family, "deo");
+    assert.equal(tiles[7].break_even_acos, 36);
+    assert.equal(tiles[8].family, "balm");
+    assert.equal(tiles[8].break_even_acos, BALM_BE_ACOS);
+    assert.equal(tiles[9].family, "balm");
   });
 
   test("keeper heartbeat marks Auto Loose enabled + sparkline length 7", () => {
@@ -1286,7 +1291,8 @@ describe("GNO pack v3 — Wed review upgrades", () => {
     assert.doesNotMatch(sqp!.body, /2026-08-22/);
     assert.match(sqp!.body, /chapstick/);
     assert.doesNotMatch(sqp!.body, /beef tallow moisturizer/);
-    assert.match(withSqp.files.find((f) => f.name === "README.txt")!.body, /sqp_weekly_slice\.csv — one stored week/);
+    assert.match(withSqp.files.find((f) => f.name === "README.txt")!.body, /STALE PRE-RAISE/);
+    assert.match(sqp!.body, /stale_pre_raise/);
 
     const empty = sqpWeeklySliceRows([]);
     assert.deepEqual(empty, []);
@@ -1294,36 +1300,43 @@ describe("GNO pack v3 — Wed review upgrades", () => {
 });
 
 describe("GNO pack — NEW_EXACT TBM shells + SQP week + ST L2 SoT + organic rank", () => {
-  const tbmBalm = "SP | TBM | B0CLF5B27Y | EX | tallow balm";
-  const tbmBeef = "SP | TBM | B0CLF5B27Y | EX | beef tallow balm";
-  const tbmDeo = "SP | TBM | B0CLF5B27Y | EX | tallow deodorant for men";
-  const tbmLive = "SP | TBM | B0CLF5B27Y | EX | tallow balm | TOS";
+  const tbmBalm = "SP | TBM | B0CLF5B27Y | EX | tallow balm | TOS";
+  const tbmBeef = "SP | TBM | B0CLF5B27Y | EX | beef tallow balm | TOS";
+  const tbmBalmNoTos = "SP | TBM | B0CLF5B27Y | EX | tallow balm";
+  const tbmDeoWrong = "SP | TBM | B0CLF5B27Y | EX | tallow deodorant for men";
+  const deoForMen = "SP | DEO | B0CLHYY3BB | EX | tallow deodorant for men | TOS";
 
-  test("NEW_EXACT includes the three TBM B0CLF5B27Y shells and live TOS variants", () => {
+  test("NEW_EXACT keeps two TBM Exact shells and the live DEO for-men TOS campaign", () => {
     assert.ok(NEW_EXACT.includes(tbmBalm));
     assert.ok(NEW_EXACT.includes(tbmBeef));
-    assert.ok(NEW_EXACT.includes(tbmDeo));
+    assert.ok(NEW_EXACT.includes(deoForMen));
+    assert.equal(NEW_EXACT.includes(tbmDeoWrong), false);
     assert.equal(watchListOf(tbmBalm), "NEW_EXACT");
-    assert.equal(watchListOf(tbmLive), "NEW_EXACT");
-    assert.equal(isNewExactName(tbmLive), true);
+    assert.equal(watchListOf(tbmBalmNoTos), "NEW_EXACT");
+    assert.equal(isNewExactName(tbmBalm), true);
+    assert.equal(isNewExactName(tbmDeoWrong), false);
+    assert.equal(watchListOf(tbmDeoWrong), "OTHER");
+    assert.equal(watchListOf(deoForMen), "NEW_EXACT");
     assert.equal(extractExactKeyword(tbmBalm), "tallow balm");
-    assert.equal(extractExactKeyword(tbmLive), "tallow balm");
+    assert.equal(extractExactKeyword(tbmBalmNoTos), "tallow balm");
     const rows = watchCampaignExportRows({
       asOf: "2026-09-10",
       today: "2026-09-11",
       campaigns: [],
       placements: [],
       campaignMeta: [
-        { campaign_name: tbmLive, state: "ENABLED", daily_budget: 25 },
+        { campaign_name: tbmBalm, state: "ENABLED", daily_budget: 25 },
         { campaign_name: tbmBeef, state: "ENABLED", daily_budget: 25 },
-        { campaign_name: tbmDeo, state: "ENABLED", daily_budget: 25 },
+        { campaign_name: tbmDeoWrong, state: "ENABLED", daily_budget: 25 },
+        { campaign_name: deoForMen, state: "ENABLED", daily_budget: 20 },
       ],
     });
     const today = rows.filter((r) => r.date_start === "2026-09-11" && r.watch_list === "NEW_EXACT");
-    assert.ok(today.some((r) => r.campaign_name === tbmLive || r.campaign_name === tbmBalm));
-    assert.ok(today.some((r) => /beef tallow balm/i.test(r.campaign_name)));
-    assert.ok(today.some((r) => /tallow deodorant for men/i.test(r.campaign_name)));
-    assert.equal(today.filter((r) => /b0clf5b27y/i.test(r.campaign_name)).length, 3);
+    assert.ok(today.some((r) => r.campaign_name === tbmBalm));
+    assert.ok(today.some((r) => r.campaign_name === tbmBeef));
+    assert.ok(today.some((r) => r.campaign_name === deoForMen));
+    assert.equal(today.some((r) => /tbm/i.test(r.campaign_name) && /deodorant/i.test(r.campaign_name)), false);
+    assert.equal(today.filter((r) => /b0clf5b27y/i.test(r.campaign_name)).length, 2);
   });
 
   test("SQP slice prefers the week covering Sep 7-10 over a pre-raise week", () => {
@@ -1349,9 +1362,18 @@ describe("GNO pack — NEW_EXACT TBM shells + SQP week + ST L2 SoT + organic ran
     const picked = selectSqpSliceWeek(rows);
     assert.equal(picked?.weekEnd, "2026-09-12");
     assert.equal(picked?.coversTarget, true);
+    assert.match(picked?.note ?? "", /stale_pre_raise=false/);
     const slice = sqpWeeklySliceRows(rows);
     assert.ok(slice.every((r) => r.week_end === "2026-09-12"));
+    assert.ok(slice.every((r) => r.stale_pre_raise === false));
     assert.doesNotMatch(slice.map((r) => r.week_end).join(","), /2026-09-05/);
+    const pack = buildGnoPack({
+      asOf: "2026-09-10", today: "2026-09-11",
+      campaigns: [], searchTerms: [], placements: [],
+      sqpWeekly: rows,
+    });
+    assert.doesNotMatch(pack.files.find((f) => f.name === "README.txt")!.body, /STALE PRE-RAISE/);
+    assert.match(pack.files.find((f) => f.name === "sqp_weekly_slice.csv")!.body, /false/);
   });
 
   test("SQP slice ships latest week with an honest pre-raise note when Sep 7-10 is missing", () => {
@@ -1365,14 +1387,20 @@ describe("GNO pack — NEW_EXACT TBM shells + SQP week + ST L2 SoT + organic ran
     const picked = selectSqpSliceWeek(rows);
     assert.equal(picked?.weekEnd, "2026-09-05");
     assert.equal(picked?.coversTarget, false);
-    assert.match(picked?.note ?? "", /does NOT cover 2026-09-07–2026-09-10/);
+    assert.match(picked?.note ?? "", /SQP week covering Sep 7–10 not in warehouse yet/);
+    assert.match(picked?.note ?? "", /stale_pre_raise=true/);
     const pack = buildGnoPack({
       asOf: "2026-09-10", today: "2026-09-11",
       campaigns: [], searchTerms: [], placements: [],
       sqpWeekly: rows,
     });
-    assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /does NOT cover/);
-    assert.match(pack.files.find((f) => f.name === "sqp_weekly_slice.csv")!.body, /2026-09-05/);
+    const readme = pack.files.find((f) => f.name === "README.txt")!.body;
+    const sqp = pack.files.find((f) => f.name === "sqp_weekly_slice.csv")!.body;
+    assert.match(readme, /SQP week covering Sep 7–10 not in warehouse yet/);
+    assert.match(readme, /STALE PRE-RAISE/);
+    assert.match(sqp, /2026-09-05/);
+    assert.match(sqp, /true/);
+    assert.ok(sqpWeeklySliceRows(rows).every((r) => r.stale_pre_raise === true));
   });
 
   test("Auto Loose L2 ST sum does not inflate vs campaign L2 (SUMMARY grain)", () => {

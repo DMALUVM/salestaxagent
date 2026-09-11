@@ -36,9 +36,10 @@ def test_gno_spec_pins_dave_watchlists():
     assert GNO_BALM_BE_ACOS == 36
     assert GNO_AUTO_LOOSE_BUDGET == 303
     assert "SP | TBL | B0CLHVCPL5 | EX | tallow lip balm | TOS" in GNO_NEW_EXACT
-    assert "SP | TBM | B0CLF5B27Y | EX | tallow balm" in GNO_NEW_EXACT
-    assert "SP | TBM | B0CLF5B27Y | EX | beef tallow balm" in GNO_NEW_EXACT
-    assert "SP | TBM | B0CLF5B27Y | EX | tallow deodorant for men" in GNO_NEW_EXACT
+    assert "SP | DEO | B0CLHYY3BB | EX | tallow deodorant for men | TOS" in GNO_NEW_EXACT
+    assert "SP | TBM | B0CLF5B27Y | EX | tallow balm | TOS" in GNO_NEW_EXACT
+    assert "SP | TBM | B0CLF5B27Y | EX | beef tallow balm | TOS" in GNO_NEW_EXACT
+    assert not any("TBM" in n and "deodorant" in n.lower() for n in GNO_NEW_EXACT)
     assert any("Loose Match-TOS" in n for n in GNO_KEEP_ALIVE)
     assert GNO_FORBIDDEN_AUTO_ACTIONS == frozenset(
         {"pause", "negate", "raise_budget", "raise_bid"})
@@ -54,6 +55,8 @@ def test_dashboard_json_matches_repo_config():
     assert spec["observe_only"] is True
     assert spec["aliases"]["broad_m"] == "GG - Lip Balm - Broad M"
     assert len(spec["flavor_shell"]) == 24
+    assert spec["new_exact"][-3] == "SP | DEO | B0CLHYY3BB | EX | tallow deodorant for men | TOS"
+    assert not any("TBM" in n and "deodorant" in n.lower() for n in spec["new_exact"])
 
 
 def test_gno_campaign_job_is_observe_only_campaigns_api():
@@ -133,6 +136,10 @@ def test_gno_dashboard_never_auto_writes_amazon():
     assert "keywordWindowMetrics" in lib
     assert "search_term === kw" not in lib.replace("normalizeTerm(t.search_term) === kw", "")
     assert "normalizeTerm(t.search_term) === kw" not in lib
+    assert "TBM_FORBIDDEN_DEO_RE" in lib
+    assert "stale_pre_raise" in lib
+    assert "auto_st_l2" not in lib.lower()
+    assert "SP | TBM | B0CLF5B27Y | EX | tallow deodorant for men" not in lib
 
 
 def test_keeper_missing_from_short_spend_lookback_is_not_p0():
