@@ -982,10 +982,13 @@ export function PpcGnoWatch() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
-            <Shield className="h-4 w-4" /> SQP Brand Analytics — manual upload
+            <Shield className="h-4 w-4" /> SQP Brand Analytics — SP-API weekly
           </CardTitle>
           <p className="text-[11px] text-muted-foreground">
-            Brand Analytics is not in the Ads API. Drop the official SQP CSV.
+            Brand Analytics SQP is not in the Ads API — we pull it weekly via
+            SP-API (<code>GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT</code>)
+            for complete Sun–Sat weeks only.
+            CSV upload is fallback if SP-API is late/FATAL or for a one-off.
             Impression / purchase share is never invented.
             {data?.sqp?.newestAsOf
               ? ` Newest stored week: ${data.sqp.newestAsOf}.`
@@ -995,17 +998,21 @@ export function PpcGnoWatch() {
         </CardHeader>
         <CardContent className="space-y-2">
           <div className="flex flex-wrap items-center gap-3">
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              disabled={sqpBusy}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) uploadSqp(f);
-                e.target.value = "";
-              }}
-              className="text-xs"
-            />
+            <label className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>CSV fallback</span>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                disabled={sqpBusy}
+                aria-label="SQP CSV fallback upload"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadSqp(f);
+                  e.target.value = "";
+                }}
+                className="text-xs"
+              />
+            </label>
             {sqpBusy && (
               <span className="text-xs text-muted-foreground">Uploading…</span>
             )}
