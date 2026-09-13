@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * GNO decision-rule + source-doc + ledger panel for /ppc/gno.
+ * Observe only. Never writes to Amazon.
+ */
+
 import { useMemo, useState } from "react";
 import { BookOpen, ExternalLink, Scale, ScrollText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -37,9 +42,10 @@ export function GnoDeskReference({ ledger }: { ledger: GnoLedgerRow[] }) {
           GNO rules, source docs, and outcome ledger
         </CardTitle>
         <CardDescription>
-          Curated from the tallowbourn-ppc methodology and this desk&apos;s harvest ledger. Family
-          CM break-even (lip 42% / deo 36% / balm 36%) stays the SoT. Open the PPC-only advisor for
-          the 152-source library, SKU economics, and execution center — do not clone that desk here.
+          Curated from the tallowbourn-ppc methodology and this desk&apos;s harvest ledger. Observe
+          only — family CM break-even (lip 42% / deo 36% / balm 36%) stays the SoT. Open the
+          PPC-only advisor for the 152-source library, SKU economics, and execution center — do
+          not clone that desk here.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
