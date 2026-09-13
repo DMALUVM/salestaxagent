@@ -18,6 +18,7 @@ import {
   type SearchTermRow,
 } from "@/lib/gno-ppc-watch";
 import { exportBannerFromState } from "@/lib/gno-export-state";
+import { GNO_LEDGER_RECENT_LIMIT, ledgerRecent } from "@/lib/gno-methodology";
 import { loadGnoExportState, loadGnoLedger } from "@/lib/gno-store";
 import {
   loadSoldScopeCompetitorKr,
@@ -282,6 +283,7 @@ export async function GET() {
       exportBanner,
       lastExportAt: exportState?.last_export_at ?? null,
       lastExportReason: exportState?.last_export_reason ?? null,
+      ledgerRecent: ledgerRecent(ledger, GNO_LEDGER_RECENT_LIMIT),
       keepers: keeperHeartbeats(campaigns, asOf, campaignMeta),
       harvestQueue: harvest.filter((t) => t.proposed_tag === "HARVEST_CANDIDATE"),
       junkQueue: harvest.filter((t) => t.proposed_tag === "JUNK_CANDIDATE"),
@@ -324,6 +326,7 @@ export async function GET() {
       lastExportAt: exportState?.last_export_at ?? null,
       lastExportReason: exportState?.last_export_reason ?? null,
       exportBanner,
+      ledgerRecent: [],
       alerts: [],
       p0: [],
       newExact: [],

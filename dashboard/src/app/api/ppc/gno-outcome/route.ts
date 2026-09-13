@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { amazonAsOf } from "@/lib/as-of";
-import { insertGnoLedger } from "@/lib/gno-store";
+import { insertGnoLedger, loadGnoLedger } from "@/lib/gno-store";
+import { GNO_LEDGER_RECENT_LIMIT, ledgerRecent } from "@/lib/gno-methodology";
 import {
   isDaveAction,
   parseGnoOutcomeLines,
@@ -8,9 +9,30 @@ import {
 } from "@/lib/gno-learning";
 
 /**
+ * GET  /api/ppc/gno-outcome — last harvest-desk ledger rows (observe only).
  * POST /api/ppc/gno-outcome — log a Dave/Grok outcome.
- * Observe only. Never pauses, negates, or writes bids to Amazon.
+ * Never pauses, negates, or writes bids to Amazon.
  */
+
+export async function GET() {
+  try {
+    const rows = ledgerRecent(await loadGnoLedger(), GNO_LEDGER_RECENT_LIMIT);
+    return Response.json({
+      ok: true,
+      observeOnly: true,
+      rows,
+      hint: "Harvest-desk learning only. Full execution-center history stays on tallowbourn-ppc.",
+    });
+  } catch (e) {
+    return Response.json({
+      ok: false,
+      observeOnly: true,
+      rows: [],
+      error: e instanceof Error ? e.message : String(e),
+      hint: "Observe only — this route never writes to Amazon.",
+    }, { status: 200 });
+  }
+}
 
 interface Body {
   paste?: string;

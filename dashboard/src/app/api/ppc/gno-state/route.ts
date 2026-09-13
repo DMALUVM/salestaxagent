@@ -1,6 +1,7 @@
 import { GNO_OBSERVE_ONLY } from "@/lib/gno-ppc-watch";
 import { exportBannerFromState } from "@/lib/gno-export-state";
-import { loadGnoExportState } from "@/lib/gno-store";
+import { GNO_LEDGER_RECENT_LIMIT, ledgerRecent } from "@/lib/gno-methodology";
+import { loadGnoExportState, loadGnoLedger } from "@/lib/gno-store";
 
 /**
  * GET /api/ppc/gno-state — last_export_* + live Wednesday review clock.
@@ -9,7 +10,10 @@ import { loadGnoExportState } from "@/lib/gno-store";
  */
 export async function GET() {
   try {
-    const exportState = await loadGnoExportState();
+    const [exportState, ledger] = await Promise.all([
+      loadGnoExportState(),
+      loadGnoLedger(),
+    ]);
     const exportBanner = exportBannerFromState(exportState);
     return Response.json({
       observeOnly: GNO_OBSERVE_ONLY,
@@ -18,6 +22,7 @@ export async function GET() {
       nextReviewAt: exportBanner.nextReviewAt,
       upcomingReviewAt: exportBanner.upcomingReviewAt,
       exportBanner,
+      ledgerRecent: ledgerRecent(ledger, GNO_LEDGER_RECENT_LIMIT),
     });
   } catch (e) {
     const exportBanner = exportBannerFromState(null);
@@ -29,6 +34,7 @@ export async function GET() {
       nextReviewAt: exportBanner.nextReviewAt,
       upcomingReviewAt: exportBanner.upcomingReviewAt,
       exportBanner,
+      ledgerRecent: [],
     }, { status: 200 });
   }
 }

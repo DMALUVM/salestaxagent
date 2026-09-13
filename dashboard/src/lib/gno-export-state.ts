@@ -386,6 +386,7 @@ export function mergeGnoAdsOntoState<T extends {
   lastExportReason?: string | null;
   nextReviewAt?: string;
   exportBanner?: ExportBanner;
+  ledgerRecent?: unknown;
 }>(state: T | null | undefined, ads: T): T {
   return {
     ...ads,
@@ -393,6 +394,7 @@ export function mergeGnoAdsOntoState<T extends {
     lastExportReason: ads.lastExportReason ?? state?.lastExportReason ?? null,
     nextReviewAt: ads.nextReviewAt ?? state?.nextReviewAt,
     exportBanner: ads.exportBanner ?? state?.exportBanner,
+    ledgerRecent: ads.ledgerRecent ?? state?.ledgerRecent,
   };
 }
 
