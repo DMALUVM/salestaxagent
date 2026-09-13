@@ -65,7 +65,8 @@ function PaidAdsCsvHowto({
             </p>
             <p>
               Date Last 7 days → Download CSV. Campaign × Day (Campaign + Cost/Impr./Clicks/Conv. value,
-              or typed Search/PMax/Shopping cost columns).
+              or typed Search/PMax/Shopping cost columns). Search top IS and Search impr. share
+              are stored when present.
             </p>
           </li>
           <li>
@@ -89,7 +90,8 @@ function PaidAdsCsvHowto({
             <p className="font-medium">Search Console</p>
             <p>
               tallowbourn.com Performance (Search results) → Last 7 → Export → Download CSV.
-              Keep Queries.csv + Pages.csv + Chart.csv (zip of those is fine).
+              Keep Queries.csv + Pages.csv + Chart.csv + Search Appearance.csv
+              (zip of those is fine). Search Appearance.csv is the recommended 7th file.
             </p>
             <p>
               <HowtoLink href={GSC_PERFORMANCE_URL}>Search Console Performance</HowtoLink>
@@ -105,8 +107,9 @@ function PaidAdsCsvHowto({
           </li>
         </ol>
         <p className="text-[13px] leading-snug">
-          Then on Dashboard: /paid-ads → Upload → select ALL files at once (parser IDs by header).
-          Matching days overwrite; older days stay.
+          Then on Dashboard: /paid-ads → Upload → select ALL files at once
+          (the recommended 7: Google + Meta + Queries + Pages + Chart + Search Appearance + GA4;
+          parser IDs by header). Matching days overwrite; older days stay.
         </p>
       </DialogContent>
     </Dialog>
@@ -590,6 +593,7 @@ const KIND_LABEL: Record<string, string> = {
   gsc_queries: "GSC Queries",
   gsc_pages: "GSC Pages",
   gsc_chart: "GSC Chart",
+  gsc_appearance: "GSC Search appearance",
   ga4: "GA4 Explore",
 };
 
@@ -1100,7 +1104,7 @@ export function PaidAdsIntel({
           <CardContent className="py-12 text-center">
             <Megaphone className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">
-              Drop Google Ads Daily, Meta campaign export, GSC (Queries + Chart + Pages), and a GA4 Explore CSV.
+              Drop Google Ads Daily, Meta campaign export, GSC (Queries + Pages + Chart + Search Appearance), and a GA4 Explore CSV.
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               Select all of them at once — the parser identifies each file by its header.
@@ -1244,6 +1248,8 @@ export function PaidAdsIntel({
                       <TableHead className="text-right">ROAS</TableHead>
                       <TableHead className="text-right">Conv.</TableHead>
                       <TableHead className="text-right">Lost IS</TableHead>
+                      <TableHead className="text-right">Impr share</TableHead>
+                      <TableHead className="text-right">Top IS</TableHead>
                       <TableHead className="text-right">Freq</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1262,6 +1268,8 @@ export function PaidAdsIntel({
                         <TableCell className="text-right tabular-nums">{c.roas.toFixed(2)}x</TableCell>
                         <TableCell className="text-right tabular-nums">{fmtD(c.conversions)}</TableCell>
                         <TableCell className="text-right tabular-nums">{c.lost_is_budget == null ? "—" : `${c.lost_is_budget.toFixed(0)}%`}</TableCell>
+                        <TableCell className="text-right tabular-nums">{c.search_impr_share == null ? "—" : `${c.search_impr_share.toFixed(0)}%`}</TableCell>
+                        <TableCell className="text-right tabular-nums">{c.search_top_is == null ? "—" : `${c.search_top_is.toFixed(0)}%`}</TableCell>
                         <TableCell className="text-right tabular-nums">{c.frequency == null ? "—" : c.frequency.toFixed(2)}</TableCell>
                       </TableRow>
                     ))}
@@ -1275,7 +1283,7 @@ export function PaidAdsIntel({
             <section id="gsc" className="space-y-3 scroll-mt-12">
               <h2 className="text-sm font-semibold tracking-tight">Search Console</h2>
               <p className="text-[11px] text-muted-foreground">
-                Queries.csv and Pages.csv are snapshots (no date). Chart.csv is the daily organic trend. Position change is never invented from the snapshot.
+                Queries.csv, Pages.csv, and Search Appearance.csv are snapshots (no date). Chart.csv is the daily organic trend. Position change is never invented from the snapshot.
               </p>
               {data.gsc.chart.length > 0 && (
                 <Card>
@@ -1305,6 +1313,16 @@ export function PaidAdsIntel({
                   }))}
                 />
               </div>
+              {(data.gsc.appearance?.length ?? 0) > 0 && (
+                <SimpleList
+                  title="Search appearance"
+                  rows={data.gsc.appearance.slice(0, 12).map((q) => ({
+                    name: q.query,
+                    meta: `CTR ${q.ctr?.toFixed(2) ?? "—"}% · pos ${q.position?.toFixed(1) ?? "—"}`,
+                    value: `${fmt(q.clicks)} clicks · ${fmt(q.impressions)} impr`,
+                  }))}
+                />
+              )}
             </section>
           )}
 

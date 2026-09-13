@@ -6,7 +6,8 @@ import {
   parseMoney, parsePct, round2, unzipCsvs,
 } from "./csv";
 import type {
-  AcceptedFile, CampaignDaily, CampaignType, GaDaily, ParsedFiles, SearchQueryDaily,
+  AcceptedFile, CampaignDaily, CampaignType, GaDaily, ParsedFiles, SearchKind,
+  SearchQueryDaily,
 } from "./types";
 
 export type FileKind =
@@ -15,9 +16,12 @@ export type FileKind =
   | "gsc_queries"
   | "gsc_pages"
   | "gsc_chart"
+  | "gsc_appearance"
   | "ga4"
   | "gsc_zip"
   | "unknown";
+
+const SNAPSHOT_KINDS: ReadonlySet<SearchKind> = new Set(["query", "page", "appearance"]);
 
 const TYPE_PREFIX: { prefix: string; type: CampaignType }[] = [
   { prefix: "search_", type: "Search" },
@@ -33,6 +37,14 @@ export function detectKind(name: string, text: string): FileKind {
   const lines = head.split(/\r?\n/).slice(0, 12);
   if (lines.some((l) => l.startsWith("#")) && /session default channel group/i.test(head)) {
     return "ga4";
+  }
+  if (
+    /search appearance/i.test(head) && /clicks/i.test(head) && /impressions/i.test(head)
+    && /ctr/i.test(head) && /position/i.test(head)
+    && !/top queries/i.test(head) && !/top pages/i.test(head)
+    && !/^date,clicks,impressions,ctr,position/im.test(head)
+  ) {
+    return "gsc_appearance";
   }
   if (/top queries/i.test(head) && /impressions/i.test(head) && /position/i.test(head)) {
     return "gsc_queries";
@@ -51,6 +63,7 @@ export function detectKind(name: string, text: string): FileKind {
   }
   if (n.includes("google")) return "google";
   if (n.includes("meta") || n.includes("tallow") && n.includes("campaign")) return "meta";
+  if (n.includes("appearance")) return "gsc_appearance";
   if (n.includes("queries")) return "gsc_queries";
   if (n.includes("pages")) return "gsc_pages";
   if (n.includes("chart")) return "gsc_chart";
@@ -69,6 +82,7 @@ function pickTypeMetrics(headers: string[], row: string[]) {
   const byType: Record<CampaignType, {
     clicks: number; conv_value: number; impressions: number;
     conversions: number; spend: number; lost_budget: number | null; lost_rank: number | null;
+    impr_share: number | null; top_is: number | null;
   }> = {
     Search: emptyType(), Shopping: emptyType(), PMax: emptyType(),
     DemandGen: emptyType(), Other: emptyType(),
@@ -88,6 +102,10 @@ function pickTypeMetrics(headers: string[], row: string[]) {
         byType[type].lost_budget = parsePct(cell);
       } else if (suffix.includes("lost is (rank)") || suffix.includes("lost is rank")) {
         byType[type].lost_rank = parsePct(cell);
+      } else if (suffix.includes("top is") && !suffix.includes("lost")) {
+        byType[type].top_is = parsePct(cell);
+      } else if (suffix.includes("impr share") || suffix.includes("impression share")) {
+        byType[type].impr_share = parsePct(cell);
       }
     }
   });
@@ -98,6 +116,7 @@ function emptyType() {
   return {
     clicks: 0, conv_value: 0, impressions: 0, conversions: 0, spend: 0,
     lost_budget: null as number | null, lost_rank: null as number | null,
+    impr_share: null as number | null, top_is: null as number | null,
   };
 }
 
@@ -135,6 +154,8 @@ export function parseGoogleCsv(text: string): CampaignDaily[] {
     let spend = 0, conv_value = 0, clicks = 0, impressions = 0, conversions = 0;
     let lost_is_budget: number | null = null;
     let lost_is_rank: number | null = null;
+    let search_impr_share: number | null = null;
+    let search_top_is: number | null = null;
     let type: CampaignType = campaignTypeOf(name, col(idx, row, "campaign type", "type", "campaign type"));
 
     if (hasTyped) {
@@ -155,6 +176,10 @@ export function parseGoogleCsv(text: string): CampaignDaily[] {
           lost_is_rank = lost_is_rank == null ? m.lost_rank : Math.max(lost_is_rank, m.lost_rank);
         }
       }
+      // Share metrics are type-specific — keep the dominant campaign_type only.
+      const share = dom !== "Other" ? by[dom] : by.Search;
+      search_impr_share = share.impr_share;
+      search_top_is = share.top_is;
     } else {
       spend = parseMoney(col(idx, row, "cost", "cost (usd)", "spend"));
       conv_value = parseMoney(col(idx, row, "conv value", "conv. value", "conversion value", "conversions value"));
@@ -163,6 +188,8 @@ export function parseGoogleCsv(text: string): CampaignDaily[] {
       conversions = parseMoney(col(idx, row, "conversions", "conv"));
       lost_is_budget = parsePct(col(idx, row, "search lost is (budget)", "search lost is budget"));
       lost_is_rank = parsePct(col(idx, row, "search lost is (rank)", "search lost is rank"));
+      search_impr_share = parsePct(col(idx, row, "search impr share", "search impression share", "search impr. share"));
+      search_top_is = parsePct(col(idx, row, "search top is", "search search top is"));
     }
 
     out.push({
@@ -180,6 +207,8 @@ export function parseGoogleCsv(text: string): CampaignDaily[] {
       conversions: round2(conversions),
       lost_is_budget,
       lost_is_rank,
+      search_impr_share,
+      search_top_is,
       frequency: null,
       frequency_peak: null,
       status: col(idx, row, "campaign status", "status") || null,
@@ -244,6 +273,8 @@ export function parseMetaCsv(text: string): CampaignDaily[] {
         conversions,
         lost_is_budget: null,
         lost_is_rank: null,
+        search_impr_share: null,
+        search_top_is: null,
         frequency: frequency > 0 ? frequency : null,
         frequency_peak: subCampaign && frequency > 0 ? frequency : null,
         status,
@@ -279,7 +310,7 @@ export function parseMetaCsv(text: string): CampaignDaily[] {
   });
 }
 
-function parseGscTable(text: string, kind: "query" | "page", nameCol: string): SearchQueryDaily[] {
+function parseGscTable(text: string, kind: "query" | "page" | "appearance", nameCol: string): SearchQueryDaily[] {
   const rows = parseCsv(text);
   const hi = findHeaderRow(rows, (h) => h.includes(normHeader(nameCol)) && h.includes("impressions"));
   if (hi < 0) return [];
@@ -311,6 +342,17 @@ export function parseGscQueries(text: string): SearchQueryDaily[] {
 
 export function parseGscPages(text: string): SearchQueryDaily[] {
   return parseGscTable(text, "page", "top pages");
+}
+
+export function parseGscAppearance(text: string): SearchQueryDaily[] {
+  return parseGscTable(text, "appearance", "search appearance");
+}
+
+/** Undated GSC snapshots replace prior rows of the same kind only. */
+export function snapshotKindsToReplace(rows: SearchQueryDaily[]): SearchKind[] {
+  return [...new Set(
+    rows.filter((q) => q.date === "" && SNAPSHOT_KINDS.has(q.kind)).map((q) => q.kind),
+  )];
 }
 
 export function parseGscChart(text: string): SearchQueryDaily[] {
@@ -404,9 +446,10 @@ export function parseNamedFile(name: string, text: string): ParsedFiles {
         ...empty, campaigns, sources: [kind], accepted: [receipt(name, kind, campaigns)],
       };
     }
-    if (kind === "gsc_queries" || kind === "gsc_pages" || kind === "gsc_chart") {
+    if (kind === "gsc_queries" || kind === "gsc_pages" || kind === "gsc_chart" || kind === "gsc_appearance") {
       const queries = kind === "gsc_queries" ? parseGscQueries(text)
         : kind === "gsc_pages" ? parseGscPages(text)
+        : kind === "gsc_appearance" ? parseGscAppearance(text)
         : parseGscChart(text);
       if (!queries.length) {
         empty.skipped.push(name);
