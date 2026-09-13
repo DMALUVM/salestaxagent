@@ -649,11 +649,20 @@ describe("export pack columns", () => {
     assert.ok(names.includes("advertised_product_l7.csv"));
     assert.ok(names.includes("organic_rank_snapshot.csv"));
     assert.ok(names.includes("competitor_kr_outliers.csv"));
+    assert.ok(names.includes("gno_decision_rules.txt"));
+    assert.ok(names.includes("gno_outcomes.csv"));
     assert.ok(names.includes("README.txt"));
+    const rules = pack.files.find((f) => f.name === "gno_decision_rules.txt")!.body;
+    assert.match(rules, /Family CM break-even/);
+    assert.match(rules, /Observe only/);
+    const outcomes = pack.files.find((f) => f.name === "gno_outcomes.csv")!.body;
+    assert.match(outcomes, /^created_at,pack_date,dave_action,/);
     const competitorCsv = pack.files.find((f) => f.name === "competitor_kr_outliers.csv")!.body;
     assert.match(competitorCsv, /^keyword,competitor_asin,our_hero_family,/);
     assert.match(competitorCsv, /already_bidding,suggested_lever/);
     assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /competitor_kr_outliers\.csv/);
+    assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /gno_decision_rules\.txt/);
+    assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /gno_outcomes\.csv/);
     assert.equal(names.includes("sqp_weekly_slice.csv"), false);
     assert.ok(names.length >= 5);
     assert.equal(pack.filename, "gno-pack-2026-09-07_1504.zip");
@@ -708,9 +717,11 @@ describe("widgets + safety rails", () => {
       "src/lib/gno-ppc-watch.ts",
       "src/lib/gno-export-state.ts",
       "src/lib/gno-learning.ts",
+      "src/lib/gno-methodology.ts",
       "src/lib/gno-store.ts",
       "src/app/ppc/gno/page.tsx",
       "src/components/ppc-gno-watch.tsx",
+      "src/components/gno-desk-reference.tsx",
       "src/app/api/ppc/gno-export/route.ts",
       "src/app/api/ppc/gno-state/route.ts",
       "src/app/api/ppc/gno-outcome/route.ts",

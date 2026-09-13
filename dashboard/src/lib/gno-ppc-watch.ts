@@ -25,6 +25,7 @@ import {
   type OrganicRankJoin,
   type RankSnapshot,
 } from "./organic-rank-progress";
+import { gnoDecisionRulesTxt, gnoOutcomesCsv } from "./gno-methodology";
 import {
   competitorKrOutliersCsv,
   type CompetitorOutlierRow,
@@ -1850,6 +1851,8 @@ export function gnoPackReadme(input: {
     organicLine,
     competitorLine,
     "- negatives_snapshot.csv — optional",
+    "- gno_decision_rules.txt — curated GNO review rules (family CM BE is SoT; 37% is a scenario)",
+    "- gno_outcomes.csv — harvest-desk ledger (hold / bid_down / bid_up / skip / approve_harvest_neg). Headers only when empty.",
     "- README.txt — this file",
     "",
     `Pack files: ${input.files.join(", ")}`,
@@ -1950,6 +1953,14 @@ export function buildGnoPack(input: {
       files.push({ name: "negatives_snapshot.csv", body: negativesSnapshotCsv(wanted) });
     }
   }
+  files.push({
+    name: "gno_decision_rules.txt",
+    body: gnoDecisionRulesTxt(),
+  });
+  files.push({
+    name: "gno_outcomes.csv",
+    body: gnoOutcomesCsv(ledger),
+  });
   files.push({
     name: "README.txt",
     body: gnoPackReadme({
