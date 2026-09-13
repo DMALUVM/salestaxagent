@@ -31,8 +31,14 @@ CREATE TABLE IF NOT EXISTS paid_campaign_daily (
 ALTER TABLE paid_campaign_daily
   ADD COLUMN IF NOT EXISTS frequency_peak numeric;
 
+-- Google typed export: Search_Search impr. share / Search_Search top IS
+-- (and Shopping / PMax equivalents), mapped from the dominant campaign_type.
+ALTER TABLE paid_campaign_daily
+  ADD COLUMN IF NOT EXISTS search_impr_share numeric,
+  ADD COLUMN IF NOT EXISTS search_top_is numeric;
+
 CREATE TABLE IF NOT EXISTS paid_search_query_daily (
-  kind text NOT NULL CHECK (kind IN ('query', 'page', 'chart')),
+  kind text NOT NULL CHECK (kind IN ('query', 'page', 'chart', 'appearance')),
   date text NOT NULL DEFAULT '',
   query text NOT NULL,
   clicks numeric NOT NULL DEFAULT 0,

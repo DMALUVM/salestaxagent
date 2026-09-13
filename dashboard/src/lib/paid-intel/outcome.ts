@@ -55,6 +55,10 @@ export function measureCheck(check: IntelCheck, ctx: MeasureContext): number | n
       const c = campaign(ctx, check.subject);
       return c?.lost_is_budget ?? null;
     }
+    case "campaign_search_impr_share": {
+      const c = campaign(ctx, check.subject);
+      return c?.search_impr_share ?? null;
+    }
     case "campaign_frequency": {
       const c = campaign(ctx, check.subject);
       if (!c) return null;
@@ -103,6 +107,10 @@ export function measureCheck(check: IntelCheck, ctx: MeasureContext): number | n
     case "url_ctr": {
       const p = ctx.queries.find((r) => r.kind === "page" && r.query.includes(check.subject ?? "\u0000"));
       return p?.ctr ?? null;
+    }
+    case "appearance_ctr": {
+      const q = ctx.queries.find((r) => r.kind === "appearance" && r.query === check.subject);
+      return q?.ctr ?? null;
     }
     default:
       return null;

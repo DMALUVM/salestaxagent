@@ -278,6 +278,7 @@ describe("page / API invariants", () => {
   const nav = readFileSync(path.join(root, "src/components/nav.tsx"), "utf8");
   const migration = readFileSync(path.join(root, "../supabase/migration_paid_ads.sql"), "utf8");
   const intelMig = readFileSync(path.join(root, "../supabase/migration_paid_intel.sql"), "utf8");
+  const appearanceMig = readFileSync(path.join(root, "../supabase/migration_paid_intel_appearance.sql"), "utf8");
 
   test("nav lists Paid Ads under MONITORING near Amazon PPC", () => {
     assert.match(nav, /href: "\/ppc"/);
@@ -337,6 +338,7 @@ describe("page / API invariants", () => {
     assert.match(howto, /Queries\.csv/);
     assert.match(howto, /Pages\.csv/);
     assert.match(howto, /Chart\.csv/);
+    assert.match(howto, /Search Appearance\.csv/);
     assert.doesNotMatch(howto, /resource_id/);
     assert.match(howto, /Tallowbourn Ads Ops Daily/);
     assert.match(howto, /Tallowbourn Meta Ads Ops Daily/);
@@ -426,6 +428,13 @@ describe("page / API invariants", () => {
     assert.match(intelMig, /CREATE TABLE IF NOT EXISTS paid_campaign_daily/);
     assert.doesNotMatch(intelMig, /DROP TABLE|TRUNCATE TABLE/i);
     assert.doesNotMatch(intelMig, /ENABLE ROW LEVEL SECURITY/);
+    assert.match(appearanceMig, /paid_search_query_daily_kind_check/);
+    assert.match(appearanceMig, /appearance/);
+    assert.match(appearanceMig, /search_impr_share/);
+    assert.match(appearanceMig, /search_top_is/);
+    assert.match(appearanceMig, /DROP CONSTRAINT/);
+    assert.doesNotMatch(appearanceMig, /DROP TABLE|TRUNCATE TABLE/i);
+    assert.doesNotMatch(appearanceMig, /ENABLE ROW LEVEL SECURITY/);
   });
 
   test("migration matches production and does not drop or lock down", () => {

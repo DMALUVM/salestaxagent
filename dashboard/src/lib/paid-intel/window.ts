@@ -48,7 +48,9 @@ export function buildFreshness(opts: {
   const google = opts.campaigns.filter((r) => r.platform !== "meta");
   const meta = opts.campaigns.filter((r) => r.platform === "meta");
   const trend = opts.queries.filter((q) => q.kind === "chart" || (q.date && !q.kind));
-  const snapshot = opts.queries.filter((q) => !q.date);
+  const snapshot = opts.queries.filter((q) =>
+    !q.date && (q.kind === "query" || q.kind === "page" || !q.kind));
+  const appearance = opts.queries.filter((q) => q.kind === "appearance");
 
   const asOf = opts.asOf
     ?? maxPaidDate(opts.campaigns)
@@ -114,6 +116,21 @@ export function buildFreshness(opts: {
       label: "Search Console snapshot",
       file: "Queries.csv + Pages.csv",
       rows: opts.stats?.gsc_snapshot?.rows ?? snapshot.length,
+      min_date: null,
+      max_date: null,
+      days_behind: null,
+      stale: false,
+      dated: false,
+      days_in_range: 0,
+      range_days: range,
+      expected_days: 0,
+      coverage: null,
+    },
+    {
+      source: "gsc_appearance",
+      label: "Search appearance",
+      file: "Search Appearance.csv",
+      rows: opts.stats?.gsc_appearance?.rows ?? appearance.length,
       min_date: null,
       max_date: null,
       days_behind: null,
@@ -227,7 +244,8 @@ export function aggregateCampaigns(rows: CampaignDaily[]): CampaignAgg[] {
   for (const list of map.values()) {
     const first = list[0];
     let spend = 0, conv = 0, clicks = 0, impressions = 0, conversions = 0;
-    let lostNum = 0, lostDen = 0, freqNum = 0, freqDen = 0, freqPeak: number | null = null;
+    let lostNum = 0, lostDen = 0, shareNum = 0, shareDen = 0, topNum = 0, topDen = 0;
+    let freqNum = 0, freqDen = 0, freqPeak: number | null = null;
     const dates = new Set<string>();
     let status: string | null = first.status;
     for (const r of list) {
@@ -240,6 +258,14 @@ export function aggregateCampaigns(rows: CampaignDaily[]): CampaignAgg[] {
       if (r.lost_is_budget != null && r.impressions > 0) {
         lostNum += r.lost_is_budget * r.impressions;
         lostDen += r.impressions;
+      }
+      if (r.search_impr_share != null && r.impressions > 0) {
+        shareNum += r.search_impr_share * r.impressions;
+        shareDen += r.impressions;
+      }
+      if (r.search_top_is != null && r.impressions > 0) {
+        topNum += r.search_top_is * r.impressions;
+        topDen += r.impressions;
       }
       if (r.frequency != null && r.impressions > 0) {
         freqNum += r.frequency * r.impressions;
@@ -265,6 +291,8 @@ export function aggregateCampaigns(rows: CampaignDaily[]): CampaignAgg[] {
       roas: deriveRoas(spend, conv),
       cpc: deriveCpc(spend, clicks),
       lost_is_budget: lostDen ? lostNum / lostDen : null,
+      search_impr_share: shareDen ? shareNum / shareDen : null,
+      search_top_is: topDen ? topNum / topDen : null,
       frequency: freqDen ? freqNum / freqDen : null,
       frequency_peak: freqPeak,
       status,

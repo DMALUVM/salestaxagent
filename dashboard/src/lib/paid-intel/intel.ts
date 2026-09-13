@@ -432,6 +432,74 @@ function detectLostIs(camps: CampaignAgg[]): IntelCard | null {
   });
 }
 
+/**
+ * Low impression share / top IS with healthy ROAS is a raise/inspect signal.
+ * Lost-budget trap (low ROAS) stays a cut. Do not invent a Blake-unasked cut.
+ */
+function detectLowShareHealthyRoas(camps: CampaignAgg[]): IntelCard | null {
+  const hits = camps.filter((c) => {
+    if (c.platform !== "google" || c.is_brand || c.spend < 20 || c.roas < 1.5) return false;
+    if ((c.lost_is_budget ?? 0) > 12) return false; // lost-is cards own budget-constrained rows
+    const share = c.search_impr_share;
+    const top = c.search_top_is;
+    return (share != null && share < 35) || (top != null && top < 20);
+  });
+  if (!hits.length) return null;
+  const top = hits.sort((a, b) =>
+    (a.search_impr_share ?? a.search_top_is ?? 99) - (b.search_impr_share ?? b.search_top_is ?? 99)
+    || b.spend - a.spend)[0];
+  const share = top.search_impr_share;
+  const topIs = top.search_top_is;
+  const stake = round2(top.spend * 0.12);
+  return card({
+    id: "low-share-raise",
+    title: `${top.campaign_name} is winning when it shows — share is the cap`,
+    body: `${top.campaign_name} is ${roas(top.roas)} on ${money(top.spend)} but impression share is ${share == null ? "—" : share.toFixed(0)}% and top IS is ${topIs == null ? "—" : topIs.toFixed(0)}%. That is unused eligible demand, not a cut signal.`,
+    doThis: `7-day test: inspect auction insights on ${top.campaign_name}. If the query mix is still healthy, raise bids or daily budget ~10–15%. Recommend-only — do not invent a cut, and do not move leftover to Brand Search.`,
+    ifItWorks: `Impr. share on ${top.campaign_name} rises toward 40% and ROAS stays ≥ 1.4x.`,
+    evidence: hits.slice(0, 4).map((c) =>
+      `${c.campaign_name} share ${c.search_impr_share?.toFixed(0) ?? "—"}% · top IS ${c.search_top_is?.toFixed(0) ?? "—"}% · ${roas(c.roas)} · ${money(c.spend)}`).join("; "),
+    stake: Math.max(stake, 25),
+    metric: `share ${share?.toFixed(0) ?? "—"}% · top IS ${topIs?.toFixed(0) ?? "—"}% · ${roas(top.roas)} — inspect/raise`,
+    action: "keep",
+    check: check("campaign_search_impr_share", top.campaign_name, "up", 40, "pct", `${top.campaign_name} impr. share`),
+  });
+}
+
+function detectAppearanceGap(queries: SearchQueryDaily[]): IntelCard | null {
+  const rows = queries.filter((q) => q.kind === "appearance" && q.date === "");
+  if (rows.length < 2) return null;
+  const snippets = rows.find((q) => /product snippet/i.test(q.query));
+  const merchant = rows.find((q) => /merchant listing/i.test(q.query));
+  const weak = snippets && snippets.impressions >= 400
+    && ((snippets.ctr ?? 100) < 2 || (snippets.position ?? 0) >= 8)
+    ? snippets
+    : [...rows].filter((q) =>
+      q.impressions >= 400 && ((q.ctr ?? 100) < 2 || (q.position ?? 0) >= 8)
+      && !/merchant listing/i.test(q.query))
+      .sort((a, b) => b.impressions - a.impressions)[0] ?? null;
+  if (!weak) return null;
+  const strong = merchant && (merchant.position ?? 99) <= 4
+    ? merchant
+    : [...rows].filter((q) => q.query !== weak.query && (q.position ?? 99) <= 4)
+      .sort((a, b) => (a.position ?? 99) - (b.position ?? 99))[0] ?? merchant ?? null;
+  if (!strong) return null;
+  return card({
+    id: "gsc-appearance",
+    owner: "site",
+    title: `${weak.query} shows a lot and earns little vs ${strong.query}`,
+    body: `${weak.query} has ${fmtInt(weak.impressions)} impressions at CTR ${weak.ctr?.toFixed(2) ?? "—"}% and position ${weak.position?.toFixed(1) ?? "—"}. ${strong.query} is already at position ${strong.position?.toFixed(1) ?? "—"} with CTR ${strong.ctr?.toFixed(2) ?? "—"}%. This is a rich-result / merchant-listing coverage gap, not a PDP redesign.`,
+    doThis: `7-day test: Nora/Blair — expand Merchant listings and product rich results (Merchant Center feed, product structured data, GTIN / price / availability). Do not redesign Extra Strength or any converting PDP.`,
+    ifItWorks: `CTR on ${weak.query} rises on the next Search Appearance.csv, or ${strong.query} picks up more of the impression mix.`,
+    evidence: rows.slice(0, 6).map((q) =>
+      `${q.query} ${q.impressions} impr · CTR ${q.ctr?.toFixed(2) ?? "—"}% · pos ${q.position?.toFixed(1) ?? "—"}`).join("; "),
+    stake: round2(Math.max(weak.impressions * 0.02, 40)),
+    metric: `${weak.query} CTR ${weak.ctr?.toFixed(2) ?? "—"}% at pos ${weak.position?.toFixed(1) ?? "—"} — rich results`,
+    action: "fix",
+    check: check("appearance_ctr", weak.query, "up", round4((weak.ctr ?? 0) * 2 || 1), "pct", `CTR on ${weak.query}`),
+  });
+}
+
 function detectPmaxVsSearch(camps: CampaignAgg[]): IntelCard | null {
   const pmax = camps.filter((c) => c.platform === "google" && c.campaign_type === "PMax" && !c.is_brand);
   const search = camps.filter((c) => c.platform === "google" && c.campaign_type === "Search" && !c.is_brand);
@@ -804,6 +872,27 @@ function winLose(camps: CampaignAgg[]): { wins: WinLoseRow[]; losses: WinLoseRow
   };
 }
 
+const PAID_LANDER = /^(paid search|cross-network|paid social)$/i;
+
+function paidLandersOf(ga: GaDaily[]) {
+  const by = new Map<string, { page: string; channel: string; sessions: number; revenue: number; key_events: number }>();
+  for (const r of ga) {
+    if (!PAID_LANDER.test(r.channel_group)) continue;
+    const key = `${r.channel_group}|${r.landing_page}`;
+    const cur = by.get(key) ?? {
+      page: r.landing_page, channel: r.channel_group, sessions: 0, revenue: 0, key_events: 0,
+    };
+    cur.sessions += r.sessions;
+    cur.revenue += r.revenue;
+    cur.key_events += r.key_events;
+    by.set(key, cur);
+  }
+  return [...by.values()]
+    .sort((a, b) => b.sessions - a.sessions || b.revenue - a.revenue)
+    .slice(0, 8)
+    .map((r) => ({ ...r, revenue: round2(r.revenue) }));
+}
+
 function gaRollup(ga: GaDaily[]) {
   const ch = new Map<string, { sessions: number; revenue: number; key_events: number; bounce: number; bn: number }>();
   const dev = new Map<string, { sessions: number; key_events: number; revenue: number }>();
@@ -882,7 +971,7 @@ export function buildIntel(opts: {
       kpis: { google: emptyK, meta: kpisOf([], "meta"), blended: emptyB },
       wow: { last: emptyB, prior: emptyB },
       campaigns: [], products: [], cards: [], log: [], wins: [], losses: [], daily: [],
-      gsc: { hidden: filter === "meta", queries: [], pages: [], chart: [] },
+      gsc: { hidden: filter === "meta", queries: [], pages: [], chart: [], appearance: [] },
       ga4: {
         channels: [], devices: [], landings: [], unassigned_share: 0,
         paid_social_sessions: 0, paid_search_sessions: 0, cross_network_sessions: 0, paid_revenue: 0,
@@ -920,6 +1009,7 @@ export function buildIntel(opts: {
   const queries = hideGsc ? [] : snapshotQueries(opts.queries, "query").slice(0, 40);
   const pages = hideGsc ? [] : snapshotQueries(opts.queries, "page").slice(0, 40);
   const chart = hideGsc ? [] : snapshotQueries(opts.queries, "chart");
+  const appearance = hideGsc ? [] : snapshotQueries(opts.queries, "appearance");
 
   const last7Camps = aggregateCampaigns(last7);
   const rawCards = [
@@ -933,6 +1023,7 @@ export function buildIntel(opts: {
     detectProspectRetarget(last7Camps),
     detectLostIsTrap(last7Camps),
     detectLostIs(last7Camps),
+    detectLowShareHealthyRoas(last7Camps),
     detectPmaxHold(last7Camps),
     detectPmaxVsSearch(last7Camps),
     detectShoppingVsPmax(last7Camps),
@@ -941,6 +1032,7 @@ export function buildIntel(opts: {
     hideGsc ? null : detectGscClimb(opts.queries),
     hideGsc ? null : detectGscPosition(opts.queries),
     hideGsc ? null : detectLowCtrTitles(opts.queries),
+    hideGsc ? null : detectAppearanceGap(opts.queries),
     detectMobileLeak(ga7),
     detectBounce(ga7),
     detectPdpWinners(ga7),
@@ -1016,7 +1108,7 @@ export function buildIntel(opts: {
 
   const grok = buildGrok({
     asOf, range, google, meta, blended, wow, camps, products, cards, brief,
-    site: siteCtx, queries, pages, ga4,
+    site: siteCtx, queries, pages, appearance, paidLanders: paidLandersOf(ga), ga4,
   });
   const chartRows = opts.campaigns.filter((r) => filter === "all" || r.platform === filter);
 
@@ -1035,7 +1127,7 @@ export function buildIntel(opts: {
     wins,
     losses,
     daily: dailySeries(chartRows, asOf, range || 30),
-    gsc: { hidden: hideGsc, queries, pages, chart },
+    gsc: { hidden: hideGsc, queries, pages, chart, appearance },
     ga4,
     grok,
     web_insights: buildWebInsights({
@@ -1143,6 +1235,7 @@ function emptySnapshot() {
       google: kpisOf([], "google"), meta: kpisOf([], "meta"),
       blended_ads_roas: 0, ga4_paid_revenue: 0, ga4_last_click_roas: null,
     },
-    campaigns: [], products: [], searchTop: [], landings: [], ga4Channels: [],
+    campaigns: [], products: [], searchTop: [], search_appearance: [],
+    landings: [], paidLanders: [], ga4Channels: [],
   };
 }
