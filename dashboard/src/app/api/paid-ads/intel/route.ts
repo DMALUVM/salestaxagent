@@ -119,6 +119,8 @@ function campRow(r: Record<string, unknown>): CampaignDaily | null {
     conversions: num(r.conversions),
     lost_is_budget: r.lost_is_budget == null ? null : num(r.lost_is_budget),
     lost_is_rank: r.lost_is_rank == null ? null : num(r.lost_is_rank),
+    search_impr_share: r.search_impr_share == null ? null : num(r.search_impr_share),
+    search_top_is: r.search_top_is == null ? null : num(r.search_top_is),
     frequency: r.frequency == null ? null : num(r.frequency),
     frequency_peak: r.frequency_peak == null ? null : num(r.frequency_peak),
     status: typeof r.status === "string" ? r.status : null,
@@ -127,7 +129,7 @@ function campRow(r: Record<string, unknown>): CampaignDaily | null {
 
 function queryRow(r: Record<string, unknown>): SearchQueryDaily | null {
   const kind = r.kind;
-  if (kind !== "query" && kind !== "page" && kind !== "chart") return null;
+  if (kind !== "query" && kind !== "page" && kind !== "chart" && kind !== "appearance") return null;
   const query = String(r.query ?? "").trim();
   if (!query) return null;
   return {
@@ -190,15 +192,23 @@ export async function GET(request: Request) {
     const filter = (INTEL_FILTERS as readonly string[]).includes(rawFilter) ? rawFilter : "all";
 
     // Stats first: they give the as-of and the true history span cheaply.
-    const [sGoogle, sMeta, sGa, sTrend, sSnap] = await Promise.all([
+    const [sGoogle, sMeta, sGa, sTrend, sQuery, sPage, sAppearance] = await Promise.all([
       tableStats("paid_campaign_daily", { eq: { platform: "google" } }),
       tableStats("paid_campaign_daily", { eq: { platform: "meta" } }),
       tableStats("paid_ga_daily"),
       tableStats("paid_search_query_daily", { eq: { kind: "chart" } }),
-      tableStats("paid_search_query_daily", { eq: { date: "" } }),
+      tableStats("paid_search_query_daily", { eq: { kind: "query" } }),
+      tableStats("paid_search_query_daily", { eq: { kind: "page" } }),
+      tableStats("paid_search_query_daily", { eq: { kind: "appearance" } }),
     ]);
     const stats = {
-      google: sGoogle, meta: sMeta, ga4: sGa, gsc_trend: sTrend, gsc_snapshot: sSnap,
+      google: sGoogle, meta: sMeta, ga4: sGa, gsc_trend: sTrend,
+      gsc_snapshot: {
+        rows: sQuery.rows + sPage.rows,
+        min_date: null,
+        max_date: null,
+      },
+      gsc_appearance: sAppearance,
     };
 
     const asOf = [sGoogle.max_date, sMeta.max_date, sGa.max_date]

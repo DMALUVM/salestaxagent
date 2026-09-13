@@ -115,6 +115,7 @@ export function buildDeskPrompt(
   cards: IntelCard[],
   ctx: PromptContext,
   brief?: string,
+  yieldBlock?: string,
 ): string {
   const role = label === "ads"
     ? "You are the Shopify paid-media agent for Tallowbourn (Google Ads + Meta)."
@@ -129,6 +130,7 @@ export function buildDeskPrompt(
     ...(label === "ads" ? ADS_RULES : SITE_RULES),
   ];
   if (brief) lines.push("", brief);
+  if (yieldBlock) lines.push("", yieldBlock);
   lines.push("", "## Stack (ranked by $ at stake)");
   if (!cards.length) {
     lines.push("Nothing for this desk in the current window.");
@@ -165,6 +167,8 @@ export function buildGrok(opts: {
   cards: IntelCard[];
   queries: SearchQueryDaily[];
   pages: SearchQueryDaily[];
+  appearance?: SearchQueryDaily[];
+  paidLanders?: Array<{ page: string; channel: string; sessions: number; revenue: number; key_events: number }>;
   ga4: {
     channels: Array<{ channel: string; sessions: number; revenue: number; key_events: number }>;
     landings: Array<{ page: string; sessions: number; revenue: number; bounce: number | null; key_events: number }>;
@@ -191,12 +195,18 @@ export function buildGrok(opts: {
       conv_value: c.conv_value,
       roas: c.roas,
       conversions: c.conversions,
+      ...(c.search_impr_share != null ? { search_impr_share: c.search_impr_share } : {}),
+      ...(c.search_top_is != null ? { search_top_is: c.search_top_is } : {}),
     })),
     products: opts.products,
     searchTop: opts.queries.slice(0, 15).map((q) => ({
       query: q.query, clicks: q.clicks, impressions: q.impressions, ctr: q.ctr, position: q.position,
     })),
+    search_appearance: (opts.appearance ?? []).slice(0, 12).map((q) => ({
+      appearance: q.query, clicks: q.clicks, impressions: q.impressions, ctr: q.ctr, position: q.position,
+    })),
     landings: opts.ga4.landings.slice(0, 12),
+    paidLanders: (opts.paidLanders ?? []).slice(0, 8),
     ga4Channels: opts.ga4.channels.slice(0, 12),
   };
 
@@ -240,6 +250,9 @@ export function buildGrok(opts: {
   const next = dump("Paid media — ads lead (ranked by $ at stake)", ads, 1);
   dump("Site & conversion — web team (ranked by $ at stake)", site, next);
   if (!opts.cards.length) lines.push("", "1. No keep/kill cards — upload a Google or Meta CSV.");
+  const adsYield = formatUploadYield("ads", opts);
+  const siteYield = formatUploadYield("site", opts);
+  if (adsYield) lines.push("", adsYield);
   lines.push("", "## JSON snapshot", "```json", JSON.stringify(snapshot, null, 2), "```", "");
   const ctx: PromptContext = {
     asOf: opts.asOf, google: opts.google, meta: opts.meta, blended: opts.blended,
@@ -248,7 +261,71 @@ export function buildGrok(opts: {
   return {
     markdown: lines.join("\n"),
     snapshot,
-    adsDesk: buildDeskPrompt("ads", ads, ctx, opts.brief?.adsHeadline || opts.brief?.headline),
-    siteDesk: buildDeskPrompt("site", site, ctx, opts.brief?.siteHeadline),
+    adsDesk: buildDeskPrompt("ads", ads, ctx, opts.brief?.adsHeadline || opts.brief?.headline, adsYield),
+    siteDesk: buildDeskPrompt("site", site, ctx, opts.brief?.siteHeadline, siteYield),
   };
+}
+
+function formatUploadYield(
+  desk: "ads" | "site",
+  opts: {
+    camps: CampaignAgg[];
+    pages: SearchQueryDaily[];
+    appearance?: SearchQueryDaily[];
+    paidLanders?: Array<{ page: string; channel: string; sessions: number; revenue: number; key_events: number }>;
+  },
+): string {
+  const lines = [
+    "## Upload yield",
+    "Evidence from this upload. Observe only — not a budget instruction.",
+  ];
+  const appearance = [...(opts.appearance ?? [])]
+    .sort((a, b) => b.impressions - a.impressions || b.clicks - a.clicks)
+    .slice(0, 8);
+  if (appearance.length) {
+    lines.push("Search appearance:");
+    for (const r of appearance) {
+      lines.push(
+        `- ${r.query}: ${r.clicks} clicks · ${r.impressions} impr · CTR ${r.ctr?.toFixed(2) ?? "—"}% · pos ${r.position?.toFixed(2) ?? "—"}`,
+      );
+    }
+  }
+  if (desk === "ads") {
+    const share = opts.camps
+      .filter((c) => c.platform === "google" && (c.search_impr_share != null || c.search_top_is != null))
+      .sort((a, b) =>
+        (a.search_impr_share ?? 999) - (b.search_impr_share ?? 999)
+        || (a.search_top_is ?? 999) - (b.search_top_is ?? 999))
+      .slice(0, 6);
+    if (share.length) {
+      lines.push("Google campaigns with lowest impr share / top IS:");
+      for (const c of share) {
+        lines.push(
+          `- ${c.campaign_name}: impr share ${c.search_impr_share?.toFixed(1) ?? "—"}% · top IS ${c.search_top_is?.toFixed(1) ?? "—"}% · ${money(c.spend)} · ${c.roas.toFixed(2)}x`,
+        );
+      }
+    }
+  }
+  const pages = [...opts.pages].sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions).slice(0, 6);
+  if (pages.length) {
+    lines.push("Top GSC pages by clicks:");
+    for (const p of pages) {
+      const path = p.query.replace(/^https?:\/\/[^/]+/, "") || p.query;
+      lines.push(
+        `- ${path}: ${p.clicks} clicks · ${p.impressions} impr · CTR ${p.ctr?.toFixed(2) ?? "—"}%`,
+      );
+    }
+  }
+  const landers = (opts.paidLanders ?? []).slice(0, 6);
+  if (landers.length) {
+    lines.push(
+      desk === "ads"
+        ? "Top paid GA4 landers (Paid Search / Cross-network / Paid Social; last-click, not ad-platform conversion value):"
+        : "Top paid GA4 landers (Paid Search / Cross-network / Paid Social; last-click sessions and revenue):",
+    );
+    for (const l of landers) {
+      lines.push(`- ${l.channel} ${l.page}: ${l.sessions} sess · ${money(l.revenue)}`);
+    }
+  }
+  return lines.length > 2 ? lines.join("\n") : "";
 }

@@ -7,24 +7,25 @@ Range 7/14/30/90/365/all is relative to the **max date in the files**, not today
 
 | Source | File | Warehouse |
 |---|---|---|
-| Google Ads Daily (Campaign × Day, typed columns or Cost/Impr./Clicks/Conv.) | `paid_campaign_daily` `platform=google` | Upsert `platform\|date\|campaign_name` |
+| Google Ads Daily (Campaign × Day, typed columns or Cost/Impr./Clicks/Conv.) | `paid_campaign_daily` `platform=google` | Upsert `platform\|date\|campaign_name`. Typed `Search_Search top IS` / `Search_Search impr. share` (and Shopping/PMax equivalents) store as `search_top_is` / `search_impr_share` from the dominant campaign type. Lost IS budget/rank unchanged. |
 | Meta Ads Manager campaign export | `paid_campaign_daily` `platform=meta` | Skip $0 **and** 0-impression days. Never map CPC / cost-per-purchase as spend or revenue. |
-| GSC `Queries.csv` + `Pages.csv` + `Chart.csv` (or a zip of those) | `paid_search_query_daily` | Queries/Pages are snapshots (`date=''`) and replace other empty-date rows of that kind only. Chart is daily. Do not invent Δ position from Queries.csv. |
+| GSC `Queries.csv` + `Pages.csv` + `Chart.csv` + **`Search Appearance.csv`** (or a zip of those) | `paid_search_query_daily` | Queries/Pages/Appearance are snapshots (`date=''`) and replace other empty-date rows of that kind only. Chart is daily. Do not invent Δ position from Queries.csv. Appearance `query` = appearance name (e.g. Product snippets). |
 | GA4 Explore | `paid_ga_daily` | Skip `#` comments and Grand total. Do not treat Total revenue as ads conversion value. Cross-network ≈ PMax. |
 
 HTTP: `POST /api/paid-ads/csv` (multipart files or JSON `{ files: [{ name, content }] }`).
 Read: `GET /api/paid-ads/intel?range=7&filter=all`.
 Track: `POST /api/paid-ads/decision` `{ card_id, as_of, status: applied|dismissed|open }`.
 
-**Select all the files at once.** Each file is identified by its header, not its
-name, so one upload can carry Google + Meta + Queries + Pages + Chart + GA4.
+**Select all seven files at once.** Each file is identified by its header, not its
+name, so one upload can carry Google + Meta + Queries + Pages + Chart +
+**Search Appearance** + GA4. Search Appearance.csv is the recommended 7th file.
 The response is a receipt: per-file kind, row count, and date span, plus the
 `skipped` list for anything unrecognised.
 
 **Upload never truncates.** Daily rows upsert on their key, so a 7-day export
 overwrites only those 7 days and leaves the rest of the history alone. Only the
-undated GSC snapshots (`Queries.csv`, `Pages.csv`) replace the previous snapshot
-of that same kind — they carry no date to key on.
+undated GSC snapshots (`Queries.csv`, `Pages.csv`, `Search Appearance.csv`)
+replace the previous snapshot of that same kind — they carry no date to key on.
 
 **Freshness** is measured against the real calendar (`America/New_York`), not the
 file as-of: once the newest paid row is `STALE_AFTER_DAYS` (7) behind, the page
@@ -44,8 +45,15 @@ lead and **Site & conversion** for the web team. Every card is a 7-day test with
 a keep/kill metric. Never move Meta/PMax onto Brand Search. Win/lose tables
 require spend ≥ $1.
 
-Copy for Grok = keep/kill prompt + numbered stack + JSON snapshot. Each desk
-also exports on its own, and each card carries a self-contained prompt.
+Copy for Grok = keep/kill prompt + numbered stack + **Upload yield** evidence
+(Search appearance, worst Google impr share / top IS, top GSC pages, paid GA4
+landers) + JSON snapshot (`search_appearance[]` and campaign share fields when
+present). Each desk also exports on its own, and each card carries a
+self-contained prompt.
+
+Migration: `supabase/migration_paid_intel.sql` plus additive
+`supabase/migration_paid_intel_appearance.sql` (CHECK widen + share columns;
+no DROP TABLE, no RLS).
 
 ## Outcome loop
 
@@ -76,8 +84,6 @@ GA4 traffic actually landed (`/products/...` key events, then revenue, then
 sessions). The ads conversion-value **total is never replaced** by GA4 revenue —
 only its distribution across products is estimated, and every estimated row is
 flagged `estimated: true`.
-
-Migration: `supabase/migration_paid_intel.sql` (additive, no DROP, no RLS).
 
 ---
 

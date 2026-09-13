@@ -2,8 +2,8 @@ import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
 import {
   dedupeCampaigns, dedupeGa, dedupeQueries, mergeParsed,
-  parseNamedFile, parseZipBuffer, type CampaignDaily, type GaDaily,
-  type ParsedFiles, type SearchQueryDaily,
+  parseNamedFile, parseZipBuffer, snapshotKindsToReplace, type CampaignDaily,
+  type GaDaily, type ParsedFiles, type SearchQueryDaily,
 } from "@/lib/paid-intel";
 
 export const runtime = "nodejs";
@@ -29,6 +29,8 @@ function toCampRow(r: CampaignDaily, ingestedAt: string) {
     conversions: r.conversions,
     lost_is_budget: r.lost_is_budget,
     lost_is_rank: r.lost_is_rank,
+    search_impr_share: r.search_impr_share ?? null,
+    search_top_is: r.search_top_is ?? null,
     frequency: r.frequency,
     frequency_peak: r.frequency_peak,
     status: r.status,
@@ -117,7 +119,8 @@ async function parseRequest(request: NextRequest): Promise<ParsedFiles> {
 /**
  * POST /api/paid-ads/csv
  * Upsert Google / Meta / GSC / GA4 CSVs. Matching days overwrite; older days stay.
- * Empty-date GSC snapshots replace other empty-date rows of the same kind only.
+ * Empty-date GSC snapshots (query / page / appearance) replace other
+ * empty-date rows of the same kind only.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -137,9 +140,7 @@ export async function POST(request: NextRequest) {
     const ingestedAt = new Date().toISOString();
     const sb = getServerSupabase();
 
-    const snapshotKinds = new Set(
-      queries.filter((q) => q.date === "" && (q.kind === "query" || q.kind === "page")).map((q) => q.kind),
-    );
+    const snapshotKinds = snapshotKindsToReplace(queries);
     for (const kind of snapshotKinds) {
       const { error } = await sb
         .from("paid_search_query_daily")

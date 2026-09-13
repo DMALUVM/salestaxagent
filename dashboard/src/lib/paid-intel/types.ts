@@ -12,7 +12,7 @@ export type IntelFilter = (typeof INTEL_FILTERS)[number];
 export type CampaignType = "Search" | "Shopping" | "PMax" | "DemandGen" | "Other";
 export type ProductLine = "deodorant" | "balm" | "soap" | "lip" | "other";
 export type Audience = "prospect" | "retarget" | "unknown";
-export type SearchKind = "query" | "page" | "chart";
+export type SearchKind = "query" | "page" | "chart" | "appearance";
 
 export interface CampaignDaily {
   platform: PaidPlatform;
@@ -29,6 +29,10 @@ export interface CampaignDaily {
   conversions: number;
   lost_is_budget: number | null;
   lost_is_rank: number | null;
+  /** Google impr. share 0–100 from the dominant typed prefix. */
+  search_impr_share?: number | null;
+  /** Google top IS 0–100 from the dominant typed prefix. */
+  search_top_is?: number | null;
   frequency: number | null;
   /** Worst ad set inside the campaign that day. Only set by ad-set exports. */
   frequency_peak: number | null;
@@ -76,7 +80,7 @@ export interface ParsedFiles {
   accepted: AcceptedFile[];
 }
 
-export type FreshnessSource = "google" | "meta" | "ga4" | "gsc_trend" | "gsc_snapshot";
+export type FreshnessSource = "google" | "meta" | "ga4" | "gsc_trend" | "gsc_snapshot" | "gsc_appearance";
 
 export interface SourceFreshness {
   source: FreshnessSource;
@@ -129,6 +133,8 @@ export interface CampaignAgg {
   roas: number;
   cpc: number;
   lost_is_budget: number | null;
+  search_impr_share?: number | null;
+  search_top_is?: number | null;
   frequency: number | null;
   frequency_peak: number | null;
   status: string | null;
@@ -189,6 +195,8 @@ export const CHECK_KINDS = [
   "page_key_events",
   "query_ctr",
   "url_ctr",
+  "appearance_ctr",
+  "campaign_search_impr_share",
 ] as const;
 export type CheckKind = (typeof CHECK_KINDS)[number];
 
@@ -304,10 +312,14 @@ export interface GrokSnapshot {
     conv_value: number;
     roas: number;
     conversions: number;
+    search_impr_share?: number | null;
+    search_top_is?: number | null;
   }>;
   products: ProductAgg[];
   searchTop: Array<{ query: string; clicks: number; impressions: number; ctr: number | null; position: number | null }>;
+  search_appearance: Array<{ appearance: string; clicks: number; impressions: number; ctr: number | null; position: number | null }>;
   landings: Array<{ page: string; sessions: number; revenue: number; bounce: number | null; key_events: number }>;
+  paidLanders: Array<{ page: string; channel: string; sessions: number; revenue: number; key_events: number }>;
   ga4Channels: Array<{ channel: string; sessions: number; revenue: number; key_events: number }>;
 }
 
@@ -395,6 +407,7 @@ export interface IntelBundle {
     queries: SearchQueryDaily[];
     pages: SearchQueryDaily[];
     chart: SearchQueryDaily[];
+    appearance: SearchQueryDaily[];
   };
   ga4: {
     channels: Array<{ channel: string; sessions: number; revenue: number; key_events: number; bounce: number | null }>;

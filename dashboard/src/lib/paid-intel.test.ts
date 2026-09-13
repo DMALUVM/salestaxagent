@@ -10,11 +10,13 @@ import {
   detectKind,
   parseGa4Csv,
   parseGoogleCsv,
+  parseGscAppearance,
   parseGscChart,
   parseGscPages,
   parseGscQueries,
   parseMetaCsv,
   parseNamedFile,
+  snapshotKindsToReplace,
   mergeParsed,
   rangeStart,
   isBrandCampaign,
@@ -114,7 +116,7 @@ describe("multi-file upload, receipts, freshness, and decisions", { skip: !haveU
 
     const w7 = at(7);
     const kinds = w7.sources.map((s) => s.source);
-    assert.deepEqual(kinds, ["google", "meta", "ga4", "gsc_trend", "gsc_snapshot"]);
+    assert.deepEqual(kinds, ["google", "meta", "ga4", "gsc_trend", "gsc_snapshot", "gsc_appearance"]);
 
     const g7 = w7.sources.find((s) => s.source === "google")!;
     assert.equal(g7.max_date, "2026-08-24");
@@ -774,5 +776,172 @@ describe("parsers on the attached Tallowbourn files", { skip: !haveUploads }, ()
     assert.ok(pmax);
     const ga4Paid = intel.ga4.paid_revenue;
     assert.notEqual(pmax!.conv_value, ga4Paid);
+  });
+});
+
+const APPEARANCE_CSV = [
+  "Search Appearance,Clicks,Impressions,CTR,Position",
+  "Product snippets,20,2077,0.96%,16.59",
+  "Merchant listings,6,525,1.14%,1.15",
+].join("\n");
+
+const GOOGLE_TYPED = [
+  "Campaign,Day,Search_Clicks,Search_Cost,Search_Conv. value,Search_Impr.,Search_Conversions,Search_Search top IS,Search_Search impr. share,Search_Search lost IS (rank),Search_Search lost IS (budget),Performance Max_Cost,Performance Max_Search top IS,Performance Max_Search impr. share",
+  "AI MAX - Search - Campaign V1,2026-09-10,40,80,200,2000,4,12.5%,22.0%,10%,5%,0,,",
+  "TALLOWBOURN- PMAX - Max Conversions - Campaign V4,2026-09-10,0,0,0,0,0,,, , ,100,8%,15%",
+].join("\n");
+
+describe("Search Appearance ingest", () => {
+  test("detectKind reads Search Appearance header, not Top queries / Pages / Chart", () => {
+    assert.equal(detectKind("Search Appearance.csv", APPEARANCE_CSV), "gsc_appearance");
+    assert.equal(detectKind("Queries.csv", "Top queries,Clicks,Impressions,CTR,Position\ntallow,1,10,10%,4"), "gsc_queries");
+    assert.equal(detectKind("Pages.csv", "Top pages,Clicks,Impressions,CTR,Position\nhttps://tallowbourn.com/,1,10,10%,2"), "gsc_pages");
+    assert.equal(detectKind("Chart.csv", "Date,Clicks,Impressions,CTR,Position\n2026-09-10,1,10,10%,4"), "gsc_chart");
+    assert.notEqual(detectKind("Search Appearance.csv", APPEARANCE_CSV), "unknown");
+  });
+
+  test("parse stores kind=appearance, date='', query=appearance name", () => {
+    const rows = parseGscAppearance(APPEARANCE_CSV);
+    assert.equal(rows.length, 2);
+    assert.ok(rows.every((r) => r.kind === "appearance" && r.date === ""));
+    const snippets = rows.find((r) => r.query === "Product snippets")!;
+    assert.equal(snippets.clicks, 20);
+    assert.equal(snippets.impressions, 2077);
+    assert.equal(snippets.ctr, 0.96);
+    assert.equal(snippets.position, 16.59);
+    const merchant = rows.find((r) => r.query === "Merchant listings")!;
+    assert.equal(merchant.impressions, 525);
+    assert.equal(merchant.position, 1.15);
+  });
+
+  test("named file receipt and snapshot replace are appearance-only", () => {
+    const parsed = parseNamedFile("Search Appearance.csv", APPEARANCE_CSV);
+    assert.deepEqual(parsed.sources, ["gsc_appearance"]);
+    assert.equal(parsed.accepted[0]?.kind, "gsc_appearance");
+    assert.equal(parsed.accepted[0]?.min_date, null);
+    assert.deepEqual(snapshotKindsToReplace(parsed.queries), ["appearance"]);
+    const mixed = snapshotKindsToReplace([
+      ...parsed.queries,
+      { kind: "query", date: "", query: "tallow", clicks: 1, impressions: 10, ctr: 10, position: 4 },
+      { kind: "chart", date: "2026-09-10", query: "(site)", clicks: 1, impressions: 10, ctr: 10, position: 4 },
+    ]);
+    assert.deepEqual([...mixed].sort(), ["appearance", "query"]);
+    assert.deepEqual(snapshotKindsToReplace([
+      { kind: "chart", date: "2026-09-10", query: "(site)", clicks: 1, impressions: 10, ctr: 10, position: 4 },
+    ]), []);
+  });
+});
+
+describe("Google typed top IS / impr share", () => {
+  test("parses Search_Search top IS and Search_Search impr. share from the dominant type", () => {
+    const rows = parseGoogleCsv(GOOGLE_TYPED);
+    assert.equal(rows.length, 2);
+    const search = rows.find((r) => /AI MAX/i.test(r.campaign_name))!;
+    assert.equal(search.campaign_type, "Search");
+    assert.equal(search.search_top_is, 12.5);
+    assert.equal(search.search_impr_share, 22);
+    assert.equal(search.lost_is_rank, 10);
+    assert.equal(search.lost_is_budget, 5);
+    const pmax = rows.find((r) => /PMAX/i.test(r.campaign_name))!;
+    assert.equal(pmax.campaign_type, "PMax");
+    assert.equal(pmax.search_top_is, 8);
+    assert.equal(pmax.search_impr_share, 15);
+    assert.equal(pmax.lost_is_budget, null);
+  });
+});
+
+describe("GA4 (not set) ingest is unchanged", () => {
+  test("empty channel group becomes (not set)", () => {
+    const csv = [
+      "# ----------------------------------------",
+      "# Start date: 20260901",
+      "Date,Session default channel group,Landing page,Device category,Sessions,Active users,Key events,Total revenue",
+      "20260901,,/products/tallow-balm,mobile,3,3,0,0",
+      "20260901,Paid Search,/products/tallow-balm,desktop,5,4,1,40",
+    ].join("\n");
+    const rows = parseGa4Csv(csv);
+    assert.equal(rows.length, 2);
+    assert.ok(rows.some((r) => r.channel_group === "(not set)" && r.sessions === 3));
+    assert.ok(rows.some((r) => r.channel_group === "Paid Search"));
+  });
+});
+
+describe("upload yield + appearance / share cards", () => {
+  test("low impr share with healthy ROAS is inspect/raise, lost-budget trap stays a cut", () => {
+    const day = (partial: {
+      campaign_name: string; spend: number; conv_value: number;
+      lost_is_budget?: number | null; search_impr_share?: number | null; search_top_is?: number | null;
+      is_brand?: boolean;
+    }) => ({
+      platform: "google" as const,
+      date: "2026-09-10",
+      campaign_type: "Search" as const,
+      product: "other" as const,
+      is_brand: partial.is_brand ?? false,
+      audience: "unknown" as const,
+      clicks: 40,
+      impressions: 2000,
+      conversions: 3,
+      lost_is_budget: partial.lost_is_budget ?? null,
+      lost_is_rank: null,
+      search_impr_share: partial.search_impr_share ?? null,
+      search_top_is: partial.search_top_is ?? null,
+      frequency: null,
+      frequency_peak: null,
+      status: null,
+      ...partial,
+    });
+    const intel = buildIntel({
+      campaigns: [
+        day({ campaign_name: "AI MAX - Search - Campaign V1", spend: 80, conv_value: 160, search_impr_share: 18, search_top_is: 8 }),
+        day({ campaign_name: "LOSERS - Search", spend: 50, conv_value: 20, lost_is_budget: 40 }),
+      ],
+      queries: [],
+      ga: [],
+      range: 7,
+      filter: "all",
+    });
+    const raise = [...intel.cards, ...intel.log].find((c) => c.id === "low-share-raise");
+    assert.ok(raise, "healthy ROAS + low share must fire inspect/raise");
+    assert.equal(raise!.action, "keep");
+    assert.match(raise!.doThis, /inspect|raise/i);
+    assert.doesNotMatch(raise!.doThis, /cut /i);
+    const trap = [...intel.cards, ...intel.log].find((c) => c.id === "lost-is-trap");
+    assert.ok(trap, "lost-budget trap must stay a cut on the weak-ROAS row");
+    assert.equal(trap!.action, "kill");
+  });
+
+  test("Search appearance high-impr weak CTR vs merchant listings is a site card", () => {
+    const parsed = parseNamedFile("Search Appearance.csv", APPEARANCE_CSV);
+    const intel = buildIntel({
+      campaigns: [{
+        platform: "google", date: "2026-09-10", campaign_name: "BRANDED - Search - Campaign V1",
+        campaign_type: "Search", product: "other", is_brand: true, audience: "unknown",
+        spend: 20, conv_value: 80, clicks: 30, impressions: 200, conversions: 2,
+        lost_is_budget: null, lost_is_rank: null, frequency: null, frequency_peak: null, status: null,
+      }],
+      queries: parsed.queries,
+      ga: [{
+        date: "2026-09-10", channel_group: "Paid Search",
+        landing_page: "/products/tallow-balm", device: "mobile",
+        sessions: 40, active_users: 30, key_events: 2, revenue: 90, bounce_rate: 0.4,
+      }],
+      range: 7,
+      filter: "all",
+    });
+    const card = [...intel.cards, ...intel.log].find((c) => c.id === "gsc-appearance");
+    assert.ok(card, "Product snippets vs Merchant listings must fire");
+    assert.equal(card!.owner, "site");
+    assert.match(card!.doThis, /Merchant listings|rich results|Merchant Center/i);
+    assert.match(card!.doThis, /Do not redesign Extra Strength/i);
+    assert.ok(intel.gsc.appearance.some((r) => r.query === "Product snippets"));
+    assert.ok(intel.freshness.sources.some((s) => s.source === "gsc_appearance" && s.file === "Search Appearance.csv"));
+    assert.ok(intel.grok.snapshot.search_appearance.some((r) => r.appearance === "Product snippets"));
+    assert.match(intel.grok.adsDesk, /Upload yield/);
+    assert.match(intel.grok.siteDesk, /Upload yield/);
+    assert.match(intel.grok.siteDesk, /Product snippets/);
+    assert.match(intel.grok.siteDesk, /Paid Search \/products\/tallow-balm/);
+    assert.doesNotMatch(intel.grok.siteDesk, /Brand Search/i);
+    assert.doesNotMatch(intel.grok.siteDesk, /ROAS/i);
   });
 });
