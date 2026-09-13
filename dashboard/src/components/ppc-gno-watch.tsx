@@ -11,7 +11,9 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { exportBannerFromState, mergeGnoAdsOntoState } from "@/lib/gno-export-state";
 import { CM_NOTE } from "@/lib/gno-ppc-watch";
+import { GnoDeskReference } from "@/components/gno-desk-reference";
 import { OrganicRankHeatmap } from "@/components/organic-rank-heatmap";
+import type { GnoLedgerRow } from "@/lib/gno-learning";
 import { RT_EMPTY_COPY, formatSoldScopeRank, formatSoldScopeVol } from "@/lib/soldscope-status";
 import { OUTLIER_EMPTY_COPY } from "@/lib/soldscope-outliers";
 import { COMPETITOR_OUTLIER_EMPTY_COPY } from "@/lib/soldscope-competitor-outliers";
@@ -156,6 +158,7 @@ interface GnoData {
   };
   lastExportAt?: string | null;
   lastExportReason?: string | null;
+  ledgerRecent?: GnoLedgerRow[];
   gaps?: string[];
   acks?: string[];
   lookbackDays?: number;
@@ -446,6 +449,8 @@ export function PpcGnoWatch() {
           <p className="mt-0.5 text-[11px] text-muted-foreground">
             Campaign L2 = spend source of truth. Search-term files = negate / harvest.
             Family BE ACOS is the config contribution-margin target ({CM_NOTE}).
+            Rules, source docs, and the harvest ledger sit below the export howto —
+            open tallowbourn-ppc for the 152-source library and execution center.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -509,6 +514,8 @@ export function PpcGnoWatch() {
           Observe only — export never writes to Amazon. One change per campaign per day still Dave/Grok.
         </p>
       </div>
+
+      <GnoDeskReference ledger={data?.ledgerRecent ?? []} />
 
       {error && (
         <Card className={banner.lastExportAt

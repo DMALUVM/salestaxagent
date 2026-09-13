@@ -121,5 +121,8 @@ describe("learning never writes Amazon", () => {
       assert.match(src, /observe/i);
       assert.doesNotMatch(src, /amazonads|autoPause\(|auto_pause\s*=\s*true/i);
     }
+    assert.match(api, /export async function GET/);
+    assert.match(api, /ledgerRecent|loadGnoLedger/);
+    assert.match(api, /Never pauses, negates, or writes bids to Amazon/);
   });
 });

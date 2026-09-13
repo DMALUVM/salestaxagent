@@ -70,6 +70,7 @@ test("/ppc calls every hook unconditionally", { timeout: TIMEOUT }, async () => 
     "src/components/ppc-playbook.tsx",
     "src/components/ppc-sku-ads.tsx",
     "src/components/ppc-gno-watch.tsx",
+    "src/components/gno-desk-reference.tsx",
     "src/app/ppc/gno/**/*.tsx",
     "src/components/brand-share.tsx",
     "src/components/sqp-status.tsx",

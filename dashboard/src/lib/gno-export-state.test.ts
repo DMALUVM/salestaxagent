@@ -251,12 +251,14 @@ describe("ads timeout preserves lastExportAt", () => {
       lastExportReason: "P0",
       exportBanner: stateBanner,
       nextReviewAt: stateBanner.nextReviewAt,
+      ledgerRecent: [{ dave_action: "hold" as const, search_term: "tallow lip balm" }],
     }, {
       error: "GNO Watch timed out loading ads.",
       lastExportAt: null,
       exportBanner: undefined,
     });
     assert.equal(merged.lastExportAt, "2026-09-10T12:00:00-07:00");
+    assert.equal(merged.ledgerRecent?.[0]?.dave_action, "hold");
     assert.ok(merged.exportBanner);
     assert.equal(merged.exportBanner.lastExportAt, "2026-09-10T12:00:00-07:00");
     assert.doesNotMatch(merged.exportBanner.headline, /never exported/);
@@ -268,6 +270,8 @@ describe("GNO export UI copy is wired", () => {
     const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-gno-watch.tsx"), "utf8");
     assert.match(ui, /EXPORT NEEDED/);
     assert.match(ui, /When to Export GNO pack/);
+    assert.match(ui, /GnoDeskReference/);
+    assert.match(ui, /ledgerRecent/);
     assert.match(ui, /Anytime a P0 fires/);
     assert.match(ui, /Every Wednesday evening ~48h review/);
     assert.match(ui, /Optional Mon\/Wed\/Fri morning digest/);

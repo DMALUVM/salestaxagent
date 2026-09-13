@@ -29,7 +29,8 @@ import {
  * GET /api/ppc/gno-export — Export GNO pack zip.
  * watch_campaigns.csv + auto_loose / fat_parent / broad_m search terms
  * + keyword_targets.csv + advertised_product_l7.csv + organic_rank_snapshot.csv
- * + competitor_kr_outliers.csv + README.txt
+ * + competitor_kr_outliers.csv + gno_decision_rules.txt + gno_outcomes.csv
+ * + README.txt
  * (+ optional sqp_weekly_slice.csv, negatives_snapshot.csv).
  * Today = config only (metrics_complete=false). L2/L7 = closed days
  * ending yesterday. Campaigns API snapshot fills 0-impr shells.
