@@ -219,7 +219,7 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
       }],
     });
     assert.equal(progress.baselineOnly, true);
-    assert.match(BASELINE_WEEK_COPY, /First baseline week/);
+    assert.match(BASELINE_WEEK_COPY, /First baseline snapshot/);
     const row = progress.rows[0];
     assert.equal(row.previous, 121);
     assert.equal(row.current, 119);
@@ -337,6 +337,8 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.match(heat, /formatSignedDelta/);
     assert.match(heat, /RankSpark/);
     assert.match(heat, /BASELINE_WEEK_COPY/);
+    assert.match(heat, /Daily organic rank/);
+    assert.match(heat, /daily RT snapshots/);
     assert.match(heat, /Moved/);
     assert.doesNotMatch(heat, /Deo stays empty/);
     assert.doesNotMatch(heat, /until a Rank Tracker group exists/);

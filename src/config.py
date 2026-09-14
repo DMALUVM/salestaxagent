@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     amazon_ads_profile_id: str = ""
     amazon_ads_region: str = "NA"
 
-    # SoldScope weekly intel (history + Rank Tracker read). Never committed.
+    # SoldScope intel (weekly history + daily Rank Tracker reuse-only). Never committed.
     soldscope_api_token: str = ""
 
     github_backup_enabled: bool = False

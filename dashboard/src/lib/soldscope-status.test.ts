@@ -123,5 +123,6 @@ describe("SoldScope status (enrich existing desks, no second warehouse UI)", () 
     assert.match(amazon, /estimate/);
     const sqp = readFileSync(path.join(root, "src/components/sqp-status.tsx"), "utf8");
     assert.match(sqp, /SoldScope Rank Tracker/);
+    assert.match(sqp, /Daily organic-rank heatmap/);
   });
 });

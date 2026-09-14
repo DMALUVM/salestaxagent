@@ -1,9 +1,13 @@
-"""Weekly SoldScope pull for the three parent hero ASINs.
+"""SoldScope pull for the three parent hero ASINs.
 
 Writes soldscope_* warehouse tables and a job_runs row (via the CLI /
-scheduler wrapper). Rank Tracker is observe-only: list existing groups,
-match heroes, pull phrases if present. Zero groups → empty + a job note.
-Never POSTs create-group / create-phrase.
+scheduler wrapper). Rank Tracker is observe-only and reuse-only: list
+existing hero groups, match lip/balm/deo, GET phrases if present.
+Zero groups → empty + a job note. Never POSTs create-group / create-phrase.
+
+Daily job (`sync_daily_rt`) upserts Rank Tracker snapshots only.
+Weekly job (`sync_weekly`) keeps sales/BSR/price/ratings/SV/KR and still
+pulls RT so Sunday KR gating sees in-run phrases.
 
 Not a source for sales_daily, nexus, liability, or Ads actions.
 """
@@ -69,7 +73,8 @@ DEFAULT_RATINGS_DAYS = 365
 MISSING_TOKEN_MESSAGE = (
     "SOLDSCOPE_API_TOKEN is not set. Add it to the Mini .env (launchd) "
     "and keep it on Vercel only if a live pull is added later. "
-    "Never commit the token. Weekly job stays scheduled and fails soft."
+    "Never commit the token. Daily RT + weekly history jobs stay scheduled "
+    "and fail soft."
 )
 
 EMPTY_HISTORY_NOTE = (
@@ -119,6 +124,13 @@ def load_config() -> dict:
         "rank_tracker": {
             "enabled": bool(rt.get("enabled", True)),
             "create_groups": False,
+            "schedule": {
+                "hour": int((rt.get("schedule") or {}).get("hour", 10)),
+                "minute": int((rt.get("schedule") or {}).get("minute", 30)),
+                "timezone": (rt.get("schedule") or {}).get(
+                    "timezone", "America/New_York",
+                ),
+            },
         },
         "search_volume": {
             "enabled": bool((raw.get("search_volume") or {}).get("enabled", True)),
@@ -803,14 +815,87 @@ def _pick_product_id(products: list[dict], asin: str) -> int | None:
     return None
 
 
+def _empty_written() -> dict[str, int]:
+    return {
+        "sales": 0, "bsr": 0, "price": 0, "rank": 0,
+        "ratings": 0, "search_volume": 0, "keyword_research": 0,
+    }
+
+
+def pull_rank_tracker_snapshots(
+    *,
+    marketplace: str,
+    asins: Iterable[str],
+    pulled_at: str,
+    as_of: date | None = None,
+) -> tuple[list[dict], list[str]]:
+    """Reuse-only GET of existing hero Rank Tracker groups.
+
+    Never POSTs create-group / create-phrase. Zero groups → empty + note.
+    ``as_of`` defaults to ``date.today()`` (Mini calendar; America/New_York).
+    """
+    hero_asins = [str(a).strip().upper() for a in asins if str(a).strip()]
+    notes: list[str] = []
+    groups = collect_rank_groups(marketplace=marketplace)
+    if not groups:
+        notes.append(RT_EMPTY_NOTE)
+        return [], notes
+
+    matched = match_hero_groups(groups, hero_asins)
+    matched = attach_hero_asins_from_products(
+        groups, hero_asins, already=matched,
+    )
+    if not matched:
+        notes.append(
+            f"Rank Tracker has {len(groups)} group(s) but none "
+            "match hero ASINs — observe-only, not creating groups."
+        )
+        return [], notes
+
+    snapshot_day = as_of or date.today()
+    rank_rows: list[dict] = []
+    for g in matched:
+        asin = str(g.get("asin") or "").strip().upper()
+        gid = int(g["id"])
+        pid_hint = g.get("_product_id")
+        products_body = list_group_products(gid)
+        products = [p for p in _page_items(products_body) if isinstance(p, dict)]
+        pid = int(pid_hint) if pid_hint is not None else _pick_product_id(products, asin)
+        if pid is None:
+            notes.append(f"RT group {gid} ({asin}) has no product id — skipped phrases.")
+            continue
+        phrases = collect_phrases(gid, pid)
+        rank_rows.extend(rank_rows_from_phrases(
+            phrases,
+            asin=asin,
+            marketplace=marketplace,
+            group_id=gid,
+            product_id=pid,
+            as_of=snapshot_day,
+            pulled_at=pulled_at,
+        ))
+    missing = [
+        a for a in hero_asins
+        if a not in {str(g.get("asin") or "").strip().upper() for g in matched}
+    ]
+    notes.append(
+        f"Rank Tracker matched {len(matched)} hero group(s), "
+        f"{len(rank_rows)} phrase snapshot(s)."
+    )
+    if missing:
+        notes.append(
+            "No Rank Tracker group for "
+            + ", ".join(missing)
+            + " — empty snapshots, not creating groups."
+        )
+    return rank_rows, notes
+
+
 def sync_weekly(*, dry_run: bool = False) -> dict:
     """Pull hero history + optional RT snapshots. Fail soft on missing token / 402."""
     notes: list[str] = []
     errors: list[str] = []
-    written = {
-        "sales": 0, "bsr": 0, "price": 0, "rank": 0,
-        "ratings": 0, "search_volume": 0, "keyword_research": 0,
-    }
+    written = _empty_written()
     pulled_at = datetime.now(timezone.utc).isoformat()
     cfg = load_config()
 
@@ -921,55 +1006,12 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
 
     if quota is None and cfg["rank_tracker"]["enabled"]:
         try:
-            groups = collect_rank_groups(marketplace=marketplace)
-            if not groups:
-                notes.append(RT_EMPTY_NOTE)
-            else:
-                matched = match_hero_groups(groups, cfg["asins"])
-                matched = attach_hero_asins_from_products(
-                    groups, cfg["asins"], already=matched,
-                )
-                if not matched:
-                    notes.append(
-                        f"Rank Tracker has {len(groups)} group(s) but none "
-                        "match hero ASINs — observe-only, not creating groups."
-                    )
-                else:
-                    as_of = date.today()
-                    for g in matched:
-                        asin = str(g.get("asin") or "").strip().upper()
-                        gid = int(g["id"])
-                        pid_hint = g.get("_product_id")
-                        products_body = list_group_products(gid)
-                        products = [p for p in _page_items(products_body) if isinstance(p, dict)]
-                        pid = int(pid_hint) if pid_hint is not None else _pick_product_id(products, asin)
-                        if pid is None:
-                            notes.append(f"RT group {gid} ({asin}) has no product id — skipped phrases.")
-                            continue
-                        phrases = collect_phrases(gid, pid)
-                        rank_rows.extend(rank_rows_from_phrases(
-                            phrases,
-                            asin=asin,
-                            marketplace=marketplace,
-                            group_id=gid,
-                            product_id=pid,
-                            as_of=as_of,
-                            pulled_at=pulled_at,
-                        ))
-                    missing = [
-                        a for a in cfg["asins"]
-                        if a not in {str(g.get("asin") or "").strip().upper() for g in matched}
-                    ]
-                    notes.append(
-                        f"Rank Tracker matched {len(matched)} hero group(s), "
-                        f"{len(rank_rows)} phrase snapshot(s)."
-                    )
-                    if missing:
-                        notes.append(
-                            "No Rank Tracker group for "
-                            + ", ".join(missing)
-                            + " — empty snapshots, not creating groups."
-                        )
+            rank_rows, rt_notes = pull_rank_tracker_snapshots(
+                marketplace=marketplace,
+                asins=cfg["asins"],
+                pulled_at=pulled_at,
+            )
+            notes.extend(rt_notes)
         except QuotaExceeded as e:
             quota = e
             notes.append(
@@ -1139,6 +1181,136 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
         "pulled_at": pulled_at,
         "asins": cfg["asins"],
         "history_empty": history_empty,
+        "quota_remaining": quota.remaining if quota else None,
+        "quota_reset": quota.reset if quota else None,
+    }
+
+
+def sync_daily_rt(*, dry_run: bool = False) -> dict:
+    """Daily reuse-only Rank Tracker snapshots. No history / SV / KR / creates."""
+    notes: list[str] = []
+    errors: list[str] = []
+    written = _empty_written()
+    pulled_at = datetime.now(timezone.utc).isoformat()
+    cfg = load_config()
+    rank_rows: list[dict] = []
+    quota: QuotaExceeded | None = None
+
+    if cfg["dropped_asins"]:
+        notes.append(
+            "Dropped non-hero ASINs from config: " + ", ".join(cfg["dropped_asins"])
+        )
+    if not cfg["asins"]:
+        return {
+            "status": "fail",
+            "message": "No locked hero ASINs left after config filter.",
+            "notes": notes,
+            "errors": errors,
+            "written": written,
+            "pulled_at": pulled_at,
+            "quota": None,
+        }
+
+    if not token_present():
+        notes.append("missing_token")
+        return {
+            "status": "fail",
+            "message": MISSING_TOKEN_MESSAGE,
+            "notes": notes,
+            "errors": errors,
+            "written": written,
+            "pulled_at": pulled_at,
+            "quota": None,
+            "asins": cfg["asins"],
+        }
+
+    try:
+        auth = check_auth()
+        acct = ((auth.get("account") or {}) if isinstance(auth, dict) else {}) or {}
+        notes.append(f"auth_ok account={acct.get('name') or acct.get('id') or '?'}")
+    except AuthError as e:
+        return {
+            "status": "fail",
+            "message": str(e)[:500],
+            "notes": notes,
+            "errors": [str(e)[:300]],
+            "written": written,
+            "pulled_at": pulled_at,
+            "quota": None,
+            "asins": cfg["asins"],
+        }
+
+    if not cfg["rank_tracker"]["enabled"]:
+        notes.append("Rank Tracker disabled in config — no daily snapshots.")
+    elif cfg["rank_tracker"]["create_groups"]:
+        # Hard lock: load_config always forces False; never POST create.
+        notes.append("create_groups must stay false — refusing Rank Tracker writes.")
+        return {
+            "status": "fail",
+            "message": "Rank Tracker create_groups is true — refusing to run.",
+            "notes": notes,
+            "errors": ["create_groups must be false"],
+            "written": written,
+            "pulled_at": pulled_at,
+            "quota": None,
+            "asins": cfg["asins"],
+        }
+    else:
+        try:
+            rank_rows, rt_notes = pull_rank_tracker_snapshots(
+                marketplace=cfg["marketplace"],
+                asins=cfg["asins"],
+                pulled_at=pulled_at,
+            )
+            notes.extend(rt_notes)
+        except QuotaExceeded as e:
+            quota = e
+            notes.append(
+                f"402 on Rank Tracker read; stopping (Remaining={e.remaining})."
+            )
+        except (SoldScopeError, AuthError) as e:
+            errors.append(f"rank tracker: {e}")
+        except Exception as e:
+            errors.append(f"rank tracker: {e}")
+
+    if not dry_run:
+        from src.db import upsert_rows
+
+        written["rank"] = upsert_rows(RANK_TABLE, rank_rows, on_conflict=RANK_CONFLICT)
+
+    if quota and not rank_rows and not written["rank"]:
+        status = "fail"
+    elif quota or errors:
+        status = "partial" if rank_rows or written["rank"] else "fail"
+    else:
+        status = "success"
+
+    message = (
+        f"{len(cfg['asins'])} hero ASIN(s), {len(rank_rows)} daily RT snapshot(s)"
+    )
+    if dry_run:
+        message = "DRY RUN — " + message
+    if notes:
+        message = (message + " | " + "; ".join(notes))[:1000]
+
+    return {
+        "status": status,
+        "message": message,
+        "notes": notes,
+        "errors": errors,
+        "written": written,
+        "counts": {
+            "sales": 0,
+            "bsr": 0,
+            "price": 0,
+            "rank": len(rank_rows),
+            "ratings": 0,
+            "search_volume": 0,
+            "keyword_research": 0,
+        },
+        "pulled_at": pulled_at,
+        "asins": cfg["asins"],
+        "history_empty": True,
         "quota_remaining": quota.remaining if quota else None,
         "quota_reset": quota.reset if quota else None,
     }

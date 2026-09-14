@@ -4,7 +4,7 @@ import { getServerSupabase } from "@/lib/supabase-server";
 import { SOLDSCOPE_OBSERVE_ONLY } from "@/lib/soldscope-status";
 
 /**
- * GET /api/ppc/organic-rank — weekly Rank Tracker heatmap + WoW flags.
+ * GET /api/ppc/organic-rank — daily Rank Tracker heatmap + movement flags.
  * Reads soldscope_rank_snapshots and joins ABA SFR + sqp_weekly /
  * keyword_organic_rank. Observe-only. Empty tables stay empty.
  */

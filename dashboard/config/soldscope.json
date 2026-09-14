@@ -15,7 +15,12 @@
   },
   "rank_tracker": {
     "enabled": true,
-    "create_groups": false
+    "create_groups": false,
+    "schedule": {
+      "hour": 10,
+      "minute": 30,
+      "timezone": "America/New_York"
+    }
   },
   "search_volume": {
     "enabled": true,
