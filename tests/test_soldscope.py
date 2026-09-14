@@ -808,16 +808,6 @@ def test_daily_rt_as_of_is_today(monkeypatch):
             return date(2026, 9, 14)
 
     monkeypatch.setattr(syn, "date", FakeDate)
-    monkeypatch.setattr(syn, "token_present", lambda: True)
-    monkeypatch.setattr(syn, "check_auth", lambda: {"account": {"id": 1}})
-    _daily_rt_history_booms(monkeypatch)
-    captured: list[date] = []
-
-    def capture_rows(phrases, **kwargs):
-        captured.append(kwargs["as_of"])
-        return syn.rank_rows_from_phrases(phrases, **kwargs)
-
-    monkeypatch.setattr(syn, "rank_rows_from_phrases", capture_rows)
     monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [
         {"id": 1, "asin": "B0CLHTF8YN"},
     ])
@@ -827,9 +817,12 @@ def test_daily_rt_as_of_is_today(monkeypatch):
     monkeypatch.setattr(syn, "list_product_phrases", lambda *a, **k: {
         "data": [{"id": 1, "phrase": "tallow lip balm", "organicPosition": 4}],
     })
-    r = syn.sync_daily_rt(dry_run=True)
-    assert r["counts"]["rank"] == 1
-    assert captured == [date(2026, 9, 14)]
+    rows, notes = syn.pull_rank_tracker_snapshots(
+        marketplace="US", asins=["B0CLHTF8YN"], pulled_at="now",
+    )
+    assert len(rows) == 1
+    assert rows[0]["as_of"] == "2026-09-14"
+    assert any("matched 1 hero" in n for n in notes)
 
 
 def test_daily_rt_job_is_scheduled_every_day():
