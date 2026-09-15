@@ -68,6 +68,7 @@ describe("Bleeders 1.0 is the pasted 10 — not a live scanner, not 22", () => {
       assert.equal(row.clicks, exp.clicks);
       assert.equal(row.spend, exp.spend);
       assert.equal(row.sales_14d, 0);
+      assert.equal(row.orders, 0);
       assert.equal(row.click_floor, 6);
     }
   });
@@ -140,5 +141,16 @@ describe("This week Recovery list is not the 1.0 10", () => {
     assert.match(page, /<PpcBleeders/);
     assert.match(page, /This week/);
     assert.match(page, /useState<"search" \| "campaigns" \| "bleeders">\("bleeders"\)/);
+  });
+
+  test("Bleeders 1.0 table surfaces Orders and copyable campaign names", () => {
+    const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-bleeders-10.tsx"), "utf8");
+    assert.match(ui, />Orders</);
+    assert.match(ui, /\{r\.orders\}/);
+    assert.match(ui, /navigator\.clipboard/);
+    assert.match(ui, /CopyableName value=\{r\.campaign_name\}/);
+    assert.match(ui, /CopyableName value=\{r\.ad_group_name\}/);
+    assert.match(ui, /CopyableName value=\{r\.search_term\}/);
+    assert.doesNotMatch(ui, /max-w-\[12rem\] truncate/);
   });
 });

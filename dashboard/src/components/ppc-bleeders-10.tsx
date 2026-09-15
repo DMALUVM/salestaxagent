@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Check, ClipboardCopy } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,47 @@ import { formatSoldScopeVol } from "@/lib/soldscope-status";
 
 function fmtD(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Full name + one-click copy for Campaign Manager paste. */
+function CopyableName({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const text = value.trim();
+  if (!text) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+
+  async function copy() {
+    try {
+      if (!navigator.clipboard?.writeText) return;
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="flex items-start gap-1 min-w-[8rem] max-w-[18rem]">
+      <span className="font-mono text-xs whitespace-normal break-words select-all leading-snug">
+        {text}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        className="mt-0.5 shrink-0 text-muted-foreground"
+        title={copied ? `${label} copied` : `Copy ${label}`}
+        aria-label={copied ? `${label} copied` : `Copy ${label}`}
+        onClick={copy}
+      >
+        {copied
+          ? <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+          : <ClipboardCopy className="h-3 w-3" />}
+      </Button>
+    </div>
+  );
 }
 
 type Status = Bleeders10Row["status"];
@@ -176,6 +218,7 @@ export function PpcBleeders10({
                   <TableHead className="text-right">SS Vol</TableHead>
                   <TableHead>Match</TableHead>
                   <TableHead className="text-right">Clicks</TableHead>
+                  <TableHead className="text-right" title="Window order count from payload (orders)">Orders</TableHead>
                   <TableHead className="text-right">Spend</TableHead>
                   <TableHead className="min-w-[16rem]">Why</TableHead>
                 </TableRow>
@@ -207,16 +250,21 @@ export function PpcBleeders10({
                       </TableCell>
                       <TableCell><Badge variant="outline" className="text-[10px]">{r.rank}</Badge></TableCell>
                       <TableCell className="text-xs whitespace-nowrap">{r.action}</TableCell>
-                      <TableCell className="text-xs max-w-[12rem] truncate" title={r.campaign_name}>
-                        {r.campaign_name}
+                      <TableCell className="align-top whitespace-normal">
+                        <CopyableName value={r.campaign_name} label="campaign name" />
                       </TableCell>
-                      <TableCell className="text-xs max-w-[10rem] truncate">{r.ad_group_name || "—"}</TableCell>
-                      <TableCell className="text-xs max-w-[10rem] truncate">{r.search_term}</TableCell>
+                      <TableCell className="align-top whitespace-normal">
+                        <CopyableName value={r.ad_group_name} label="ad group name" />
+                      </TableCell>
+                      <TableCell className="align-top whitespace-normal">
+                        <CopyableName value={r.search_term} label="search term" />
+                      </TableCell>
                       <TableCell className="text-right tabular-nums text-xs text-muted-foreground" title="SoldScope search volume when stored">
                         {formatSoldScopeVol(r.soldscope_sv)}
                       </TableCell>
                       <TableCell className="text-[10px] text-muted-foreground">{r.match_type || "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">{r.clicks}</TableCell>
+                      <TableCell className="text-right tabular-nums">{r.orders}</TableCell>
                       <TableCell className="text-right tabular-nums">${fmtD(r.spend)}</TableCell>
                       <TableCell className="text-[11px] whitespace-normal max-w-[18rem]">{r.why}</TableCell>
                     </TableRow>
