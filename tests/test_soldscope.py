@@ -205,6 +205,7 @@ def test_empty_rt_groups_is_clean_noop(monkeypatch):
     assert syn.EMPTY_HISTORY_NOTE in r["notes"]
     assert r["written"] == {
         "sales": 0, "bsr": 0, "price": 0, "rank": 0,
+        "rank_variations": 0,
         "ratings": 0, "search_volume": 0, "keyword_research": 0,
     }
     assert r["counts"]["ratings"] == 0
