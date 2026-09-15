@@ -24,9 +24,21 @@ def test_config_heroes_are_asin_title_parents_only():
     assert cfg["marketplace"] == "US"
     assert int(cfg["days"]) == 90
     assert cfg["rank_tracker"]["create_groups"] is False
+    assert "day_of_week" not in (cfg["rank_tracker"].get("schedule") or {})
     loaded = syn.load_config()
     assert loaded["asins"] == list(HEROES)
     assert loaded["rank_tracker"]["create_groups"] is False
+    assert loaded["rank_tracker"]["heatmap_days"] == 30
+    assert loaded["rank_tracker"]["schedule"]["hour"] == 10
+    assert loaded["rank_tracker"]["schedule"]["minute"] == 30
+    assert loaded["rank_tracker"]["schedule"]["timezone"] == "America/New_York"
+    assert loaded["schedule"]["day_of_week"] == "sun"
+    assert "day_of_week" not in loaded["rank_tracker"]["schedule"]
+    dash = json.loads((ROOT / "dashboard" / "config" / "soldscope.json").read_text())
+    assert dash["rank_tracker"]["create_groups"] is False
+    assert "day_of_week" not in (dash["rank_tracker"].get("schedule") or {})
+    assert dash["rank_tracker"]["schedule"]["hour"] == cfg["rank_tracker"]["schedule"]["hour"]
+    assert dash["rank_tracker"]["schedule"]["minute"] == cfg["rank_tracker"]["schedule"]["minute"]
 
 
 def test_client_param_building_days_required_except_price():
@@ -64,6 +76,8 @@ def test_observe_only_refuses_writes_and_discovery():
         ("POST", "/keyword-research/searches/asin/multi"),
         ("DELETE", "/rank-tracker/groups"),
         ("PUT", "/rank-tracker/tags/1"),
+        ("GET", "/rank-tracker/groups/1/products/7/heatmap-widgets"),
+        ("GET", "/rank-tracker/groups/1/positions-chart-data/99"),
     ]:
         with pytest.raises(ss.SoldScopeError, match="Refusing"):
             ss.assert_read_only(method, path)
@@ -714,3 +728,227 @@ def test_kr_create_skipped_when_rt_phrases_exist(monkeypatch):
     assert r["counts"]["rank"] == 3
     assert r["counts"]["keyword_research"] == 0
     assert any("Rank Tracker phrases already stored" in n for n in r["notes"])
+
+
+def _daily_rt_history_booms(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("daily RT must not pull history/SV/KR")
+
+    monkeypatch.setattr(syn, "get_sales_history", boom)
+    monkeypatch.setattr(syn, "get_bsr_history", boom)
+    monkeypatch.setattr(syn, "get_price_history", boom)
+    monkeypatch.setattr(syn, "get_ratings_history", boom)
+    monkeypatch.setattr(syn, "get_search_volume", boom)
+    monkeypatch.setattr(syn, "collect_existing_keywords", boom)
+    monkeypatch.setattr(syn, "list_kr_searches", boom)
+    monkeypatch.setattr(syn, "create_single_asin_search", boom)
+    monkeypatch.setattr(syn, "get_kr_asin_results", boom)
+    monkeypatch.setattr(syn, "collect_saved_kr_search_ids", boom)
+
+
+def test_daily_rt_skips_history_and_stays_reuse_only(monkeypatch):
+    monkeypatch.setattr(syn, "token_present", lambda: True)
+    monkeypatch.setattr(syn, "check_auth", lambda: {"account": {"id": 1}})
+    _daily_rt_history_booms(monkeypatch)
+    monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [
+        {"id": 3537, "asin": "B0CLHTF8YN"},
+    ])
+    monkeypatch.setattr(syn, "list_group_products", lambda gid: {
+        "data": [{"id": 6051, "asin": "B0CLHTF8YN"}],
+    })
+    monkeypatch.setattr(syn, "list_product_phrases", lambda *a, **k: {
+        "data": [{
+            "id": 1, "phrase": "tallow lip balm",
+            "organicPosition": 5, "organicPreviousPosition": 11,
+            "abaSearchFrequencyRank": 44,
+        }],
+    })
+    r = syn.sync_daily_rt(dry_run=True)
+    assert r["status"] == "success"
+    assert r["counts"]["rank"] == 1
+    assert r["counts"]["sales"] == 0
+    assert r["counts"]["keyword_research"] == 0
+    assert syn.load_config()["rank_tracker"]["create_groups"] is False
+    src = inspect.getsource(syn.sync_daily_rt) + inspect.getsource(syn.pull_rank_tracker_snapshots)
+    assert "create_single_asin_search" not in src
+    assert "get_sales_history" not in src
+    assert "create_groups" in inspect.getsource(syn.sync_daily_rt)
+
+
+def test_daily_rt_empty_groups_is_clean_noop(monkeypatch):
+    monkeypatch.setattr(syn, "token_present", lambda: True)
+    monkeypatch.setattr(syn, "check_auth", lambda: {"account": {"name": "Tallowbourn"}})
+    _daily_rt_history_booms(monkeypatch)
+    monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [])
+
+    def boom(*a, **k):
+        raise AssertionError("must not list products/phrases when groups are empty")
+
+    monkeypatch.setattr(syn, "list_group_products", boom)
+    monkeypatch.setattr(syn, "list_product_phrases", boom)
+    r = syn.sync_daily_rt(dry_run=True)
+    assert r["status"] == "success"
+    assert r["counts"]["rank"] == 0
+    assert syn.RT_EMPTY_NOTE in r["notes"]
+
+
+def test_daily_rt_missing_token_fails_soft(monkeypatch):
+    monkeypatch.setattr(syn, "token_present", lambda: False)
+    monkeypatch.setattr(
+        syn, "check_auth",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no HTTP without token")),
+    )
+    r = syn.sync_daily_rt(dry_run=True)
+    assert r["status"] == "fail"
+    assert "SOLDSCOPE_API_TOKEN" in r["message"]
+    assert "missing_token" in r["notes"]
+
+
+def test_daily_rt_as_of_is_today(monkeypatch):
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 9, 14)
+
+    monkeypatch.setattr(syn, "date", FakeDate)
+    monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [
+        {"id": 1, "asin": "B0CLHTF8YN"},
+    ])
+    monkeypatch.setattr(syn, "list_group_products", lambda gid: {
+        "data": [{"id": 9, "asin": "B0CLHTF8YN"}],
+    })
+    monkeypatch.setattr(syn, "list_product_phrases", lambda *a, **k: {
+        "data": [{"id": 1, "phrase": "tallow lip balm", "organicPosition": 4}],
+    })
+    rows, notes = syn.pull_rank_tracker_snapshots(
+        marketplace="US", asins=["B0CLHTF8YN"], pulled_at="now",
+    )
+    assert len(rows) == 1
+    assert rows[0]["as_of"] == "2026-09-14"
+    assert any("matched 1 hero" in n for n in notes)
+
+
+def test_daily_rt_job_is_scheduled_every_day():
+    from src import main as main_mod
+
+    src = inspect.getsource(main_mod)
+    assert 'id="soldscope_daily_rt"' in src
+    assert 'id="soldscope_weekly_sync"' in src
+    assert "soldscope-daily-rt" in src
+    daily_add = src.split('id="soldscope_daily_rt"')[0].rsplit("scheduler.add_job", 1)[1]
+    assert "day_of_week" not in daily_add
+    weekly_add = src.split('id="soldscope_weekly_sync"')[0].rsplit("scheduler.add_job", 1)[1]
+    assert "day_of_week" in weekly_add
+    runner = inspect.getsource(main_mod._run_soldscope_daily_rt)
+    assert "sync_daily_rt" in runner
+    assert "sync_weekly" not in runner
+    assert "create_missing" not in runner
+
+
+def test_heatmap_window_clamps_to_soldscope_max():
+    start, end = syn.heatmap_window(30, today=date(2026, 9, 14))
+    assert end == date(2026, 9, 14)
+    assert start == date(2026, 8, 16)
+    start_max, end_max = syn.heatmap_window(200, today=date(2026, 9, 14))
+    assert (end_max - start_max).days == 91
+    assert syn._clamp_heatmap_days(0) == 1
+    assert syn._clamp_heatmap_days("nope") == 30
+
+
+def test_phrase_heatmap_ranks_skip_null_and_do_not_invent():
+    ranks = syn.phrase_heatmap_ranks({
+        "phrase": "tallow lip balm",
+        "organicPosition": 4,
+        "r_2026-09-11": {"date": "2026-09-11", "rank": 6, "amazon_choice": False},
+        "r_2026-09-12": {"date": "2026-09-12", "rank": 5, "amazon_choice": False},
+        "r_2026-09-13": {"date": "2026-09-13", "rank": None, "amazon_choice": False},
+        "r_2026-09-10": {"date": "2026-09-10", "rank": 0},
+        "not_a_day": {"rank": 1},
+    })
+    assert ranks == {"2026-09-11": 6, "2026-09-12": 5}
+    assert "2026-09-13" not in ranks
+    assert "2026-09-10" not in ranks
+
+
+def test_rank_rows_expand_heatmap_days_without_inventing():
+    rows = syn.rank_rows_from_phrases(
+        [{
+            "id": 1,
+            "phrase": "tallow lip balm",
+            "organicPosition": 4,
+            "abaSearchFrequencyRank": 80,
+            "r_2026-09-11": {"date": "2026-09-11", "rank": 6},
+            "r_2026-09-12": {"date": "2026-09-12", "rank": 5},
+            "r_2026-09-13": {"date": "2026-09-13", "rank": None},
+        }],
+        asin="B0CLHTF8YN",
+        marketplace="US",
+        group_id=3537,
+        product_id=6051,
+        as_of=date(2026, 9, 14),
+        pulled_at="now",
+    )
+    by_day = {r["as_of"]: r for r in rows}
+    assert set(by_day) == {"2026-09-11", "2026-09-12", "2026-09-14"}
+    assert by_day["2026-09-11"]["organic_position"] == 6
+    assert by_day["2026-09-12"]["organic_position"] == 5
+    assert by_day["2026-09-14"]["organic_position"] == 4
+    assert by_day["2026-09-14"]["aba_search_frequency_rank"] == 80
+    assert by_day["2026-09-11"]["aba_search_frequency_rank"] is None
+    assert "2026-09-13" not in by_day
+
+
+def test_list_product_phrases_sends_heatmap_query(monkeypatch):
+    seen: list[dict] = []
+
+    def fake_request(method, path, *, params=None, timeout=45):
+        seen.append({"method": method, "path": path, "params": params})
+        return {"data": []}, {}
+
+    monkeypatch.setattr(ss, "request", fake_request)
+    ss.list_product_phrases(
+        3537, 6051, heatmap=True,
+        heatmap_date_from="2026-08-16", heatmap_date_to="2026-09-14",
+    )
+    assert seen[0]["method"] == "GET"
+    assert seen[0]["path"].endswith("/phrases/v2")
+    assert seen[0]["params"]["heatmap"] is True
+    assert seen[0]["params"]["heatmapDateFrom"] == "2026-08-16"
+    assert seen[0]["params"]["heatmapDateTo"] == "2026-09-14"
+    assert "heatmap-widgets" not in inspect.getsource(ss)
+
+
+def test_pull_requests_heatmap_and_upserts_returned_days(monkeypatch):
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 9, 14)
+
+    monkeypatch.setattr(syn, "date", FakeDate)
+    called: list[dict] = []
+
+    def phrases(gid, pid, **kwargs):
+        called.append(kwargs)
+        return {"data": [{
+            "id": 1, "phrase": "tallow lip balm",
+            "organicPosition": 4,
+            "r_2026-09-11": {"date": "2026-09-11", "rank": 6},
+            "r_2026-09-12": {"date": "2026-09-12", "rank": 5},
+        }]}
+
+    monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [
+        {"id": 3537, "asin": "B0CLHTF8YN"},
+    ])
+    monkeypatch.setattr(syn, "list_group_products", lambda gid: {
+        "data": [{"id": 6051, "asin": "B0CLHTF8YN"}],
+    })
+    monkeypatch.setattr(syn, "list_product_phrases", phrases)
+    rows, notes = syn.pull_rank_tracker_snapshots(
+        marketplace="US", asins=["B0CLHTF8YN"], pulled_at="now",
+        heatmap_days=30,
+    )
+    assert called[0]["heatmap"] is True
+    assert called[0]["heatmap_date_from"] == "2026-08-16"
+    assert called[0]["heatmap_date_to"] == "2026-09-14"
+    assert {r["as_of"] for r in rows} == {"2026-09-11", "2026-09-12", "2026-09-14"}
+    assert any("2026-08-16→2026-09-14" in n for n in notes)

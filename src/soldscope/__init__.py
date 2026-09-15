@@ -1,1 +1,1 @@
-"""SoldScope weekly Amazon intel — observe-only history + Rank Tracker read."""
+"""SoldScope Amazon intel — weekly history + daily Rank Tracker reuse-only."""

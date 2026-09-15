@@ -116,7 +116,7 @@ export function OrganicRankHeatmap() {
   const baselineOnly = Boolean(filtered?.baselineOnly);
 
   const emptyCopy = !data
-    ? "Loading weekly organic ranks…"
+    ? "Loading daily organic ranks…"
     : filtered?.empty
       ? (filtered.emptyCopy || emptyCopyForFamily(family))
       : null;
@@ -128,14 +128,15 @@ export function OrganicRankHeatmap() {
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <CardTitle className="text-sm font-medium">
-                Weekly organic rank
+                Daily organic rank
               </CardTitle>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Keywords × week from SoldScope Rank Tracker. SFR is Brand
-                Analytics (`abaSearchFrequencyRank`) — never invented from
-                SoldScope search volume. Cell fill is absolute rank (greener =
-                better). The small Δ is movement vs the prior week, or vs
-                SoldScope previous position when only one week is stored.
+                Keywords × day from SoldScope Rank Tracker daily RT snapshots.
+                SFR is Brand Analytics (`abaSearchFrequencyRank`) — never
+                invented from SoldScope search volume. Cell fill is absolute
+                rank (greener = better). The small Δ is movement vs the prior
+                snapshot, or vs SoldScope previous position when only one
+                as_of column is stored.
               </p>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -171,12 +172,12 @@ export function OrganicRankHeatmap() {
             <>
               <div className="grid gap-3 md:grid-cols-2">
                 <MoverList
-                  title="Improved this week"
+                  title="Improved vs last snapshot"
                   rows={improved}
                   tone="up"
                 />
                 <MoverList
-                  title="Slipped this week"
+                  title="Slipped vs last snapshot"
                   rows={worsened}
                   tone="down"
                 />
@@ -185,7 +186,7 @@ export function OrganicRankHeatmap() {
               {baselineOnly && weeks[0] && (
                 <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
                   {BASELINE_WEEK_COPY}{" "}
-                  Week of {weekLabel(weeks[0])}. {movedCount} of {rows.length} keywords
+                  Snapshot {weekLabel(weeks[0])}. {movedCount} of {rows.length} keywords
                   moved; {flaggedCount} flagged as meaningful (≥{WOW_MOVE_POSITIONS}{" "}
                   or crossing top {WOW_TOP_N}).
                 </p>
@@ -194,7 +195,7 @@ export function OrganicRankHeatmap() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-[10px] text-muted-foreground">
                   {rows.length} keyword{rows.length === 1 ? "" : "s"}
-                  {weeks.length ? ` · ${weeks.length} week${weeks.length === 1 ? "" : "s"}` : ""}
+                  {weeks.length ? ` · ${weeks.length} day${weeks.length === 1 ? "" : "s"}` : ""}
                   {movedCount ? ` · ${movedCount} moved` : ""}
                   {flaggedCount ? ` · ${flaggedCount} flagged` : ""}
                   {sort === "sfr" ? " · sorted by SFR (more frequent first)" : ""}
@@ -421,7 +422,7 @@ function MoverList({
       </p>
       {rows.length === 0 ? (
         <p className="text-[11px] text-muted-foreground">
-          No meaningful {tone === "up" ? "gains" : "drops"} vs last week.
+          No meaningful {tone === "up" ? "gains" : "drops"} vs last snapshot.
         </p>
       ) : (
         <ul className="space-y-1">

@@ -1,5 +1,5 @@
 /**
- * Weekly organic-rank progress for hero ASINs.
+ * Organic-rank progress for hero ASINs (daily RT snapshots).
  *
  * Positions come from soldscope_rank_snapshots (SoldScope Rank Tracker).
  * SFR SoT is Brand Analytics via SoldScope phrases/v2
@@ -17,7 +17,7 @@ export const HEATMAP_WEEK_CAP = 12;
 export const HEATMAP_DEFAULT_ROWS = 40;
 
 export const RANK_EMPTY_COPY =
-  "No weekly organic-rank snapshots yet. The Sunday SoldScope job stores phrases when a Rank Tracker group exists. Empty is real — this is not a sales or ads number, and this desk never creates Rank Tracker groups.";
+  "No daily organic-rank snapshots yet. The daily SoldScope Rank Tracker job stores phrases when a hero group already exists. Empty is real — this is not a sales or ads number, and this desk never creates Rank Tracker groups.";
 
 export const DEO_EMPTY_COPY =
   "Deodorant is not in Rank Tracker yet. No rows invented — add a SoldScope RT group for B0HBSZ71XQ when you are ready. This desk never creates groups or phrases.";
@@ -26,7 +26,7 @@ export const FAMILY_EMPTY_COPY =
   "No Rank Tracker snapshots for this hero yet. Empty is real — nothing invented, and no group is created from this desk.";
 
 export const BASELINE_WEEK_COPY =
-  "First baseline week — one snapshot column so far. Movement is vs SoldScope previous position when stored, not a second week column yet.";
+  "First baseline snapshot — one as_of column so far. Movement is vs SoldScope previous position when stored, not a second daily column yet.";
 
 export type HeroFamilyId = "lip" | "balm" | "deo";
 
