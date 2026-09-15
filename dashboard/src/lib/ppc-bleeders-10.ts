@@ -142,6 +142,20 @@ export function bleeders10TermsEqual(
   return na.length > 0 && na === nb;
 }
 
+/**
+ * Pasted 1.0 stores campaign_id as the campaign name. Return a distinct
+ * Ads id only when it actually differs — never a second copy of the name.
+ */
+export function bleeders10DistinctCampaignId(
+  campaignName: string | null | undefined,
+  campaignId: string | null | undefined,
+): string | null {
+  const name = String(campaignName ?? "").trim();
+  const id = String(campaignId ?? "").trim();
+  if (!id || id === name) return null;
+  return id;
+}
+
 function termsEqual(a: string, b: string): boolean {
   return bleeders10TermsEqual(a, b);
 }

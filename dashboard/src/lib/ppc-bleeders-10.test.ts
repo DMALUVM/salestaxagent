@@ -13,6 +13,7 @@ import {
   BLEEDERS_10_VERIFY,
   BLEEDERS_10_WINDOW_LABEL,
   actionLabelOf10,
+  bleeders10DistinctCampaignId,
   bleeders10TermsEqual,
   buildBleeders10,
   resolveBleeders10Action,
@@ -257,15 +258,19 @@ describe("This week Recovery list is not the 1.0 10", () => {
     assert.match(page, /useState<"search" \| "campaigns" \| "bleeders">\("bleeders"\)/);
   });
 
-  test("Bleeders 1.0 table surfaces Orders/Sales and copyable campaign names", () => {
+  test("Bleeders 1.0 table surfaces Orders/Sales and one copyable campaign name", () => {
     const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-bleeders-10.tsx"), "utf8");
     assert.match(ui, />Orders</);
     assert.match(ui, />Sales</);
     assert.match(ui, /\{r\.orders\}/);
     assert.match(ui, /r\.sales_14d/);
     assert.match(ui, /navigator\.clipboard/);
-    assert.match(ui, /CopyableName value=\{r\.campaign_name\}/);
-    assert.match(ui, /CopyableName value=\{r\.campaign_id\}/);
+    assert.match(ui, /CampaignCell name=\{r\.campaign_name\} campaignId=\{r\.campaign_id\}/);
+    assert.match(ui, /CopyableName value=\{name\} label="campaign name"/);
+    assert.match(ui, /bleeders10DistinctCampaignId/);
+    assert.match(ui, /no SP-API id on pasted 1\.0/);
+    assert.doesNotMatch(ui, /Campaign ID \(= name/);
+    assert.doesNotMatch(ui, /CopyableName value=\{r\.campaign_id\}/);
     assert.match(ui, /CopyableName value=\{r\.ad_group_name\}/);
     assert.match(ui, /CopyableName value=\{r\.search_term\}/);
     assert.match(ui, /CopyableName value=\{r\.match_type\}/);
@@ -273,8 +278,31 @@ describe("This week Recovery list is not the 1.0 10", () => {
     assert.match(ui, /Verify in Ads: SP Search Term report/);
     assert.match(ui, /data\.window\.window_start/);
     assert.match(ui, /data\.window\.window_end/);
-    assert.match(ui, /CopyableName value=\{r\.campaign_id\} label="campaign id"/);
     assert.match(ui, /Hide evidence/);
     assert.doesNotMatch(ui, /max-w-\[12rem\] truncate/);
+    assert.doesNotMatch(
+      ui,
+      /CampaignCell[\s\S]{0,400}window_start\}\.\.\{data\.window\.window_end\}/,
+    );
+  });
+});
+
+describe("Bleeders 1.0 campaign id is not a second copy of the name", () => {
+  test("pasted 1.0 rows store campaign_id as the name", () => {
+    for (const row of buildBleeders10().rows) {
+      assert.equal(row.campaign_id, row.campaign_name, row.search_term);
+      assert.equal(bleeders10DistinctCampaignId(row.campaign_name, row.campaign_id), null);
+    }
+  });
+
+  test("distinct Ads id is returned only when it differs from the name", () => {
+    assert.equal(bleeders10DistinctCampaignId("GG - Lip Balm - Asin Offense", "GG - Lip Balm - Asin Offense"), null);
+    assert.equal(bleeders10DistinctCampaignId("GG - Lip Balm - Asin Offense", "  GG - Lip Balm - Asin Offense  "), null);
+    assert.equal(bleeders10DistinctCampaignId("GG - Lip Balm - Asin Offense", ""), null);
+    assert.equal(bleeders10DistinctCampaignId("GG - Lip Balm - Asin Offense", null), null);
+    assert.equal(
+      bleeders10DistinctCampaignId("GG - Lip Balm - Asin Offense", "1234567890"),
+      "1234567890",
+    );
   });
 });
