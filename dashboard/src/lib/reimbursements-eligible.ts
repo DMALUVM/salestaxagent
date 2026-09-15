@@ -44,12 +44,59 @@ export const SELLER_CENTRAL_LINK_LIMIT =
   "No stable Seller Central deep link opens a pre-filled FBA case. " +
   "Only real FBA* shipment IDs link to the inbound shipment tracker. " +
   "Ledger reference / transaction IDs (digit strings) are not shipment IDs. " +
-  "Support (manual) opens Get Support — it is NOT a pre-filled lost-inbound or warehouse case. " +
+  "Warehouse damage is filed in IDR (Inventory → Inventory Defect and Reimbursement), " +
+  "not via a generic Support hub button. That hub is NOT a pre-filled lost-inbound or warehouse case. " +
   "Dave submits; this desk never auto-files.";
 
-export const SUPPORT_MANUAL_LIMIT =
-  "Support (manual) opens Seller Central Get Support. It is not a pre-filled " +
-  "lost-inbound case and does not carry FC / Reference ID. Copy those fields first.";
+export const IDR_INSTRUCTION =
+  "Open IDR (Inventory → Inventory Defect and Reimbursement)";
+
+export const HOW_TO_FILE_TITLE = "How to file";
+
+export const HOW_TO_FILE_INTRO =
+  "Current queue is warehouse damage (codes 7 / E — Damaged at FC). " +
+  "Amazon auto-pays many warehouse lost/damaged events. This desk never auto-files.";
+
+export const HOW_TO_FILE_STEPS = [
+  {
+    title: "Check Paid / Reimbursements report first",
+    body:
+      "Amazon auto-pays many warehouse lost/damaged units. Skip filing if already paid within ~60 days (Already reimbursed tab).",
+  },
+  {
+    title: "File within 60 days",
+    body: "The clock starts on the ledger event date.",
+  },
+  {
+    title: "Use Reference ID + SKU details",
+    body:
+      "Paste the digit Reference ID plus FNSKU/SKU/ASIN/qty/FC/date. Reference ID is a ledger transaction ID — not a shipment ID.",
+  },
+  {
+    title: "Preferred: Inventory Defect and Reimbursement (IDR)",
+    body: "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR).",
+  },
+  {
+    title: "Classic path",
+    body:
+      "Reports → Fulfillment → Inventory Adjustments / Ledger Adjustments → find Damaged at FC row → Help / Get Support → FBA → warehouse lost/damaged (or the warehouse-damaged status tool with Transaction Item ID).",
+  },
+  {
+    title: "One case per event",
+    body: "Copy the case packet from the row and paste those fields. Do not batch unrelated events.",
+  },
+] as const;
+
+export const HOW_TO_FILE_NO_DEEP_LINK =
+  "There is no stable deep link that opens a pre-filled case. " +
+  "Do not use a generic Support hub button as if it does.";
+
+export const CASE_QUEUE_SOURCE_NOTE =
+  "Needs case currently comes from (1) ledger adjustments with eligible codes and " +
+  "(2) CLOSED/stale inbound shipped−received shorts.";
+
+export const NO_INBOUND_DISCREPANCIES =
+  "No CLOSED inbound discrepancies in warehouse right now";
 
 export {
   CLASSIFICATION_VERSION,
@@ -161,8 +208,8 @@ export function isEligibleNeedsCase(row: CaseEventRow): boolean {
 export function normalizeCaseRow(row: CaseEventRow): CaseEventRow {
   const group = reasonGroup(row.reason, row.disposition);
   const shipment = fbaShipmentId(row.shipment_id);
-  const kind = shipment ? "inbound_shipment" : "support_manual";
-  const url = shipment ? `${SC_INBOUND_SHIPMENT}${shipment}` : SC_SUPPORT_HUB;
+  const kind = shipment ? "inbound_shipment" : "idr_instructions";
+  const url = shipment ? `${SC_INBOUND_SHIPMENT}${shipment}` : null;
   return {
     ...row,
     reason_group: group,
@@ -297,11 +344,10 @@ export function eventQueryBounds(start: string, end: string): { gte: string; lte
   };
 }
 
-export function sellerCentralHref(row: Pick<CaseEventRow, "seller_central_url" | "shipment_id" | "reference_id">): string {
+export function sellerCentralHref(row: Pick<CaseEventRow, "seller_central_url" | "shipment_id" | "reference_id">): string | null {
   const sid = fbaShipmentId(row.shipment_id);
   if (sid) return `${SC_INBOUND_SHIPMENT}${sid}`;
-  if (row.seller_central_url && isFbaShipmentId(row.shipment_id)) return row.seller_central_url;
-  return SC_SUPPORT_HUB;
+  return null;
 }
 
 export function isInboundTrackerLink(row: Pick<CaseEventRow, "shipment_id">): boolean {
@@ -310,7 +356,34 @@ export function isInboundTrackerLink(row: Pick<CaseEventRow, "shipment_id">): bo
 
 export function linkKindLabel(kind: string | null | undefined): string {
   if (kind === "inbound_shipment") return "Shipment tracker";
-  return "Support (manual)";
+  return IDR_INSTRUCTION;
+}
+
+export function inboundDiscrepancyCount(rows: Pick<CaseEventRow, "source">[]): number {
+  return rows.filter((row) => row.source === "inbound_discrepancy").length;
+}
+
+export function inboundEmptyCopy(rows: Pick<CaseEventRow, "source">[]): string | null {
+  return inboundDiscrepancyCount(rows) === 0 ? NO_INBOUND_DISCREPANCIES : null;
+}
+
+export function formatCasePacket(row: CaseEventRow): string {
+  const shipment = fbaShipmentId(row.shipment_id);
+  const ref = row.reference_id && row.reference_id !== shipment ? row.reference_id : "";
+  const lines = [
+    `FBA Needs-case packet — ${reasonLabel(row.reason, row.disposition)}`,
+    `Date: ${caseDay(row)}`,
+    `Reference ID: ${ref || "—"} (ledger transaction ID — not a shipment ID)`,
+    `FNSKU: ${row.fnsku || "—"}`,
+    `SKU: ${row.sku || "—"}`,
+    `ASIN: ${row.asin || "—"}`,
+    `Qty: ${caseQty(row)}`,
+    `FC: ${row.fulfillment_center || "—"}`,
+    shipment ? `Shipment: ${shipment}` : null,
+    `Preferred path: ${IDR_INSTRUCTION}`,
+    HOW_TO_FILE_NO_DEEP_LINK,
+  ];
+  return lines.filter((line): line is string => Boolean(line)).join("\n");
 }
 
 export interface CaseQa {
@@ -466,7 +539,7 @@ export function buildReesePackage(
       shipment_id: fbaShipmentId(r.shipment_id),
       reference_id: r.reference_id,
       estimated_amount: r.estimated_amount ?? null,
-      seller_central_url: sellerCentralHref(r),
+      seller_central_url: sellerCentralHref(r) ?? "",
     }));
   const units = events.reduce((s, e) => s + e.quantity, 0);
   const known = events.filter((e) => e.estimated_amount != null && e.estimated_amount !== "");
@@ -501,12 +574,18 @@ export function renderReeseMarkdown(pkg: Omit<ReesePackage, "markdown">): string
     `- Events: **${pkg.summary.events}** · Units: **${pkg.summary.units}** · Est. $: **${estS}**`,
     `- Target agent: \`${pkg.target.agent_id}\``,
     "",
-    "## Seller Central links",
+    `## ${HOW_TO_FILE_TITLE}`,
+    "",
+    HOW_TO_FILE_INTRO,
+    "",
+    ...HOW_TO_FILE_STEPS.map((step, i) => `${i + 1}. **${step.title}** — ${step.body}`),
+    "",
+    HOW_TO_FILE_NO_DEEP_LINK,
+    "",
+    `- ${IDR_INSTRUCTION}`,
+    `- Inventory ledger report: ${SC_LEDGER_HUB}`,
     "",
     SELLER_CENTRAL_LINK_LIMIT,
-    "",
-    `- Get Support: ${SC_SUPPORT_HUB}`,
-    `- Inventory ledger report: ${SC_LEDGER_HUB}`,
     "",
   ];
   const groups: Record<string, ReesePackageEvent[]> = {};
@@ -535,8 +614,9 @@ export function renderReeseMarkdown(pkg: Omit<ReesePackage, "markdown">): string
         : "—";
       const shipment = fbaShipmentId(r.shipment_id) || "—";
       const ref = r.reference_id && r.reference_id !== shipment ? r.reference_id : "—";
+      const fileCell = r.seller_central_url || IDR_INSTRUCTION;
       lines.push(
-        `| ${r.event_date} | \`${r.sku || "—"}\` | ${r.asin || "—"} | ${r.quantity} | ${r.fulfillment_center || "—"} | ${shipment} | ${ref} | ${estCell} | ${r.seller_central_url} |`,
+        `| ${r.event_date} | \`${r.sku || "—"}\` | ${r.asin || "—"} | ${r.quantity} | ${r.fulfillment_center || "—"} | ${shipment} | ${ref} | ${estCell} | ${fileCell} |`,
       );
     }
     lines.push("");

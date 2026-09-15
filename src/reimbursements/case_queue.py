@@ -51,6 +51,7 @@ SC_INBOUND_SHIPMENT = (
 SC_LEDGER_HUB = "https://sellercentral.amazon.com/reportcentral/INVENTORY_LEDGER/1"
 
 LINK_KIND_INBOUND = "inbound_shipment"
+LINK_KIND_IDR = "idr_instructions"
 LINK_KIND_SUPPORT_MANUAL = "support_manual"
 # Legacy rows stored this before the trust fix.
 LINK_KIND_SUPPORT_HUB = "support_hub"
@@ -60,8 +61,64 @@ SELLER_CENTRAL_LINK_LIMIT = (
     "No stable Seller Central deep link opens a pre-filled FBA case. "
     "Only real FBA* shipment IDs link to the inbound shipment tracker. "
     "Ledger reference / transaction IDs (digit strings) are not shipment IDs. "
-    "Support (manual) opens Get Support (help/hub/contact-us) — it is NOT a "
+    "Warehouse damage is filed in IDR (Inventory → Inventory Defect and "
+    "Reimbursement), not via a generic Support hub button. That hub is NOT a "
     "pre-filled lost-inbound or warehouse case. Dave submits; this desk never auto-files."
+)
+
+IDR_INSTRUCTION = "Open IDR (Inventory → Inventory Defect and Reimbursement)"
+
+HOW_TO_FILE_TITLE = "How to file"
+
+HOW_TO_FILE_INTRO = (
+    "Current queue is warehouse damage (codes 7 / E — Damaged at FC). "
+    "Amazon auto-pays many warehouse lost/damaged events. This desk never auto-files."
+)
+
+HOW_TO_FILE_STEPS = (
+    (
+        "Check Paid / Reimbursements report first",
+        "Amazon auto-pays many warehouse lost/damaged units. Skip filing if "
+        "already paid within ~60 days (Already reimbursed tab).",
+    ),
+    (
+        "File within 60 days",
+        "The clock starts on the ledger event date.",
+    ),
+    (
+        "Use Reference ID + SKU details",
+        "Paste the digit Reference ID plus FNSKU/SKU/ASIN/qty/FC/date. "
+        "Reference ID is a ledger transaction ID — not a shipment ID.",
+    ),
+    (
+        "Preferred: Inventory Defect and Reimbursement (IDR)",
+        "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR).",
+    ),
+    (
+        "Classic path",
+        "Reports → Fulfillment → Inventory Adjustments / Ledger Adjustments → "
+        "find Damaged at FC row → Help / Get Support → FBA → warehouse "
+        "lost/damaged (or the warehouse-damaged status tool with Transaction Item ID).",
+    ),
+    (
+        "One case per event",
+        "Copy the case packet from the row and paste those fields. "
+        "Do not batch unrelated events.",
+    ),
+)
+
+HOW_TO_FILE_NO_DEEP_LINK = (
+    "There is no stable deep link that opens a pre-filled case. "
+    "Do not use a generic Support hub button as if it does."
+)
+
+CASE_QUEUE_SOURCE_NOTE = (
+    "Needs case currently comes from (1) ledger adjustments with eligible codes "
+    "and (2) CLOSED/stale inbound shipped−received shorts."
+)
+
+NO_INBOUND_DISCREPANCIES = (
+    "No CLOSED inbound discrepancies in warehouse right now"
 )
 
 CLOSED_INBOUND = frozenset({"CLOSED"})
@@ -131,17 +188,17 @@ def _fba_id(value: str | None) -> str | None:
     return None
 
 
-def seller_central_link(shipment_id: str | None, reference_id: str | None) -> tuple[str, str]:
+def seller_central_link(shipment_id: str | None, reference_id: str | None) -> tuple[str | None, str]:
     """Best available SC URL and a documented kind.
 
     Real FBA* ids → inbound shipment tracker. Digit ledger transaction IDs
-    are not shipment IDs — those get Support (manual), which is not a
-    pre-filled case.
+    are not shipment IDs — those get IDR instructions, not a fake Support
+    hub claim URL. There is no stable pre-filled case deep link.
     """
     sid = fba_shipment_id(shipment_id, reference_id)
     if sid:
         return SC_INBOUND_SHIPMENT.format(shipment_id=sid), LINK_KIND_INBOUND
-    return SC_SUPPORT_HUB, LINK_KIND_SUPPORT_MANUAL
+    return None, LINK_KIND_IDR
 
 
 def inbound_ready(ship: dict, as_of: date) -> bool:
