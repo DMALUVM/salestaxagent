@@ -72,7 +72,7 @@ export function PpcBleeders10({
   onNotice?: (n: { kind: "success" | "warn" | "error"; text: string }) => void;
   onMarked?: () => void;
 }) {
-  const [filter, setFilter] = useState<"open" | "done" | "skipped" | "all">("open");
+  const [filter, setFilter] = useState<"open" | "already_applied" | "done" | "skipped" | "all">("open");
   const [busy, setBusy] = useState<string | null>(null);
   const [local, setLocal] = useState<Record<string, Status>>({});
 
@@ -81,11 +81,13 @@ export function PpcBleeders10({
     return rows.filter((r) => {
       const status = local[r.checklist_id] ?? r.status;
       if (filter === "all") return true;
+      if (filter === "done") return status === "done";
       return status === filter;
     });
   }, [rows, filter, local]);
 
   const openCount = rows.filter((r) => (local[r.checklist_id] ?? r.status) === "open").length;
+  const alreadyAppliedCount = rows.filter((r) => (local[r.checklist_id] ?? r.status) === "already_applied").length;
   const doneCount = rows.filter((r) => (local[r.checklist_id] ?? r.status) === "done").length;
   const skippedCount = rows.filter((r) => (local[r.checklist_id] ?? r.status) === "skipped").length;
 
@@ -177,6 +179,16 @@ export function PpcBleeders10({
             <p><span className="text-muted-foreground">Window:</span> {data.window.label}</p>
             <p><span className="text-muted-foreground">Campaign:</span> listed on each row — open that campaign in Ads to verify.</p>
             <p>{BLEEDERS_10_VERIFY}</p>
+            <p>
+              <span className="text-muted-foreground">Ads snapshot:</span>{" "}
+              {data.ads_snapshot?.pulled_at
+                ? `keywords ${data.ads_snapshot.keywords_count} · negatives ${data.ads_snapshot.negatives_count} · pulled_at ${data.ads_snapshot.pulled_at}`
+                : "not loaded"}
+              {alreadyAppliedCount ? ` · ${alreadyAppliedCount} already applied in Ads` : ""}
+            </p>
+            {data.ads_snapshot?.warning ? (
+              <p className="text-amber-700 dark:text-amber-400">{data.ads_snapshot.warning}</p>
+            ) : null}
           </div>
           {data.notes.filter((n) => n !== BLEEDERS_10_BLURB).slice(0, 3).map((n) => (
             <p key={n.slice(0, 48)} className="text-[11px] text-muted-foreground">{n}</p>
@@ -188,6 +200,7 @@ export function PpcBleeders10({
         <div className="flex gap-1">
           {([
             ["open", `Open (${openCount})`],
+            ["already_applied", `Already applied (${alreadyAppliedCount})`],
             ["done", `Done (${doneCount})`],
             ["skipped", `Skipped (${skippedCount})`],
             ["all", `All (${rows.length})`],
@@ -234,23 +247,36 @@ export function PpcBleeders10({
                   return (
                     <TableRow key={r.checklist_id} className={status !== "open" ? "opacity-60" : ""}>
                       <TableCell>
-                        <div className="flex gap-1">
-                          <Button
-                            variant={status === "done" ? "default" : "outline"}
-                            size="sm"
-                            disabled={busy === r.checklist_id}
-                            onClick={() => mark(r, "done")}
-                          >
-                            Done
-                          </Button>
-                          <Button
-                            variant={status === "skipped" ? "default" : "outline"}
-                            size="sm"
-                            disabled={busy === r.checklist_id}
-                            onClick={() => mark(r, "skipped")}
-                          >
-                            Skipped
-                          </Button>
+                        <div className="space-y-1">
+                          {status === "already_applied" ? (
+                            <Badge variant="outline" className="text-[10px] text-emerald-700 dark:text-emerald-400">
+                              Already applied in Ads
+                            </Badge>
+                          ) : null}
+                          <div className="flex gap-1">
+                            <Button
+                              variant={status === "done" ? "default" : "outline"}
+                              size="sm"
+                              disabled={busy === r.checklist_id}
+                              onClick={() => mark(r, "done")}
+                            >
+                              Done
+                            </Button>
+                            <Button
+                              variant={status === "skipped" ? "default" : "outline"}
+                              size="sm"
+                              disabled={busy === r.checklist_id}
+                              onClick={() => mark(r, "skipped")}
+                            >
+                              Skipped
+                            </Button>
+                          </div>
+                          {r.applied_reason && status !== "open" ? (
+                            <p className="max-w-[12rem] text-[10px] leading-snug text-muted-foreground">{r.applied_reason}</p>
+                          ) : null}
+                          {status === "open" && r.ads_verify_note ? (
+                            <p className="max-w-[12rem] text-[10px] leading-snug text-amber-700 dark:text-amber-400">{r.ads_verify_note}</p>
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell><Badge variant="outline" className="text-[10px]">{r.rank}</Badge></TableCell>

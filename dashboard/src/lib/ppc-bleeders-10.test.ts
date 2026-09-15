@@ -189,6 +189,8 @@ describe("Bleeders 1.0 is the pasted 10 — not a live scanner, not 22", () => {
     assert.match(ui, /action_label/);
     assert.match(ui, /suggested_action/);
     assert.match(ui, /same Exact KW as the search term/);
+    assert.match(ui, /already_applied/);
+    assert.match(ui, /Already applied in Ads/);
     assert.doesNotMatch(ui, />\{r\.action\}</);
   });
 
@@ -224,6 +226,8 @@ describe("This week Recovery list is not the 1.0 10", () => {
     const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/route.ts"), "utf8");
     const page = readFileSync(path.join(process.cwd(), "src/app/ppc/page.tsx"), "utf8");
     assert.match(route, /buildBleeders10\s*\(\s*\{/);
+    assert.match(route, /ads_negatives/);
+    assert.match(route, /ads_keyword_targets/);
     assert.match(route, /bleeders10/);
     assert.match(route, /buildBlakeRecovery0905List/);
     assert.doesNotMatch(route, /buildBlake63dList/);

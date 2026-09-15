@@ -8,6 +8,13 @@
  */
 
 import type { WeeklyLockDecision } from "./ppc-weekly";
+import {
+  reconcileBleeders10Row,
+  summarizeBleeders10Ads,
+  type Bleeders10AdsSnapshot,
+  type Bleeders10AppliedSource,
+  type Bleeders10AdsSummary,
+} from "./ppc-bleeders-10-ads";
 
 export const BLEEDERS_10_VERSION = "1.0";
 export const BLEEDERS_10_CLICK_FLOOR = 6;
@@ -77,8 +84,11 @@ export interface Bleeders10Row {
   why: string;
   action_label: string;
   suggested_action: string;
-  status: "open" | "done" | "skipped";
+  status: "open" | "done" | "skipped" | "already_applied";
   decision_id: string | null;
+  applied_reason: string | null;
+  applied_source: Bleeders10AppliedSource | null;
+  ads_verify_note: string | null;
   soldscope_sv?: number | null;
 }
 
@@ -100,6 +110,8 @@ export interface Bleeders10Payload {
   open_count: number;
   done_count: number;
   skipped_count: number;
+  already_applied_count: number;
+  ads_snapshot: Bleeders10AdsSummary;
   search_term_coverage: "SP-only";
   notes: string[];
   rows: Bleeders10Row[];
@@ -350,6 +362,8 @@ export function emptyBleeders10(): Bleeders10Payload {
     open_count: 0,
     done_count: 0,
     skipped_count: 0,
+    already_applied_count: 0,
+    ads_snapshot: summarizeBleeders10Ads(null),
     search_term_coverage: "SP-only",
     notes: [
       "Bleeders 1.0 — pasted 10. Not This week's Recovery execute list.",
@@ -363,8 +377,10 @@ export function emptyBleeders10(): Bleeders10Payload {
 
 export function buildBleeders10(input: {
   decisions?: Array<Bleeders10Decision | WeeklyLockDecision>;
+  ads?: Bleeders10AdsSnapshot | null;
 } = {}): Bleeders10Payload {
   const decisions = (input.decisions ?? []) as Bleeders10Decision[];
+  const adsSummary = summarizeBleeders10Ads(input.ads, input.ads?.now);
   const skip = new Set(BLEEDERS_10_SKIP_TERMS.map(norm));
 
   const rows: Bleeders10Row[] = specs().slice(0, BLEEDERS_10_CAP).map((spec) => {
@@ -390,6 +406,27 @@ export function buildBleeders10(input: {
       clicks: spec.clicks,
       spend: spec.spend,
     };
+    const adsHit = marked.status === "open"
+      ? reconcileBleeders10Row({
+          action: classified,
+          campaign_name: campaignName,
+          campaign_id: campaignId,
+          ad_group_id: "",
+          search_term: spec.term,
+          keyword,
+        }, input.ads, adsSummary)
+      : { applied: false, source: null, reason: null, note: null };
+    const status: Bleeders10Row["status"] = marked.status !== "open"
+      ? marked.status
+      : adsHit.applied ? "already_applied" : "open";
+    const applied_source: Bleeders10AppliedSource | null = marked.status !== "open"
+      ? "manual"
+      : adsHit.source;
+    const applied_reason = marked.status === "done"
+      ? "Marked Done on this desk."
+      : marked.status === "skipped"
+        ? "Marked Skipped on this desk."
+        : adsHit.reason;
     return {
       checklist_id: id,
       rank: spec.rank,
@@ -411,13 +448,17 @@ export function buildBleeders10(input: {
       why: whyOf10(draft),
       action_label: actionLabelOf10(draft),
       suggested_action: suggestedActionCopy(draft),
-      status: marked.status,
+      status,
       decision_id: marked.decision_id,
+      applied_reason,
+      applied_source,
+      ads_verify_note: status === "open" ? (adsHit.note ?? adsSummary.warning) : null,
     };
   });
 
   const done_count = rows.filter((r) => r.status === "done").length;
   const skipped_count = rows.filter((r) => r.status === "skipped").length;
+  const already_applied_count = rows.filter((r) => r.status === "already_applied").length;
 
   return {
     version: "1.0",
@@ -434,9 +475,11 @@ export function buildBleeders10(input: {
     account_cvr_source: "nonbrand search-term CVR",
     click_floor: BLEEDERS_10_CLICK_FLOOR,
     gno_floor_overridden: true,
-    open_count: rows.length - done_count - skipped_count,
+    open_count: rows.length - done_count - skipped_count - already_applied_count,
     done_count,
     skipped_count,
+    already_applied_count,
+    ads_snapshot: adsSummary,
     search_term_coverage: "SP-only",
     notes: [
       "Bleeders 1.0 — pasted 10 tonight. Not This week's Recovery execute list. Cap 10. Do not expand to 22.",
@@ -444,7 +487,7 @@ export function buildBleeders10(input: {
       "Window 2026-06-30..08-31 (63d, SP search terms).",
       "Nonbrand search-term CVR 25.79% (~1-in-4). Click floor 6 (1.5×).",
       "Skip branded $0: primal essence deodorant. tallowbourne deodorant is a confirmed skip (brand misspell — defend). Increment rows (b0c3kw5vjr, tallow balm for lips) hold for Monday.",
-      "Done/Skipped records ads_action_decisions. Nothing writes to Amazon.",
+      "Already applied is Ads truth from ads_negatives / ads_keyword_targets. Manual Done/Skipped still records ads_action_decisions. Nothing writes to Amazon.",
     ],
     rows,
   };
