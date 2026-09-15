@@ -165,8 +165,10 @@ describe("This week Recovery list is not the 1.0 10", () => {
     assert.match(ui, /CopyableName value=\{r\.search_term\}/);
     assert.match(ui, /CopyableName value=\{r\.match_type\}/);
     assert.match(ui, /Verify in Amazon Ads/);
+    assert.match(ui, /Verify in Ads: SP Search Term report/);
     assert.match(ui, /data\.window\.window_start/);
     assert.match(ui, /data\.window\.window_end/);
+    assert.match(ui, /CopyableName value=\{r\.campaign_id\} label="campaign id"/);
     assert.match(ui, /Hide evidence/);
     assert.doesNotMatch(ui, /max-w-\[12rem\] truncate/);
   });

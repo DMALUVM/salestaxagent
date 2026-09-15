@@ -313,16 +313,19 @@ export function PpcBleeders10({
                       <TableCell className="align-top text-xs whitespace-nowrap">{r.action}</TableCell>
                       <TableCell className="align-top whitespace-normal">
                         <CopyableName value={r.campaign_name} label="campaign name" />
-                        {idDiffers ? (
+                        {r.campaign_id ? (
                           <div className="mt-1">
-                            <p className="text-[10px] text-muted-foreground">Campaign ID</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {idDiffers
+                                ? "Campaign ID"
+                                : "Campaign ID (= name; no SP-API id on pasted 1.0)"}
+                            </p>
                             <CopyableName value={r.campaign_id} label="campaign id" compact />
                           </div>
-                        ) : r.campaign_id ? (
-                          <p className="mt-0.5 text-[10px] text-muted-foreground">
-                            ID = name (1.0 pasted rows have no SP-API id)
-                          </p>
                         ) : null}
+                        <p className="mt-1 text-[10px] tabular-nums text-muted-foreground">
+                          {data.window.window_start}..{data.window.window_end}
+                        </p>
                       </TableCell>
                       <TableCell className="align-top whitespace-normal">
                         <CopyableName value={r.ad_group_name} label="ad group name" />
@@ -341,6 +344,10 @@ export function PpcBleeders10({
                       <TableCell className="align-top text-right tabular-nums">${fmtD(r.sales_14d)}</TableCell>
                       <TableCell className="align-top text-right tabular-nums">${fmtD(r.spend)}</TableCell>
                       <TableCell className="align-top text-[11px] whitespace-normal max-w-[18rem]">
+                        <p className="mb-1 text-[10px] text-muted-foreground">
+                          Verify in Ads: SP Search Term report for {data.window.window_start}..{data.window.window_end},
+                          campaign {r.campaign_name || "?"}, term {r.search_term || "?"}.
+                        </p>
                         {!metricsOk ? (
                           <p className="mb-1 text-[10px] font-medium text-amber-700 dark:text-amber-400">
                             Why text does not match clicks/spend columns — trust the columns.
