@@ -10,6 +10,7 @@ from datetime import date
 from typing import Iterable
 
 from src.reimbursements.case_queue import (
+    HOW_TO_FILE_INBOUND,
     HOW_TO_FILE_INTRO,
     HOW_TO_FILE_NO_DEEP_LINK,
     HOW_TO_FILE_STEPS,
@@ -85,6 +86,8 @@ def build_case_package(
             "fnsku": r.get("fnsku"),
             "product_name": r.get("product_name"),
             "quantity": int(r.get("quantity") or 0),
+            "quantity_shipped": r.get("quantity_shipped"),
+            "quantity_received": r.get("quantity_received"),
             "reason": r.get("reason"),
             "reason_group": r.get("reason_group"),
             "fulfillment_center": r.get("fulfillment_center"),
@@ -121,7 +124,8 @@ def build_case_package(
         "source": source,
         "spapi_sources": [
             "GET_LEDGER_DETAIL_VIEW_DATA (eventType=Adjustments)",
-            "FBA inbound v0 QuantityShipped − QuantityReceived",
+            "FBA inbound v0 QuantityShipped − QuantityReceived (SP-API live only)",
+            "Sellerboard CLOSED inbound shorts (Dana MCP → warehouse)",
             "GET_FBA_REIMBURSEMENTS_DATA (dedupe only — paid desk)",
         ],
         "not_sources": [
@@ -192,8 +196,11 @@ def render_package_markdown(package: dict) -> str:
             continue
         lines.append(f"## {GROUP_HEADINGS.get(group, group)} ({len(rows)})")
         lines.append("")
-        lines.append("| Date | SKU | ASIN | Qty | FC | Shipment | Reference ID | Est $ | Seller Central |")
-        lines.append("| --- | --- | --- | ---: | --- | --- | --- | ---: | --- |")
+        if group == "lost_inbound":
+            lines.append(HOW_TO_FILE_INBOUND)
+            lines.append("")
+        lines.append("| Date | SKU | ASIN | Qty | Shipped | Received | FC | Shipment | Reference ID | Est $ | Seller Central |")
+        lines.append("| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- | ---: | --- |")
         for r in rows:
             est_cell = (
                 f"{_money(r.get('estimated_amount')):.2f}"
@@ -205,9 +212,13 @@ def render_package_markdown(package: dict) -> str:
             if shipment != "—" and ref == shipment:
                 ref = "—"
             url = r.get("seller_central_url") or IDR_INSTRUCTION
+            shipped = r.get("quantity_shipped")
+            received = r.get("quantity_received")
             lines.append(
                 f"| {r.get('event_date')} | `{r.get('sku') or '—'}` | "
                 f"{r.get('asin') or '—'} | {r.get('quantity')} | "
+                f"{shipped if shipped is not None else '—'} | "
+                f"{received if received is not None else '—'} | "
                 f"{r.get('fulfillment_center') or '—'} | {shipment} | {ref} | "
                 f"{est_cell} | {url} |"
             )
