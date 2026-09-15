@@ -29,7 +29,6 @@ import {
   fbaShipmentId,
   filterCaseGroup,
   isInboundTrackerLink,
-  linkKindLabel,
   reasonLabel,
   searchCaseRows,
   sellerCentralHref,
@@ -462,7 +461,7 @@ export function ReimbursementsEligiblePanel() {
                                 rel="noreferrer"
                                 className="text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
                               >
-                                {linkKindLabel(r.seller_central_link_kind)}
+                                Support (manual)
                               </a>
                             </span>
                           )}
