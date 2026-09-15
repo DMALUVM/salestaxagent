@@ -109,3 +109,18 @@ def test_nightly_window_covers_july_at_end_of_august():
     as_of = date(2026, 8, 30)
     start = as_of - timedelta(days=SPAPI_REIMBURSEMENTS_DAYS)
     assert start <= date(2026, 7, 2)
+
+
+def test_job_worker_handles_reimbursements_sync():
+    import inspect
+    from src.main import _run_job_worker, _run_reimbursements_sync
+
+    worker = inspect.getsource(_run_job_worker)
+    helper = inspect.getsource(_run_reimbursements_sync)
+    assert 'job_type == "reimbursements_sync"' in worker
+    assert "_run_reimbursements_sync" in worker
+    assert "fetch_reimbursements" in helper
+    assert "SPAPI_REIMBURSEMENTS_DAYS" in helper
+    assert "amazon_as_of" in helper
+    assert "open_case" not in helper
+    assert "sellerise" not in helper.lower()
