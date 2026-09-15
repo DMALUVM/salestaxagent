@@ -336,6 +336,8 @@ def test_rank_rows_map_organic_position_sfr_and_previous():
             "abaSearchFrequencyRank": 120,
             "abaTotalClickShare": 0.18,
             "abaTotalConvShare": 0.09,
+            "organicAsin": "b0clf5b27y",
+            "mobileOrganicAsin": "B0CHILDMOB1",
         }],
         asin="B0CLHTF8YN",
         marketplace="US",
@@ -354,6 +356,10 @@ def test_rank_rows_map_organic_position_sfr_and_previous():
     assert row["aba_total_conv_share"] == 0.09
     assert row["search_volume"] == 8800
     assert row["search_volume"] != row["aba_search_frequency_rank"]
+    assert row["asin"] == "B0CLHTF8YN"
+    assert row["organic_asin"] == "B0CLF5B27Y"
+    assert row["mobile_organic_asin"] == "B0CHILDMOB1"
+    assert row["amazon_choice"] is None
 
 
 def test_rank_rows_do_not_invent_sfr_from_search_volume():
@@ -373,6 +379,9 @@ def test_rank_rows_do_not_invent_sfr_from_search_volume():
     assert rows[0]["search_volume"] == 4400
     assert rows[0]["aba_search_frequency_rank"] is None
     assert rows[0]["organic_previous_position"] is None
+    assert rows[0]["organic_asin"] is None
+    assert rows[0]["mobile_organic_asin"] is None
+    assert rows[0]["amazon_choice"] is None
 
 
 def test_rank_rows_ignore_organic_rank_alias_when_position_present():
@@ -413,6 +422,11 @@ def test_phrase_helpers_treat_zero_and_blank_as_missing():
     assert syn.phrase_sfr({"searchVolume": 900}) is None
     assert syn.phrase_sfr({"abaSearchFrequencyRank": ""}) is None
     assert syn.phrase_organic_previous({"organicPreviousPosition": None}) is None
+    assert syn.phrase_organic_asin({"organicAsin": "b0clf5b27y"}) == "B0CLF5B27Y"
+    assert syn.phrase_organic_asin({"organicAsin": ""}) is None
+    assert syn.phrase_mobile_organic_asin({"mobileOrganicAsin": "B0X"}) == "B0X"
+    assert syn.phrase_amazon_choice({"amazon_choice": False}) is False
+    assert syn.phrase_amazon_choice({}) is None
 
 
 def test_attach_hero_asins_from_products_skips_known_non_heroes(monkeypatch):
@@ -870,6 +884,24 @@ def test_phrase_heatmap_ranks_skip_null_and_do_not_invent():
     assert "2026-09-10" not in ranks
 
 
+def test_phrase_heatmap_days_keep_asin_and_choice_when_present():
+    days = syn.phrase_heatmap_days({
+        "organicAsin": "B0TODAYCHILD",
+        "r_2026-09-11": {
+            "date": "2026-09-11", "rank": 6,
+            "asin": "b0clf5b27y", "amazon_choice": True,
+        },
+        "r_2026-09-12": {"date": "2026-09-12", "rank": 5},
+        "r_2026-09-13": {"date": "2026-09-13", "rank": None, "asin": "B0SKIP"},
+    })
+    assert days["2026-09-11"]["rank"] == 6
+    assert days["2026-09-11"]["organic_asin"] == "B0CLF5B27Y"
+    assert days["2026-09-11"]["amazon_choice"] is True
+    assert days["2026-09-12"]["organic_asin"] is None
+    assert days["2026-09-12"]["amazon_choice"] is None
+    assert "2026-09-13" not in days
+
+
 def test_rank_rows_expand_heatmap_days_without_inventing():
     rows = syn.rank_rows_from_phrases(
         [{
@@ -877,7 +909,12 @@ def test_rank_rows_expand_heatmap_days_without_inventing():
             "phrase": "tallow lip balm",
             "organicPosition": 4,
             "abaSearchFrequencyRank": 80,
-            "r_2026-09-11": {"date": "2026-09-11", "rank": 6},
+            "organicAsin": "B0TODAYCHILD",
+            "mobileOrganicAsin": "B0TODAYMOB",
+            "r_2026-09-11": {
+                "date": "2026-09-11", "rank": 6,
+                "asin": "b0clf5b27y", "amazon_choice": False,
+            },
             "r_2026-09-12": {"date": "2026-09-12", "rank": 5},
             "r_2026-09-13": {"date": "2026-09-13", "rank": None},
         }],
@@ -896,6 +933,13 @@ def test_rank_rows_expand_heatmap_days_without_inventing():
     assert by_day["2026-09-14"]["aba_search_frequency_rank"] == 80
     assert by_day["2026-09-11"]["aba_search_frequency_rank"] is None
     assert "2026-09-13" not in by_day
+    assert by_day["2026-09-14"]["organic_asin"] == "B0TODAYCHILD"
+    assert by_day["2026-09-14"]["mobile_organic_asin"] == "B0TODAYMOB"
+    assert by_day["2026-09-11"]["organic_asin"] == "B0CLF5B27Y"
+    assert by_day["2026-09-11"]["amazon_choice"] is False
+    assert by_day["2026-09-11"]["mobile_organic_asin"] is None
+    assert by_day["2026-09-12"]["organic_asin"] is None
+    assert by_day["2026-09-12"]["amazon_choice"] is None
 
 
 def test_list_product_phrases_sends_heatmap_query(monkeypatch):

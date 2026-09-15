@@ -267,23 +267,81 @@ def heatmap_window(days: int, *, today: date | None = None) -> tuple[date, date]
     return start, end
 
 
-def phrase_heatmap_ranks(p: dict) -> dict[str, int]:
-    """Parse phrases/v2 ``r_YYYY-MM-DD`` heatmap objects. Skip null/blank/≤0."""
-    out: dict[str, int] = {}
+def _asin(value: Any) -> str | None:
+    a = str(value or "").strip().upper()
+    return a or None
+
+
+def phrase_organic_asin(p: dict) -> str | None:
+    """phrases/v2 organicAsin — child holding the desktop organic slot."""
+    if not isinstance(p, dict):
+        return None
+    return _asin(_first_present(p, "organicAsin", "organic_asin"))
+
+
+def phrase_mobile_organic_asin(p: dict) -> str | None:
+    """phrases/v2 mobileOrganicAsin when SoldScope returns it."""
+    if not isinstance(p, dict):
+        return None
+    return _asin(_first_present(p, "mobileOrganicAsin", "mobile_organic_asin"))
+
+
+def _amazon_choice(value: Any) -> bool | None:
+    """True/False only when SoldScope sent a boolean-like value. Else None."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    s = str(value).strip().lower()
+    if s in ("true", "yes"):
+        return True
+    if s in ("false", "no"):
+        return False
+    return None
+
+
+def phrase_amazon_choice(p: dict) -> bool | None:
+    if not isinstance(p, dict):
+        return None
+    return _amazon_choice(_first_present(p, "amazon_choice", "amazonChoice"))
+
+
+def phrase_heatmap_days(p: dict) -> dict[str, dict[str, Any]]:
+    """Parse phrases/v2 ``r_YYYY-MM-DD`` objects. Skip null/blank/≤0 ranks.
+
+    Day objects may carry ``asin`` / ``amazon_choice``. Those are stored
+    only when present — never copied from today's phrase-level fields.
+    """
+    out: dict[str, dict[str, Any]] = {}
     if not isinstance(p, dict):
         return out
     for key, raw in p.items():
         m = HEATMAP_DAY_KEY.match(str(key))
         if not m:
             continue
+        child: str | None = None
+        choice: bool | None = None
         if isinstance(raw, dict):
             n = _int(_first_present(raw, "rank", "organicPosition", "organic_position"))
+            child = _asin(_first_present(raw, "asin", "organicAsin", "organic_asin"))
+            choice = _amazon_choice(_first_present(raw, "amazon_choice", "amazonChoice"))
         else:
             n = _int(raw)
         if n is None or n <= 0:
             continue
-        out[m.group(1)] = n
+        out[m.group(1)] = {
+            "rank": n,
+            "organic_asin": child,
+            "amazon_choice": choice,
+        }
     return out
+
+
+def phrase_heatmap_ranks(p: dict) -> dict[str, int]:
+    """Rank-only view of ``phrase_heatmap_days`` for existing callers/tests."""
+    return {day: int(item["rank"]) for day, item in phrase_heatmap_days(p).items()}
 
 
 def group_primary_asin(g: dict) -> str | None:
@@ -819,7 +877,16 @@ def _phrase_snapshot_row(
     organic_position: int | None,
     pulled_at: str,
     current: bool,
+    organic_asin: str | None = None,
+    amazon_choice: bool | None = None,
 ) -> dict:
+    child = organic_asin if organic_asin is not None else (
+        phrase_organic_asin(p) if current else None
+    )
+    mobile = phrase_mobile_organic_asin(p) if current else None
+    choice = amazon_choice if amazon_choice is not None else (
+        phrase_amazon_choice(p) if current else None
+    )
     return {
         "asin": asin,
         "marketplace": marketplace,
@@ -842,6 +909,9 @@ def _phrase_snapshot_row(
             p, "abaTotalConvShare", "aba_total_conv_share",
         ) if current else None,
         "organic_page": _int(_first_present(p, "organicPage", "organic_page")) if current else None,
+        "organic_asin": child,
+        "mobile_organic_asin": mobile,
+        "amazon_choice": choice,
         "as_of": as_of,
         "pulled_at": pulled_at,
         "raw": {
@@ -852,6 +922,9 @@ def _phrase_snapshot_row(
             "abaSearchFrequencyRank": p.get("abaSearchFrequencyRank") if current else None,
             "abaTotalClickShare": p.get("abaTotalClickShare") if current else None,
             "abaTotalConvShare": p.get("abaTotalConvShare") if current else None,
+            "organicAsin": child,
+            "mobileOrganicAsin": mobile,
+            "amazon_choice": choice,
             "heatmap": not current,
         },
     }
@@ -879,10 +952,15 @@ def rank_rows_from_phrases(
         phrase = str(p.get("phrase") or "").strip()
         if not phrase:
             continue
-        heatmap = phrase_heatmap_ranks(p)
+        heatmap = phrase_heatmap_days(p)
+        today_heat = heatmap.get(today_iso) or {}
         today_pos = phrase_organic_position(p)
         if today_pos is None:
-            today_pos = heatmap.get(today_iso)
+            today_pos = today_heat.get("rank")
+        today_child = phrase_organic_asin(p) or today_heat.get("organic_asin")
+        today_choice = phrase_amazon_choice(p)
+        if today_choice is None:
+            today_choice = today_heat.get("amazon_choice")
         today_key = (phrase, today_iso)
         if today_key not in seen:
             seen.add(today_key)
@@ -897,8 +975,10 @@ def rank_rows_from_phrases(
                 organic_position=today_pos,
                 pulled_at=pulled_at,
                 current=True,
+                organic_asin=today_child,
+                amazon_choice=today_choice,
             ))
-        for day_iso, rank in heatmap.items():
+        for day_iso, day in heatmap.items():
             key = (phrase, day_iso)
             if key in seen:
                 continue
@@ -911,9 +991,11 @@ def rank_rows_from_phrases(
                 product_id=product_id,
                 phrase=phrase,
                 as_of=day_iso,
-                organic_position=rank,
+                organic_position=day.get("rank"),
                 pulled_at=pulled_at,
                 current=False,
+                organic_asin=day.get("organic_asin"),
+                amazon_choice=day.get("amazon_choice"),
             ))
     return rows
 

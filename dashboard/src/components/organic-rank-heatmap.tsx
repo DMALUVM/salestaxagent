@@ -22,6 +22,7 @@ import {
   formatSignedDelta,
   heatmapSortCaption,
   rankHeatTone,
+  shortAsin,
   sortHeatmapRows,
   sparklineGeometry,
   sparklineSeries,
@@ -187,7 +188,9 @@ export function OrganicRankHeatmap() {
                 invented from SoldScope search volume. Cell fill is absolute
                 rank (greener = better). The small Δ is movement vs the prior
                 snapshot, or vs SoldScope previous position when only one
-                as_of column is stored.
+                as_of column is stored. The mono chip is the child ASIN
+                holding that organic slot (`organicAsin`) — not the parent
+                hero.
               </p>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -323,6 +326,14 @@ export function OrganicRankHeatmap() {
                             <div className="text-[9px] uppercase tracking-wide text-muted-foreground">
                               {row.family} · {row.asin}
                             </div>
+                            {row.organic_child_asin && (
+                              <span
+                                className="mt-0.5 inline-flex items-center rounded border border-border/70 bg-background/80 px-1 font-mono text-[9px] normal-case tracking-normal text-foreground/80"
+                                title={`Child ASIN holding organic rank: ${row.organic_child_asin}`}
+                              >
+                                {row.organic_child_asin}
+                              </span>
+                            )}
                           </td>
                           <td className="px-1.5 py-1.5">
                             <RankSpark row={row} weeks={weeks} />
@@ -335,7 +346,13 @@ export function OrganicRankHeatmap() {
                             const prior = cellPriorRank(row, w, weeks);
                             return (
                               <td key={w} className="px-1 py-1.5">
-                                <RankCell rank={rank} prior={prior} sfr={row.sfr} />
+                                <RankCell
+                                  rank={rank}
+                                  prior={prior}
+                                  sfr={row.sfr}
+                                  childAsin={row.childAsins[w] ?? null}
+                                  amazonChoice={row.amazonChoice[w] ?? null}
+                                />
                               </td>
                             );
                           })}
@@ -369,18 +386,25 @@ function RankCell({
   rank,
   prior,
   sfr,
+  childAsin,
+  amazonChoice,
 }: {
   rank: number | null;
   prior: number | null;
   sfr: number | null;
+  childAsin?: string | null;
+  amazonChoice?: boolean | null;
 }) {
   const tone = TONE[rankHeatTone(rank)];
   const move = classifyMovement(prior, rank);
   const chip = deltaChip(move.direction);
+  const childShort = shortAsin(childAsin);
   return (
     <span
-      className={`mx-auto flex h-10 min-w-[3.4rem] flex-col items-center justify-center rounded-md px-1 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] ${tone.cell}`}
-      title={cellHoverTitle({ previous: prior, current: rank, sfr })}
+      className={`mx-auto flex min-h-10 min-w-[3.4rem] flex-col items-center justify-center rounded-md px-1 py-0.5 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] ${tone.cell}`}
+      title={cellHoverTitle({
+        previous: prior, current: rank, sfr, childAsin, amazonChoice,
+      })}
     >
       <span className="text-[11px] font-semibold tabular-nums leading-none">
         {formatCellRank(rank)}
@@ -390,6 +414,11 @@ function RankCell({
           {formatSignedDelta(move.delta)}
         </span>
       )}
+      {childShort ? (
+        <span className="mt-0.5 font-mono text-[8px] leading-none opacity-90">
+          {childShort}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -459,6 +488,9 @@ function Legend() {
         Any 1+ move tints the row; a stronger tint plus the lists means
         meaningful (≥{WOW_MOVE_POSITIONS} positions or crossing top {WOW_TOP_N}).
         Trend is prior → current (lower toward #1 reads as up).
+        Child chip is SoldScope <code>organicAsin</code> (last 4 in the
+        cell, full ASIN on the keyword chip and hover). Missing means
+        SoldScope did not return a child that day.
       </p>
     </div>
   );
@@ -501,6 +533,14 @@ function MoverList({
                 <span className="ml-1 text-[9px] uppercase text-muted-foreground">
                   {row.family}
                 </span>
+                {row.organic_child_asin && (
+                  <span
+                    className="ml-1 font-mono text-[9px] normal-case text-foreground/70"
+                    title={`Child ASIN holding organic rank: ${row.organic_child_asin}`}
+                  >
+                    {shortAsin(row.organic_child_asin)}
+                  </span>
+                )}
               </span>
               <span className="shrink-0 tabular-nums text-muted-foreground">
                 {row.previous ?? "—"}→{row.current ?? "—"}

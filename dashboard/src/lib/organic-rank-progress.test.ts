@@ -26,8 +26,10 @@ import {
   formatCellRank,
   formatSignedDelta,
   heatmapSortCaption,
+  normalizeAsin,
   rankDelta,
   resolveSfr,
+  shortAsin,
   sortHeatmapRows,
   sparklineGeometry,
   sparklineSeries,
@@ -211,6 +213,20 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.equal(cellHoverTitle({ previous: 12, current: 12, sfr: 80 }), "12 → 12 (0) · SFR 80");
     assert.equal(cellHoverTitle({ previous: null, current: 12, sfr: null }), "— → 12 · SFR —");
     assert.equal(cellHoverTitle({ previous: 18, current: null }), "18 → —");
+    assert.equal(
+      cellHoverTitle({
+        previous: 18, current: 12, sfr: 80,
+        childAsin: "b0clf5b27y", amazonChoice: true,
+      }),
+      "18 → 12 (↑6) · SFR 80 · child B0CLF5B27Y · Amazon's Choice",
+    );
+    assert.equal(
+      cellHoverTitle({ previous: 18, current: 12, amazonChoice: false }),
+      "18 → 12 (↑6)",
+    );
+    assert.equal(normalizeAsin(" b0clf5b27y "), "B0CLF5B27Y");
+    assert.equal(shortAsin("B0CLF5B27Y"), "B27Y");
+    assert.equal(shortAsin(null), "");
   });
 
   test("one-week sparkline is prior→current; cell prior uses SoldScope previous", () => {
@@ -402,7 +418,51 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.match(heat, /cycleHeatmapSort/);
     assert.match(heat, /aria-sort/);
     assert.match(heat, /SortHeader/);
+    assert.match(heat, /organic_child_asin/);
+    assert.match(heat, /shortAsin/);
+    assert.match(heat, /childAsins/);
     assert.doesNotMatch(heat, /Deo stays empty/);
     assert.doesNotMatch(heat, /until a Rank Tracker group exists/);
+  });
+
+  test("heatmap keeps the child ASIN that holds each day's organic slot", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [
+        {
+          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-08-30",
+          organic_position: 18, organic_asin: "b0oldchild1",
+          aba_search_frequency_rank: 90,
+        },
+        {
+          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-06",
+          organic_position: 8, organic_asin: "B0CLF5B27Y",
+          amazon_choice: true, aba_search_frequency_rank: 80,
+        },
+        {
+          phrase: "chapstick", asin: "B0CLHTF8YN", as_of: "2026-09-06",
+          organic_position: 40, aba_search_frequency_rank: 20,
+        },
+      ],
+    });
+    const lip = progress.rows.find((r) => r.keyword_normalized === "tallow lip balm");
+    assert.equal(lip?.asin, "B0CLHTF8YN");
+    assert.equal(lip?.organic_child_asin, "B0CLF5B27Y");
+    assert.equal(lip?.childAsins["2026-08-30"], "B0OLDCHILD1");
+    assert.equal(lip?.childAsins["2026-09-06"], "B0CLF5B27Y");
+    assert.equal(lip?.amazonChoice["2026-09-06"], true);
+    const chap = progress.rows.find((r) => r.keyword_normalized === "chapstick");
+    assert.equal(chap?.organic_child_asin, null);
+    assert.equal(chap?.childAsins["2026-09-06"], null);
+    const hit = lookupOrganicRank(
+      buildOrganicRankJoinIndex([
+        {
+          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-06",
+          organic_position: 8, organic_asin: "B0CLF5B27Y",
+        },
+      ]),
+      "tallow lip balm",
+      "B0CLHTF8YN",
+    );
+    assert.equal(hit.organic_asin, "B0CLHTF8YN");
   });
 });

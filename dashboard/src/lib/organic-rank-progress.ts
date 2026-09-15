@@ -75,6 +75,10 @@ export type RankSnapshot = {
   aba_total_click_share?: number | null;
   aba_total_conv_share?: number | null;
   search_volume?: number | null;
+  /** Child ASIN holding the organic slot that day (SoldScope organicAsin). */
+  organic_asin?: string | null;
+  mobile_organic_asin?: string | null;
+  amazon_choice?: boolean | null;
   as_of?: string | null;
   group_id?: number | null;
 };
@@ -106,6 +110,11 @@ export type HeatmapRow = {
   sqp_click_share: number | null;
   sqp_organic_rank: number | null;
   positions: Record<string, number | null>;
+  /** Child ASIN holding the organic slot per shown day. Missing stays null. */
+  childAsins: Record<string, string | null>;
+  amazonChoice: Record<string, boolean | null>;
+  /** Latest shown day's child ASIN (desktop organicAsin). */
+  organic_child_asin: string | null;
   previous: number | null;
   current: number | null;
   wow: WowFlag | null;
@@ -147,6 +156,19 @@ export function asRank(value: number | null | undefined): number | null {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return null;
   return Math.trunc(n);
+}
+
+/** Uppercase ASIN or null — never invent from the hero parent. */
+export function normalizeAsin(value: string | null | undefined): string | null {
+  const a = String(value ?? "").trim().toUpperCase();
+  return a || null;
+}
+
+/** Glanceable tail of a 10-char ASIN. Full value stays on hover. */
+export function shortAsin(value: string | null | undefined): string {
+  const a = normalizeAsin(value);
+  if (!a) return "";
+  return a.length <= 4 ? a : a.slice(-4);
 }
 
 /**
@@ -243,6 +265,8 @@ export function cellHoverTitle(args: {
   previous: number | null | undefined;
   current: number | null | undefined;
   sfr?: number | null;
+  childAsin?: string | null;
+  amazonChoice?: boolean | null;
 }): string {
   const prev = asRank(args.previous);
   const cur = asRank(args.current);
@@ -251,7 +275,10 @@ export function cellHoverTitle(args: {
   const right = cur == null ? "—" : String(cur);
   const move = delta == null ? "" : ` (${formatSignedDelta(delta)})`;
   const sfr = args.sfr === undefined ? "" : ` · SFR ${formatSfr(args.sfr)}`;
-  return `${left} → ${right}${move}${sfr}`;
+  const child = normalizeAsin(args.childAsin);
+  const childBit = child ? ` · child ${child}` : "";
+  const choiceBit = args.amazonChoice === true ? " · Amazon's Choice" : "";
+  return `${left} → ${right}${move}${sfr}${childBit}${choiceBit}`;
 }
 
 /**
@@ -508,6 +535,8 @@ export function buildOrganicRankProgress(input: {
     sfr: number | null;
     sfr_as_of: string | null;
     positions: Record<string, number | null>;
+    childAsins: Record<string, string | null>;
+    amazonChoice: Record<string, boolean | null>;
     previous_from_api: number | null;
   };
   const series = new Map<string, Series>();
@@ -533,10 +562,18 @@ export function buildOrganicRankProgress(input: {
       sfr: null,
       sfr_as_of: null,
       positions: {},
+      childAsins: {},
+      amazonChoice: {},
       previous_from_api: null,
     };
     if (shownWeeks.includes(asOf)) {
       cur.positions[asOf] = asRank(row.organic_position);
+      cur.childAsins[asOf] = normalizeAsin(row.organic_asin);
+      cur.amazonChoice[asOf] = row.amazon_choice === true
+        ? true
+        : row.amazon_choice === false
+          ? false
+          : null;
     }
     const sfrHit = resolveSfr(row.aba_search_frequency_rank);
     if (sfrHit.sfr != null && newerDate(cur.sfr_as_of, asOf)) {
@@ -568,6 +605,9 @@ export function buildOrganicRankProgress(input: {
       sqp_click_share: sqpRow?.click_share ?? null,
       sqp_organic_rank: asRank(korRow?.organic_rank),
       positions: Object.fromEntries(shownWeeks.map((w) => [w, s.positions[w] ?? null])),
+      childAsins: Object.fromEntries(shownWeeks.map((w) => [w, s.childAsins[w] ?? null])),
+      amazonChoice: Object.fromEntries(shownWeeks.map((w) => [w, s.amazonChoice[w] ?? null])),
+      organic_child_asin: lastWeek ? (s.childAsins[lastWeek] ?? null) : null,
       previous,
       current,
       wow: classifyWowDelta(previous, current),
