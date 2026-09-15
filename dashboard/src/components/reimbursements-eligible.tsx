@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ClipboardCopy, ExternalLink, RefreshCw, Send } from "lucide-react";
+import { AlertTriangle, Check, ClipboardCopy, ExternalLink, RefreshCw, Send } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,9 @@ import {
   CASE_QUEUE_SOURCE_NOTE,
   CASE_QUEUE_SOURCES,
   CLASSIFICATION_VERSION,
+  HOW_TO_FILE_INBOUND,
+  HOW_TO_FILE_INBOUND_STEPS,
+  HOW_TO_FILE_INBOUND_TITLE,
   HOW_TO_FILE_INTRO,
   HOW_TO_FILE_NO_DEEP_LINK,
   HOW_TO_FILE_STEPS,
@@ -36,11 +39,15 @@ import {
   filterCaseGroup,
   formatCasePacket,
   inboundDiscrepancyCount,
+  inboundReceived,
+  inboundShipped,
+  isInboundSource,
   isInboundTrackerLink,
   reasonLabel,
   searchCaseRows,
   sellerCentralHref,
   sortCaseRows,
+  sourceLabel,
   summarizeCases,
   type CaseEventRow,
   type CaseQa,
@@ -86,7 +93,10 @@ interface EligiblePayload {
   miniResync?: string;
   qa?: CaseQa;
   syncedAt?: string | null;
+  howToInbound?: string;
   rows: CaseEventRow[];
+  submittedRows?: CaseEventRow[];
+  inboundAlerts?: CaseEventRow[];
   alertRows: CaseEventRow[];
 }
 
@@ -105,6 +115,7 @@ export function ReimbursementsEligiblePanel() {
   const [msg, setMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   function load(rangeStart = start, rangeEnd = end) {
     setLoading(true);
@@ -138,8 +149,29 @@ export function ReimbursementsEligiblePanel() {
     other: filterCaseGroup(rows, "other").length,
   }), [rows]);
   const alertRows = data?.alertRows ?? [];
+  const submittedRows = data?.submittedRows ?? [];
   const alertSummary = useMemo(() => summarizeCases(alertRows), [alertRows]);
   const inboundCount = inboundDiscrepancyCount(rows);
+
+  async function dismissRow(row: CaseEventRow) {
+    setBusyKey(row.event_key);
+    setMsg(null);
+    try {
+      const r = await fetch(apiUrl("/api/reimbursements/inbound-alerts"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event_key: row.event_key, note: "filed" }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || "Dismiss failed");
+      setMsg("Marked submitted — kept in history. No Amazon write.");
+      load(start, end);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyKey(null);
+    }
+  }
   const qa = data?.qa;
   const qaOk = Boolean(qa?.ok);
   const notifyBlocked = !qaOk || !rows.length;
@@ -318,6 +350,23 @@ export function ReimbursementsEligiblePanel() {
         <p>{data?.sellerCentralLinkLimit || SELLER_CENTRAL_LINK_LIMIT}</p>
       </div>
 
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">{HOW_TO_FILE_INBOUND_TITLE}</CardTitle>
+          <p className="text-xs text-muted-foreground">{data?.howToInbound || HOW_TO_FILE_INBOUND}</p>
+        </CardHeader>
+        <CardContent className="space-y-2 text-xs text-muted-foreground">
+          <ol className="list-decimal space-y-1.5 pl-4">
+            {HOW_TO_FILE_INBOUND_STEPS.map((step) => (
+              <li key={step.title}>
+                <span className="font-medium text-foreground">{step.title}.</span>{" "}
+                {step.body}
+              </li>
+            ))}
+          </ol>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
         <label className="space-y-1 text-xs text-muted-foreground">
           From (LA)
@@ -350,15 +399,53 @@ export function ReimbursementsEligiblePanel() {
           </CardContent>
         </Card>
       ) : !rows.length ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-sm text-muted-foreground">No open Needs-case rows in this window.</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Nightly Mini rebuilds the queue after paid reimbursements. Or Sync queue /
-              <code> python -m src.main reimbursements-case-sync --days 90</code>
-            </p>
-          </CardContent>
-        </Card>
+        <>
+          <Card>
+            <CardContent className="py-12 text-center">
+              <p className="text-sm text-muted-foreground">No open Needs-case rows in this window.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Nightly Mini rebuilds the queue after paid reimbursements. Or Sync queue /
+                <code> python -m src.main reimbursements-case-sync --days 90</code>
+              </p>
+            </CardContent>
+          </Card>
+          {submittedRows.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Submitted / dismissed ({fmt(submittedRows.length)})
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="overflow-x-auto p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>SKU / ASIN</TableHead>
+                      <TableHead className="text-right">Short</TableHead>
+                      <TableHead>Shipment</TableHead>
+                      <TableHead>Source</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {submittedRows.map((r) => (
+                      <TableRow key={r.event_key}>
+                        <TableCell className="text-xs tabular-nums">{caseDay(r)}</TableCell>
+                        <TableCell>
+                          <div className="text-xs font-medium">{r.sku || "—"}</div>
+                          <div className="text-[10px] text-muted-foreground">{r.asin || "—"}</div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(caseQty(r))}</TableCell>
+                        <TableCell className="text-xs font-mono">{fbaShipmentId(r.shipment_id) || "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{sourceLabel(r.source)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </>
       ) : (
         <>
           {alertRows.length > 0 && (
@@ -450,6 +537,8 @@ export function ReimbursementsEligiblePanel() {
                     <SortHead label="Reason" active={sortKey === "reason"} dir={sortDir} onClick={() => toggleSort("reason")} />
                     <SortHead label="SKU / ASIN" active={sortKey === "sku"} dir={sortDir} onClick={() => toggleSort("sku")} />
                     <SortHead label="Qty" active={sortKey === "quantity"} dir={sortDir} onClick={() => toggleSort("quantity")} align="right" />
+                    <TableHead className="text-right">Shipped</TableHead>
+                    <TableHead className="text-right">Received</TableHead>
                     <SortHead label="Est $" active={sortKey === "estimated_amount"} dir={sortDir} onClick={() => toggleSort("estimated_amount")} align="right" />
                     <TableHead>FC</TableHead>
                     <TableHead>Shipment</TableHead>
@@ -466,13 +555,15 @@ export function ReimbursementsEligiblePanel() {
                     const shipment = fbaShipmentId(r.shipment_id);
                     const tracker = isInboundTrackerLink(r);
                     const refId = r.reference_id && r.reference_id !== shipment ? r.reference_id : null;
+                    const shipped = inboundShipped(r);
+                    const received = inboundReceived(r);
                     return (
                       <TableRow key={r.event_key}>
                         <TableCell className="text-xs tabular-nums">{day}</TableCell>
                         <TableCell className="text-xs">
                           <span className="font-medium">{reasonLabel(r.reason, r.disposition)}</span>
                           <div className="text-[10px] text-muted-foreground">
-                            {r.source === "inbound_discrepancy" ? "Inbound short" : "Ledger adjustment"}
+                            {sourceLabel(r.source)}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -480,6 +571,12 @@ export function ReimbursementsEligiblePanel() {
                           <div className="text-[10px] text-muted-foreground">{r.asin || "—"}</div>
                         </TableCell>
                         <TableCell className="text-right tabular-nums">{fmt(caseQty(r))}</TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {shipped == null ? "—" : fmt(shipped)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {received == null ? "—" : fmt(received)}
+                        </TableCell>
                         <TableCell className="text-right tabular-nums text-muted-foreground">
                           {amt == null || amt === "" ? "—" : `$${fmtD(caseAmount(r))}`}
                         </TableCell>
@@ -520,9 +617,24 @@ export function ReimbursementsEligiblePanel() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="text-[10px] font-normal">
-                            Needs case
-                          </Badge>
+                          <div className="flex flex-col items-start gap-1">
+                            <Badge variant="outline" className="text-[10px] font-normal">
+                              Needs case
+                            </Badge>
+                            {isInboundSource(r.source) && shipment && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-1.5 text-[10px]"
+                                disabled={busyKey === r.event_key}
+                                onClick={() => dismissRow(r)}
+                                title="Mark submitted after filing. Keeps the row in history."
+                              >
+                                <Check className="mr-0.5 h-3 w-3" />
+                                {busyKey === r.event_key ? "Saving…" : "Mark submitted"}
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -531,6 +643,48 @@ export function ReimbursementsEligiblePanel() {
               </Table>
             </CardContent>
           </Card>
+
+          {submittedRows.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Submitted / dismissed ({fmt(submittedRows.length)})
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Evidence kept after Overview dismiss. New CLOSED shorts (new FBA shipment / event_key) still alert.
+                </p>
+              </CardHeader>
+              <CardContent className="overflow-x-auto p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>SKU / ASIN</TableHead>
+                      <TableHead className="text-right">Short</TableHead>
+                      <TableHead>FC</TableHead>
+                      <TableHead>Shipment</TableHead>
+                      <TableHead>Source</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {submittedRows.map((r) => (
+                      <TableRow key={r.event_key}>
+                        <TableCell className="text-xs tabular-nums">{caseDay(r)}</TableCell>
+                        <TableCell>
+                          <div className="text-xs font-medium">{r.sku || "—"}</div>
+                          <div className="text-[10px] text-muted-foreground">{r.asin || "—"}</div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(caseQty(r))}</TableCell>
+                        <TableCell className="text-xs">{r.fulfillment_center || "—"}</TableCell>
+                        <TableCell className="text-xs font-mono">{fbaShipmentId(r.shipment_id) || "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{sourceLabel(r.source)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
     </div>

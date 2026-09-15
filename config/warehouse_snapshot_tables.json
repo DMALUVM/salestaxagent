@@ -43,6 +43,7 @@
     { "name": "fba_reimbursements", "on_conflict": "reimbursement_id,sku", "restore_order": 60 },
     { "name": "fba_inventory_adjustments", "on_conflict": "event_key", "restore_order": 60 },
     { "name": "fba_case_events", "on_conflict": "event_key", "restore_order": 61 },
+    { "name": "sellerboard_inbound_discrepancies", "on_conflict": "shipment_id,sku", "restore_order": 60 },
     { "name": "fba_case_packages", "on_conflict": "id", "restore_order": 62 },
     { "name": "amazon_sales_traffic", "on_conflict": "date", "restore_order": 60 },
     { "name": "amazon_asin_traffic", "on_conflict": "parent_asin", "restore_order": 60 },

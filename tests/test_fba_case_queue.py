@@ -14,6 +14,8 @@ from src.reimbursements.case_package import (
     build_case_package,
 )
 from src.reimbursements.case_queue import (
+    CASE_QUEUE_SOURCE_NOTE,
+    HOW_TO_FILE_INBOUND,
     HOW_TO_FILE_INTRO,
     HOW_TO_FILE_NO_DEEP_LINK,
     HOW_TO_FILE_STEPS,
@@ -21,16 +23,22 @@ from src.reimbursements.case_queue import (
     IDR_INSTRUCTION,
     LINK_KIND_IDR,
     NO_INBOUND_DISCREPANCIES,
-    CASE_QUEUE_SOURCE_NOTE,
+    SOURCE_INBOUND,
+    SOURCE_SELLERBOARD,
     STATUS_ALREADY_REIMBURSED,
+    STATUS_CASE_SUBMITTED,
     STATUS_FOUND_OFFSET,
     STATUS_NEEDS_CASE,
     apply_paid_dedupe,
     build_case_events,
     inbound_discrepancies,
     inbound_ready,
+    is_active_inbound_alert,
+    merge_inbound_sources,
+    preserve_submitted_status,
     reason_group,
     seller_central_link,
+    sellerboard_inbound_discrepancies,
 )
 from src.rules import SPAPI_CASE_QUEUE_DAYS, SPAPI_MAX_CHUNK_DAYS
 
@@ -348,6 +356,253 @@ def test_window_and_worker_wiring():
     assert "open_case" not in helper
     assert "sync_case_queue" in nightly
     assert "GET_FBA_FULFILLMENT_INVENTORY_ADJUSTMENTS_DATA" not in helper
+    queue_src = Path(__file__).resolve().parent.parent.joinpath("src/reimbursements/case_queue.py").read_text()
+    assert "sellerboard_inbound_discrepancies" in queue_src
+    assert "SOURCE_SELLERBOARD" in queue_src
+
+
+def test_sellerboard_closed_short_becomes_lost_inbound():
+    rows = sellerboard_inbound_discrepancies(
+        [{
+            "shipment_id": "FBA19K98F8VN",
+            "sku": "sku-c",
+            "asin": "B003",
+            "fulfillment_center": "SMF3",
+            "quantity_shipped": 540,
+            "quantity_received": 463,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+        }],
+        date(2026, 9, 14),
+        date(2026, 6, 17),
+        date(2026, 9, 14),
+    )
+    assert len(rows) == 1
+    assert rows[0]["source"] == SOURCE_SELLERBOARD
+    assert rows[0]["quantity"] == 77
+    assert rows[0]["quantity_shipped"] == 540
+    assert rows[0]["quantity_received"] == 463
+    assert rows[0]["shipment_id"] == "FBA19K98F8VN"
+    assert rows[0]["reason"] == "Lost_Inbound"
+    assert rows[0]["event_key"] == "inbound|FBA19K98F8VN|SKU-C"
+
+
+def test_sellerboard_working_in_transit_never_eligible():
+    for status in ("WORKING", "IN_TRANSIT"):
+        rows = sellerboard_inbound_discrepancies(
+            [{
+                "shipment_id": "FBA19WORKING",
+                "sku": "SKU-Z",
+                "quantity_shipped": 10,
+                "quantity_received": 0,
+                "shipment_status": status,
+                "closed_at": "2026-08-01",
+            }],
+            date(2026, 9, 14),
+            date(2026, 6, 17),
+            date(2026, 9, 14),
+        )
+        assert rows == [], status
+
+
+def test_sellerboard_and_spapi_same_shipment_sku_dedupe():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[{
+            "shipment_id": "FBA19K98F8VN",
+            "shipment_status": "CLOSED",
+            "destination_fc": "SMF3",
+            "closed_at": "2026-08-20",
+        }],
+        shipment_items=[{
+            "shipment_id": "FBA19K98F8VN",
+            "sku": "SKU-C",
+            "quantity_shipped": 540,
+            "quantity_received": 463,
+        }],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19K98F8VN",
+            "sku": "SKU-C",
+            "asin": "B003",
+            "fulfillment_center": "SMF3",
+            "quantity_shipped": 540,
+            "quantity_received": 463,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+        }],
+    )
+    needs = [e for e in events if e["status"] == STATUS_NEEDS_CASE]
+    assert len(needs) == 1
+    assert needs[0]["source"] == SOURCE_INBOUND
+    assert needs[0]["quantity"] == 77
+
+
+def test_sellerboard_row_survives_when_spapi_has_no_closed():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[{
+            "shipment_id": "FBA19LIVEONLY",
+            "shipment_status": "IN_TRANSIT",
+            "destination_fc": "ONT8",
+            "last_updated_at": "2026-09-10",
+        }],
+        shipment_items=[{
+            "shipment_id": "FBA19LIVEONLY",
+            "sku": "SKU-LIVE",
+            "quantity_shipped": 12,
+            "quantity_received": 0,
+        }],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19K98F8VN",
+            "sku": "SKU-C",
+            "asin": "B003",
+            "fulfillment_center": "SMF3",
+            "quantity_shipped": 540,
+            "quantity_received": 463,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+        }],
+    )
+    needs = [e for e in events if e["status"] == STATUS_NEEDS_CASE]
+    assert len(needs) == 1
+    assert needs[0]["source"] == SOURCE_SELLERBOARD
+    assert needs[0]["shipment_id"] == "FBA19K98F8VN"
+    assert is_active_inbound_alert(needs[0]) is True
+
+
+def test_sellerboard_paid_dedupe_and_dana_existing_row():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[{
+            "approval_date": "2026-08-25",
+            "reimbursement_id": "R-LI",
+            "reason": "Lost_Inbound",
+            "sku": "SKU-C",
+            "qty_total": 77,
+            "amount_per_unit": 4.0,
+            "amount_total": 308.0,
+        }],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        existing_events=[{
+            "event_key": "inbound|FBA19K98F8VN|SKU-C",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "SKU-C",
+            "asin": "B003",
+            "quantity": 77,
+            "quantity_shipped": 540,
+            "quantity_received": 463,
+            "reason": "Lost_Inbound",
+            "reason_group": "lost_inbound",
+            "fulfillment_center": "SMF3",
+            "shipment_id": "FBA19K98F8VN",
+            "shipment_status": "CLOSED",
+            "status": STATUS_NEEDS_CASE,
+        }],
+    )
+    assert events[0]["status"] == STATUS_ALREADY_REIMBURSED
+    assert is_active_inbound_alert(events[0]) is False
+
+
+def test_dismiss_persists_across_rebuild_new_shipment_still_alerts():
+    submitted = {
+        "event_key": "inbound|FBA19OLD|SKU-C",
+        "source": SOURCE_SELLERBOARD,
+        "status": STATUS_CASE_SUBMITTED,
+        "dismissed_at": "2026-09-10T12:00:00Z",
+        "dismissed_note": "filed",
+    }
+    rebuilt = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[
+            {
+                "shipment_id": "FBA19OLD",
+                "sku": "SKU-C",
+                "fulfillment_center": "SMF3",
+                "quantity_shipped": 10,
+                "quantity_received": 7,
+                "shipment_status": "CLOSED",
+                "closed_at": "2026-08-01",
+            },
+            {
+                "shipment_id": "FBA19NEW",
+                "sku": "SKU-C",
+                "fulfillment_center": "SMF3",
+                "quantity_shipped": 20,
+                "quantity_received": 18,
+                "shipment_status": "CLOSED",
+                "closed_at": "2026-09-01",
+            },
+        ],
+        existing_events=[submitted],
+    )
+    by_sid = {e["shipment_id"]: e for e in rebuilt}
+    assert by_sid["FBA19OLD"]["status"] == STATUS_CASE_SUBMITTED
+    assert by_sid["FBA19OLD"]["dismissed_at"] == "2026-09-10T12:00:00Z"
+    assert by_sid["FBA19NEW"]["status"] == STATUS_NEEDS_CASE
+    assert is_active_inbound_alert(by_sid["FBA19OLD"]) is False
+    assert is_active_inbound_alert(by_sid["FBA19NEW"]) is True
+
+
+def test_merge_inbound_prefers_spapi_keeps_sellerboard_qty():
+    merged = merge_inbound_sources(
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "source": SOURCE_INBOUND,
+            "sku": "SKU-A",
+            "shipment_id": "FBA1",
+            "quantity": 3,
+        }],
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "source": SOURCE_SELLERBOARD,
+            "sku": "SKU-A",
+            "shipment_id": "FBA1",
+            "quantity": 3,
+            "quantity_shipped": 10,
+            "quantity_received": 7,
+            "fulfillment_center": "ONT8",
+        }],
+    )
+    assert len(merged) == 1
+    assert merged[0]["source"] == SOURCE_INBOUND
+    assert merged[0]["quantity_shipped"] == 10
+    assert merged[0]["fulfillment_center"] == "ONT8"
+
+
+def test_preserve_submitted_does_not_revive_paid():
+    out = preserve_submitted_status(
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "status": STATUS_ALREADY_REIMBURSED,
+            "quantity": 0,
+        }],
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "status": STATUS_CASE_SUBMITTED,
+        }],
+    )
+    assert out[0]["status"] == STATUS_ALREADY_REIMBURSED
+
+
+def test_inbound_howto_mentions_sellerboard_closed():
+    assert "Sellerboard CLOSED" in HOW_TO_FILE_INBOUND
+    assert "shipment tracker" in HOW_TO_FILE_INBOUND.lower() or "FBA*" in HOW_TO_FILE_INBOUND
+    assert "Reference ID" in HOW_TO_FILE_INBOUND
 
 
 def test_deprecated_adjustments_report_is_not_the_source():

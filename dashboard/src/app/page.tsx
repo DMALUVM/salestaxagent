@@ -19,6 +19,7 @@ import { buildLast30Series } from "@/lib/overview-series";
 import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
 import { agentToday, amazonAsOf, monthNameFromIso, monthStart, shiftDays, windowStart } from "@/lib/as-of";
 import { InventoryLogisticsPanel } from "@/components/inventory/InventoryLogisticsPanel";
+import { InboundDiscrepancyAlerts } from "@/components/inbound-discrepancy-alerts";
 import { LoadingState } from "@/components/loading";
 import { QueryError } from "@/components/query-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -336,6 +337,8 @@ export default function Pulse() {
           ))}
         </div>
       </div>
+
+      {configured && <InboundDiscrepancyAlerts />}
 
       {/* ── Sales pulse: Yesterday / L7 / L30 / MTD / Last Month ── */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
