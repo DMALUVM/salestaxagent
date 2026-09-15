@@ -170,6 +170,29 @@ export function recTypeOfBleeders10(action: Bleeders10Action): string {
   return BLEEDERS_10_REC_TYPES[action];
 }
 
+/** Short note when pasted 1.0 used the campaign name as campaign_id. */
+export const BLEEDERS_10_ID_EQUALS_NAME_NOTE = "ID = name (pasted 1.0)";
+
+export type Bleeders10CampaignIdDisplay =
+  | { mode: "hidden" }
+  | { mode: "same_as_name"; note: string }
+  | { mode: "distinct"; id: string };
+
+/**
+ * Campaign cell: one copyable name. A second ID line only when the id
+ * is a different string. Display-only — does not change reconcile/action.
+ */
+export function bleeders10CampaignIdDisplay(
+  campaignName: string | null | undefined,
+  campaignId: string | null | undefined,
+): Bleeders10CampaignIdDisplay {
+  const name = String(campaignName ?? "").trim();
+  const id = String(campaignId ?? "").trim();
+  if (!id) return { mode: "hidden" };
+  if (id === name) return { mode: "same_as_name", note: BLEEDERS_10_ID_EQUALS_NAME_NOTE };
+  return { mode: "distinct", id };
+}
+
 export function actionLabelOf10(row: {
   action: Bleeders10Action;
   search_term: string;

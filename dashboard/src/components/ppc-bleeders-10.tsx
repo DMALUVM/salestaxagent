@@ -12,6 +12,7 @@ import {
   BLEEDERS_10_BLURB,
   BLEEDERS_10_TITLE,
   BLEEDERS_10_VERIFY,
+  bleeders10CampaignIdDisplay,
   bleeders10TermsEqual,
   recTypeOfBleeders10,
   type Bleeders10Payload,
@@ -298,7 +299,7 @@ export function PpcBleeders10({
                     && bleeders10TermsEqual(r.search_term, r.keyword);
                   const evidenceOpen = openEvidence === r.checklist_id;
                   const metricsOk = whyMetricsMatch(r);
-                  const idDiffers = Boolean(r.campaign_id && r.campaign_id !== r.campaign_name);
+                  const campaignIdLine = bleeders10CampaignIdDisplay(r.campaign_name, r.campaign_id);
                   return (
                     <Fragment key={r.checklist_id}>
                     <TableRow className={status !== "open" ? "opacity-60" : ""}>
@@ -350,15 +351,13 @@ export function PpcBleeders10({
                       </TableCell>
                       <TableCell className="align-top whitespace-normal">
                         <CopyableName value={r.campaign_name} label="campaign name" />
-                        {r.campaign_id ? (
+                        {campaignIdLine.mode === "distinct" ? (
                           <div className="mt-1">
-                            <p className="text-[10px] text-muted-foreground">
-                              {idDiffers
-                                ? "Campaign ID"
-                                : "Campaign ID (= name; no SP-API id on pasted 1.0)"}
-                            </p>
-                            <CopyableName value={r.campaign_id} label="campaign id" compact />
+                            <p className="text-[10px] text-muted-foreground">Campaign ID</p>
+                            <CopyableName value={campaignIdLine.id} label="campaign id" compact />
                           </div>
+                        ) : campaignIdLine.mode === "same_as_name" ? (
+                          <p className="mt-0.5 text-[10px] text-muted-foreground">{campaignIdLine.note}</p>
                         ) : null}
                         <p className="mt-1 text-[10px] tabular-nums text-muted-foreground">
                           {data.window.window_start}..{data.window.window_end}

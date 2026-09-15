@@ -7,12 +7,14 @@ import {
   BLEEDERS_10_BLURB,
   BLEEDERS_10_CAP,
   BLEEDERS_10_CLICK_FLOOR,
+  BLEEDERS_10_ID_EQUALS_NAME_NOTE,
   BLEEDERS_10_NONBRAND_CVR,
   BLEEDERS_10_SKIP_TERMS,
   BLEEDERS_10_TITLE,
   BLEEDERS_10_VERIFY,
   BLEEDERS_10_WINDOW_LABEL,
   actionLabelOf10,
+  bleeders10CampaignIdDisplay,
   bleeders10TermsEqual,
   buildBleeders10,
   resolveBleeders10Action,
@@ -265,7 +267,9 @@ describe("This week Recovery list is not the 1.0 10", () => {
     assert.match(ui, /r\.sales_14d/);
     assert.match(ui, /navigator\.clipboard/);
     assert.match(ui, /CopyableName value=\{r\.campaign_name\}/);
-    assert.match(ui, /CopyableName value=\{r\.campaign_id\}/);
+    assert.match(ui, /bleeders10CampaignIdDisplay/);
+    assert.match(ui, /CopyableName value=\{campaignIdLine\.id\}/);
+    assert.match(ui, /same_as_name/);
     assert.match(ui, /CopyableName value=\{r\.ad_group_name\}/);
     assert.match(ui, /CopyableName value=\{r\.search_term\}/);
     assert.match(ui, /CopyableName value=\{r\.match_type\}/);
@@ -273,8 +277,40 @@ describe("This week Recovery list is not the 1.0 10", () => {
     assert.match(ui, /Verify in Ads: SP Search Term report/);
     assert.match(ui, /data\.window\.window_start/);
     assert.match(ui, /data\.window\.window_end/);
-    assert.match(ui, /CopyableName value=\{r\.campaign_id\} label="campaign id"/);
+    assert.match(ui, /CopyableName value=\{campaignIdLine\.id\} label="campaign id"/);
     assert.match(ui, /Hide evidence/);
     assert.doesNotMatch(ui, /max-w-\[12rem\] truncate/);
+    assert.doesNotMatch(ui, /Campaign ID \(= name; no SP-API id on pasted 1\.0\)/);
+    assert.doesNotMatch(ui, /CopyableName value=\{r\.campaign_id\}/);
+    assert.equal((ui.match(/<CopyableName value=\{r\.campaign_name\}/g) ?? []).length, 1);
+    assert.equal((ui.match(/<CopyableName value=\{r\.ad_group_name\}/g) ?? []).length, 1);
+    assert.equal((ui.match(/<CopyableName value=\{r\.search_term\}/g) ?? []).length, 1);
+  });
+});
+
+describe("Bleeders 1.0 campaign cell does not copy the same string twice", () => {
+  test("pasted 1.0 rows keep campaign_id === campaign_name so the desk shows one name + a short note", () => {
+    const out = buildBleeders10();
+    assert.equal(out.rows.length, 10);
+    for (const row of out.rows) {
+      assert.equal(row.campaign_id, row.campaign_name, `rank ${row.rank}`);
+      assert.deepEqual(
+        bleeders10CampaignIdDisplay(row.campaign_name, row.campaign_id),
+        { mode: "same_as_name", note: BLEEDERS_10_ID_EQUALS_NAME_NOTE },
+      );
+    }
+  });
+
+  test("helper hides empty id, notes when id equals name, and shows a distinct id once", () => {
+    assert.deepEqual(bleeders10CampaignIdDisplay("GG Lip", ""), { mode: "hidden" });
+    assert.deepEqual(bleeders10CampaignIdDisplay("GG Lip", null), { mode: "hidden" });
+    assert.deepEqual(bleeders10CampaignIdDisplay("  GG Lip  ", "GG Lip"), {
+      mode: "same_as_name",
+      note: BLEEDERS_10_ID_EQUALS_NAME_NOTE,
+    });
+    assert.deepEqual(bleeders10CampaignIdDisplay("GG Lip", "193871638584961"), {
+      mode: "distinct",
+      id: "193871638584961",
+    });
   });
 });
