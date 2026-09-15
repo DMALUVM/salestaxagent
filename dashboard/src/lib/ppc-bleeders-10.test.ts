@@ -68,7 +68,17 @@ describe("Bleeders 1.0 is the pasted 10 — not a live scanner, not 22", () => {
       assert.equal(row.clicks, exp.clicks);
       assert.equal(row.spend, exp.spend);
       assert.equal(row.sales_14d, 0);
+      assert.equal(row.orders, 0);
       assert.equal(row.click_floor, 6);
+    }
+  });
+
+  test("Why text repeats the same clicks and spend as row fields", () => {
+    for (const row of out.rows) {
+      assert.match(row.why, new RegExp(`${row.clicks} click`));
+      assert.ok(row.why.includes(row.spend.toFixed(2)), `${row.search_term} why missing spend`);
+      assert.equal(row.orders, 0);
+      assert.equal(row.sales_14d, 0);
     }
   });
 
@@ -140,5 +150,26 @@ describe("This week Recovery list is not the 1.0 10", () => {
     assert.match(page, /<PpcBleeders/);
     assert.match(page, /This week/);
     assert.match(page, /useState<"search" \| "campaigns" \| "bleeders">\("bleeders"\)/);
+  });
+
+  test("Bleeders 1.0 table surfaces Orders/Sales and copyable campaign names", () => {
+    const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-bleeders-10.tsx"), "utf8");
+    assert.match(ui, />Orders</);
+    assert.match(ui, />Sales</);
+    assert.match(ui, /\{r\.orders\}/);
+    assert.match(ui, /r\.sales_14d/);
+    assert.match(ui, /navigator\.clipboard/);
+    assert.match(ui, /CopyableName value=\{r\.campaign_name\}/);
+    assert.match(ui, /CopyableName value=\{r\.campaign_id\}/);
+    assert.match(ui, /CopyableName value=\{r\.ad_group_name\}/);
+    assert.match(ui, /CopyableName value=\{r\.search_term\}/);
+    assert.match(ui, /CopyableName value=\{r\.match_type\}/);
+    assert.match(ui, /Verify in Amazon Ads/);
+    assert.match(ui, /Verify in Ads: SP Search Term report/);
+    assert.match(ui, /data\.window\.window_start/);
+    assert.match(ui, /data\.window\.window_end/);
+    assert.match(ui, /CopyableName value=\{r\.campaign_id\} label="campaign id"/);
+    assert.match(ui, /Hide evidence/);
+    assert.doesNotMatch(ui, /max-w-\[12rem\] truncate/);
   });
 });
