@@ -13,14 +13,20 @@ import { LoadingState } from "@/components/loading";
 import { amazonAsOf } from "@/lib/as-of";
 import {
   CASE_QUEUE_GAP,
+  CASE_QUEUE_SOURCE_NOTE,
   CASE_QUEUE_SOURCES,
   CLASSIFICATION_VERSION,
+  HOW_TO_FILE_INTRO,
+  HOW_TO_FILE_NO_DEEP_LINK,
+  HOW_TO_FILE_STEPS,
+  HOW_TO_FILE_TITLE,
+  IDR_INSTRUCTION,
   MINI_RESYNC_HINT,
+  NO_INBOUND_DISCREPANCIES,
   NOTIFY_BLOCK_COPY,
   REASON_GROUP_LABELS,
   REESE_AGENT_NAME,
   SELLER_CENTRAL_LINK_LIMIT,
-  SUPPORT_MANUAL_LIMIT,
   apiUrl,
   caseAmount,
   caseDay,
@@ -28,6 +34,8 @@ import {
   defaultCaseRange,
   fbaShipmentId,
   filterCaseGroup,
+  formatCasePacket,
+  inboundDiscrepancyCount,
   isInboundTrackerLink,
   reasonLabel,
   searchCaseRows,
@@ -96,6 +104,7 @@ export function ReimbursementsEligiblePanel() {
   const [notifying, setNotifying] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   function load(rangeStart = start, rangeEnd = end) {
     setLoading(true);
@@ -130,9 +139,22 @@ export function ReimbursementsEligiblePanel() {
   }), [rows]);
   const alertRows = data?.alertRows ?? [];
   const alertSummary = useMemo(() => summarizeCases(alertRows), [alertRows]);
+  const inboundCount = inboundDiscrepancyCount(rows);
   const qa = data?.qa;
   const qaOk = Boolean(qa?.ok);
   const notifyBlocked = !qaOk || !rows.length;
+
+  async function copyPacket(row: CaseEventRow) {
+    const text = formatCasePacket(row);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setCopiedKey(row.event_key);
+      }
+    } catch {
+      setCopiedKey(null);
+    }
+  }
 
   function toggleSort(key: CaseSortKey) {
     if (sortKey === key) {
@@ -258,7 +280,36 @@ export function ReimbursementsEligiblePanel() {
         </div>
       )}
 
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">{HOW_TO_FILE_TITLE}</CardTitle>
+          <p className="text-xs text-muted-foreground">{HOW_TO_FILE_INTRO}</p>
+        </CardHeader>
+        <CardContent className="space-y-3 pb-4">
+          <ol className="space-y-2 text-sm">
+            {HOW_TO_FILE_STEPS.map((step, i) => (
+              <li key={step.title} className="flex gap-2">
+                <span className="mt-0.5 w-5 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">
+                  {i + 1}.
+                </span>
+                <div>
+                  <p className="font-medium leading-snug">{step.title}</p>
+                  <p className="text-xs text-muted-foreground">{step.body}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+          <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+            {HOW_TO_FILE_NO_DEEP_LINK}
+          </p>
+        </CardContent>
+      </Card>
+
       <div className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground space-y-1">
+        <p>{CASE_QUEUE_SOURCE_NOTE}</p>
+        {data && !data.tableMissing && inboundCount === 0 && (
+          <p>{NO_INBOUND_DISCREPANCIES}</p>
+        )}
         <p>{data?.gap || CASE_QUEUE_GAP}</p>
         <p>
           Sources: {(data?.sources ?? [...CASE_QUEUE_SOURCES]).join(" · ")}. Dana owns tab + sync;
@@ -403,7 +454,7 @@ export function ReimbursementsEligiblePanel() {
                     <TableHead>FC</TableHead>
                     <TableHead>Shipment</TableHead>
                     <TableHead>Reference ID</TableHead>
-                    <TableHead>Seller Central</TableHead>
+                    <TableHead>File</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -440,7 +491,7 @@ export function ReimbursementsEligiblePanel() {
                           {refId || "—"}
                         </TableCell>
                         <TableCell className="text-xs">
-                          {tracker ? (
+                          {tracker && href ? (
                             <a
                               href={href}
                               target="_blank"
@@ -451,19 +502,21 @@ export function ReimbursementsEligiblePanel() {
                               <ExternalLink className="h-3 w-3" />
                             </a>
                           ) : (
-                            <span
-                              className="inline-flex items-center gap-1 text-muted-foreground"
-                              title={SUPPORT_MANUAL_LIMIT}
-                            >
-                              <a
-                                href={href}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+                            <div className="space-y-1">
+                              <p className="text-[11px] leading-snug text-muted-foreground">
+                                {IDR_INSTRUCTION}
+                              </p>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() => copyPacket(r)}
                               >
-                                Support (manual)
-                              </a>
-                            </span>
+                                <ClipboardCopy className="mr-1 h-3 w-3" />
+                                {copiedKey === r.event_key ? "Copied" : "Copy case packet"}
+                              </Button>
+                            </div>
                           )}
                         </TableCell>
                         <TableCell>

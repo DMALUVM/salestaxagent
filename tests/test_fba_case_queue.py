@@ -14,8 +14,14 @@ from src.reimbursements.case_package import (
     build_case_package,
 )
 from src.reimbursements.case_queue import (
-    LINK_KIND_SUPPORT_MANUAL,
-    SC_SUPPORT_HUB,
+    HOW_TO_FILE_INTRO,
+    HOW_TO_FILE_NO_DEEP_LINK,
+    HOW_TO_FILE_STEPS,
+    HOW_TO_FILE_TITLE,
+    IDR_INSTRUCTION,
+    LINK_KIND_IDR,
+    NO_INBOUND_DISCREPANCIES,
+    CASE_QUEUE_SOURCE_NOTE,
     STATUS_ALREADY_REIMBURSED,
     STATUS_FOUND_OFFSET,
     STATUS_NEEDS_CASE,
@@ -151,8 +157,8 @@ def test_paid_dedupe_drops_reimbursed_units():
         "fulfillment_center": "PHX6",
         "shipment_id": None,
         "reference_id": "ref-dw",
-        "seller_central_url": SC_SUPPORT_HUB,
-        "seller_central_link_kind": "support_hub",
+        "seller_central_url": None,
+        "seller_central_link_kind": "idr_instructions",
     }]
     paid = [{
         "approval_date": "2026-08-20T12:00:00-07:00",
@@ -256,14 +262,35 @@ def test_inbound_and_ledger_lost_inbound_dedupe_to_one_row():
 
 def test_seller_central_links_are_honest():
     url, kind = seller_central_link("FBA16ABCDE", None)
-    assert "inbound-shipment-workflow" in url
+    assert url is not None and "inbound-shipment-workflow" in url
     assert kind == "inbound_shipment"
     url, kind = seller_central_link(None, "not-an-fba")
-    assert url == SC_SUPPORT_HUB
-    assert kind == LINK_KIND_SUPPORT_MANUAL
+    assert url is None
+    assert kind == LINK_KIND_IDR
     url, kind = seller_central_link(None, "20080126439780")
-    assert url == SC_SUPPORT_HUB
-    assert kind == LINK_KIND_SUPPORT_MANUAL
+    assert url is None
+    assert kind == LINK_KIND_IDR
+
+
+def test_how_to_file_copy_matches_amazon_warehouse_damage_process():
+    assert HOW_TO_FILE_TITLE == "How to file"
+    assert "7 / E" in HOW_TO_FILE_INTRO
+    assert "Damaged at FC" in HOW_TO_FILE_INTRO
+    titles = " | ".join(title for title, _ in HOW_TO_FILE_STEPS)
+    bodies = " ".join(body for _, body in HOW_TO_FILE_STEPS)
+    assert "Check Paid / Reimbursements report first" in titles
+    assert "File within 60 days" in titles
+    assert "already paid within ~60 days" in bodies
+    assert "Inventory Defect and Reimbursement" in bodies
+    assert "Inventory Adjustments / Ledger Adjustments" in bodies
+    assert "not a shipment ID" in bodies
+    assert "no stable deep link" in HOW_TO_FILE_NO_DEEP_LINK
+    assert "Support hub" in HOW_TO_FILE_NO_DEEP_LINK
+    assert IDR_INSTRUCTION == "Open IDR (Inventory → Inventory Defect and Reimbursement)"
+    assert "ledger adjustments with eligible codes" in CASE_QUEUE_SOURCE_NOTE
+    assert NO_INBOUND_DISCREPANCIES == (
+        "No CLOSED inbound discrepancies in warehouse right now"
+    )
 
 
 def test_reese_package_contract():
@@ -292,6 +319,9 @@ def test_reese_package_contract():
     assert pkg["summary"]["events"] == 1
     assert pkg["summary"]["units"] == 3
     assert "Do not auto-file" in pkg["markdown"]
+    assert "How to file" in pkg["markdown"]
+    assert "Inventory Defect and Reimbursement" in pkg["markdown"]
+    assert "help/hub/contact-us" not in pkg["markdown"]
     assert "Sellerise" not in pkg["markdown"] or "scrape Sellerise" in pkg["purpose"]
 
 
