@@ -217,6 +217,20 @@ def seller_central_link(shipment_id: str | None, reference_id: str | None) -> tu
     return None, LINK_KIND_IDR
 
 
+def inbound_age_day(ship: dict) -> date | None:
+    """Date used for the stale-receiving ≥21-day clock.
+
+    Prefer ``received_at`` — Amazon often leaves LastUpdatedDate stuck at
+    ship time while receive date advances. Then ``closed_at``, then
+    ``last_updated_at``. Do not invent CLOSED from these dates.
+    """
+    return (
+        _parse_day(ship.get("received_at"))
+        or _parse_day(ship.get("closed_at"))
+        or _parse_day(ship.get("last_updated_at"))
+    )
+
+
 def inbound_ready(ship: dict, as_of: date) -> bool:
     """True when a short-receive is case-eligible (not still in transit)."""
     status = (ship.get("shipment_status") or "").upper()
@@ -224,7 +238,7 @@ def inbound_ready(ship: dict, as_of: date) -> bool:
         return True
     if status not in STALE_INBOUND:
         return False
-    updated = _parse_day(ship.get("last_updated_at") or ship.get("received_at"))
+    updated = inbound_age_day(ship)
     if not updated:
         return False
     return (as_of - updated).days >= STALE_INBOUND_DAYS
