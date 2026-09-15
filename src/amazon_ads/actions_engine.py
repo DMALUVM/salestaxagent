@@ -8,12 +8,13 @@ Action types (DB `type` → `evidence.action_type` used by the dashboard):
   REVIEW_SEARCH_TERM   → review_campaign  — stale 0-order; do not apply yet
   HARVEST_SEARCH_TERM  → harvest_exact    — converting + ACOS <= target
   REDUCE_BID           → reduce_bid       — ACOS >> target with enough data
-  WASTED_SPEND_ROLLUP  → review_campaign  — top wasted $ by campaign
+  WASTED_SPEND_ROLLUP  → review_campaign  — P2 review of qualifying fat zeros
 
 KEEP IN SYNC WITH `dashboard/src/lib/ppc-actions-generate.ts` (called from
 POST /api/ppc action=generate). The dashboard cannot call Python; both must
 emit the same closed-day window, orders_14d attribution, pause-vs-negate
-lever, and stale-warehouse guard. Change one, change the other.
+lever, stale-warehouse guard, and fat-zero floors (spend >= $5, clicks >= 3;
+rollup P2 at >= $25). Change one, change the other.
 """
 from __future__ import annotations
 
@@ -30,12 +31,13 @@ log = logging.getLogger(__name__)
 # Configurable thresholds (lowered from original to produce actionable recs)
 DEFAULT_TARGET_ACOS = 30.0
 DEFAULT_LOOKBACK_DAYS = 7
-MIN_SPEND_NEGATE = 5.0       # was 15 — too aggressive for small accounts
+MIN_SPEND_NEGATE = 5.0       # per-term floor for negate/pause/review AND rollup
 MIN_SPEND_HARVEST = 3.0
 MIN_SPEND_REDUCE = 5.0
 MIN_CLICKS_REDUCE = 5
+MIN_CLICKS_WASTE = 3         # exclude one-click noise from waste + rollup
 MIN_ORDERS_HARVEST = 1
-MIN_WASTE_ROLLUP = 5.0
+MIN_WASTE_ROLLUP = 25.0      # campaign fat-zero floor; was 5 — tiny campaigns spam P1
 MAX_WASTE_ROLLUPS = 5
 MIN_BID = 0.02
 
@@ -115,6 +117,19 @@ def resolve_zero_order_lever(
     if "exact" in types and terms_equal(keyword, search_term):
         return "pause_keyword"
     return "negate_exact"
+
+
+def is_waste_eligible(e: dict) -> bool:
+    """Fat zero: 0 orders_14d AND spend >= $5 AND clicks >= 3.
+
+    One-click and penny zeros stay out of negate/pause/review *and* rollup
+    membership so WASTED_SPEND_ROLLUP cannot claim hundreds of noise terms.
+    """
+    return (
+        int(e.get("orders") or 0) == 0
+        and float(e.get("spend") or 0) >= MIN_SPEND_NEGATE
+        and int(e.get("clicks") or 0) >= MIN_CLICKS_WASTE
+    )
 
 
 def sibling_exact_converters(
@@ -345,23 +360,40 @@ def score_search_term_actions(
                         f"before cutting further."),
             ))
 
-    # ── P1: WASTED_SPEND_ROLLUP — top campaigns by zero-order spend ──
-    campaign_waste: dict[str, dict] = defaultdict(
-        lambda: {"spend": 0.0, "terms": 0, "campaign_id": ""})
+    # ── P2: WASTED_SPEND_ROLLUP — campaigns by qualifying fat-zero spend ──
+    # Membership uses the same floors as per-term negate/pause/review. Raw
+    # zero-order totals stay in evidence so Dave can reconcile vs Ads, but
+    # impact and action copy never claim pennies or one-click noise.
+    campaign_waste: dict[str, dict] = defaultdict(lambda: {
+        "spend": 0.0, "terms": 0, "campaign_id": "",
+        "raw_terms": 0, "raw_spend": 0.0, "term_rows": [],
+    })
     for e in agg.values():
         if e["orders"] != 0:
             continue
         w = campaign_waste[e["campaign_name"]]
+        w["raw_terms"] += 1
+        w["raw_spend"] += e["spend"]
+        w["campaign_id"] = w["campaign_id"] or e["campaign_id"]
+        if not is_waste_eligible(e):
+            continue
         w["spend"] += e["spend"]
         w["terms"] += 1
-        w["campaign_id"] = w["campaign_id"] or e["campaign_id"]
+        w["term_rows"].append({
+            "search_term": e["search_term"],
+            "spend": round(e["spend"], 2),
+            "clicks": e["clicks"],
+        })
     top_waste = sorted(campaign_waste.items(), key=lambda x: -x[1]["spend"])[:MAX_WASTE_ROLLUPS]
     for name, w in top_waste:
         if w["spend"] < MIN_WASTE_ROLLUP:
             continue
+        by_spend = sorted(w["term_rows"], key=lambda t: -t["spend"])
+        floors = (f"0 {ATTRIBUTION_FIELD}, spend >= {_usd(MIN_SPEND_NEGATE)}, "
+                  f"clicks >= {MIN_CLICKS_WASTE}; pennies and one-click excluded")
         recs.append(_make_rec(
             type="WASTED_SPEND_ROLLUP",
-            priority="P1",
+            priority="P2",
             impact=w["spend"],
             entity_type="campaign",
             entity_name=name,
@@ -370,20 +402,32 @@ def score_search_term_actions(
             ad_group_id="",
             evidence={
                 "action_type": "review_campaign",
-                "why": (f"{_usd(w['spend'])} across {w['terms']} search terms "
-                        f"with 0 {ATTRIBUTION_FIELD}{window_suffix}."),
+                "why": (f"{_usd(w['spend'])} across {w['terms']} qualifying "
+                        f"fat-zero search terms ({floors}){window_suffix}."),
                 "spend": round(w["spend"], 2), "orders": 0,
-                "zero_order_terms": w["terms"], "window": window,
+                "zero_order_terms": w["terms"],
+                "qualifying_terms": w["terms"],
+                "qualifying_spend": round(w["spend"], 2),
+                "min_spend_negate": MIN_SPEND_NEGATE,
+                "min_clicks_waste": MIN_CLICKS_WASTE,
+                "min_waste_rollup": MIN_WASTE_ROLLUP,
+                "pennies_excluded": True,
+                "one_click_excluded": True,
+                "raw_zero_order_terms": w["raw_terms"],
+                "raw_zero_order_spend": round(w["raw_spend"], 2),
+                "excluded_noise_terms": w["raw_terms"] - w["terms"],
+                "qualifying_terms_by_spend": by_spend,
+                "window": window,
                 "verified": not freshness["st_stale"],
                 "attribution": ATTRIBUTION_FIELD,
             },
             action=(f'Open campaign "{name}" → Search terms report for '
                     f"{window['start']} → {window['end']} (closed days, "
                     f"America/Los_Angeles), sort by Spend, and review the "
-                    f"{w['terms']} terms with 0 {ATTRIBUTION_FIELD} "
-                    f"({_usd(w['spend'])} of wasted spend). The individual "
-                    f"rows list the biggest offenders — pause Exact KW=term, "
-                    f"do not negate those."),
+                    f"{w['terms']} qualifying fat-zero terms ({floors}). "
+                    f"{_usd(w['spend'])} at stake. The individual rows list "
+                    f"the biggest offenders — pause Exact KW=term, do not "
+                    f"negate those."),
         ))
     return recs
 
@@ -394,8 +438,8 @@ def _zero_order_rec(
     where: str, scope: str, window: dict, window_suffix: str,
     freshness: dict, siblings: list[str],
 ) -> dict | None:
-    """P0/P1 pause-or-negate, or P2 review when ST is stale. None if no spend."""
-    if e["spend"] < MIN_SPEND_NEGATE or e["orders"] != 0:
+    """P0/P1 pause-or-negate, or P2 review when ST is stale. None if not a fat zero."""
+    if not is_waste_eligible(e):
         return None
 
     lever = resolve_zero_order_lever(e.get("keyword"), e["search_term"], e["match_types"])

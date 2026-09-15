@@ -15,9 +15,13 @@ from datetime import date
 
 from src.amazon_ads.actions_engine import (
     ATTRIBUTION_FIELD,
+    MIN_CLICKS_WASTE,
+    MIN_SPEND_NEGATE,
+    MIN_WASTE_ROLLUP,
     _aggregate_terms,
     closed_lookback_window,
     filter_closed_window,
+    is_waste_eligible,
     resolve_zero_order_lever,
     score_search_term_actions,
     sibling_exact_converters,
@@ -222,3 +226,113 @@ class TestStaleAndSiblings:
                 sales_14d=40.0),
         ])
         assert sibling_exact_converters(agg, TERM, "camp-orange") == []
+
+
+class TestFatZeroWaste:
+    """WASTED_SPEND_ROLLUP and per-term waste only count fat zeros.
+
+    Dave reconciled the P1 Auto Loose card ($2186 / 316 terms) against Ads
+    exports: the old rollup summed every orders_14d=0 row in the short window,
+    including one-click pennies. Floors: spend >= $5, clicks >= 3; campaign
+    rollup needs >= $25 qualifying waste and is P2 review.
+    """
+
+    def _score(self, rows, *, fresh="2026-09-14"):
+        return score_search_term_actions(
+            rows, target_acos=30, lookback_days=7, as_of=AS_OF,
+            st_fresh_through=fresh)
+
+    def test_floors_are_not_lowered(self):
+        assert MIN_SPEND_NEGATE >= 5.0
+        assert MIN_CLICKS_WASTE == 3
+        assert MIN_WASTE_ROLLUP >= 25.0
+        assert is_waste_eligible({"orders": 0, "spend": 12.0, "clicks": 5})
+        assert not is_waste_eligible({"orders": 0, "spend": 4.0, "clicks": 1})
+        assert not is_waste_eligible({"orders": 0, "spend": 20.0, "clicks": 1})
+        assert not is_waste_eligible({"orders": 0, "spend": 4.0, "clicks": 5})
+        assert not is_waste_eligible({"orders": 1, "spend": 12.0, "clicks": 5})
+
+    def test_one_click_four_dollar_term_is_not_waste(self):
+        rows = [row(clicks=1, spend=4.0, keyword="other", match_type="BROAD",
+                    search_term="one click noise")]
+        recs = self._score(rows)
+        types = {r["type"] for r in recs}
+        assert types.isdisjoint({
+            "NEGATE_SEARCH_TERM", "PAUSE_KEYWORD",
+            "REVIEW_SEARCH_TERM", "WASTED_SPEND_ROLLUP",
+        })
+
+    def test_five_click_twelve_dollar_zero_is_negate(self):
+        rows = [row(clicks=5, spend=12.0, keyword="other", match_type="BROAD",
+                    search_term="fat zero")]
+        recs = self._score(rows)
+        waste = [r for r in recs if r["type"] == "NEGATE_SEARCH_TERM"]
+        assert len(waste) == 1
+        assert waste[0]["evidence"]["spend"] == 12.0
+        assert waste[0]["evidence"]["clicks"] == 5
+        assert waste[0]["evidence"]["orders"] == 0
+        # $12 < $25 campaign floor — no rollup spam
+        assert not any(r["type"] == "WASTED_SPEND_ROLLUP" for r in recs)
+
+    def test_rollup_impact_equals_qualifying_terms_only(self):
+        """Hundreds of pennies + two fat zeros → rollup is $30 / 2 terms, P2."""
+        auto = "SP - Auto Loose - Tallow"
+        fat = [
+            row(search_term="fat a", campaign_name=auto, campaign_id="auto-1",
+                keyword="tallow", match_type="BROAD", clicks=8, spend=18.0),
+            row(search_term="fat b", campaign_name=auto, campaign_id="auto-1",
+                keyword="tallow", match_type="BROAD", clicks=5, spend=12.0),
+        ]
+        one_click = [
+            row(search_term=f"one click {i}", campaign_name=auto,
+                campaign_id="auto-1", keyword="tallow", match_type="BROAD",
+                clicks=1, spend=4.0)
+            for i in range(50)
+        ]
+        pennies = [
+            row(search_term=f"penny {i}", campaign_name=auto,
+                campaign_id="auto-1", keyword="tallow", match_type="BROAD",
+                clicks=2, spend=0.50)
+            for i in range(20)
+        ]
+        recs = self._score(fat + one_click + pennies)
+        rollup = [r for r in recs if r["type"] == "WASTED_SPEND_ROLLUP"]
+        assert len(rollup) == 1
+        card = rollup[0]
+        assert card["priority"] == "P2"
+        assert card["impact_estimate"] == 30.0
+        ev = card["evidence"]
+        assert ev["qualifying_terms"] == 2
+        assert ev["qualifying_spend"] == 30.0
+        assert ev["zero_order_terms"] == 2
+        assert ev["min_spend_negate"] == MIN_SPEND_NEGATE
+        assert ev["min_clicks_waste"] == MIN_CLICKS_WASTE
+        assert ev["min_waste_rollup"] == MIN_WASTE_ROLLUP
+        assert ev["pennies_excluded"] is True
+        assert ev["one_click_excluded"] is True
+        assert ev["raw_zero_order_terms"] == 72
+        assert ev["excluded_noise_terms"] == 70
+        assert ev["raw_zero_order_spend"] == 30.0 + 50 * 4.0 + 20 * 0.50
+        names = [t["search_term"] for t in ev["qualifying_terms_by_spend"]]
+        assert names == ["fat a", "fat b"]
+        assert "qualifying" in card["suggested_action"]
+        assert "pennies and one-click excluded" in card["suggested_action"]
+        assert "pennies and one-click excluded" in ev["why"]
+        assert "316" not in card["suggested_action"]
+        assert "72" not in card["suggested_action"]
+        negates = [r for r in recs if r["type"] == "NEGATE_SEARCH_TERM"]
+        assert {r["entity_name"] for r in negates} == {"fat a", "fat b"}
+
+    def test_penny_zeros_only_produces_no_rollup(self):
+        rows = [
+            row(search_term=f"n{i}", campaign_name="Auto Loose",
+                campaign_id="auto-1", keyword="tallow", match_type="BROAD",
+                clicks=1, spend=0.40)
+            for i in range(100)
+        ]
+        recs = self._score(rows)
+        types = {r["type"] for r in recs}
+        assert "WASTED_SPEND_ROLLUP" not in types
+        assert "NEGATE_SEARCH_TERM" not in types
+        assert "PAUSE_KEYWORD" not in types
+        assert "REVIEW_SEARCH_TERM" not in types
