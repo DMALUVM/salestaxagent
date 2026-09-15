@@ -221,6 +221,13 @@ def phrase_organic_asin(p: dict) -> str | None:
     return a or None
 
 
+def phrase_mobile_organic_asin(p: dict) -> str | None:
+    """phrases/v2 mobileOrganicAsin when SoldScope returns it."""
+    raw = _first_present(p, "mobileOrganicAsin", "mobile_organic_asin")
+    a = str(raw or "").strip().upper()
+    return a or None
+
+
 def phrase_amazon_choice(p: dict) -> bool | None:
     """Amazon's Choice when SoldScope sends it. Missing stays None."""
     raw = _first_present(p, "amazonChoice", "amazon_choice")
@@ -867,13 +874,6 @@ def _phrase_snapshot_row(
     organic_asin: str | None = None,
     amazon_choice: bool | None = None,
 ) -> dict:
-    child = organic_asin if organic_asin is not None else (
-        phrase_organic_asin(p) if current else None
-    )
-    mobile = phrase_mobile_organic_asin(p) if current else None
-    choice = amazon_choice if amazon_choice is not None else (
-        phrase_amazon_choice(p) if current else None
-    )
     return {
         "asin": asin,
         "marketplace": marketplace,
@@ -898,9 +898,6 @@ def _phrase_snapshot_row(
             p, "abaTotalConvShare", "aba_total_conv_share",
         ) if current else None,
         "organic_page": _int(_first_present(p, "organicPage", "organic_page")) if current else None,
-        "organic_asin": child,
-        "mobile_organic_asin": mobile,
-        "amazon_choice": choice,
         "as_of": as_of,
         "pulled_at": pulled_at,
         "raw": {
@@ -912,6 +909,7 @@ def _phrase_snapshot_row(
             "abaTotalClickShare": p.get("abaTotalClickShare") if current else None,
             "abaTotalConvShare": p.get("abaTotalConvShare") if current else None,
             "organicAsin": organic_asin,
+            "mobileOrganicAsin": phrase_mobile_organic_asin(p) if current else None,
             "amazonChoice": amazon_choice,
             "heatmap": not current,
         },
@@ -965,8 +963,6 @@ def rank_rows_from_phrases(
                 amazon_choice=today_choice,
                 pulled_at=pulled_at,
                 current=True,
-                organic_asin=today_child,
-                amazon_choice=today_choice,
             ))
         for day_iso, day in heatmap.items():
             key = (phrase, day_iso)
@@ -986,8 +982,6 @@ def rank_rows_from_phrases(
                 amazon_choice=day.get("amazon_choice"),
                 pulled_at=pulled_at,
                 current=False,
-                organic_asin=day.get("organic_asin"),
-                amazon_choice=day.get("amazon_choice"),
             ))
     return rows
 

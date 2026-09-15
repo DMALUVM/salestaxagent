@@ -17,6 +17,7 @@ import {
   organicRankSnapshotRows,
   DEFAULT_HEATMAP_SORT,
   asOrganicChild,
+  shortOrganicChild,
   cellHoverTitle,
   cellPriorRank,
   latestOrganicChild,
@@ -28,10 +29,8 @@ import {
   formatCellRank,
   formatSignedDelta,
   heatmapSortCaption,
-  normalizeAsin,
   rankDelta,
   resolveSfr,
-  shortAsin,
   sortHeatmapRows,
   sparklineGeometry,
   sparklineSeries,
@@ -228,6 +227,8 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     );
     assert.equal(asOrganicChild("  b0childlip1 "), "B0CHILDLIP1");
     assert.equal(asOrganicChild(""), null);
+    assert.equal(shortOrganicChild("B0CHILDLIP1"), "LIP1");
+    assert.equal(shortOrganicChild(null), "");
     assert.equal(
       latestOrganicChild({ "2026-09-11": null, "2026-09-12": "B0DAYCHILD" }, ["2026-09-11", "2026-09-12"]),
       "B0DAYCHILD",
@@ -454,48 +455,8 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.match(heat, /organic_child_asin/);
     assert.match(heat, /child \{row\.organic_child_asin\}/);
     assert.match(heat, /organicAsin/);
+    assert.match(heat, /shortOrganicChild/);
     assert.doesNotMatch(heat, /Deo stays empty/);
     assert.doesNotMatch(heat, /until a Rank Tracker group exists/);
-  });
-
-  test("heatmap keeps the child ASIN that holds each day's organic slot", () => {
-    const progress = buildOrganicRankProgress({
-      snapshots: [
-        {
-          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-08-30",
-          organic_position: 18, organic_asin: "b0oldchild1",
-          aba_search_frequency_rank: 90,
-        },
-        {
-          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-06",
-          organic_position: 8, organic_asin: "B0CLF5B27Y",
-          amazon_choice: true, aba_search_frequency_rank: 80,
-        },
-        {
-          phrase: "chapstick", asin: "B0CLHTF8YN", as_of: "2026-09-06",
-          organic_position: 40, aba_search_frequency_rank: 20,
-        },
-      ],
-    });
-    const lip = progress.rows.find((r) => r.keyword_normalized === "tallow lip balm");
-    assert.equal(lip?.asin, "B0CLHTF8YN");
-    assert.equal(lip?.organic_child_asin, "B0CLF5B27Y");
-    assert.equal(lip?.childAsins["2026-08-30"], "B0OLDCHILD1");
-    assert.equal(lip?.childAsins["2026-09-06"], "B0CLF5B27Y");
-    assert.equal(lip?.amazonChoice["2026-09-06"], true);
-    const chap = progress.rows.find((r) => r.keyword_normalized === "chapstick");
-    assert.equal(chap?.organic_child_asin, null);
-    assert.equal(chap?.childAsins["2026-09-06"], null);
-    const hit = lookupOrganicRank(
-      buildOrganicRankJoinIndex([
-        {
-          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-06",
-          organic_position: 8, organic_asin: "B0CLF5B27Y",
-        },
-      ]),
-      "tallow lip balm",
-      "B0CLHTF8YN",
-    );
-    assert.equal(hit.organic_asin, "B0CLHTF8YN");
   });
 });

@@ -77,10 +77,6 @@ export type RankSnapshot = {
   aba_total_click_share?: number | null;
   aba_total_conv_share?: number | null;
   search_volume?: number | null;
-  /** Child ASIN holding the organic slot that day (SoldScope organicAsin). */
-  organic_asin?: string | null;
-  mobile_organic_asin?: string | null;
-  amazon_choice?: boolean | null;
   as_of?: string | null;
   group_id?: number | null;
 };
@@ -158,19 +154,6 @@ export function asRank(value: number | null | undefined): number | null {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return null;
   return Math.trunc(n);
-}
-
-/** Uppercase ASIN or null — never invent from the hero parent. */
-export function normalizeAsin(value: string | null | undefined): string | null {
-  const a = String(value ?? "").trim().toUpperCase();
-  return a || null;
-}
-
-/** Glanceable tail of a 10-char ASIN. Full value stays on hover. */
-export function shortAsin(value: string | null | undefined): string {
-  const a = normalizeAsin(value);
-  if (!a) return "";
-  return a.length <= 4 ? a : a.slice(-4);
 }
 
 /**
@@ -266,6 +249,13 @@ export function formatCellRank(n: number | null | undefined): string {
 export function asOrganicChild(asin: string | null | undefined): string | null {
   const a = String(asin ?? "").trim().toUpperCase();
   return a || null;
+}
+
+/** Last 4 of a child ASIN for heatmap cells. Full value stays on hover. */
+export function shortOrganicChild(asin: string | null | undefined): string {
+  const a = asOrganicChild(asin);
+  if (!a) return "";
+  return a.length <= 4 ? a : a.slice(-4);
 }
 
 export function latestOrganicChild(

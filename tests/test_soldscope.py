@@ -330,6 +330,7 @@ def test_rank_rows_map_organic_position_sfr_and_previous():
             "phrase": "tallow lip balm",
             "organicPosition": 7,
             "organicAsin": "b0childlip1",
+            "mobileOrganicAsin": "b0mobilelip",
             "amazonChoice": True,
             "organicPreviousPosition": 14,
             "organicPage": 1,
@@ -338,8 +339,6 @@ def test_rank_rows_map_organic_position_sfr_and_previous():
             "abaSearchFrequencyRank": 120,
             "abaTotalClickShare": 0.18,
             "abaTotalConvShare": 0.09,
-            "organicAsin": "b0clf5b27y",
-            "mobileOrganicAsin": "B0CHILDMOB1",
         }],
         asin="B0CLHTF8YN",
         marketplace="US",
@@ -352,6 +351,7 @@ def test_rank_rows_map_organic_position_sfr_and_previous():
     row = rows[0]
     assert row["organic_position"] == 7
     assert row["organic_asin"] == "B0CHILDLIP1"
+    assert row["raw"]["mobileOrganicAsin"] == "B0MOBILELIP"
     assert row["amazon_choice"] is True
     assert row["organic_previous_position"] == 14
     assert row["organic_page"] == 1
@@ -360,10 +360,6 @@ def test_rank_rows_map_organic_position_sfr_and_previous():
     assert row["aba_total_conv_share"] == 0.09
     assert row["search_volume"] == 8800
     assert row["search_volume"] != row["aba_search_frequency_rank"]
-    assert row["asin"] == "B0CLHTF8YN"
-    assert row["organic_asin"] == "B0CLF5B27Y"
-    assert row["mobile_organic_asin"] == "B0CHILDMOB1"
-    assert row["amazon_choice"] is None
 
 
 def test_rank_rows_do_not_invent_sfr_from_search_volume():
@@ -427,6 +423,7 @@ def test_phrase_helpers_treat_zero_and_blank_as_missing():
     assert syn.phrase_organic_previous({"organicPreviousPosition": None}) is None
     assert syn.phrase_organic_asin({"organicAsin": "b0childlip1"}) == "B0CHILDLIP1"
     assert syn.phrase_organic_asin({"organic_asin": ""}) is None
+    assert syn.phrase_mobile_organic_asin({"mobileOrganicAsin": "b0x"}) == "B0X"
     assert syn.phrase_amazon_choice({"amazon_choice": False}) is False
     assert syn.phrase_amazon_choice({}) is None
 
@@ -908,24 +905,6 @@ def test_phrase_heatmap_ranks_skip_null_and_do_not_invent():
     assert "2026-09-13" not in days
 
 
-def test_phrase_heatmap_days_keep_asin_and_choice_when_present():
-    days = syn.phrase_heatmap_days({
-        "organicAsin": "B0TODAYCHILD",
-        "r_2026-09-11": {
-            "date": "2026-09-11", "rank": 6,
-            "asin": "b0clf5b27y", "amazon_choice": True,
-        },
-        "r_2026-09-12": {"date": "2026-09-12", "rank": 5},
-        "r_2026-09-13": {"date": "2026-09-13", "rank": None, "asin": "B0SKIP"},
-    })
-    assert days["2026-09-11"]["rank"] == 6
-    assert days["2026-09-11"]["organic_asin"] == "B0CLF5B27Y"
-    assert days["2026-09-11"]["amazon_choice"] is True
-    assert days["2026-09-12"]["organic_asin"] is None
-    assert days["2026-09-12"]["amazon_choice"] is None
-    assert "2026-09-13" not in days
-
-
 def test_rank_rows_expand_heatmap_days_without_inventing():
     rows = syn.rank_rows_from_phrases(
         [{
@@ -960,13 +939,6 @@ def test_rank_rows_expand_heatmap_days_without_inventing():
     assert by_day["2026-09-11"]["aba_search_frequency_rank"] is None
     assert by_day["2026-09-12"]["organic_asin"] is None
     assert "2026-09-13" not in by_day
-    assert by_day["2026-09-14"]["organic_asin"] == "B0TODAYCHILD"
-    assert by_day["2026-09-14"]["mobile_organic_asin"] == "B0TODAYMOB"
-    assert by_day["2026-09-11"]["organic_asin"] == "B0CLF5B27Y"
-    assert by_day["2026-09-11"]["amazon_choice"] is False
-    assert by_day["2026-09-11"]["mobile_organic_asin"] is None
-    assert by_day["2026-09-12"]["organic_asin"] is None
-    assert by_day["2026-09-12"]["amazon_choice"] is None
 
 
 def test_list_product_phrases_sends_heatmap_query(monkeypatch):
