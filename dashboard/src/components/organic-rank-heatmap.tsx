@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   BASELINE_WEEK_COPY,
+  DEFAULT_HEATMAP_SORT,
   HEATMAP_DEFAULT_ROWS,
   HERO_FAMILIES,
   WOW_MOVE_POSITIONS,
@@ -13,11 +14,13 @@ import {
   cellHoverTitle,
   cellPriorRank,
   classifyMovement,
+  cycleHeatmapSort,
   emptyCopyForFamily,
   filterProgress,
   formatCellRank,
   formatSfr,
   formatSignedDelta,
+  heatmapSortCaption,
   rankHeatTone,
   sortHeatmapRows,
   sparklineGeometry,
@@ -25,6 +28,7 @@ import {
   wowLabel,
   type HeatmapRow,
   type HeatmapSortKey,
+  type HeatmapSortSpec,
   type HeroFamilyId,
   type MoveDirection,
   type OrganicRankProgress,
@@ -50,6 +54,53 @@ const LEGEND_SWATCHES: Array<{ tone: keyof typeof TONE; label: string }> = [
   { tone: "poor", label: "100+" },
   { tone: "missing", label: "no rank" },
 ];
+
+function SortHeader({
+  label,
+  title,
+  align,
+  sticky,
+  tabular,
+  active,
+  dir,
+  onClick,
+}: {
+  label: string;
+  title: string;
+  align: "left" | "right" | "center";
+  sticky?: boolean;
+  tabular?: boolean;
+  active: boolean;
+  dir: HeatmapSortSpec["dir"];
+  onClick: () => void;
+}) {
+  const ariaSort = !active ? "none" : dir === "asc" ? "ascending" : "descending";
+  const justify = align === "right" ? "justify-end" : align === "center" ? "justify-center" : "justify-start";
+  return (
+    <th
+      className={`${sticky ? "sticky left-0 z-10 bg-muted/90 " : ""}px-2 py-1.5 font-medium ${
+        align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"
+      } ${tabular ? "tabular-nums" : ""}`}
+      title={title}
+      aria-sort={ariaSort}
+    >
+      <button
+        type="button"
+        className={`inline-flex w-full items-center gap-0.5 ${justify} select-none font-medium hover:text-foreground`}
+        onClick={onClick}
+        aria-label={`${label}. ${title}`}
+      >
+        {label}
+        <span
+          className={`text-[8px] leading-none ${active ? "text-foreground" : "text-muted-foreground/40"}`}
+          aria-hidden
+        >
+          {active && dir === "desc" ? "▼" : "▲"}
+        </span>
+      </button>
+    </th>
+  );
+}
 
 function weekLabel(iso: string): string {
   const d = new Date(`${iso}T00:00:00`);
@@ -85,7 +136,7 @@ export function OrganicRankHeatmap() {
   const [data, setData] = useState<(OrganicRankProgress & { error?: string }) | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [family, setFamily] = useState<HeroFamilyId | "all">("all");
-  const [sort, setSort] = useState<HeatmapSortKey>("sfr");
+  const [sort, setSort] = useState<HeatmapSortSpec>(DEFAULT_HEATMAP_SORT);
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
@@ -198,8 +249,7 @@ export function OrganicRankHeatmap() {
                   {weeks.length ? ` · ${weeks.length} day${weeks.length === 1 ? "" : "s"}` : ""}
                   {movedCount ? ` · ${movedCount} moved` : ""}
                   {flaggedCount ? ` · ${flaggedCount} flagged` : ""}
-                  {sort === "sfr" ? " · sorted by SFR (more frequent first)" : ""}
-                  {sort === "moved" ? " · movers first" : ""}
+                  {` · ${heatmapSortCaption(sort)}`}
                 </p>
                 <div className="flex gap-1">
                   {([
@@ -212,9 +262,9 @@ export function OrganicRankHeatmap() {
                       key={key}
                       type="button"
                       size="sm"
-                      variant={sort === key ? "default" : "outline"}
+                      variant={sort.key === key ? "default" : "outline"}
                       className="h-6 text-[10px]"
-                      onClick={() => setSort(key)}
+                      onClick={() => setSort(cycleHeatmapSort(sort, { key }))}
                     >
                       {label}
                     </Button>
@@ -226,19 +276,37 @@ export function OrganicRankHeatmap() {
                 <table className="w-full min-w-[720px] border-collapse text-[11px]">
                   <thead>
                     <tr className="border-b bg-muted/40">
-                      <th className="sticky left-0 z-10 bg-muted/90 px-2 py-1.5 text-left font-medium">
-                        Keyword
-                      </th>
+                      <SortHeader
+                        label="Keyword"
+                        title="Click to sort A–Z, then Z–A. Ties stay A–Z."
+                        align="left"
+                        sticky
+                        active={sort.key === "keyword"}
+                        dir={sort.dir}
+                        onClick={() => setSort(cycleHeatmapSort(sort, { key: "keyword" }))}
+                      />
                       <th className="px-1.5 py-1.5 text-center font-medium" title="Prior → current trend. Lower (toward #1) is up.">
                         Trend
                       </th>
-                      <th className="px-2 py-1.5 text-right font-medium" title="Brand Analytics Search Frequency Rank — lower is more frequent">
-                        SFR
-                      </th>
+                      <SortHeader
+                        label="SFR"
+                        title="Brand Analytics Search Frequency Rank — lower is more frequent. Click to sort; missing SFR sorts last."
+                        align="right"
+                        active={sort.key === "sfr"}
+                        dir={sort.dir}
+                        onClick={() => setSort(cycleHeatmapSort(sort, { key: "sfr" }))}
+                      />
                       {weeks.map((w) => (
-                        <th key={w} className="px-1.5 py-1.5 text-center font-medium tabular-nums">
-                          {weekLabel(w)}
-                        </th>
+                        <SortHeader
+                          key={w}
+                          label={weekLabel(w)}
+                          title={`Organic rank on ${weekLabel(w)}. Lower number is better (#1 first). Click to sort; missing ranks sort last.`}
+                          align="center"
+                          tabular
+                          active={sort.key === "week" && sort.week === w}
+                          dir={sort.dir}
+                          onClick={() => setSort(cycleHeatmapSort(sort, { key: "week", week: w }))}
+                        />
                       ))}
                     </tr>
                   </thead>
