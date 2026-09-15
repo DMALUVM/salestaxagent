@@ -14,6 +14,7 @@ from src.reimbursements.case_package import (
     build_case_package,
 )
 from src.reimbursements.case_queue import (
+    LINK_KIND_SUPPORT_MANUAL,
     SC_SUPPORT_HUB,
     STATUS_ALREADY_REIMBURSED,
     STATUS_FOUND_OFFSET,
@@ -259,7 +260,10 @@ def test_seller_central_links_are_honest():
     assert kind == "inbound_shipment"
     url, kind = seller_central_link(None, "not-an-fba")
     assert url == SC_SUPPORT_HUB
-    assert kind == "support_hub"
+    assert kind == LINK_KIND_SUPPORT_MANUAL
+    url, kind = seller_central_link(None, "20080126439780")
+    assert url == SC_SUPPORT_HUB
+    assert kind == LINK_KIND_SUPPORT_MANUAL
 
 
 def test_reese_package_contract():
@@ -296,6 +300,9 @@ def test_reason_groups():
     assert reason_group("Lost_Inbound") == "lost_inbound"
     assert reason_group("Lost_Warehouse") == "lost_warehouse"
     assert reason_group("CustomerReturn") == "other"
+    assert reason_group("M") == "lost_warehouse"
+    assert reason_group("M") != "lost_inbound"
+    assert reason_group("7") == "warehouse_damage"
 
 
 def test_window_and_worker_wiring():

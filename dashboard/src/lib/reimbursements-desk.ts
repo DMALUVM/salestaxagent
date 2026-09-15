@@ -3,19 +3,23 @@
  *
  * Source of truth is `fba_reimbursements` (GET_FBA_REIMBURSEMENTS_DATA).
  * Cash awareness only — never fold into contribution / net_after_ads.
+ *
+ * Reason grouping uses the Amazon ledger legend
+ * (`reimbursements-reason-legend.ts`). Letter M is Inventory misplaced
+ * → lost_warehouse, never lost inbound.
  */
 import { amazonAsOf, shiftDays, windowStart } from "./as-of";
 import { approvalLaDay } from "./fba-reimbursements";
+import {
+  reasonGroup as legendReasonGroup,
+  reasonLabel as legendReasonLabel,
+  type ReasonGroup,
+} from "./reimbursements-reason-legend";
 
 export const REIMBURSEMENTS_DEFAULT_DAYS = 90;
 export const REIMBURSEMENTS_ALERT_DAYS = 7;
 
-export type ReasonGroup =
-  | "warehouse_damage"
-  | "lost_inbound"
-  | "lost_warehouse"
-  | "other";
-
+export type { ReasonGroup };
 export type ReasonFilter = "all" | ReasonGroup;
 
 export const ALERT_REASON_CODES = [
@@ -31,10 +35,7 @@ export const REASON_GROUP_LABELS: Record<ReasonGroup, string> = {
   other: "Other",
 };
 
-const REASON_LABELS: Record<string, string> = {
-  Damaged_Warehouse: "Warehouse damage",
-  Lost_Inbound: "Lost inbound",
-  Lost_Warehouse: "Lost warehouse",
+const PAID_DESK_REASON_LABELS: Record<string, string> = {
   CustomerReturn: "Customer return",
   Reimbursement_Reversal: "Reimbursement reversal",
   CustomerServiceIssue: "Customer service issue",
@@ -102,22 +103,8 @@ export function normalizeReason(reason: string | null | undefined): string {
   return (reason ?? "").trim();
 }
 
-function reasonKey(reason: string | null | undefined): string {
-  return normalizeReason(reason).toLowerCase().replace(/[\s-]+/g, "_");
-}
-
 export function reasonGroup(reason: string | null | undefined): ReasonGroup {
-  const key = reasonKey(reason);
-  if (key === "damaged_warehouse" || key === "warehouse_damage" || key === "warehousedamage") {
-    return "warehouse_damage";
-  }
-  if (key === "lost_inbound" || key === "lostinbound" || key === "inbound_lost") {
-    return "lost_inbound";
-  }
-  if (key === "lost_warehouse" || key === "lostwarehouse" || key === "warehouse_lost") {
-    return "lost_warehouse";
-  }
-  return "other";
+  return legendReasonGroup(reason);
 }
 
 export function isAlertReason(reason: string | null | undefined): boolean {
@@ -127,8 +114,8 @@ export function isAlertReason(reason: string | null | undefined): boolean {
 export function reasonLabel(reason: string | null | undefined): string {
   const raw = normalizeReason(reason);
   if (!raw) return "Unknown";
-  if (REASON_LABELS[raw]) return REASON_LABELS[raw];
-  return raw.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
+  if (PAID_DESK_REASON_LABELS[raw]) return PAID_DESK_REASON_LABELS[raw];
+  return legendReasonLabel(raw);
 }
 
 export function defaultDeskRange(now: Date = new Date()): {

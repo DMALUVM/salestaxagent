@@ -14,6 +14,12 @@ from src.reimbursements.case_queue import (
     SC_SUPPORT_HUB,
     SELLER_CENTRAL_LINK_LIMIT,
     STATUS_NEEDS_CASE,
+    fba_shipment_id,
+)
+from src.reimbursements.reason_legend import (
+    CLASSIFICATION_VERSION,
+    MINI_RESYNC_HINT,
+    reason_label,
 )
 
 REESE_AGENT_ID = "74a7ce8a-6754-4bf1-90aa-afa1f4cd774c"
@@ -78,12 +84,14 @@ def build_case_package(
             "reason": r.get("reason"),
             "reason_group": r.get("reason_group"),
             "fulfillment_center": r.get("fulfillment_center"),
-            "shipment_id": r.get("shipment_id"),
+            "shipment_id": fba_shipment_id(r.get("shipment_id")),
             "reference_id": r.get("reference_id"),
             "estimated_amount": r.get("estimated_amount"),
             "amount_basis": r.get("amount_basis"),
             "seller_central_url": r.get("seller_central_url") or SC_SUPPORT_HUB,
-            "seller_central_link_kind": r.get("seller_central_link_kind") or "support_hub",
+            "seller_central_link_kind": r.get("seller_central_link_kind") or "support_manual",
+            "classification_version": r.get("classification_version") or CLASSIFICATION_VERSION,
+            "reason_label": reason_label(r.get("reason"), r.get("disposition")),
             "status": "needs_case",
         })
 
@@ -113,6 +121,8 @@ def build_case_package(
         "seller_central_link_limit": SELLER_CENTRAL_LINK_LIMIT,
         "support_hub": SC_SUPPORT_HUB,
         "ledger_report_hub": SC_LEDGER_HUB,
+        "classification_version": CLASSIFICATION_VERSION,
+        "mini_resync": MINI_RESYNC_HINT,
         "summary": {
             "events": len(payload_events),
             "units": units,
@@ -138,6 +148,7 @@ def render_package_markdown(package: dict) -> str:
         f"- Window: `{package.get('start')}` → `{package.get('end')}`",
         f"- Events: **{s.get('events', 0)}** · Units: **{s.get('units', 0)}** · Est. $: **{est_s}**",
         f"- Target agent: `{package.get('target', {}).get('agent_id', REESE_AGENT_ID)}`",
+        f"- Classification: `{package.get('classification_version', CLASSIFICATION_VERSION)}`",
         "",
         "## Seller Central links",
         "",
@@ -162,19 +173,23 @@ def render_package_markdown(package: dict) -> str:
             continue
         lines.append(f"## {GROUP_HEADINGS.get(group, group)} ({len(rows)})")
         lines.append("")
-        lines.append("| Date | SKU | ASIN | Qty | FC / Shipment | Est $ | Seller Central |")
-        lines.append("| --- | --- | --- | ---: | --- | ---: | --- |")
+        lines.append("| Date | SKU | ASIN | Qty | FC | Shipment | Reference ID | Est $ | Seller Central |")
+        lines.append("| --- | --- | --- | ---: | --- | --- | --- | ---: | --- |")
         for r in rows:
             est_cell = (
                 f"{_money(r.get('estimated_amount')):.2f}"
                 if r.get("estimated_amount") not in (None, "")
                 else "—"
             )
-            loc = r.get("shipment_id") or r.get("fulfillment_center") or r.get("reference_id") or "—"
+            shipment = fba_shipment_id(r.get("shipment_id")) or "—"
+            ref = r.get("reference_id") or "—"
+            if shipment != "—" and ref == shipment:
+                ref = "—"
             url = r.get("seller_central_url") or SC_SUPPORT_HUB
             lines.append(
                 f"| {r.get('event_date')} | `{r.get('sku') or '—'}` | "
-                f"{r.get('asin') or '—'} | {r.get('quantity')} | {loc} | "
+                f"{r.get('asin') or '—'} | {r.get('quantity')} | "
+                f"{r.get('fulfillment_center') or '—'} | {shipment} | {ref} | "
                 f"{est_cell} | {url} |"
             )
         lines.append("")

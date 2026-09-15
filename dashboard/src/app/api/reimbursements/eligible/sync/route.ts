@@ -56,7 +56,10 @@ export async function POST(request: NextRequest) {
       job_id: job?.id,
       message:
         `Needs-case sync enqueued (last ${days} closed LA days). `
-        + "Mini pulls ledger Adjustments + inbound shorts. This desk does not open Amazon cases.",
+        + "Mini pulls ledger Adjustments + inbound shorts and stamps "
+        + "classification_version. After a classification deploy Mini must "
+        + "run: python -m src.main reimbursements-case-sync --days 90. "
+        + "This desk does not open Amazon cases.",
     });
   } catch (e) {
     return Response.json(

@@ -3849,6 +3849,10 @@ def reimbursements_case_sync_cmd(days, dry_run, no_fetch):
 
     Observe only — never opens Seller Central cases. Paid cash stays on
     GET_FBA_REIMBURSEMENTS_DATA / /reimbursements.
+
+    After a classification deploy, Mini must re-run this with --days 90 so
+    fba_case_events is stamped with the current classification_version.
+    Letter M = Inventory misplaced = lost_warehouse (NOT lost inbound).
     """
     from src.reimbursements.case_queue import sync_case_queue
 
