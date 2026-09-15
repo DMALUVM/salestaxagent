@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { Check, ClipboardCopy } from "lucide-react";
+import { ClipboardCopy } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,14 +55,14 @@ function CopyableName({
       <Button
         type="button"
         variant="ghost"
-        size="icon-xs"
+        size={copied ? "xs" : "icon-xs"}
         className="mt-0.5 shrink-0 text-muted-foreground"
         title={copied ? `${label} copied` : `Copy ${label}`}
         aria-label={copied ? `${label} copied` : `Copy ${label}`}
         onClick={copy}
       >
         {copied
-          ? <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+          ? <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Copied</span>
           : <ClipboardCopy className="h-3 w-3" />}
       </Button>
     </div>
