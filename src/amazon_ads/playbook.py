@@ -194,7 +194,8 @@ def waste_actions(recs: list[dict]) -> list[Action]:
     out: list[Action] = []
     waste = [r for r in recs
              if str(r.get("type") or "").upper() in
-             ("ADD_NEGATIVE", "WASTED_SPEND_ROLLUP", "PAUSE_KEYWORD")]
+             ("ADD_NEGATIVE", "NEGATE_SEARCH_TERM", "WASTED_SPEND_ROLLUP",
+              "PAUSE_KEYWORD")]
     if waste:
         impact = sum(float(r.get("impact") or 0) for r in waste)
         out.append(Action(
