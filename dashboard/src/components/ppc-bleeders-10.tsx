@@ -9,7 +9,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
+  BLEEDERS_10_BLURB,
   BLEEDERS_10_TITLE,
+  BLEEDERS_10_VERIFY,
+  bleeders10TermsEqual,
   recTypeOfBleeders10,
   type Bleeders10Payload,
   type Bleeders10Row,
@@ -25,10 +28,12 @@ function CopyableName({
   value,
   label,
   compact,
+  hint,
 }: {
   value: string;
   label: string;
   compact?: boolean;
+  hint?: string;
 }) {
   const [copied, setCopied] = useState(false);
   const text = value.trim();
@@ -49,9 +54,14 @@ function CopyableName({
 
   return (
     <div className={`flex items-start gap-1 ${compact ? "min-w-0 max-w-[12rem]" : "min-w-[8rem] max-w-[18rem]"}`}>
-      <span className="font-mono text-xs whitespace-normal break-words select-all leading-snug">
-        {text}
-      </span>
+      <div className="min-w-0">
+        <span className="font-mono text-xs whitespace-normal break-words select-all leading-snug">
+          {text}
+        </span>
+        {hint ? (
+          <p className="mt-0.5 text-[10px] text-emerald-700 dark:text-emerald-400">{hint}</p>
+        ) : null}
+      </div>
       <Button
         type="button"
         variant="ghost"
@@ -76,7 +86,7 @@ function whyMetricsMatch(row: Bleeders10Row): boolean {
   return row.why.includes(spend) || row.why.includes(String(row.spend));
 }
 
-const TABLE_COL_COUNT = 13;
+const TABLE_COL_COUNT = 14;
 
 type Status = Bleeders10Row["status"];
 
@@ -89,7 +99,7 @@ export function PpcBleeders10({
   onNotice?: (n: { kind: "success" | "warn" | "error"; text: string }) => void;
   onMarked?: () => void;
 }) {
-  const [filter, setFilter] = useState<"open" | "done" | "skipped" | "all">("open");
+  const [filter, setFilter] = useState<"open" | "already_applied" | "done" | "skipped" | "all">("open");
   const [busy, setBusy] = useState<string | null>(null);
   const [local, setLocal] = useState<Record<string, Status>>({});
   const [openEvidence, setOpenEvidence] = useState<string | null>(null);
@@ -99,11 +109,13 @@ export function PpcBleeders10({
     return rows.filter((r) => {
       const status = local[r.checklist_id] ?? r.status;
       if (filter === "all") return true;
+      if (filter === "done") return status === "done";
       return status === filter;
     });
   }, [rows, filter, local]);
 
   const openCount = rows.filter((r) => (local[r.checklist_id] ?? r.status) === "open").length;
+  const alreadyAppliedCount = rows.filter((r) => (local[r.checklist_id] ?? r.status) === "already_applied").length;
   const doneCount = rows.filter((r) => (local[r.checklist_id] ?? r.status) === "done").length;
   const skippedCount = rows.filter((r) => (local[r.checklist_id] ?? r.status) === "skipped").length;
 
@@ -127,6 +139,9 @@ export function PpcBleeders10({
             impact_estimate: row.spend,
             evidence: {
               why: row.why,
+              action_label: row.action_label,
+              suggested_action: row.suggested_action,
+              keyword: row.keyword,
               clicks: row.clicks,
               spend: row.spend,
               sales: row.sales_14d,
@@ -187,13 +202,7 @@ export function PpcBleeders10({
               Open <strong className="text-foreground">{openCount}</strong>
             </span>
           </div>
-          <p className="text-sm text-foreground">
-            Window {data.window.window_start}..{data.window.window_end}{" "}
-            ({data.window.window_days}d, SP search terms). Nonbrand search-term
-            CVR {data.account_cvr}% (~1-in-4). Click floor {data.click_floor} (1.5×).
-            pause_keyword iff term = exact KW; else negative_exact. Pasted 10 —
-            not This week. Nothing writes to Amazon.
-          </p>
+          <p className="text-sm text-foreground">{BLEEDERS_10_BLURB}</p>
           <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2 space-y-0.5">
             <p className="text-xs font-medium text-foreground">
               Verify in Amazon Ads → Reports → Search term before pause/negate
@@ -207,10 +216,20 @@ export function PpcBleeders10({
             <p className="text-[11px] text-muted-foreground">
               Reconcile campaign name/id, ad group, term, match, clicks, orders,
               sales, and spend to that report. Orders and Sales come from payload
-              fields — this page does not infer them from Why. Nothing writes to Amazon.
+              fields — this page does not infer them from Why. {BLEEDERS_10_VERIFY}
             </p>
+            <p className="text-[11px] text-foreground">
+              <span className="text-muted-foreground">Ads snapshot:</span>{" "}
+              {data.ads_snapshot?.pulled_at
+                ? `keywords ${data.ads_snapshot.keywords_count} · negatives ${data.ads_snapshot.negatives_count} · pulled_at ${data.ads_snapshot.pulled_at}`
+                : "not loaded"}
+              {alreadyAppliedCount ? ` · ${alreadyAppliedCount} already applied in Ads` : ""}
+            </p>
+            {data.ads_snapshot?.warning ? (
+              <p className="text-[11px] text-amber-700 dark:text-amber-400">{data.ads_snapshot.warning}</p>
+            ) : null}
           </div>
-          {data.notes.slice(0, 3).map((n) => (
+          {data.notes.filter((n) => n !== BLEEDERS_10_BLURB).slice(0, 3).map((n) => (
             <p key={n.slice(0, 48)} className="text-[11px] text-muted-foreground">{n}</p>
           ))}
         </CardContent>
@@ -220,6 +239,7 @@ export function PpcBleeders10({
         <div className="flex gap-1">
           {([
             ["open", `Open (${openCount})`],
+            ["already_applied", `Already applied (${alreadyAppliedCount})`],
             ["done", `Done (${doneCount})`],
             ["skipped", `Skipped (${skippedCount})`],
             ["all", `All (${rows.length})`],
@@ -257,10 +277,11 @@ export function PpcBleeders10({
                 <TableRow>
                   <TableHead className="w-28">Done / Skipped</TableHead>
                   <TableHead>Rank</TableHead>
-                  <TableHead>Action</TableHead>
+                  <TableHead className="min-w-[22rem]">Action + how-to</TableHead>
                   <TableHead>Campaign</TableHead>
                   <TableHead>Ad group</TableHead>
-                  <TableHead>Term</TableHead>
+                  <TableHead>Search term</TableHead>
+                  <TableHead>Keyword / targeting</TableHead>
                   <TableHead className="text-right">SS Vol</TableHead>
                   <TableHead>Match</TableHead>
                   <TableHead className="text-right">Clicks</TableHead>
@@ -273,6 +294,8 @@ export function PpcBleeders10({
               <TableBody>
                 {shown.map((r) => {
                   const status = local[r.checklist_id] ?? r.status;
+                  const sameExact = r.action === "pause_keyword"
+                    && bleeders10TermsEqual(r.search_term, r.keyword);
                   const evidenceOpen = openEvidence === r.checklist_id;
                   const metricsOk = whyMetricsMatch(r);
                   const idDiffers = Boolean(r.campaign_id && r.campaign_id !== r.campaign_name);
@@ -281,6 +304,11 @@ export function PpcBleeders10({
                     <TableRow className={status !== "open" ? "opacity-60" : ""}>
                       <TableCell className="align-top">
                         <div className="flex flex-col gap-1">
+                          {status === "already_applied" ? (
+                            <Badge variant="outline" className="text-[10px] text-emerald-700 dark:text-emerald-400">
+                              Already applied in Ads
+                            </Badge>
+                          ) : null}
                           <div className="flex gap-1">
                             <Button
                               variant={status === "done" ? "default" : "outline"}
@@ -307,10 +335,19 @@ export function PpcBleeders10({
                           >
                             {evidenceOpen ? "Hide evidence" : "Evidence"}
                           </Button>
+                          {r.applied_reason && status !== "open" ? (
+                            <p className="max-w-[14rem] text-[10px] leading-snug text-muted-foreground">{r.applied_reason}</p>
+                          ) : null}
+                          {status === "open" && r.ads_verify_note ? (
+                            <p className="max-w-[14rem] text-[10px] leading-snug text-amber-700 dark:text-amber-400">{r.ads_verify_note}</p>
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell className="align-top"><Badge variant="outline" className="text-[10px]">{r.rank}</Badge></TableCell>
-                      <TableCell className="align-top text-xs whitespace-nowrap">{r.action}</TableCell>
+                      <TableCell className="align-top min-w-[22rem] max-w-[28rem] whitespace-normal">
+                        <p className="text-xs font-medium text-foreground">{r.action_label}</p>
+                        <p className="mt-1 text-[11px] leading-snug text-foreground/90">{r.suggested_action}</p>
+                      </TableCell>
                       <TableCell className="align-top whitespace-normal">
                         <CopyableName value={r.campaign_name} label="campaign name" />
                         {r.campaign_id ? (
@@ -332,6 +369,13 @@ export function PpcBleeders10({
                       </TableCell>
                       <TableCell className="align-top whitespace-normal">
                         <CopyableName value={r.search_term} label="search term" />
+                      </TableCell>
+                      <TableCell className="align-top whitespace-normal">
+                        <CopyableName
+                          value={r.keyword ?? ""}
+                          label="keyword"
+                          hint={sameExact ? "same Exact KW as the search term" : undefined}
+                        />
                       </TableCell>
                       <TableCell className="align-top text-right tabular-nums text-xs text-muted-foreground" title="SoldScope search volume when stored">
                         {formatSoldScopeVol(r.soldscope_sv)}
@@ -374,6 +418,8 @@ export function PpcBleeders10({
                             <p>sales_14d {r.sales_14d}</p>
                             <p>spend {r.spend}</p>
                             <p>term_cvr {r.term_cvr}</p>
+                            <p>action {r.action_label || r.action}</p>
+                            <p>status {status}</p>
                             <p className="sm:col-span-2">
                               Verify in Ads: SP Search Term report for {data.window.window_start}..{data.window.window_end},
                               campaign {r.campaign_name || "?"}, term {r.search_term || "?"}.

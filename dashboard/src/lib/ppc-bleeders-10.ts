@@ -8,6 +8,13 @@
  */
 
 import type { WeeklyLockDecision } from "./ppc-weekly";
+import {
+  reconcileBleeders10Row,
+  summarizeBleeders10Ads,
+  type Bleeders10AdsSnapshot,
+  type Bleeders10AppliedSource,
+  type Bleeders10AdsSummary,
+} from "./ppc-bleeders-10-ads";
 
 export const BLEEDERS_10_VERSION = "1.0";
 export const BLEEDERS_10_CLICK_FLOOR = 6;
@@ -19,6 +26,16 @@ export const BLEEDERS_10_TITLE =
   "Bleeders 1.0 · 2026-06-30..08-31 · nonbrand ST CVR 25.79% · floor 6";
 export const BLEEDERS_10_WINDOW_LABEL =
   "2026-06-30..08-31 (63d, SP search terms)";
+
+/** One-sentence desk rule. Pause only when the query is an Exact KW you own. */
+export const BLEEDERS_10_BLURB =
+  "These rows come from the SP Search Term report. Pause only when the customer query equals an Exact keyword you own; otherwise add Negative exact on the query. Verify in Ads before acting.";
+
+export const BLEEDERS_10_VERIFY =
+  "Confirm the campaign, ad group, and Exact keyword (or add the Negative exact) in Ads before acting. Numbers stay on this pasted payload. Nothing writes to Amazon.";
+
+export const BLEEDERS_10_FLOOR_WHY =
+  "Nonbrand search-term CVR 25.79% (~1-in-4). Click floor 6 (1.5×). Window 2026-06-30..08-31 (63d, SP search terms).";
 
 export const BLEEDERS_10_ACTIONS = ["pause_keyword", "negative_exact"] as const;
 export type Bleeders10Action = (typeof BLEEDERS_10_ACTIONS)[number];
@@ -65,9 +82,13 @@ export interface Bleeders10Row {
   account_cvr: number;
   click_floor: number;
   why: string;
+  action_label: string;
   suggested_action: string;
-  status: "open" | "done" | "skipped";
+  status: "open" | "done" | "skipped" | "already_applied";
   decision_id: string | null;
+  applied_reason: string | null;
+  applied_source: Bleeders10AppliedSource | null;
+  ads_verify_note: string | null;
   soldscope_sv?: number | null;
 }
 
@@ -89,6 +110,8 @@ export interface Bleeders10Payload {
   open_count: number;
   done_count: number;
   skipped_count: number;
+  already_applied_count: number;
+  ads_snapshot: Bleeders10AdsSummary;
   search_term_coverage: "SP-only";
   notes: string[];
   rows: Bleeders10Row[];
@@ -104,45 +127,95 @@ interface Spec {
   match_type: string;
   clicks: number;
   spend: number;
-  why: string;
 }
 
 function norm(s: string | null | undefined): string {
   return String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function termsEqual(a: string, b: string): boolean {
+export function bleeders10TermsEqual(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
   const na = norm(a);
   const nb = norm(b);
   return na.length > 0 && na === nb;
 }
 
+function termsEqual(a: string, b: string): boolean {
+  return bleeders10TermsEqual(a, b);
+}
+
 /**
- * pause_keyword ONLY where search_term equals the exact keyword.
- * Else negative_exact (including TARGETING query ≠ expression).
+ * Canonical Bleeders 1.0 lever:
+ *   pause_keyword ONLY when match is Exact AND search_term equals that Exact keyword.
+ *   Otherwise negative_exact (query ≠ KW, missing KW, Auto, ASIN, Broad, Phrase, targeting).
+ * Never leave a misleading pause_keyword when the Exact KW cannot be asserted.
  */
 export function resolveBleeders10Action(
   matchType: string,
   searchTerm: string,
-  keyword: string,
+  keyword: string | null | undefined,
 ): Bleeders10Action | null {
   const mt = String(matchType ?? "").trim();
-  if (!mt) return null;
-  if (mt.toUpperCase() === "EXACT" && keyword && termsEqual(searchTerm, keyword)) {
+  const term = String(searchTerm ?? "").trim();
+  if (!mt || !term) return null;
+  if (mt.toUpperCase() === "EXACT" && keyword && termsEqual(term, keyword)) {
     return "pause_keyword";
   }
-  if (mt.toUpperCase().startsWith("TARGETING")) {
-    if (!keyword) return null;
-    if (termsEqual(searchTerm, keyword)) return null;
-    return "negative_exact";
-  }
-  const u = mt.toUpperCase();
-  if (u === "EXACT" || u === "PHRASE" || u === "BROAD") return "negative_exact";
-  return null;
+  return "negative_exact";
 }
 
 export function recTypeOfBleeders10(action: Bleeders10Action): string {
   return BLEEDERS_10_REC_TYPES[action];
+}
+
+export function actionLabelOf10(row: {
+  action: Bleeders10Action;
+  search_term: string;
+  keyword: string | null;
+}): string {
+  if (row.action === "pause_keyword") {
+    const kw = row.keyword || row.search_term || "?";
+    return `Pause Exact keyword "${kw}" in Keywords (this search term IS that keyword)`;
+  }
+  const term = row.search_term || "?";
+  return `Add Negative exact on search term "${term}"`;
+}
+
+export function whyOf10(row: {
+  action: Bleeders10Action;
+  search_term: string;
+  keyword: string | null;
+  match_type: string;
+  clicks: number;
+  spend: number;
+}): string {
+  const spendBit = `$0 on ${row.clicks} clicks / $${row.spend.toFixed(2)}.`;
+  if (row.action === "pause_keyword") {
+    const kw = row.keyword || row.search_term || "?";
+    return `This search term IS the Exact keyword "${kw}". Pause Exact "${kw}" in the Keywords tab. Do not add Negative exact. ${spendBit} ${BLEEDERS_10_FLOOR_WHY} If you cannot find that Exact KW in Ads, do not invent a pause — verify first.`;
+  }
+  const term = row.search_term || "?";
+  const kw = row.keyword ? `"${row.keyword}"` : "missing";
+  const mt = String(row.match_type ?? "").toUpperCase();
+  let relation: string;
+  if (mt.startsWith("TARGETING") && /asin=/i.test(row.keyword ?? "")) {
+    relation = `Customer query "${term}" ≠ ASIN targeting ${row.keyword}.`;
+  } else if (mt.startsWith("TARGETING")) {
+    relation = `Auto/targeting query "${term}" ≠ expression ${kw}.`;
+  } else if (mt === "BROAD") {
+    relation = `Broad query "${term}" ≠ expression ${kw}.`;
+  } else if (mt === "PHRASE") {
+    relation = `Phrase query "${term}" ≠ keyword ${kw}.`;
+  } else if (mt === "EXACT" && row.keyword && !termsEqual(term, row.keyword)) {
+    relation = `Search term "${term}" ≠ Exact keyword ${kw}.`;
+  } else if (mt === "EXACT" && !row.keyword) {
+    relation = `Exact match but keyword is missing — cannot assert an Exact KW to pause.`;
+  } else {
+    relation = `Search term "${term}" is not an Exact keyword you own.`;
+  }
+  return `${relation} Add Negative exact on the search term "${term}". Do not pause a keyword. ${spendBit} ${BLEEDERS_10_FLOOR_WHY}`;
 }
 
 export function suggestedActionOf10(row: {
@@ -152,88 +225,82 @@ export function suggestedActionOf10(row: {
   search_term: string;
   keyword: string | null;
 }): string {
-  const camp = `"${row.campaign_name || "?"}"`;
+  const camp = row.campaign_name || "?";
   const ag = row.ad_group_name ? `ad group "${row.ad_group_name}"` : "the ad group";
   if (row.action === "pause_keyword") {
     const kw = row.keyword || row.search_term || "?";
-    return `In Campaign Manager, open ${camp} → ${ag} → Keywords, and pause "${kw}". Nothing writes to Amazon from this page.`;
+    return `Campaign Manager → "${camp}" → ${ag} → Keywords → find Exact "${kw}" → Pause (or archive). This search term IS that Exact keyword — do not add Negative exact. If you cannot find Exact "${kw}" in Ads, do not invent a pause — verify first. Nothing writes to Amazon from this page.`;
   }
   const term = row.search_term || "?";
-  return `In Campaign Manager, open ${camp} → ${ag} → Negative keywords, and add "${term}" as a Negative exact keyword. Nothing writes to Amazon from this page.`;
+  return `Campaign Manager → "${camp}" → ${ag} → Negative keywords → add Exact negative for the search term "${term}". Do not pause a keyword. Nothing writes to Amazon from this page.`;
 }
 
+/** Desk how-to copy — always visible on the row, not buried in Why. */
+export const suggestedActionCopy = suggestedActionOf10;
+
 function specs(): Spec[] {
-  const floor = "Nonbrand search-term CVR 25.79% (~1-in-4). Click floor 6 (1.5×). Window 2026-06-30..08-31 (63d, SP search terms).";
+  // Pasted 10 — ranks/terms/numbers stay locked. `action` is documented intent;
+  // buildBleeders10 re-classifies from search_term / keyword / match_type.
   return [
     {
       rank: 1, action: "pause_keyword",
       campaign: "GG - Deodorant - Exact - SQR - CST", ad_group: "Exact",
       term: "deodorant men", keyword: "deodorant men", match_type: "EXACT",
       clicks: 96, spend: 113.18,
-      why: `Exact KW = term. $0 on 96 clicks / $113.18. Pause the keyword. ${floor}`,
     },
     {
       rank: 2, action: "negative_exact",
       campaign: "GG - B0CLHYY3BB - Deodorant - Asin Defense", ad_group: "Asin Defense",
       term: "carpe deodorant", keyword: 'asin="B0CLHYY3BB"', match_type: "TARGETING_EXPRESSION",
       clicks: 42, spend: 78.66,
-      why: `Customer query ≠ targeting expression. $0 on 42 clicks / $78.66. Add negative exact. ${floor}`,
     },
     {
       rank: 3, action: "pause_keyword",
       campaign: "GG - SP - KW - Tallow Balm - B0CLF5B27Y - Exact 4", ad_group: "Exact",
       term: "beef tallow moisturizer", keyword: "beef tallow moisturizer", match_type: "EXACT",
       clicks: 31, spend: 59.40,
-      why: `Exact KW = term. $0 on 31 clicks / $59.40. Pause the keyword. ${floor}`,
     },
     {
       rank: 4, action: "negative_exact",
       campaign: "GG - Lip Balm - Asin Offense", ad_group: "Asin Offense",
       term: "dr dans cortibalm lip balm", keyword: 'asin="B00PX0ARAK"', match_type: "TARGETING_EXPRESSION",
       clicks: 32, spend: 58.55,
-      why: `Customer query ≠ targeting expression. $0 on 32 clicks / $58.55. Add negative exact. ${floor}`,
     },
     {
       rank: 5, action: "negative_exact",
       campaign: "GG - Deodorant - Exact - Low Volume", ad_group: "Exact",
       term: "vanmans deodorant", keyword: "vanman deodorant", match_type: "EXACT",
       clicks: 38, spend: 42.78,
-      why: `Exact KW=vanman deodorant (NOT equal). $0 on 38 clicks / $42.78. Add negative exact. ${floor}`,
     },
     {
       rank: 6, action: "negative_exact",
       campaign: "SP - KW - Exact - Tallow Balm MAG", ad_group: "",
       term: "beef tallow and honey balm", keyword: "beef tallow honey balm", match_type: "EXACT",
       clicks: 24, spend: 42.37,
-      why: `Exact KW=beef tallow honey balm (NOT equal). $0 on 24 clicks / $42.37. Add negative exact. ${floor}`,
     },
     {
       rank: 7, action: "negative_exact",
       campaign: "GG - Lip Balm - Broad M", ad_group: "Broad",
       term: "coconut oil lip balm", keyword: "+lip +moisturizer", match_type: "BROAD",
       clicks: 21, spend: 40.93,
-      why: `Broad query ≠ expression. $0 on 21 clicks / $40.93. Add negative exact. ${floor}`,
     },
     {
       rank: 8, action: "negative_exact",
       campaign: "SP Auto Deo close-match", ad_group: "close-match",
       term: "wild deodorant", keyword: "close-match", match_type: "TARGETING_EXPRESSION_PREDEFINED",
       clicks: 35, spend: 31.18,
-      why: `Auto close-match (query ≠ expression). $0 on 35 clicks / $31.18. Add negative exact. ${floor}`,
     },
     {
       rank: 9, action: "negative_exact",
       campaign: "GG Lip Balm Exact Long/Low", ad_group: "Exact",
       term: "goats milk chapstick", keyword: "goat milk chapstick", match_type: "EXACT",
       clicks: 18, spend: 29.27,
-      why: `Exact KW=goat milk chapstick (NOT equal). $0 on 18 clicks / $29.27. Add negative exact. ${floor}`,
     },
     {
       rank: 10, action: "pause_keyword",
       campaign: "GG Tallow Balm Exact 2", ad_group: "Exact",
       term: "tallow balm for face", keyword: "tallow balm for face", match_type: "EXACT",
       clicks: 14, spend: 28.48,
-      why: `Exact KW = term. $0 on 14 clicks / $28.48. Pause the keyword. ${floor}`,
     },
   ];
 }
@@ -295,9 +362,12 @@ export function emptyBleeders10(): Bleeders10Payload {
     open_count: 0,
     done_count: 0,
     skipped_count: 0,
+    already_applied_count: 0,
+    ads_snapshot: summarizeBleeders10Ads(null),
     search_term_coverage: "SP-only",
     notes: [
       "Bleeders 1.0 — pasted 10. Not This week's Recovery execute list.",
+      BLEEDERS_10_BLURB,
       BLEEDERS_10_WINDOW_LABEL,
       "Nonbrand search-term CVR 25.79% (~1-in-4). Click floor 6 (1.5×).",
     ],
@@ -307,31 +377,60 @@ export function emptyBleeders10(): Bleeders10Payload {
 
 export function buildBleeders10(input: {
   decisions?: Array<Bleeders10Decision | WeeklyLockDecision>;
+  ads?: Bleeders10AdsSnapshot | null;
 } = {}): Bleeders10Payload {
   const decisions = (input.decisions ?? []) as Bleeders10Decision[];
+  const adsSummary = summarizeBleeders10Ads(input.ads, input.ads?.now);
   const skip = new Set(BLEEDERS_10_SKIP_TERMS.map(norm));
 
   const rows: Bleeders10Row[] = specs().slice(0, BLEEDERS_10_CAP).map((spec) => {
     if (skip.has(norm(spec.term))) {
       throw new Error(`Bleeders 1.0 skip list leaked: ${spec.term}`);
     }
+    const classified = resolveBleeders10Action(spec.match_type, spec.term, spec.keyword)
+      ?? "negative_exact";
+    const classifiedSpec: Spec = { ...spec, action: classified };
     const campaignName = spec.campaign;
     const campaignId = spec.campaign;
     const adGroup = spec.ad_group;
-    const id = checklistId(spec, campaignId);
-    const marked = decisionStatus(spec, campaignId, id, decisions);
-    const keyword = spec.action === "pause_keyword" ? (spec.keyword || spec.term) : spec.keyword;
+    const id = checklistId(classifiedSpec, campaignId);
+    const marked = decisionStatus(classifiedSpec, campaignId, id, decisions);
+    const keyword = classified === "pause_keyword" ? (spec.keyword || spec.term) : spec.keyword;
     const draft = {
-      action: spec.action,
+      action: classified,
       campaign_name: campaignName,
       ad_group_name: adGroup,
       search_term: spec.term,
       keyword,
+      match_type: spec.match_type,
+      clicks: spec.clicks,
+      spend: spec.spend,
     };
+    const adsHit = marked.status === "open"
+      ? reconcileBleeders10Row({
+          action: classified,
+          campaign_name: campaignName,
+          campaign_id: campaignId,
+          ad_group_id: "",
+          search_term: spec.term,
+          keyword,
+        }, input.ads, adsSummary)
+      : { applied: false, source: null, reason: null, note: null };
+    const status: Bleeders10Row["status"] = marked.status !== "open"
+      ? marked.status
+      : adsHit.applied ? "already_applied" : "open";
+    const applied_source: Bleeders10AppliedSource | null = marked.status !== "open"
+      ? "manual"
+      : adsHit.source;
+    const applied_reason = marked.status === "done"
+      ? "Marked Done on this desk."
+      : marked.status === "skipped"
+        ? "Marked Skipped on this desk."
+        : adsHit.reason;
     return {
       checklist_id: id,
       rank: spec.rank,
-      action: spec.action,
+      action: classified,
       campaign_name: campaignName,
       campaign_id: campaignId,
       ad_group_name: adGroup,
@@ -346,15 +445,20 @@ export function buildBleeders10(input: {
       term_cvr: 0,
       account_cvr: BLEEDERS_10_NONBRAND_CVR,
       click_floor: BLEEDERS_10_CLICK_FLOOR,
-      why: spec.why,
-      suggested_action: suggestedActionOf10(draft),
-      status: marked.status,
+      why: whyOf10(draft),
+      action_label: actionLabelOf10(draft),
+      suggested_action: suggestedActionCopy(draft),
+      status,
       decision_id: marked.decision_id,
+      applied_reason,
+      applied_source,
+      ads_verify_note: status === "open" ? (adsHit.note ?? adsSummary.warning) : null,
     };
   });
 
   const done_count = rows.filter((r) => r.status === "done").length;
   const skipped_count = rows.filter((r) => r.status === "skipped").length;
+  const already_applied_count = rows.filter((r) => r.status === "already_applied").length;
 
   return {
     version: "1.0",
@@ -371,17 +475,19 @@ export function buildBleeders10(input: {
     account_cvr_source: "nonbrand search-term CVR",
     click_floor: BLEEDERS_10_CLICK_FLOOR,
     gno_floor_overridden: true,
-    open_count: rows.length - done_count - skipped_count,
+    open_count: rows.length - done_count - skipped_count - already_applied_count,
     done_count,
     skipped_count,
+    already_applied_count,
+    ads_snapshot: adsSummary,
     search_term_coverage: "SP-only",
     notes: [
       "Bleeders 1.0 — pasted 10 tonight. Not This week's Recovery execute list. Cap 10. Do not expand to 22.",
+      BLEEDERS_10_BLURB,
       "Window 2026-06-30..08-31 (63d, SP search terms).",
       "Nonbrand search-term CVR 25.79% (~1-in-4). Click floor 6 (1.5×).",
-      "pause_keyword iff term = exact KW; else negative_exact.",
       "Skip branded $0: primal essence deodorant. tallowbourne deodorant is a confirmed skip (brand misspell — defend). Increment rows (b0c3kw5vjr, tallow balm for lips) hold for Monday.",
-      "Done/Skipped records ads_action_decisions. Nothing writes to Amazon.",
+      "Already applied is Ads truth from ads_negatives / ads_keyword_targets. Manual Done/Skipped still records ads_action_decisions. Nothing writes to Amazon.",
     ],
     rows,
   };

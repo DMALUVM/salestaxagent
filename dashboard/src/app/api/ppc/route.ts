@@ -14,6 +14,7 @@ import {
   buildBlakeRecovery0905List,
 } from "@/lib/ppc-weekly-blake-recovery-0905";
 import { buildBleeders10, emptyBleeders10 } from "@/lib/ppc-bleeders-10";
+import { adsSnapshotFromWarehouse } from "@/lib/ppc-bleeders-10-ads";
 import type { WeeklyCampaignRef, WeeklyPlacementRef, WeeklyTermRef } from "@/lib/ppc-weekly-blake-recovery-0905";
 import { loadSoldScopeKeywordIntel } from "@/lib/soldscope-load";
 import { attachKeywordIntel } from "@/lib/soldscope-status";
@@ -729,7 +730,9 @@ export async function GET() {
 
     // Bleeders 1.0 — pasted 10. Secondary triage. Not This week.
     // Do not re-aggregate. Do not expand to 22. No 2.0.
-    const bleeders10 = buildBleeders10({ decisions });
+    // Ads-truth reconcile from ads_negatives / ads_keyword_targets.
+    const ads = await loadBleeders10AdsSnapshot(sb);
+    const bleeders10 = buildBleeders10({ decisions, ads });
 
     const ssIntel = await loadSoldScopeKeywordIntel(sb);
     const attachTerms = (rows: TermAgg[]) => attachKeywordIntel(
@@ -867,6 +870,75 @@ export async function GET() {
       dateMin: null, dateMax: null, daysInDb: 0, lastSync: null,
     });
   }
+}
+
+async function pageAdsTable(
+  sb: ReturnType<typeof getServerSupabase>,
+  table: string,
+  cols: string,
+  order: string,
+): Promise<Array<Record<string, unknown>>> {
+  const rows: Array<Record<string, unknown>> = [];
+  let offset = 0;
+  while (true) {
+    const r = await sb.from(table).select(cols)
+      .order(order, { ascending: true })
+      .range(offset, offset + 999);
+    if (r.error) {
+      const msg = r.error.message || "";
+      if (/does not exist|schema cache|PGRST/i.test(msg)) return [];
+      throw new Error(`${table}: ${msg}`);
+    }
+    const page = (r.data ?? []) as unknown as Array<Record<string, unknown>>;
+    rows.push(...page);
+    if (page.length < 1000) break;
+    offset += 1000;
+  }
+  return rows;
+}
+
+/** Live keyword/negative snapshots — first SoT for Bleeders 1.0 already-applied. */
+async function loadBleeders10AdsSnapshot(
+  sb: ReturnType<typeof getServerSupabase>,
+) {
+  const NEG_COLS =
+    "negative_id,campaign_id,campaign_name,ad_group_id,keyword,match_type,state,level,snapshot_at";
+  const NEG_COLS_BASE =
+    "negative_id,campaign_id,campaign_name,ad_group_id,keyword,match_type,state,level";
+  const KW_COLS =
+    "keyword_id,campaign_id,campaign_name,ad_group_id,keyword_text,match_type,state,snapshot_at";
+  const KW_COLS_BASE =
+    "keyword_id,campaign_id,campaign_name,ad_group_id,keyword_text,match_type,state";
+  const META_COLS = "campaign_id,campaign_name";
+
+  let negatives: Array<Record<string, unknown>> = [];
+  let keywords: Array<Record<string, unknown>> = [];
+  let campaigns: Array<Record<string, unknown>> = [];
+  try {
+    negatives = await pageAdsTable(sb, "ads_negatives", NEG_COLS, "negative_id");
+    if (negatives.length === 0) {
+      negatives = await pageAdsTable(sb, "ads_negatives", NEG_COLS_BASE, "negative_id");
+    }
+  } catch {
+    try {
+      negatives = await pageAdsTable(sb, "ads_negatives", NEG_COLS_BASE, "negative_id");
+    } catch { /* snapshot optional until migration */ }
+  }
+  try {
+    keywords = await pageAdsTable(sb, "ads_keyword_targets", KW_COLS, "keyword_id");
+    if (keywords.length === 0) {
+      keywords = await pageAdsTable(sb, "ads_keyword_targets", KW_COLS_BASE, "keyword_id");
+    }
+  } catch {
+    try {
+      keywords = await pageAdsTable(sb, "ads_keyword_targets", KW_COLS_BASE, "keyword_id");
+    } catch { /* snapshot optional until migration */ }
+  }
+  try {
+    campaigns = await pageAdsTable(sb, "ads_campaign_meta", META_COLS, "campaign_id");
+  } catch { /* optional name→id map */ }
+
+  return adsSnapshotFromWarehouse({ negatives, keywords, campaigns });
 }
 
 /** POST /api/ppc — Update rec status OR generate recommendations. */
