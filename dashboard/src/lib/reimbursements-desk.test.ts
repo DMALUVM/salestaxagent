@@ -192,12 +192,13 @@ describe("summarize, filter, search, sort, alert", () => {
   });
 });
 
-describe("desk wiring stays cash-awareness and Sellerise-free", () => {
+describe("desk wiring stays cash-awareness and SP-API only", () => {
   const here = path.dirname(new URL(import.meta.url).pathname);
   const page = readFileSync(path.join(here, "../app/reimbursements/page.tsx"), "utf8");
   const nav = readFileSync(path.join(here, "../components/nav.tsx"), "utf8");
   const api = readFileSync(path.join(here, "../app/api/reimbursements/route.ts"), "utf8");
   const sync = readFileSync(path.join(here, "../app/api/reimbursements/sync/route.ts"), "utf8");
+  const lib = readFileSync(path.join(here, "reimbursements-desk.ts"), "utf8");
   const pnl = readFileSync(path.join(here, "pnl-periods.ts"), "utf8");
 
   test("nav and route exist", () => {
@@ -207,14 +208,17 @@ describe("desk wiring stays cash-awareness and Sellerise-free", () => {
     assert.match(sync, /reimbursements_sync/);
   });
 
-  test("desk is observe\/alert — no auto-filing, no Sellerise dependency", () => {
+  test("desk is observe\/alert on fba_reimbursements via GET_FBA_REIMBURSEMENTS_DATA", () => {
     assert.match(page, /Reese/);
     assert.match(page, /observe\/alert/);
     assert.match(page, /does not auto-file/);
-    assert.doesNotMatch(page, /sellerise/i);
+    assert.match(page, /GET_FBA_REIMBURSEMENTS_DATA/);
+    assert.match(lib, /fba_reimbursements/);
+    assert.match(api, /from\("fba_reimbursements"\)/);
+    assert.match(sync, /GET_FBA_REIMBURSEMENTS_DATA/);
     assert.doesNotMatch(page, /openAmazonCase|createCase|auto-open/i);
-    assert.doesNotMatch(api, /sellerise/i);
-    assert.doesNotMatch(sync, /sellerise/i);
+    assert.doesNotMatch(api, /openAmazonCase|createCase|auto-open/i);
+    assert.doesNotMatch(sync, /openAmazonCase|createCase|auto-open/i);
   });
 
   test("contribution formula still excludes reimbursements", () => {

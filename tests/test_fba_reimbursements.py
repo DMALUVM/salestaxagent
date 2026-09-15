@@ -122,5 +122,5 @@ def test_job_worker_handles_reimbursements_sync():
     assert "fetch_reimbursements" in helper
     assert "SPAPI_REIMBURSEMENTS_DAYS" in helper
     assert "amazon_as_of" in helper
+    assert "GET_FBA_REIMBURSEMENTS_DATA" in helper
     assert "open_case" not in helper
-    assert "sellerise" not in helper.lower()
