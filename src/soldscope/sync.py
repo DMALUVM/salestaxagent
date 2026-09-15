@@ -132,8 +132,8 @@ def load_config() -> dict:
                 (rt.get("heatmap_days") or DEFAULT_RT_HEATMAP_DAYS),
             ),
             "schedule": {
-                "hour": int((rt.get("schedule") or {}).get("hour", 10)),
-                "minute": int((rt.get("schedule") or {}).get("minute", 30)),
+                "hour": int((rt.get("schedule") or {}).get("hour", 6)),
+                "minute": int((rt.get("schedule") or {}).get("minute", 15)),
                 "timezone": (rt.get("schedule") or {}).get(
                     "timezone", "America/New_York",
                 ),
@@ -214,6 +214,30 @@ def phrase_organic_position(p: dict) -> int | None:
     return n
 
 
+def phrase_organic_asin(p: dict) -> str | None:
+    """Child ASIN holding the organic slot. Empty/missing stays None."""
+    raw = _first_present(p, "organicAsin", "organic_asin")
+    a = str(raw or "").strip().upper()
+    return a or None
+
+
+def phrase_amazon_choice(p: dict) -> bool | None:
+    """Amazon's Choice when SoldScope sends it. Missing stays None."""
+    raw = _first_present(p, "amazonChoice", "amazon_choice")
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)) and raw in (0, 1):
+        return bool(raw)
+    s = str(raw).strip().lower()
+    if s in ("true", "1", "yes"):
+        return True
+    if s in ("false", "0", "no"):
+        return False
+    return None
+
+
 def phrase_organic_previous(p: dict) -> int | None:
     """SoldScope RT previous organic slot — WoW when we only have one snapshot."""
     n = _int(_first_present(
@@ -267,81 +291,44 @@ def heatmap_window(days: int, *, today: date | None = None) -> tuple[date, date]
     return start, end
 
 
-def _asin(value: Any) -> str | None:
-    a = str(value or "").strip().upper()
-    return a or None
+def phrase_heatmap_days(p: dict) -> dict[str, dict]:
+    """Parse phrases/v2 ``r_YYYY-MM-DD`` heatmap objects.
 
-
-def phrase_organic_asin(p: dict) -> str | None:
-    """phrases/v2 organicAsin — child holding the desktop organic slot."""
-    if not isinstance(p, dict):
-        return None
-    return _asin(_first_present(p, "organicAsin", "organic_asin"))
-
-
-def phrase_mobile_organic_asin(p: dict) -> str | None:
-    """phrases/v2 mobileOrganicAsin when SoldScope returns it."""
-    if not isinstance(p, dict):
-        return None
-    return _asin(_first_present(p, "mobileOrganicAsin", "mobile_organic_asin"))
-
-
-def _amazon_choice(value: Any) -> bool | None:
-    """True/False only when SoldScope sent a boolean-like value. Else None."""
-    if value is None or value == "":
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)) and value in (0, 1):
-        return bool(value)
-    s = str(value).strip().lower()
-    if s in ("true", "yes"):
-        return True
-    if s in ("false", "no"):
-        return False
-    return None
-
-
-def phrase_amazon_choice(p: dict) -> bool | None:
-    if not isinstance(p, dict):
-        return None
-    return _amazon_choice(_first_present(p, "amazon_choice", "amazonChoice"))
-
-
-def phrase_heatmap_days(p: dict) -> dict[str, dict[str, Any]]:
-    """Parse phrases/v2 ``r_YYYY-MM-DD`` objects. Skip null/blank/≤0 ranks.
-
-    Day objects may carry ``asin`` / ``amazon_choice``. Those are stored
-    only when present — never copied from today's phrase-level fields.
+    Skip null/blank/≤0 ranks. Ingest ``asin`` / ``amazon_choice`` only when
+    that day's object includes them — never copy today's organicAsin onto
+    a historical day.
     """
-    out: dict[str, dict[str, Any]] = {}
+    out: dict[str, dict] = {}
     if not isinstance(p, dict):
         return out
     for key, raw in p.items():
         m = HEATMAP_DAY_KEY.match(str(key))
         if not m:
             continue
-        child: str | None = None
-        choice: bool | None = None
+        day: dict[str, Any] = {}
         if isinstance(raw, dict):
             n = _int(_first_present(raw, "rank", "organicPosition", "organic_position"))
-            child = _asin(_first_present(raw, "asin", "organicAsin", "organic_asin"))
-            choice = _amazon_choice(_first_present(raw, "amazon_choice", "amazonChoice"))
+            asin = phrase_organic_asin(raw)
+            if asin is None:
+                a = str(raw.get("asin") or "").strip().upper()
+                asin = a or None
+            if asin:
+                day["organic_asin"] = asin
+            choice = phrase_amazon_choice(raw)
+            if choice is not None:
+                day["amazon_choice"] = choice
         else:
             n = _int(raw)
         if n is None or n <= 0:
             continue
-        out[m.group(1)] = {
-            "rank": n,
-            "organic_asin": child,
-            "amazon_choice": choice,
-        }
+        day["rank"] = n
+        out[m.group(1)] = day
     return out
 
 
 def phrase_heatmap_ranks(p: dict) -> dict[str, int]:
-    """Rank-only view of ``phrase_heatmap_days`` for existing callers/tests."""
-    return {day: int(item["rank"]) for day, item in phrase_heatmap_days(p).items()}
+    """Rank-only view of ``phrase_heatmap_days`` (null/blank/≤0 skipped)."""
+    return {day: int(info["rank"]) for day, info in phrase_heatmap_days(p).items()}
 
 
 def group_primary_asin(g: dict) -> str | None:
@@ -895,6 +882,8 @@ def _phrase_snapshot_row(
         "phrase_id": _int(p.get("id")),
         "phrase": phrase,
         "organic_position": organic_position,
+        "organic_asin": organic_asin,
+        "amazon_choice": amazon_choice,
         "organic_previous_position": phrase_organic_previous(p) if current else None,
         "sponsored_position": _int(_first_present(
             p, "sponsoredPosition", "sponsored_position",
@@ -922,9 +911,8 @@ def _phrase_snapshot_row(
             "abaSearchFrequencyRank": p.get("abaSearchFrequencyRank") if current else None,
             "abaTotalClickShare": p.get("abaTotalClickShare") if current else None,
             "abaTotalConvShare": p.get("abaTotalConvShare") if current else None,
-            "organicAsin": child,
-            "mobileOrganicAsin": mobile,
-            "amazon_choice": choice,
+            "organicAsin": organic_asin,
+            "amazonChoice": amazon_choice,
             "heatmap": not current,
         },
     }
@@ -973,6 +961,8 @@ def rank_rows_from_phrases(
                 phrase=phrase,
                 as_of=today_iso,
                 organic_position=today_pos,
+                organic_asin=today_child,
+                amazon_choice=today_choice,
                 pulled_at=pulled_at,
                 current=True,
                 organic_asin=today_child,
@@ -992,6 +982,8 @@ def rank_rows_from_phrases(
                 phrase=phrase,
                 as_of=day_iso,
                 organic_position=day.get("rank"),
+                organic_asin=day.get("organic_asin"),
+                amazon_choice=day.get("amazon_choice"),
                 pulled_at=pulled_at,
                 current=False,
                 organic_asin=day.get("organic_asin"),

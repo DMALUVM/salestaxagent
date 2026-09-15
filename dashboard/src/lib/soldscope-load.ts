@@ -158,9 +158,9 @@ export async function loadOrganicRankSources(
     "asin", "phrase", "organic_position", "organic_previous_position",
     "sponsored_position", "search_volume", "aba_search_frequency_rank",
     "aba_total_click_share", "aba_total_conv_share", "as_of", "group_id",
-    "organic_asin", "mobile_organic_asin", "amazon_choice",
+    "organic_asin", "amazon_choice",
   ].join(",");
-  const RANK_COLS_SFR = [
+  const RANK_COLS_NO_CHILD = [
     "asin", "phrase", "organic_position", "organic_previous_position",
     "sponsored_position", "search_volume", "aba_search_frequency_rank",
     "aba_total_click_share", "aba_total_conv_share", "as_of", "group_id",
@@ -176,7 +176,7 @@ export async function loadOrganicRankSources(
   try {
     snapshots = await pageTable(sb, "soldscope_rank_snapshots", RANK_COLS, "as_of");
     if (snapshots.length === 0) {
-      snapshots = await pageTable(sb, "soldscope_rank_snapshots", RANK_COLS_SFR, "as_of");
+      snapshots = await pageTable(sb, "soldscope_rank_snapshots", RANK_COLS_NO_CHILD, "as_of");
     }
     if (snapshots.length === 0) {
       snapshots = await pageTable(sb, "soldscope_rank_snapshots", RANK_COLS_BASE, "as_of");

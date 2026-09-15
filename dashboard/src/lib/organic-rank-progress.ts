@@ -71,6 +71,8 @@ export type RankSnapshot = {
   asin?: string | null;
   organic_position?: number | null;
   organic_previous_position?: number | null;
+  organic_asin?: string | null;
+  amazon_choice?: boolean | null;
   aba_search_frequency_rank?: number | null;
   aba_total_click_share?: number | null;
   aba_total_conv_share?: number | null;
@@ -110,10 +112,10 @@ export type HeatmapRow = {
   sqp_click_share: number | null;
   sqp_organic_rank: number | null;
   positions: Record<string, number | null>;
-  /** Child ASIN holding the organic slot per shown day. Missing stays null. */
-  childAsins: Record<string, string | null>;
-  amazonChoice: Record<string, boolean | null>;
-  /** Latest shown day's child ASIN (desktop organicAsin). */
+  /** Child ASIN holding the organic slot, per day. Missing days stay null. */
+  organic_child_asins: Record<string, string | null>;
+  amazon_choices: Record<string, boolean | null>;
+  /** Latest (or most recent stored) child ASIN for the keyword chip. */
   organic_child_asin: string | null;
   previous: number | null;
   current: number | null;
@@ -261,11 +263,28 @@ export function formatCellRank(n: number | null | undefined): string {
   return r == null ? "—" : `#${r}`;
 }
 
+export function asOrganicChild(asin: string | null | undefined): string | null {
+  const a = String(asin ?? "").trim().toUpperCase();
+  return a || null;
+}
+
+export function latestOrganicChild(
+  asins: Record<string, string | null | undefined> | null | undefined,
+  weeks: string[],
+): string | null {
+  if (!asins) return null;
+  for (let i = weeks.length - 1; i >= 0; i--) {
+    const hit = asOrganicChild(asins[weeks[i]]);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 export function cellHoverTitle(args: {
   previous: number | null | undefined;
   current: number | null | undefined;
   sfr?: number | null;
-  childAsin?: string | null;
+  organicAsin?: string | null;
   amazonChoice?: boolean | null;
 }): string {
   const prev = asRank(args.previous);
@@ -275,10 +294,10 @@ export function cellHoverTitle(args: {
   const right = cur == null ? "—" : String(cur);
   const move = delta == null ? "" : ` (${formatSignedDelta(delta)})`;
   const sfr = args.sfr === undefined ? "" : ` · SFR ${formatSfr(args.sfr)}`;
-  const child = normalizeAsin(args.childAsin);
+  const child = asOrganicChild(args.organicAsin);
   const childBit = child ? ` · child ${child}` : "";
-  const choiceBit = args.amazonChoice === true ? " · Amazon's Choice" : "";
-  return `${left} → ${right}${move}${sfr}${childBit}${choiceBit}`;
+  const choice = args.amazonChoice === true ? " · Amazon's Choice" : "";
+  return `${left} → ${right}${move}${sfr}${childBit}${choice}`;
 }
 
 /**
@@ -535,8 +554,8 @@ export function buildOrganicRankProgress(input: {
     sfr: number | null;
     sfr_as_of: string | null;
     positions: Record<string, number | null>;
-    childAsins: Record<string, string | null>;
-    amazonChoice: Record<string, boolean | null>;
+    organic_child_asins: Record<string, string | null>;
+    amazon_choices: Record<string, boolean | null>;
     previous_from_api: number | null;
   };
   const series = new Map<string, Series>();
@@ -562,18 +581,17 @@ export function buildOrganicRankProgress(input: {
       sfr: null,
       sfr_as_of: null,
       positions: {},
-      childAsins: {},
-      amazonChoice: {},
+      organic_child_asins: {},
+      amazon_choices: {},
       previous_from_api: null,
     };
     if (shownWeeks.includes(asOf)) {
       cur.positions[asOf] = asRank(row.organic_position);
-      cur.childAsins[asOf] = normalizeAsin(row.organic_asin);
-      cur.amazonChoice[asOf] = row.amazon_choice === true
-        ? true
-        : row.amazon_choice === false
-          ? false
-          : null;
+      const child = asOrganicChild(row.organic_asin);
+      if (child) cur.organic_child_asins[asOf] = child;
+      if (typeof row.amazon_choice === "boolean") {
+        cur.amazon_choices[asOf] = row.amazon_choice;
+      }
     }
     const sfrHit = resolveSfr(row.aba_search_frequency_rank);
     if (sfrHit.sfr != null && newerDate(cur.sfr_as_of, asOf)) {
@@ -605,9 +623,13 @@ export function buildOrganicRankProgress(input: {
       sqp_click_share: sqpRow?.click_share ?? null,
       sqp_organic_rank: asRank(korRow?.organic_rank),
       positions: Object.fromEntries(shownWeeks.map((w) => [w, s.positions[w] ?? null])),
-      childAsins: Object.fromEntries(shownWeeks.map((w) => [w, s.childAsins[w] ?? null])),
-      amazonChoice: Object.fromEntries(shownWeeks.map((w) => [w, s.amazonChoice[w] ?? null])),
-      organic_child_asin: lastWeek ? (s.childAsins[lastWeek] ?? null) : null,
+      organic_child_asins: Object.fromEntries(
+        shownWeeks.map((w) => [w, asOrganicChild(s.organic_child_asins[w])]),
+      ),
+      amazon_choices: Object.fromEntries(
+        shownWeeks.map((w) => [w, s.amazon_choices[w] ?? null]),
+      ),
+      organic_child_asin: latestOrganicChild(s.organic_child_asins, shownWeeks),
       previous,
       current,
       wow: classifyWowDelta(previous, current),
