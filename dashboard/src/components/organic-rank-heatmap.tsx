@@ -11,6 +11,7 @@ import {
   HERO_FAMILIES,
   WOW_MOVE_POSITIONS,
   WOW_TOP_N,
+  asOrganicChild,
   cellHoverTitle,
   cellPriorRank,
   classifyMovement,
@@ -184,10 +185,12 @@ export function OrganicRankHeatmap() {
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Keywords × day from SoldScope Rank Tracker daily RT snapshots.
                 SFR is Brand Analytics (`abaSearchFrequencyRank`) — never
-                invented from SoldScope search volume. Cell fill is absolute
-                rank (greener = better). The small Δ is movement vs the prior
-                snapshot, or vs SoldScope previous position when only one
-                as_of column is stored.
+                invented from SoldScope search volume. The child chip is the
+                variation holding the organic slot (`organicAsin`); hover a
+                day for that date&apos;s child when SoldScope sent it. Cell
+                fill is absolute rank (greener = better). The small Δ is
+                movement vs the prior snapshot, or vs SoldScope previous
+                position when only one as_of column is stored.
               </p>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -323,6 +326,14 @@ export function OrganicRankHeatmap() {
                             <div className="text-[9px] uppercase tracking-wide text-muted-foreground">
                               {row.family} · {row.asin}
                             </div>
+                            {row.organic_child_asin && (
+                              <span
+                                className="mt-0.5 inline-flex max-w-full truncate rounded border border-border/70 bg-muted/70 px-1 py-px font-mono text-[8px] font-medium uppercase tracking-wide text-foreground/80"
+                                title={`Child ASIN holding the latest organic rank: ${row.organic_child_asin}`}
+                              >
+                                child {row.organic_child_asin}
+                              </span>
+                            )}
                           </td>
                           <td className="px-1.5 py-1.5">
                             <RankSpark row={row} weeks={weeks} />
@@ -335,7 +346,13 @@ export function OrganicRankHeatmap() {
                             const prior = cellPriorRank(row, w, weeks);
                             return (
                               <td key={w} className="px-1 py-1.5">
-                                <RankCell rank={rank} prior={prior} sfr={row.sfr} />
+                                <RankCell
+                                  rank={rank}
+                                  prior={prior}
+                                  sfr={row.sfr}
+                                  organicAsin={row.organic_child_asins[w]}
+                                  amazonChoice={row.amazon_choices[w]}
+                                />
                               </td>
                             );
                           })}
@@ -369,18 +386,26 @@ function RankCell({
   rank,
   prior,
   sfr,
+  organicAsin,
+  amazonChoice,
 }: {
   rank: number | null;
   prior: number | null;
   sfr: number | null;
+  organicAsin?: string | null;
+  amazonChoice?: boolean | null;
 }) {
   const tone = TONE[rankHeatTone(rank)];
   const move = classifyMovement(prior, rank);
   const chip = deltaChip(move.direction);
+  const child = asOrganicChild(organicAsin);
   return (
     <span
       className={`mx-auto flex h-10 min-w-[3.4rem] flex-col items-center justify-center rounded-md px-1 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] ${tone.cell}`}
-      title={cellHoverTitle({ previous: prior, current: rank, sfr })}
+      title={cellHoverTitle({
+        previous: prior, current: rank, sfr,
+        organicAsin: child, amazonChoice,
+      })}
     >
       <span className="text-[11px] font-semibold tabular-nums leading-none">
         {formatCellRank(rank)}
@@ -459,6 +484,8 @@ function Legend() {
         Any 1+ move tints the row; a stronger tint plus the lists means
         meaningful (≥{WOW_MOVE_POSITIONS} positions or crossing top {WOW_TOP_N}).
         Trend is prior → current (lower toward #1 reads as up).
+        Child chip / cell hover is the variation holding that day&apos;s
+        organic slot — omitted when SoldScope did not send it.
       </p>
     </div>
   );
