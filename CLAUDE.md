@@ -59,7 +59,7 @@ python -m src.main pulse-audit --date $(date -v-1d +%Y-%m-%d)
 
 ## FBA Needs-case queue
 
-Classification version `ledger-legend-2026-09-15` lives in
+Classification version `ledger-legend-2026-09-15-do` lives in
 `src/reimbursements/reason_legend.py` (dashboard twin:
 `dashboard/src/lib/reimbursements-reason-legend.ts`).
 
@@ -70,9 +70,11 @@ python -m src.main reimbursements-case-sync --days 90
 ```
 
 Letter **M = Inventory misplaced → `lost_warehouse`**. Never invent
-Lost inbound from M. Digit `reference_id` values are ledger transaction
-IDs, not FBA shipment IDs. Do not apply `migration_rls_lockdown.sql`
-for this work.
+Lost inbound from M. **D = disposed, O = correction** — exclude from
+Needs case; disposition must not promote them. Digit `reference_id`
+values are ledger transaction IDs, not FBA shipment IDs. Do not apply
+`migration_rls_lockdown.sql` for this work. After rebuild, delete any
+stale D/O `needs_case` orphans left by upsert-only.
 
 ## Source Quarantine
 

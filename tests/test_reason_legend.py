@@ -48,6 +48,10 @@ def test_legend_table_encodes_amazon_codes():
     for code in ("6", "7", "H", "K", "U"):
         assert by_code[code].group == "warehouse_damage"
         assert by_code[code].eligible is True
+    assert by_code["D"].eligible is False
+    assert by_code["D"].group == "disposed"
+    assert by_code["O"].eligible is False
+    assert by_code["O"].group == "correction"
     assert by_code["G"].eligible is False
     assert by_code["N"].eligible is False
     assert by_code["7"].label == "Damaged at FC"
@@ -88,10 +92,27 @@ def test_qp_and_g_and_n_excluded():
     assert reason_group("G") == "other"
 
 
-def test_disposition_is_secondary_damage_signal_only():
-    assert reason_group(None, "WAREHOUSE_DAMAGED") == "warehouse_damage"
-    assert is_eligible_loss("", -1, "WAREHOUSE_DAMAGED") is True
-    # Do not invent Lost inbound from M even with a disposition.
+def test_d_and_o_never_needs_case_even_with_damaged_disposition():
+    for code in ("D", "O", "d", "o"):
+        assert is_eligible_loss(code, -1, "WAREHOUSE_DAMAGED") is False
+        assert reason_group(code, "WAREHOUSE_DAMAGED") == "other"
+        assert reason_group(code) != "warehouse_damage"
+    assert reason_label("D") == "D — Inventory disposed of"
+    assert reason_label("O") == "O — Inventory correction"
+    # Eligible damage codes still work; M is still lost_warehouse.
+    assert is_eligible_loss("E", -1, "WAREHOUSE_DAMAGED") is True
+    assert is_eligible_loss("7", -1, "WAREHOUSE_DAMAGED") is True
+    assert reason_group("E") == "warehouse_damage"
+    assert reason_group("7") == "warehouse_damage"
+    assert reason_group("M", "WAREHOUSE_DAMAGED") == "lost_warehouse"
+    assert reason_group("M") != "lost_inbound"
+
+
+def test_disposition_does_not_promote_unknown_or_blank_letters():
+    assert reason_group(None, "WAREHOUSE_DAMAGED") == "other"
+    assert is_eligible_loss("", -1, "WAREHOUSE_DAMAGED") is False
+    assert is_eligible_loss("Z", -1, "WAREHOUSE_DAMAGED") is False
+    assert reason_group("Z", "WAREHOUSE_DAMAGED") == "other"
     assert reason_group("M", "SELLABLE") == "lost_warehouse"
 
 
@@ -219,5 +240,75 @@ def test_empty_adjustments_pull_fails_loudly():
 
 def test_unknown_reason_helper():
     assert is_unknown_reason("M") is False
+    assert is_unknown_reason("D") is False
+    assert is_unknown_reason("O") is False
     assert is_unknown_reason("ZZZ") is True
-    assert is_unknown_reason("", "WAREHOUSE_DAMAGED") is False
+    assert is_unknown_reason("", "WAREHOUSE_DAMAGED") is True
+
+
+def test_d_o_with_disposition_never_enter_needs_case_queue():
+    from src.reimbursements.case_queue import orphan_needs_case_keys
+
+    events = build_case_events(
+        adjustments=[
+            {
+                "event_key": "adj|d",
+                "event_date": "2026-08-01",
+                "sku": "SKU-D",
+                "quantity": -2,
+                "reason": "D",
+                "fulfillment_center": "ONT8",
+                "disposition": "WAREHOUSE_DAMAGED",
+                "reference_id": "111",
+            },
+            {
+                "event_key": "adj|o",
+                "event_date": "2026-08-01",
+                "sku": "SKU-O",
+                "quantity": -1,
+                "reason": "O",
+                "fulfillment_center": "SMF3",
+                "disposition": "WAREHOUSE_DAMAGED",
+                "reference_id": "222",
+            },
+            {
+                "event_key": "adj|e",
+                "event_date": "2026-08-01",
+                "sku": "SKU-E",
+                "quantity": -1,
+                "reason": "E",
+                "fulfillment_center": "PHX6",
+                "disposition": "WAREHOUSE_DAMAGED",
+            },
+            {
+                "event_key": "adj|7",
+                "event_date": "2026-08-01",
+                "sku": "SKU-7",
+                "quantity": -1,
+                "reason": "7",
+                "fulfillment_center": "PHX6",
+            },
+            {
+                "event_key": "adj|m",
+                "event_date": "2026-08-01",
+                "sku": "SKU-M",
+                "quantity": -1,
+                "reason": "M",
+                "fulfillment_center": "ONT8",
+            },
+        ],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+    )
+    reasons = {e["reason"] for e in events if e["status"] == STATUS_NEEDS_CASE}
+    assert reasons == {"E", "7", "M"}
+    assert all(e["reason_group"] != "warehouse_damage" or e["reason"] in {"E", "7"} for e in events)
+    stale = [
+        {"event_key": "adj|stale-d", "status": STATUS_NEEDS_CASE, "reason": "D", "quantity": 2},
+        {"event_key": "adj|stale-o", "status": STATUS_NEEDS_CASE, "reason": "O", "quantity": 1},
+        {"event_key": "adj|keep-e", "status": STATUS_NEEDS_CASE, "reason": "E", "quantity": 1},
+    ]
+    assert orphan_needs_case_keys(stale) == ["adj|stale-d", "adj|stale-o"]

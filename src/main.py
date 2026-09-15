@@ -3853,6 +3853,8 @@ def reimbursements_case_sync_cmd(days, dry_run, no_fetch):
     After a classification deploy, Mini must re-run this with --days 90 so
     fba_case_events is stamped with the current classification_version.
     Letter M = Inventory misplaced = lost_warehouse (NOT lost inbound).
+    D/O are disposed/correction — excluded. Rebuild deletes stale D/O
+    needs_case orphans left by upsert-only.
     """
     from src.reimbursements.case_queue import sync_case_queue
 

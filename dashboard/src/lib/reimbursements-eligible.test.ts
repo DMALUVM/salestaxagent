@@ -51,6 +51,18 @@ function row(partial: Partial<CaseEventRow> & Pick<CaseEventRow, "event_key" | "
 }
 
 describe("needs-case vs paid", () => {
+  test("D and O never stay in Needs case even with WAREHOUSE_DAMAGED", () => {
+    const rows = [
+      row({ event_key: "d", event_date: "2026-08-01", reason: "D", reason_group: "warehouse_damage", disposition: "WAREHOUSE_DAMAGED" }),
+      row({ event_key: "o", event_date: "2026-08-01", reason: "O", reason_group: "warehouse_damage", disposition: "WAREHOUSE_DAMAGED" }),
+      row({ event_key: "e", event_date: "2026-08-01", reason: "E", reason_group: "warehouse_damage" }),
+      row({ event_key: "seven", event_date: "2026-08-01", reason: "7", reason_group: "warehouse_damage" }),
+      row({ event_key: "m", event_date: "2026-08-01", reason: "M", reason_group: "lost_inbound" }),
+    ];
+    assert.deepEqual(filterNeedsCase(rows).map((r) => r.event_key).sort(), ["e", "m", "seven"]);
+    assert.equal(reasonGroup("M"), "lost_warehouse");
+  });
+
   test("only status=needs_case with qty>0 stays in the queue", () => {
     const rows = [
       row({ event_key: "a", event_date: "2026-08-01", status: "needs_case", quantity: 2 }),
@@ -145,6 +157,9 @@ describe("needs-case vs paid", () => {
     assert.equal(reasonLabel("M"), "M — Inventory misplaced");
     assert.equal(reasonGroup("7"), "warehouse_damage");
     assert.equal(reasonGroup("Q"), "other");
+    assert.equal(reasonGroup("D", "WAREHOUSE_DAMAGED"), "other");
+    assert.equal(reasonGroup("O", "WAREHOUSE_DAMAGED"), "other");
+    assert.notEqual(reasonGroup("D"), "warehouse_damage");
     const stale = normalizeCaseRow(row({
       event_key: "stale-m",
       event_date: "2026-08-01",

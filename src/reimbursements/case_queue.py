@@ -33,6 +33,7 @@ from src.reimbursements.reason_legend import (
     MINI_RESYNC_HINT,
     is_eligible_loss,
     is_found_reason,
+    lookup_reason,
     reason_group,
     reason_label,
 )
@@ -245,7 +246,8 @@ def negative_adjustments_in_window(
 def adjustment_candidates(adjustments: Iterable[dict], start: date, end: date) -> list[dict]:
     """Negative eligible-reason ledger adjustments in the window.
 
-    Q/P disposition churn, G disposed, N corrections, and Found are excluded.
+    Q/P disposition churn, D/G disposed, N/O corrections, and Found are excluded.
+    Disposition (WAREHOUSE_DAMAGED) cannot promote D/O or unknown letters.
     Letter M is lost_warehouse (misplaced), never lost inbound.
     Digit ``reference_id`` values are ledger transaction IDs, not FBA shipments.
     """
@@ -523,6 +525,53 @@ def _with_one_retry(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
 
+def orphan_needs_case_keys(existing: Iterable[dict]) -> list[str]:
+    """event_keys that are still needs_case but are no longer eligible.
+
+    Upsert-only rebuilds leave stale D/O (and other excluded-letter) rows.
+    Mini must delete these orphans after reimbursements-case-sync.
+    """
+    keys: list[str] = []
+    for row in existing:
+        if row.get("status") != STATUS_NEEDS_CASE:
+            continue
+        key = str(row.get("event_key") or "").strip()
+        if not key:
+            continue
+        if row.get("source") == SOURCE_INBOUND and reason_group(row.get("reason")) == "lost_inbound":
+            continue
+        entry = lookup_reason(row.get("reason"))
+        if entry and entry.eligible:
+            continue
+        keys.append(key)
+    return keys
+
+
+def purge_ineligible_needs_case_orphans() -> int:
+    """Delete stale D/O (and other ineligible) needs_case rows left by upsert."""
+    from src.db import fetch_all, get_client
+
+    existing = _with_one_retry(fetch_all, "fba_case_events", {"status": STATUS_NEEDS_CASE})
+    keys = orphan_needs_case_keys(existing)
+    if not keys:
+        return 0
+    client = get_client()
+    deleted = 0
+    for i in range(0, len(keys), 200):
+        chunk = keys[i : i + 200]
+        result = (
+            client.table("fba_case_events")
+            .delete()
+            .eq("status", STATUS_NEEDS_CASE)
+            .in_("event_key", chunk)
+            .execute()
+        )
+        deleted += len(result.data) if result.data else 0
+    if deleted:
+        log.warning("Purged %s ineligible needs_case orphans (D/O and excluded codes)", deleted)
+    return deleted
+
+
 def fail_if_empty_adjustments_pull(
     previous_count: int,
     pulled: int,
@@ -638,6 +687,7 @@ def sync_case_queue(
         "classification_version": CLASSIFICATION_VERSION,
         "qa": qa,
         "mini_resync": MINI_RESYNC_HINT,
+        "orphans_purged": 0,
     }
     if dry_run:
         summary["events"] = stamped
@@ -656,6 +706,13 @@ def sync_case_queue(
                 qa=qa,
             ) from e
         summary["rows_inserted"] = inserted
+
+    try:
+        purged = _with_one_retry(purge_ineligible_needs_case_orphans)
+    except Exception as e:
+        log.warning("Could not purge ineligible needs_case orphans: %s", e)
+        purged = 0
+    summary["orphans_purged"] = purged
 
     if not qa["ok"]:
         raise CaseQueueSyncError(
