@@ -12,6 +12,7 @@ import {
   WOW_MOVE_POSITIONS,
   WOW_TOP_N,
   asOrganicChild,
+  compactVariationLabel,
   heatmapDayChips,
   shortOrganicChild,
   variationSlotHoverTitle,
@@ -390,11 +391,43 @@ export function OrganicRankHeatmap() {
   );
 }
 
-function childDeltaTone(delta: number | null): string {
+function chipDeltaTone(delta: number | null): string {
   if (delta == null) return "";
-  if (delta > 0) return "text-emerald-600 dark:text-emerald-400";
-  if (delta < 0) return "text-rose-600 dark:text-rose-400";
-  return "text-muted-foreground/70";
+  if (delta > 0) return "text-emerald-300";
+  if (delta < 0) return "text-rose-300";
+  return "text-zinc-400";
+}
+
+/** High-contrast theme+#N pill — readable on red/green/amber heat fills. */
+function VariationChipLine({
+  label,
+  rank,
+  delta,
+  title,
+}: {
+  label: string;
+  rank: number | null;
+  delta: number | null;
+  title: string;
+}) {
+  const shown = compactVariationLabel(label);
+  if (!shown && rank == null) return null;
+  return (
+    <span
+      className="inline-flex max-w-full items-center gap-1 rounded bg-zinc-950 px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-white shadow-sm"
+      title={title}
+    >
+      {shown ? <span className="truncate">{shown}</span> : null}
+      {rank != null ? (
+        <span className="shrink-0 font-mono tabular-nums">#{rank}</span>
+      ) : null}
+      {delta != null ? (
+        <span className={`shrink-0 tabular-nums ${chipDeltaTone(delta)}`}>
+          {formatSignedDelta(delta)}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function RankCell({
@@ -429,35 +462,36 @@ function RankCell({
   ].filter(Boolean);
   return (
     <span
-      className={`flex min-h-10 w-full flex-col items-center justify-center rounded-md px-1 py-1 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] ${tone.cell}`}
+      className={`flex w-full flex-col items-center justify-center gap-1 rounded-md px-1 py-1.5 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] ${tone.cell}`}
       title={hoverBits.join(" · ")}
     >
-      <span className="text-[11px] font-semibold tabular-nums leading-none">
-        {formatCellRank(rank)}
+      <span className="inline-flex items-center justify-center gap-1">
+        <span className="text-[13px] font-bold tabular-nums leading-none">
+          {formatCellRank(rank)}
+        </span>
+        {move.direction !== "unknown" && chip && (
+          <span className={`inline-flex items-center rounded px-1 text-[9px] font-semibold leading-none ${chip}`}>
+            {formatSignedDelta(move.delta)}
+          </span>
+        )}
       </span>
-      {move.direction !== "unknown" && chip && (
-        <span className={`mt-1 inline-flex items-center rounded px-1 text-[8px] font-semibold leading-none ${chip}`}>
-          {formatSignedDelta(move.delta)}
-        </span>
-      )}
       {winnerLabel && !winnerChipped ? (
-        <span className="mt-0.5 max-w-full truncate text-[7px] font-medium leading-none opacity-90">
-          {winnerLabel}
-        </span>
+        <VariationChipLine
+          label={winnerLabel}
+          rank={null}
+          delta={null}
+          title={winnerLabel}
+        />
       ) : null}
-      {chips.length > 0 ? (
-        <span className="mt-0.5 flex w-full flex-col items-center gap-px">
-          {chips.map((c) => (
-            <span key={c.asin} className="inline-flex max-w-full items-center gap-0.5 text-[7px] leading-none opacity-95">
-              <span className="truncate">{c.label}</span>
-              <span className="shrink-0 font-mono tabular-nums">{c.rank != null ? `#${c.rank}` : ""}</span>
-              {c.delta != null ? (
-                <span className={`shrink-0 ${childDeltaTone(c.delta)}`}>{formatSignedDelta(c.delta)}</span>
-              ) : null}
-            </span>
-          ))}
-        </span>
-      ) : null}
+      {chips.map((c) => (
+        <VariationChipLine
+          key={c.asin}
+          label={c.label}
+          rank={c.rank}
+          delta={c.delta}
+          title={variationSlotHoverTitle(c)}
+        />
+      ))}
     </span>
   );
 }
