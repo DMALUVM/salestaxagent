@@ -154,8 +154,8 @@ export default function AmazonOpsPage() {
             <ShoppingCart className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">No Amazon ops data yet.</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Run: <code>python -m src.main spapi-traffic --days 30</code> and
-              <code> python -m src.main spapi-reimbursements --days 90</code>
+              Run: <code>./.venv/bin/python -m src.main spapi-traffic --days 30</code> and
+              <code> ./.venv/bin/python -m src.main spapi-reimbursements --days 90</code>
             </p>
           </CardContent>
         </Card>

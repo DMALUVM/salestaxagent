@@ -207,6 +207,14 @@ describe("desk wiring stays cash-awareness and Sellerise-free", () => {
     assert.match(sync, /reimbursements_sync/);
   });
 
+  test("sync button enqueues a Mini pull and CLI uses the venv", () => {
+    assert.match(page, /Enqueue 90D pull/);
+    assert.match(page, /Enqueueing\.\.\./);
+    assert.doesNotMatch(page, />\s*Sync\s*</);
+    assert.match(page, /\.\/\.venv\/bin\/python -m src\.main spapi-reimbursements/);
+    assert.match(sync, /\.\/\.venv\/bin\/python -m src\.main spapi-reimbursements/);
+  });
+
   test("desk is observe\/alert — no auto-filing, no Sellerise dependency", () => {
     assert.match(page, /Reese/);
     assert.match(page, /observe\/alert/);

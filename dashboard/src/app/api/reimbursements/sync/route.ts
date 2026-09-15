@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
       return Response.json(
         {
           error: error.message,
-          hint: "Could not enqueue reimbursements_sync. Confirm agent_jobs exists and SUPABASE_SERVICE_KEY is set. Or on the Mini: python -m src.main spapi-reimbursements --days " + days,
+          hint: "Could not enqueue reimbursements_sync. Confirm agent_jobs exists and SUPABASE_SERVICE_KEY is set. Or on the Mini: ./.venv/bin/python -m src.main spapi-reimbursements --days " + days,
         },
         { status: 500 },
       );
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
     return Response.json(
       {
         error: e instanceof Error ? e.message : String(e),
-        hint: "Run on the Mini: python -m src.main spapi-reimbursements --days 90",
+        hint: "Run on the Mini: ./.venv/bin/python -m src.main spapi-reimbursements --days 90",
       },
       { status: 500 },
     );

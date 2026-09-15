@@ -175,8 +175,8 @@ export default function ReimbursementsDeskPage() {
                   body: JSON.stringify({ days: 90 }),
                 });
                 const j = await r.json();
-                if (!r.ok) throw new Error(j.error || "Sync failed");
-                setSyncMsg(j.message || "Sync enqueued");
+                if (!r.ok) throw new Error(j.error || "Enqueue failed");
+                setSyncMsg(j.message || "Reimbursements pull enqueued");
               } catch (e) {
                 setSyncMsg(e instanceof Error ? e.message : String(e));
               } finally {
@@ -185,7 +185,7 @@ export default function ReimbursementsDeskPage() {
             }}
           >
             <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
-            Sync
+            {syncing ? "Enqueueing..." : "Enqueue 90D pull"}
           </Button>
         </div>
       </div>
@@ -217,7 +217,7 @@ export default function ReimbursementsDeskPage() {
             <p className="text-sm text-muted-foreground">No paid reimbursements in this window.</p>
             <p className="mt-1 text-xs text-muted-foreground">
               Nightly sync already covers 90 closed LA days. Or run:{" "}
-              <code>python -m src.main spapi-reimbursements --days 90</code>
+              <code>./.venv/bin/python -m src.main spapi-reimbursements --days 90</code>
             </p>
           </CardContent>
         </Card>
