@@ -15,6 +15,8 @@ import {
   childSlotHoverTitle,
   childSlotRank,
   shortOrganicChild,
+  variationChipsForDay,
+  variationSlotHoverTitle,
   cellHoverTitle,
   cellPriorRank,
   classifyMovement,
@@ -37,6 +39,7 @@ import {
   type HeroFamilyId,
   type MoveDirection,
   type OrganicRankProgress,
+  type VariationChip,
 } from "@/lib/organic-rank-progress";
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 
@@ -193,10 +196,13 @@ export function OrganicRankHeatmap() {
                 variation holding the organic slot (`organicAsin`); hover a
                 day for that date&apos;s child when SoldScope sent it. The
                 Keyword CHILD pill shows that slot&apos;s current rank in
-                the blank space beside it — never a sibling we did not
-                store. Cell fill is absolute rank (greener = better). The
-                small Δ is movement vs the prior snapshot, or vs SoldScope
-                previous position when only one as_of column is stored.
+                the blank space beside it. Compact chips list every tracked
+                child ASIN SoldScope ranked that day (theme when stored,
+                else last 4 of the ASIN) — missing children are omitted,
+                never invented. Cell fill is the family winner rank
+                (greener = better). The small Δ is movement vs the prior
+                snapshot, or vs SoldScope previous position when only one
+                as_of column is stored.
               </p>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -332,7 +338,7 @@ export function OrganicRankHeatmap() {
                             <div className="text-[9px] uppercase tracking-wide text-muted-foreground">
                               {row.family} · {row.asin}
                             </div>
-                            <KeywordChildSlot row={row} />
+                            <KeywordChildSlot row={row} weeks={weeks} />
                           </td>
                           <td className="px-1.5 py-1.5">
                             <RankSpark row={row} weeks={weeks} />
@@ -351,6 +357,7 @@ export function OrganicRankHeatmap() {
                                   sfr={row.sfr}
                                   organicAsin={row.organic_child_asins[w]}
                                   amazonChoice={row.amazon_choices[w]}
+                                  chips={variationChipsForDay(row, w, weeks)}
                                 />
                               </td>
                             );
@@ -388,33 +395,69 @@ function childDeltaTone(delta: number | null): string {
   return "text-muted-foreground/70";
 }
 
-function KeywordChildSlot({ row }: { row: HeatmapRow }) {
+function KeywordChildSlot({ row, weeks }: { row: HeatmapRow; weeks: string[] }) {
   const slot = childSlotRank(row);
-  if (!slot) return null;
-  const rankLabel = formatChildSlotRank(slot.rank);
-  const deltaLabel = formatSignedDelta(slot.delta);
+  const latestWeek = weeks[weeks.length - 1];
+  const chips = latestWeek ? variationChipsForDay(row, latestWeek, weeks) : [];
+  if (!slot && chips.length === 0) return null;
+  const rankLabel = slot ? formatChildSlotRank(slot.rank) : "";
+  const deltaLabel = slot ? formatSignedDelta(slot.delta) : "";
   return (
-    <div className="mt-0.5 flex min-w-0 items-center gap-1">
-      <span
-        className="inline-flex min-w-0 max-w-[9.5rem] truncate rounded border border-border/70 bg-muted/70 px-1 py-px font-mono text-[8px] font-medium uppercase tracking-wide text-foreground/80"
-        title={childSlotHoverTitle(slot)}
-      >
-        child {slot.asin}
-      </span>
-      {rankLabel ? (
-        <span
-          className="shrink-0 font-mono text-[8px] font-semibold tabular-nums text-foreground/80"
-          title={childSlotHoverTitle(slot)}
-        >
-          {rankLabel}
-        </span>
+    <div className="mt-0.5 space-y-0.5">
+      {slot ? (
+        <div className="flex min-w-0 items-center gap-1">
+          <span
+            className="inline-flex min-w-0 max-w-[9.5rem] truncate rounded border border-border/70 bg-muted/70 px-1 py-px font-mono text-[8px] font-medium uppercase tracking-wide text-foreground/80"
+            title={childSlotHoverTitle(slot)}
+          >
+            child {slot.asin}
+          </span>
+          {rankLabel ? (
+            <span
+              className="shrink-0 font-mono text-[8px] font-semibold tabular-nums text-foreground/80"
+              title={childSlotHoverTitle(slot)}
+            >
+              {rankLabel}
+            </span>
+          ) : null}
+          {deltaLabel ? (
+            <span className={`shrink-0 text-[8px] font-semibold leading-none ${childDeltaTone(slot.delta)}`}>
+              {deltaLabel}
+            </span>
+          ) : null}
+        </div>
       ) : null}
+      {chips.length > 0 ? (
+        <div className="flex min-w-0 flex-wrap gap-0.5">
+          {chips.map((chip) => (
+            <VariationChipView key={chip.asin} chip={chip} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function VariationChipView({ chip }: { chip: VariationChip }) {
+  const rankLabel = chip.rank != null ? `#${chip.rank}` : "—";
+  const deltaLabel = formatSignedDelta(chip.delta);
+  return (
+    <span
+      className={`inline-flex max-w-[9.5rem] items-center gap-0.5 rounded border px-1 py-px font-mono text-[7px] leading-none ${
+        chip.winner
+          ? "border-foreground/30 bg-muted/80 font-semibold text-foreground"
+          : "border-border/60 bg-muted/40 text-foreground/75"
+      }`}
+      title={variationSlotHoverTitle(chip)}
+    >
+      <span className="truncate">{chip.label}</span>
+      <span className="shrink-0 tabular-nums">{rankLabel}</span>
       {deltaLabel ? (
-        <span className={`shrink-0 text-[8px] font-semibold leading-none ${childDeltaTone(slot.delta)}`}>
+        <span className={`shrink-0 font-semibold ${childDeltaTone(chip.delta)}`}>
           {deltaLabel}
         </span>
       ) : null}
-    </div>
+    </span>
   );
 }
 
@@ -424,22 +467,27 @@ function RankCell({
   sfr,
   organicAsin,
   amazonChoice,
+  chips,
 }: {
   rank: number | null;
   prior: number | null;
   sfr: number | null;
   organicAsin?: string | null;
   amazonChoice?: boolean | null;
+  chips: VariationChip[];
 }) {
   const tone = TONE[rankHeatTone(rank)];
   const move = classifyMovement(prior, rank);
   const chip = deltaChip(move.direction);
   const child = asOrganicChild(organicAsin);
   const childShort = shortOrganicChild(child);
+  const chipTitle = chips.length
+    ? chips.map((c) => variationSlotHoverTitle(c)).join(" · ")
+    : undefined;
   return (
     <span
       className={`mx-auto flex min-h-10 min-w-[3.4rem] flex-col items-center justify-center rounded-md px-1 py-0.5 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] ${tone.cell}`}
-      title={cellHoverTitle({
+      title={chipTitle || cellHoverTitle({
         previous: prior, current: rank, sfr,
         organicAsin: child, amazonChoice,
       })}
@@ -452,7 +500,19 @@ function RankCell({
           {formatSignedDelta(move.delta)}
         </span>
       )}
-      {childShort ? (
+      {chips.length > 0 ? (
+        <span className="mt-0.5 flex max-w-[6.4rem] flex-col items-center gap-px">
+          {chips.map((c) => (
+            <span key={c.asin} className="inline-flex max-w-full items-center gap-0.5 font-mono text-[7px] leading-none opacity-95">
+              <span className="truncate">{c.label}</span>
+              <span className="shrink-0 tabular-nums">{c.rank != null ? `#${c.rank}` : "—"}</span>
+              {c.delta != null ? (
+                <span className={`shrink-0 ${childDeltaTone(c.delta)}`}>{formatSignedDelta(c.delta)}</span>
+              ) : null}
+            </span>
+          ))}
+        </span>
+      ) : childShort ? (
         <span className="mt-0.5 font-mono text-[8px] leading-none opacity-90">
           {childShort}
         </span>
@@ -529,8 +589,10 @@ function Legend() {
         Child chip is the variation holding that day&apos;s organic slot
         (full ASIN under the keyword; last 4 in each cell; full on hover).
         Rank beside the keyword CHILD pill is that slot&apos;s current
-        position (Δ when both snapshots exist). Omitted when SoldScope
-        did not send the child; rank stays blank when the warehouse has none.
+        position (Δ when both snapshots exist). Extra chips are every
+        tracked child SoldScope ranked that day (theme or last 4 + #N + Δ).
+        Omitted when SoldScope did not send the child; rank stays blank
+        when the warehouse has none.
       </p>
     </div>
   );

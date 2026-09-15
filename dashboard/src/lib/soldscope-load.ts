@@ -138,6 +138,16 @@ export async function loadOrganicRankSources(
   sb: Sb = getServerSupabase(),
 ): Promise<{
   snapshots: SoldScopeRankRow[];
+  variationSnapshots: Array<{
+    asin?: string | null;
+    phrase?: string | null;
+    variation_asin?: string | null;
+    theme?: string | null;
+    organic_position?: number | null;
+    amazon_choice?: boolean | null;
+    as_of?: string | null;
+    group_id?: number | null;
+  }>;
   sqpRows: Array<{
     asin?: string | null;
     query_normalized?: string | null;
@@ -171,6 +181,10 @@ export async function loadOrganicRankSources(
     "asin,query_normalized,week_start,click_share,impression_share,search_query_volume";
   const KOR_COLS =
     "asin,keyword_normalized,as_of,organic_rank,impression_share_organic";
+  const VARIATION_COLS = [
+    "asin", "phrase", "variation_asin", "theme", "organic_position",
+    "amazon_choice", "as_of", "group_id",
+  ].join(",");
 
   let snapshots: Record<string, unknown>[] = [];
   try {
@@ -183,6 +197,13 @@ export async function loadOrganicRankSources(
     }
   } catch { /* table optional */ }
 
+  let variationSnapshots: Record<string, unknown>[] = [];
+  try {
+    variationSnapshots = await pageTable(
+      sb, "soldscope_rank_variation_snapshots", VARIATION_COLS, "as_of",
+    );
+  } catch { /* table optional until Dana applies the migration */ }
+
   const [sqpRows, korRows] = await Promise.all([
     pageTable(sb, "sqp_weekly", SQP_COLS, "week_start"),
     pageTable(sb, "keyword_organic_rank", KOR_COLS, "as_of"),
@@ -190,6 +211,7 @@ export async function loadOrganicRankSources(
 
   return {
     snapshots: snapshots as SoldScopeRankRow[],
+    variationSnapshots,
     sqpRows,
     korRows,
   };
