@@ -5,11 +5,17 @@ import {
   REESE_AGENT_ID,
   REESE_AGENT_NAME,
   REESE_PACKAGE_CONTRACT,
+  CLASSIFICATION_VERSION,
+  MINI_RESYNC_HINT,
+  NOTIFY_BLOCK_COPY,
   buildReesePackage,
   defaultCaseRange,
+  evaluateCaseQa,
   eventQueryBounds,
   filterNeedsCase,
   inCaseRange,
+  normalizeCaseRow,
+  notifyGateErrors,
   type CaseEventRow,
 } from "@/lib/reimbursements-eligible";
 
@@ -69,12 +75,32 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    let rows = filterNeedsCase(
-      ((data ?? []) as CaseEventRow[]).filter((r) => inCaseRange(r, rangeStart, rangeEnd)),
-    );
+    const storedNeeds = ((data ?? []) as CaseEventRow[])
+      .filter((r) => inCaseRange(r, rangeStart, rangeEnd))
+      .map(normalizeCaseRow)
+      .filter((r) => r.status === "needs_case" && Number(r.quantity ?? 0) > 0);
+    let rows = filterNeedsCase(storedNeeds);
     if (keys.length) {
       const want = new Set(keys);
       rows = rows.filter((r) => want.has(r.event_key));
+    }
+
+    const qa = evaluateCaseQa(keys.length ? rows : storedNeeds);
+    const gate = notifyGateErrors(rows, qa);
+    if (gate.length) {
+      return Response.json(
+        {
+          ok: false,
+          error: NOTIFY_BLOCK_COPY,
+          qa: { ...qa, ok: false, errors: gate },
+          errors: gate,
+          contract: REESE_PACKAGE_CONTRACT,
+          auto_submit: false,
+          classificationVersion: CLASSIFICATION_VERSION,
+          hint: MINI_RESYNC_HINT,
+        },
+        { status: 422 },
+      );
     }
 
     const pkg = buildReesePackage(rows, {
@@ -119,6 +145,8 @@ export async function POST(request: NextRequest) {
       package_id: packageId,
       contract: REESE_PACKAGE_CONTRACT,
       auto_submit: false,
+      classificationVersion: CLASSIFICATION_VERSION,
+      qa,
       target: pkg.target,
       as_of: pkg.as_of,
       start: pkg.start,

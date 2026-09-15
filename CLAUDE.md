@@ -54,6 +54,25 @@ python -m src.main pulse-audit --date $(date -v-1d +%Y-%m-%d)
 | `src/channels.py` | Channel taxonomy, quarantine policy |
 | `src/inventory/velocity.py` | Unit velocity engine |
 | `src/forecast/` | SKU demand forecast with calibration |
+| `src/reimbursements/case_queue.py` | FBA Needs-case queue (inferred, not paid) |
+| `src/reimbursements/reason_legend.py` | Amazon ledger reason legend (M ≠ Lost inbound) |
+
+## FBA Needs-case queue
+
+Classification version `ledger-legend-2026-09-15` lives in
+`src/reimbursements/reason_legend.py` (dashboard twin:
+`dashboard/src/lib/reimbursements-reason-legend.ts`).
+
+**After this classification lands, Mini must rebuild the warehouse:**
+
+```bash
+python -m src.main reimbursements-case-sync --days 90
+```
+
+Letter **M = Inventory misplaced → `lost_warehouse`**. Never invent
+Lost inbound from M. Digit `reference_id` values are ledger transaction
+IDs, not FBA shipment IDs. Do not apply `migration_rls_lockdown.sql`
+for this work.
 
 ## Source Quarantine
 

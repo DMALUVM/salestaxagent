@@ -14,15 +14,21 @@ import { amazonAsOf } from "@/lib/as-of";
 import {
   CASE_QUEUE_GAP,
   CASE_QUEUE_SOURCES,
+  CLASSIFICATION_VERSION,
+  MINI_RESYNC_HINT,
+  NOTIFY_BLOCK_COPY,
   REASON_GROUP_LABELS,
   REESE_AGENT_NAME,
   SELLER_CENTRAL_LINK_LIMIT,
+  SUPPORT_MANUAL_LIMIT,
   apiUrl,
   caseAmount,
   caseDay,
   caseQty,
   defaultCaseRange,
+  fbaShipmentId,
   filterCaseGroup,
+  isInboundTrackerLink,
   linkKindLabel,
   reasonLabel,
   searchCaseRows,
@@ -30,6 +36,7 @@ import {
   sortCaseRows,
   summarizeCases,
   type CaseEventRow,
+  type CaseQa,
   type CaseSortKey,
   type ReasonFilter,
 } from "@/lib/reimbursements-eligible";
@@ -68,6 +75,9 @@ interface EligiblePayload {
   gap?: string;
   sources?: string[];
   sellerCentralLinkLimit?: string;
+  classificationVersion?: string;
+  miniResync?: string;
+  qa?: CaseQa;
   syncedAt?: string | null;
   rows: CaseEventRow[];
   alertRows: CaseEventRow[];
@@ -121,6 +131,9 @@ export function ReimbursementsEligiblePanel() {
   }), [rows]);
   const alertRows = data?.alertRows ?? [];
   const alertSummary = useMemo(() => summarizeCases(alertRows), [alertRows]);
+  const qa = data?.qa;
+  const qaOk = Boolean(qa?.ok);
+  const notifyBlocked = !qaOk || !rows.length;
 
   function toggleSort(key: CaseSortKey) {
     if (sortKey === key) {
@@ -177,7 +190,8 @@ export function ReimbursementsEligiblePanel() {
           <Button
             variant="outline"
             size="sm"
-            disabled={notifying || !rows.length}
+            disabled={notifying || notifyBlocked}
+            title={notifyBlocked ? NOTIFY_BLOCK_COPY : "Build a verified prep package for Reese"}
             onClick={async () => {
               setNotifying(true);
               setMsg(null);
@@ -218,6 +232,32 @@ export function ReimbursementsEligiblePanel() {
       </div>
 
       {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+
+      {qa && !qa.ok && (
+        <div className="flex items-start gap-2 rounded-lg border border-red-400/70 bg-red-50 px-3 py-2 text-sm text-red-950 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="space-y-1">
+            <p className="font-medium">Classification / sync QA is not green — do not prep Reese packets</p>
+            <p className="text-xs opacity-90">{NOTIFY_BLOCK_COPY}</p>
+            <ul className="list-disc pl-4 text-xs opacity-90">
+              {(qa.errors ?? []).slice(0, 6).map((err) => (
+                <li key={err}>{err}</li>
+              ))}
+            </ul>
+            <p className="text-xs font-mono opacity-80">
+              {data?.miniResync || MINI_RESYNC_HINT}
+            </p>
+            <p className="text-[10px] opacity-70">
+              Wanted classification_version {data?.classificationVersion || CLASSIFICATION_VERSION}
+            </p>
+          </div>
+        </div>
+      )}
+      {qa?.ok && rows.length > 0 && (
+        <div className="rounded-lg border border-emerald-400/50 bg-emerald-50 px-3 py-2 text-xs text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100">
+          Classification {qa.classification_version} verified. Notify Reese is unlocked.
+        </div>
+      )}
 
       <div className="rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground space-y-1">
         <p>{data?.gap || CASE_QUEUE_GAP}</p>
@@ -361,7 +401,9 @@ export function ReimbursementsEligiblePanel() {
                     <SortHead label="SKU / ASIN" active={sortKey === "sku"} dir={sortDir} onClick={() => toggleSort("sku")} />
                     <SortHead label="Qty" active={sortKey === "quantity"} dir={sortDir} onClick={() => toggleSort("quantity")} align="right" />
                     <SortHead label="Est $" active={sortKey === "estimated_amount"} dir={sortDir} onClick={() => toggleSort("estimated_amount")} align="right" />
-                    <TableHead>FC / Shipment</TableHead>
+                    <TableHead>FC</TableHead>
+                    <TableHead>Shipment</TableHead>
+                    <TableHead>Reference ID</TableHead>
                     <TableHead>Seller Central</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
@@ -371,11 +413,14 @@ export function ReimbursementsEligiblePanel() {
                     const day = caseDay(r);
                     const amt = r.estimated_amount;
                     const href = sellerCentralHref(r);
+                    const shipment = fbaShipmentId(r.shipment_id);
+                    const tracker = isInboundTrackerLink(r);
+                    const refId = r.reference_id && r.reference_id !== shipment ? r.reference_id : null;
                     return (
                       <TableRow key={r.event_key}>
                         <TableCell className="text-xs tabular-nums">{day}</TableCell>
                         <TableCell className="text-xs">
-                          <span className="font-medium">{reasonLabel(r.reason)}</span>
+                          <span className="font-medium">{reasonLabel(r.reason, r.disposition)}</span>
                           <div className="text-[10px] text-muted-foreground">
                             {r.source === "inbound_discrepancy" ? "Inbound short" : "Ledger adjustment"}
                           </div>
@@ -388,22 +433,39 @@ export function ReimbursementsEligiblePanel() {
                         <TableCell className="text-right tabular-nums text-muted-foreground">
                           {amt == null || amt === "" ? "—" : `$${fmtD(caseAmount(r))}`}
                         </TableCell>
-                        <TableCell className="text-xs">
-                          <div>{r.fulfillment_center || "—"}</div>
-                          <div className="font-mono text-[10px] text-muted-foreground">
-                            {r.shipment_id || r.reference_id || "—"}
-                          </div>
+                        <TableCell className="text-xs">{r.fulfillment_center || "—"}</TableCell>
+                        <TableCell className="text-xs font-mono">
+                          {shipment || "—"}
+                        </TableCell>
+                        <TableCell className="text-xs font-mono text-muted-foreground">
+                          {refId || "—"}
                         </TableCell>
                         <TableCell className="text-xs">
-                          <a
-                            href={href}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-primary hover:underline"
-                          >
-                            {linkKindLabel(r.seller_central_link_kind)}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
+                          {tracker ? (
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-primary hover:underline"
+                            >
+                              Shipment tracker
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1 text-muted-foreground"
+                              title={SUPPORT_MANUAL_LIMIT}
+                            >
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+                              >
+                                {linkKindLabel(r.seller_central_link_kind)}
+                              </a>
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-[10px] font-normal">

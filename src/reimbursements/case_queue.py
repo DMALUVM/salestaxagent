@@ -23,6 +23,19 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterable
 
+from src.reimbursements.qa import (
+    CaseQueueSyncError,
+    evaluate_queue_qa,
+)
+from src.reimbursements.reason_legend import (
+    CLASSIFICATION_VERSION,
+    ELIGIBLE_REASON_GROUPS,
+    MINI_RESYNC_HINT,
+    is_eligible_loss,
+    is_found_reason,
+    reason_group,
+    reason_label,
+)
 from src.sku_normalize import normalize_sku
 
 log = logging.getLogger(__name__)
@@ -36,12 +49,18 @@ SC_INBOUND_SHIPMENT = (
 )
 SC_LEDGER_HUB = "https://sellercentral.amazon.com/reportcentral/INVENTORY_LEDGER/1"
 
+LINK_KIND_INBOUND = "inbound_shipment"
+LINK_KIND_SUPPORT_MANUAL = "support_manual"
+# Legacy rows stored this before the trust fix.
+LINK_KIND_SUPPORT_HUB = "support_hub"
+
 # Honest: Amazon does not publish a stable pre-filled "open this case" URL.
 SELLER_CENTRAL_LINK_LIMIT = (
     "No stable Seller Central deep link opens a pre-filled FBA case. "
-    "FBA shipment IDs link to the inbound shipment tracker. "
-    "Everything else lands on Get Support (help/hub/contact-us). "
-    "Dave submits; this desk never auto-files."
+    "Only real FBA* shipment IDs link to the inbound shipment tracker. "
+    "Ledger reference / transaction IDs (digit strings) are not shipment IDs. "
+    "Support (manual) opens Get Support (help/hub/contact-us) — it is NOT a "
+    "pre-filled lost-inbound or warehouse case. Dave submits; this desk never auto-files."
 )
 
 CLOSED_INBOUND = frozenset({"CLOSED"})
@@ -50,12 +69,6 @@ STALE_INBOUND_DAYS = 21
 FOUND_OFFSET_DAYS = 30
 PAID_LOOKAHEAD_DAYS = 90
 PAID_SETTLE_PAD_DAYS = 7
-
-ELIGIBLE_REASON_GROUPS = frozenset({
-    "warehouse_damage",
-    "lost_inbound",
-    "lost_warehouse",
-})
 
 STATUS_NEEDS_CASE = "needs_case"
 STATUS_ALREADY_REIMBURSED = "already_reimbursed"
@@ -68,32 +81,22 @@ AMOUNT_BASIS_RECENT = "recent_reimbursement"
 AMOUNT_BASIS_UNKNOWN = "unknown"
 
 
-def _reason_key(reason: str | None) -> str:
-    return (reason or "").strip().lower().replace(" ", "_").replace("-", "_")
+def is_fba_shipment_id(value: str | None) -> bool:
+    """True only for real FBA inbound shipment IDs (FBA…)."""
+    return bool(FBA_SHIPMENT_RE.match((value or "").strip()))
 
 
-def reason_group(reason: str | None) -> str:
-    """Map Amazon ledger / reimbursements reason → desk group."""
-    key = _reason_key(reason)
-    if key in {
-        "damaged_warehouse", "warehouse_damage", "warehousedamage",
-        "damaged_inbound", "damagedinbound",
-    }:
-        return "warehouse_damage"
-    if key in {"lost_inbound", "lostinbound", "inbound_lost", "m"}:
-        return "lost_inbound"
-    if key in {"lost_warehouse", "lostwarehouse", "warehouse_lost"}:
-        return "lost_warehouse"
-    return "other"
+def fba_shipment_id(*candidates: str | None) -> str | None:
+    """First real FBA* id among candidates. Digit ledger refs are not shipments."""
+    for value in candidates:
+        raw = (value or "").strip().upper()
+        if FBA_SHIPMENT_RE.match(raw):
+            return raw
+    return None
 
 
-def is_found_reason(reason: str | None) -> bool:
-    key = _reason_key(reason)
-    return key in {"found", "found_warehouse", "foundwarehouse", "7"} or key.startswith("found")
-
-
-def is_eligible_loss(reason: str | None, quantity: int) -> bool:
-    return quantity < 0 and reason_group(reason) in ELIGIBLE_REASON_GROUPS
+def _fba_id(value: str | None) -> str | None:
+    return fba_shipment_id(value)
 
 
 def inbound_event_key(shipment_id: str, sku: str) -> str:
@@ -130,12 +133,14 @@ def _fba_id(value: str | None) -> str | None:
 def seller_central_link(shipment_id: str | None, reference_id: str | None) -> tuple[str, str]:
     """Best available SC URL and a documented kind.
 
-    Inbound FBA ids → shipment tracker. Otherwise Get Support hub.
+    Real FBA* ids → inbound shipment tracker. Digit ledger transaction IDs
+    are not shipment IDs — those get Support (manual), which is not a
+    pre-filled case.
     """
-    sid = _fba_id(shipment_id) or _fba_id(reference_id)
+    sid = fba_shipment_id(shipment_id, reference_id)
     if sid:
-        return SC_INBOUND_SHIPMENT.format(shipment_id=sid), "inbound_shipment"
-    return SC_SUPPORT_HUB, "support_hub"
+        return SC_INBOUND_SHIPMENT.format(shipment_id=sid), LINK_KIND_INBOUND
+    return SC_SUPPORT_HUB, LINK_KIND_SUPPORT_MANUAL
 
 
 def inbound_ready(ship: dict, as_of: date) -> bool:
@@ -184,8 +189,8 @@ def inbound_discrepancies(
             continue
         sku = normalize_sku(it.get("sku"))
         fc = ship.get("destination_fc")
-        ref = sid
-        url, kind = seller_central_link(sid, None)
+        fba = fba_shipment_id(sid)
+        url, kind = seller_central_link(fba, None)
         out.append({
             "event_key": inbound_event_key(sid, sku),
             "source": SOURCE_INBOUND,
@@ -198,17 +203,52 @@ def inbound_discrepancies(
             "reason": "Lost_Inbound",
             "reason_group": "lost_inbound",
             "fulfillment_center": fc,
-            "shipment_id": sid,
-            "reference_id": ref,
+            "shipment_id": fba,
+            "reference_id": None if fba else (sid or None),
             "disposition": None,
+            "classification_version": CLASSIFICATION_VERSION,
             "seller_central_url": url,
             "seller_central_link_kind": kind,
         })
     return out
 
 
+def _unreconciled(row: dict) -> int | None:
+    raw = row.get("unreconciled_qty")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def negative_adjustments_in_window(
+    adjustments: Iterable[dict], start: date, end: date,
+) -> list[dict]:
+    """Negative ledger rows in the window (for unknown-reason QA)."""
+    out: list[dict] = []
+    for row in adjustments:
+        day = _parse_day(row.get("event_date"))
+        if day is None or day < start or day > end:
+            continue
+        try:
+            qty = int(row.get("quantity") or 0)
+        except (TypeError, ValueError):
+            continue
+        if qty >= 0:
+            continue
+        out.append(row)
+    return out
+
+
 def adjustment_candidates(adjustments: Iterable[dict], start: date, end: date) -> list[dict]:
-    """Negative eligible-reason ledger adjustments in the window."""
+    """Negative eligible-reason ledger adjustments in the window.
+
+    Q/P disposition churn, G disposed, N corrections, and Found are excluded.
+    Letter M is lost_warehouse (misplaced), never lost inbound.
+    Digit ``reference_id`` values are ledger transaction IDs, not FBA shipments.
+    """
     out: list[dict] = []
     for row in adjustments:
         day = _parse_day(row.get("event_date"))
@@ -219,12 +259,13 @@ def adjustment_candidates(adjustments: Iterable[dict], start: date, end: date) -
         except (TypeError, ValueError):
             continue
         reason = row.get("reason")
-        if not is_eligible_loss(reason, qty):
+        disposition = row.get("disposition")
+        if not is_eligible_loss(reason, qty, disposition, _unreconciled(row)):
             continue
         sku = normalize_sku(row.get("sku"))
         ref = row.get("reference_id")
-        sid = _fba_id(ref)
-        url, kind = seller_central_link(sid, ref)
+        sid = fba_shipment_id(row.get("shipment_id"), ref)
+        url, kind = seller_central_link(sid, None)
         out.append({
             "event_key": row.get("event_key") or "",
             "source": SOURCE_LEDGER,
@@ -235,11 +276,13 @@ def adjustment_candidates(adjustments: Iterable[dict], start: date, end: date) -
             "product_name": row.get("product_name"),
             "quantity": abs(qty),
             "reason": reason or "Unknown",
-            "reason_group": reason_group(reason),
+            "reason_group": reason_group(reason, disposition),
+            "reason_label": reason_label(reason, disposition),
             "fulfillment_center": row.get("fulfillment_center"),
             "shipment_id": sid,
             "reference_id": ref,
-            "disposition": row.get("disposition"),
+            "disposition": disposition,
+            "classification_version": CLASSIFICATION_VERSION,
             "seller_central_url": url,
             "seller_central_link_kind": kind,
         })
@@ -444,7 +487,17 @@ def build_case_events(
         ledger_kept.append(ev)
     merged = apply_found_offsets(ledger_kept + inbound, found_offsets(adj_list))
     merged = _enrich_asin(merged, adj_list, paid_list)
-    return apply_paid_dedupe(merged, paid_list)
+    out = apply_paid_dedupe(merged, paid_list)
+    for row in out:
+        row["classification_version"] = CLASSIFICATION_VERSION
+        row["reason_group"] = reason_group(row.get("reason"), row.get("disposition"))
+        row["reason_label"] = reason_label(row.get("reason"), row.get("disposition"))
+        sid = fba_shipment_id(row.get("shipment_id"), None)
+        row["shipment_id"] = sid
+        url, kind = seller_central_link(sid, None)
+        row["seller_central_url"] = url
+        row["seller_central_link_kind"] = kind
+    return out
 
 
 def _stamp(rows: list[dict]) -> list[dict]:
@@ -456,8 +509,33 @@ def _stamp(rows: list[dict]) -> list[dict]:
         if isinstance(day, date):
             rec["event_date"] = day.isoformat()
         rec["synced_at"] = now
+        rec["classification_version"] = CLASSIFICATION_VERSION
         out.append(rec)
     return out
+
+
+def _with_one_retry(fn, *args, **kwargs):
+    """Retry a warehouse read/write once on transient failure."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        log.warning("Transient warehouse failure, retrying once: %s", e)
+        return fn(*args, **kwargs)
+
+
+def fail_if_empty_adjustments_pull(
+    previous_count: int,
+    pulled: int,
+    pull_error: str | None,
+) -> None:
+    """Loud fail when a live pull is empty after a prior sync had rows."""
+    if previous_count > 0 and pulled <= 0:
+        detail = pull_error or "adjustments pull returned 0 rows"
+        raise CaseQueueSyncError(
+            "Adjustments pull returned empty when previous sync had "
+            f"{previous_count} rows ({detail}). Do not rebuild from an empty "
+            f"ledger. {MINI_RESYNC_HINT}"
+        )
 
 
 def sync_case_queue(
@@ -466,7 +544,13 @@ def sync_case_queue(
     fetch_ledger: bool = True,
     on_poll: callable | None = None,
 ) -> dict:
-    """Pull ledger Adjustments (optional) and rebuild fba_case_events."""
+    """Pull ledger Adjustments (optional) and rebuild fba_case_events.
+
+    Retries warehouse read/write once. Fails loudly when a live adjustments
+    pull is empty after a prior sync had rows, or when unknown-reason QA
+    exceeds the threshold. Mini must re-run this after a classification
+    deploy so ``classification_version`` is current.
+    """
     from src.amazon_sp.adjustments import fetch_ledger_adjustments
     from src.db import fetch_all, upsert_rows
     from src.rules import SPAPI_CASE_QUEUE_DAYS, amazon_as_of
@@ -475,30 +559,46 @@ def sync_case_queue(
     end = amazon_as_of()
     start = end - timedelta(days=window)
 
+    previous_adj_count = 0
+    try:
+        previous_adj_count = len(_with_one_retry(fetch_all, "fba_inventory_adjustments"))
+    except Exception as e:
+        log.warning("Could not count prior fba_inventory_adjustments: %s", e)
+
     adj_summary: dict = {}
     if fetch_ledger:
         try:
             adj_summary = fetch_ledger_adjustments(start, end, dry_run=dry_run, on_poll=on_poll)
         except Exception as e:
-            log.warning("Ledger adjustments pull failed; rebuilding from warehouse: %s", e)
-            adj_summary = {"error": str(e)[:300], "rows_inserted": 0}
+            log.error("Ledger adjustments pull failed: %s", e)
+            adj_summary = {"error": str(e)[:300], "rows_inserted": 0, "rows_parsed": 0}
+            if not dry_run:
+                fail_if_empty_adjustments_pull(previous_adj_count, 0, str(e)[:300])
+
+        pulled = int(adj_summary.get("rows_parsed") or 0)
+        if not pulled:
+            pulled = len(adj_summary.get("records") or [])
+        if not dry_run:
+            fail_if_empty_adjustments_pull(
+                previous_adj_count, pulled, adj_summary.get("error"),
+            )
 
     if dry_run:
         adjustments = adj_summary.get("records") or []
     else:
         try:
-            adjustments = fetch_all("fba_inventory_adjustments")
+            adjustments = _with_one_retry(fetch_all, "fba_inventory_adjustments")
         except Exception:
             adjustments = adj_summary.get("records") or []
 
     try:
-        shipments = fetch_all("inventory_inbound_shipments")
-        items = fetch_all("inventory_inbound_shipment_items")
+        shipments = _with_one_retry(fetch_all, "inventory_inbound_shipments")
+        items = _with_one_retry(fetch_all, "inventory_inbound_shipment_items")
     except Exception as e:
         log.warning("Inbound tables unavailable: %s", e)
         shipments, items = [], []
     try:
-        paid = fetch_all("fba_reimbursements")
+        paid = _with_one_retry(fetch_all, "fba_reimbursements")
     except Exception as e:
         log.warning("fba_reimbursements unavailable: %s", e)
         paid = []
@@ -511,6 +611,12 @@ def sync_case_queue(
         start=start,
         end=end,
         as_of=end,
+    )
+    negatives = negative_adjustments_in_window(adjustments, start, end)
+    qa = evaluate_queue_qa(
+        events,
+        negative_adjustments=negatives,
+        adjustments_empty_after_prior=False,
     )
     needs = [e for e in events if e.get("status") == STATUS_NEEDS_CASE]
     stamped = _stamp(events)
@@ -529,12 +635,32 @@ def sync_case_queue(
         "rows_inserted": 0,
         "seller_central_link_limit": SELLER_CENTRAL_LINK_LIMIT,
         "auto_submit": False,
+        "classification_version": CLASSIFICATION_VERSION,
+        "qa": qa,
+        "mini_resync": MINI_RESYNC_HINT,
     }
     if dry_run:
         summary["events"] = stamped
+        if not qa["ok"]:
+            summary["qa_failed"] = True
         return summary
 
     if stamped:
-        inserted = upsert_rows("fba_case_events", stamped, on_conflict="event_key")
+        try:
+            inserted = _with_one_retry(
+                upsert_rows, "fba_case_events", stamped, on_conflict="event_key",
+            )
+        except Exception as e:
+            raise CaseQueueSyncError(
+                f"fba_case_events upsert failed after retry: {e}. {MINI_RESYNC_HINT}",
+                qa=qa,
+            ) from e
         summary["rows_inserted"] = inserted
+
+    if not qa["ok"]:
+        raise CaseQueueSyncError(
+            "Needs-case QA failed — do not prep Reese packets. "
+            + "; ".join(qa["errors"]),
+            qa=qa,
+        )
     return summary
