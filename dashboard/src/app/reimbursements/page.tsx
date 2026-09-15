@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, RefreshCw, Shield, Wallet } from "lucide-react";
+import { ReimbursementsEligiblePanel } from "@/components/reimbursements-eligible";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ import {
   type ReasonFilter,
   type ReimbursementDeskRow,
 } from "@/lib/reimbursements-desk";
+import { apiUrl } from "@/lib/reimbursements-eligible";
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -70,8 +72,17 @@ interface DeskPayload {
   alertRows: ReimbursementDeskRow[];
 }
 
+type DeskTab = "paid" | "eligible";
+
+function initialTab(): DeskTab {
+  if (typeof window === "undefined") return "paid";
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  return tab === "eligible" ? "eligible" : "paid";
+}
+
 export default function ReimbursementsDeskPage() {
   const defaults = defaultDeskRange();
+  const [tab, setTab] = useState<DeskTab>("paid");
   const [start, setStart] = useState(defaults.start);
   const [end, setEnd] = useState(defaults.end);
   const [data, setData] = useState<DeskPayload | null>(null);
@@ -86,7 +97,7 @@ export default function ReimbursementsDeskPage() {
   function load(rangeStart = start, rangeEnd = end) {
     setLoading(true);
     const params = new URLSearchParams({ start: rangeStart, end: rangeEnd });
-    fetch(`/api/reimbursements?${params}`)
+    fetch(apiUrl(`/api/reimbursements?${params}`))
       .then((r) => r.json())
       .then((d) => {
         setData(d);
@@ -96,6 +107,7 @@ export default function ReimbursementsDeskPage() {
   }
 
   useEffect(() => {
+    setTab(initialTab());
     if (!isConfigured()) {
       setLoading(false);
       return;
@@ -104,6 +116,16 @@ export default function ReimbursementsDeskPage() {
     // Default 90d load on mount only; date Apply refetches explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function selectTab(next: DeskTab) {
+    setTab(next);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (next === "eligible") url.searchParams.set("tab", "eligible");
+      else url.searchParams.delete("tab");
+      window.history.replaceState(null, "", url.pathname + url.search);
+    }
+  }
 
   const rows = data?.rows ?? [];
   const summary = useMemo(() => summarizeDesk(rows), [rows]);
@@ -154,13 +176,16 @@ export default function ReimbursementsDeskPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">FBA Reimbursements</h1>
           <p className="text-sm text-muted-foreground">
-            Paid Amazon FBA reimbursements — cash Amazon already approved
+            {tab === "eligible"
+              ? "Needs case — inferred open discrepancies, not paid cash"
+              : "Paid Amazon FBA reimbursements — cash Amazon already approved"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link href="/amazon">
             <Button variant="outline" size="sm">← Amazon Ops</Button>
           </Link>
+          {tab === "paid" && (
           <Button
             variant="outline"
             size="sm"
@@ -169,7 +194,7 @@ export default function ReimbursementsDeskPage() {
               setSyncing(true);
               setSyncMsg(null);
               try {
-                const r = await fetch("/api/reimbursements/sync", {
+                const r = await fetch(apiUrl("/api/reimbursements/sync"), {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ days: 90 }),
@@ -187,8 +212,39 @@ export default function ReimbursementsDeskPage() {
             <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
             {syncing ? "Enqueueing..." : "Enqueue 90D pull"}
           </Button>
+          )}
         </div>
       </div>
+
+      <div className="flex flex-wrap gap-1 border-b">
+        <button
+          type="button"
+          onClick={() => selectTab("paid")}
+          className={`border-b-2 px-3 py-2 text-sm transition-colors ${
+            tab === "paid"
+              ? "border-primary font-medium text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Already reimbursed
+        </button>
+        <button
+          type="button"
+          onClick={() => selectTab("eligible")}
+          className={`border-b-2 px-3 py-2 text-sm transition-colors ${
+            tab === "eligible"
+              ? "border-primary font-medium text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Needs case
+        </button>
+      </div>
+
+      {tab === "eligible" ? (
+        <ReimbursementsEligiblePanel />
+      ) : (
+      <>
 
       {syncMsg && <p className="text-xs text-muted-foreground">{syncMsg}</p>}
 
@@ -407,8 +463,10 @@ export default function ReimbursementsDeskPage() {
         Cash awareness only — not folded into contribution or net after ads.
         Nightly GET_FBA_REIMBURSEMENTS_DATA already covers 90 closed LA days (chunked ≤30).
         This desk is observe/alert; case prep is Reese’s lane and Dave submits. It does not auto-file Amazon cases.
-        Eligible-for-claim / open-case funnel is a later phase.
+        Open / eligible cases live on the Needs case tab (GET_LEDGER_DETAIL_VIEW_DATA Adjustments + inbound shorts).
       </p>
+      </>
+      )}
     </div>
   );
 }

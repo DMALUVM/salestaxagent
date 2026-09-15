@@ -55,6 +55,9 @@ SPAPI_INVENTORY_BACKFILL_DAYS: int = _RULES["spapi"].get(
 # FBA reimbursements: cash credits/reversals on approval_date (LA day).
 # Wider than 30d so a July reimbursement is still pulled at the end of August.
 SPAPI_REIMBURSEMENTS_DAYS: int = int(_RULES["spapi"].get("reimbursements_days", 90))
+# Needs-case queue: ledger Adjustments + inbound shorts. Same 90d floor as
+# paid reimbursements so a July loss is still visible at the end of August.
+SPAPI_CASE_QUEUE_DAYS: int = int(_RULES["spapi"].get("case_queue_days", 90))
 
 # ── Ads ───────────────────────────────────────────────────
 ADS_MAX_REPORT_DAYS: int = _RULES["ads"]["max_report_days"]

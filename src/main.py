@@ -3840,6 +3840,31 @@ def spapi_reimbursements_cmd(days, dry_run):
     click.echo(f"Parsed: {result['rows_parsed']}, Total: ${result['total_amount']:,.2f}, Inserted: {result['rows_inserted']}")
 
 
+@cli.command("reimbursements-case-sync")
+@click.option("--days", default=90, help="Days back (chunked ≤30)")
+@click.option("--dry-run", is_flag=True)
+@click.option("--no-fetch", is_flag=True, help="Rebuild queue from warehouse only")
+def reimbursements_case_sync_cmd(days, dry_run, no_fetch):
+    """Rebuild the FBA Needs-case queue (ledger Adjustments + inbound shorts).
+
+    Observe only — never opens Seller Central cases. Paid cash stays on
+    GET_FBA_REIMBURSEMENTS_DATA / /reimbursements.
+    """
+    from src.reimbursements.case_queue import sync_case_queue
+
+    if dry_run:
+        click.echo("DRY RUN\n")
+    result = sync_case_queue(days=days, dry_run=dry_run, fetch_ledger=not no_fetch)
+    click.echo(
+        f"Needs case: {result.get('needs_case', 0)} rows / "
+        f"{result.get('needs_units', 0)} u  "
+        f"(already reimbursed {result.get('already_reimbursed', 0)}, "
+        f"found-offset {result.get('found_offset', 0)})"
+    )
+    if result.get("adjustments_error"):
+        click.echo(f"Ledger adjustments pull: {result['adjustments_error']}")
+
+
 @cli.command("spapi-refresh")
 @click.option("--days", default=30, help="Number of days back to fetch (default 30)")
 @click.option("--dry-run", is_flag=True)
@@ -6018,6 +6043,18 @@ def _run_spapi_refresh():
     except Exception as e:
         print(f"[SP-API] {ts} Reimbursements error: {e}")
 
+    # Needs-case queue (90d ledger Adjustments + inbound shorts).
+    # Paid GET_FBA_REIMBURSEMENTS_DATA is dedupe only. Never auto-files.
+    try:
+        from src.reimbursements.case_queue import sync_case_queue
+        from src.rules import SPAPI_CASE_QUEUE_DAYS
+        cases = sync_case_queue(days=SPAPI_CASE_QUEUE_DAYS, dry_run=False, fetch_ledger=True)
+        print(f"[SP-API] {ts} Case queue: {cases.get('needs_case', 0)} needs-case / "
+              f"{cases.get('needs_units', 0)} u "
+              f"(adj {cases.get('adjustments_inserted', 0)})")
+    except Exception as e:
+        print(f"[SP-API] {ts} Case queue error: {e}")
+
     # Subscribe & Save (Replenishment API)
     try:
         from src.amazon_sp.replenishment import fetch_seller_metrics, fetch_offer_metrics
@@ -7427,7 +7464,39 @@ def _run_reimbursements_sync(payload: dict | None = None) -> dict:
     end = amazon_as_of()
     start = end - timedelta(days=days)
     print(f"[Job Worker] reimbursements_sync {start} → {end}")
-    return fetch_reimbursements(start, end)
+    result = fetch_reimbursements(start, end)
+    # Refresh paid-vs-open dedupe without another ledger pull.
+    try:
+        from src.reimbursements.case_queue import sync_case_queue
+        sync_case_queue(days=days, dry_run=False, fetch_ledger=False)
+    except Exception as e:
+        print(f"[Job Worker] case-queue rebuild after reimbursements_sync: {e}")
+    return result
+
+
+def _run_reimbursements_case_sync(payload: dict | None = None) -> dict:
+    """Dashboard-enqueued Needs-case rebuild.
+
+    GET_LEDGER_DETAIL_VIEW_DATA eventType=Adjustments + inbound
+    shipped−received, then dedupe against paid fba_reimbursements.
+    Observe only — never opens Amazon cases.
+    """
+    from src.reimbursements.case_queue import sync_case_queue
+    from src.rules import SPAPI_CASE_QUEUE_DAYS
+
+    payload = payload or {}
+    try:
+        days = int(payload.get("days", SPAPI_CASE_QUEUE_DAYS))
+    except (TypeError, ValueError):
+        days = SPAPI_CASE_QUEUE_DAYS
+    if days < 1:
+        days = SPAPI_CASE_QUEUE_DAYS
+    days = min(days, 365)
+    fetch_ledger = payload.get("fetch_ledger", True)
+    if isinstance(fetch_ledger, str):
+        fetch_ledger = fetch_ledger.strip().lower() not in {"0", "false", "no"}
+    print(f"[Job Worker] reimbursements_case_sync days={days} fetch_ledger={bool(fetch_ledger)}")
+    return sync_case_queue(days=days, dry_run=False, fetch_ledger=bool(fetch_ledger))
 
 
 def _run_job_worker():
@@ -7485,6 +7554,8 @@ def _run_job_worker():
                 _run_sqp_sync()
             elif job_type == "reimbursements_sync":
                 _run_reimbursements_sync(payload)
+            elif job_type == "reimbursements_case_sync":
+                _run_reimbursements_case_sync(payload)
             else:
                 raise ValueError(f"Unknown job type: {job_type}")
 
