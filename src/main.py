@@ -7406,6 +7406,30 @@ def _ads_enqueue_kwargs(payload: dict | None) -> dict:
     }
 
 
+def _run_reimbursements_sync(payload: dict | None = None) -> dict:
+    """Dashboard-enqueued paid FBA reimbursements pull (chunked ≤30d).
+
+    Same GET_FBA_REIMBURSEMENTS_DATA window as nightly spapi_refresh —
+    default ``SPAPI_REIMBURSEMENTS_DAYS`` (90). Observe/ingest only.
+    """
+    from datetime import timedelta
+    from src.amazon_sp.reports import fetch_reimbursements
+    from src.rules import SPAPI_REIMBURSEMENTS_DAYS, amazon_as_of
+
+    payload = payload or {}
+    try:
+        days = int(payload.get("days", SPAPI_REIMBURSEMENTS_DAYS))
+    except (TypeError, ValueError):
+        days = SPAPI_REIMBURSEMENTS_DAYS
+    if days < 1:
+        days = SPAPI_REIMBURSEMENTS_DAYS
+    days = min(days, 365)
+    end = amazon_as_of()
+    start = end - timedelta(days=days)
+    print(f"[Job Worker] reimbursements_sync {start} → {end}")
+    return fetch_reimbursements(start, end)
+
+
 def _run_job_worker():
     """Poll agent_jobs for pending work and execute."""
     from src.db import get_client
@@ -7459,6 +7483,8 @@ def _run_job_worker():
                 _run_inventory_sync()
             elif job_type == "sqp_sync":
                 _run_sqp_sync()
+            elif job_type == "reimbursements_sync":
+                _run_reimbursements_sync(payload)
             else:
                 raise ValueError(f"Unknown job type: {job_type}")
 

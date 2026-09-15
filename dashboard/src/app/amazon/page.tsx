@@ -11,6 +11,8 @@ import { isConfigured } from "@/lib/supabase";
 import { amazonAsOf, windowStart } from "@/lib/as-of";
 import { Shield, TrendingUp, DollarSign, Eye, ShoppingCart, AlertTriangle } from "lucide-react";
 import { formatSoldScopeStars, formatSoldScopeVol } from "@/lib/soldscope-status";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 function fmtD(n: number) { return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -126,11 +128,16 @@ export default function AmazonOpsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Amazon Ops</h1>
-        <p className="text-sm text-muted-foreground">
-          Sales & Traffic (Brand Analytics) + Reimbursements
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Amazon Ops</h1>
+          <p className="text-sm text-muted-foreground">
+            Sales & Traffic (Brand Analytics) + Reimbursements
+          </p>
+        </div>
+        <Link href="/reimbursements">
+          <Button variant="outline" size="sm">Reimbursements desk</Button>
+        </Link>
       </div>
 
       {loadError ? (
@@ -284,7 +291,12 @@ export default function AmazonOpsPage() {
             <>
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">FBA Reimbursements (30d)</CardTitle>
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-sm font-medium">FBA Reimbursements (30d)</CardTitle>
+                    <Link href="/reimbursements">
+                      <Button variant="outline" size="sm">Reimbursements desk</Button>
+                    </Link>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-3 sm:grid-cols-3 mb-4">
