@@ -313,6 +313,35 @@ export function shortVariationLabel(
   return variationThemeLabel(theme) || shortOrganicChild(asin);
 }
 
+/** Size / pack / strength segments — drop when a scent/theme remains. */
+function isPackSizePart(part: string): boolean {
+  const p = part.trim();
+  if (!p) return true;
+  if (/\b(ounce|oz\.?|count|ct\.?)\b/i.test(p) && /\d/.test(p)) return true;
+  if (/\bpack of \d+\b/i.test(p)) return true;
+  if (/^\d+[-\s]?packs?$/i.test(p)) return true;
+  if (/^(extra strength|travel size|refill)$/i.test(p)) return true;
+  return false;
+}
+
+/**
+ * Glance label for a heatmap chip. Prefers the scent/theme segment,
+ * drops pack-size prefixes, then ellipsizes. Full string stays on hover.
+ */
+export function compactVariationLabel(
+  label: string | null | undefined,
+  opts?: { maxLen?: number },
+): string {
+  const maxLen = opts?.maxLen ?? 22;
+  const raw = String(label ?? "").trim();
+  if (!raw) return "";
+  const parts = raw.split("/").map((p) => p.trim()).filter(Boolean);
+  const keep = parts.filter((p) => !isPackSizePart(p));
+  const chosen = (keep.length > 0 ? keep : parts).join(" / ");
+  if (chosen.length <= maxLen) return chosen;
+  return `${chosen.slice(0, Math.max(1, maxLen - 1)).trimEnd()}…`;
+}
+
 export function variationSlotHoverTitle(slot: VariationChip): string {
   const rankBit = slot.rank != null ? ` · #${slot.rank}` : " · —";
   const deltaBit = slot.delta != null ? ` (${formatSignedDelta(slot.delta)})` : "";

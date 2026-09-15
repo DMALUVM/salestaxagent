@@ -20,6 +20,7 @@ import {
   childSlotHoverTitle,
   childSlotRank,
   shortOrganicChild,
+  compactVariationLabel,
   shortVariationLabel,
   heatmapDayChips,
   isTopTenOrganic,
@@ -556,9 +557,14 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.match(heat, /SortHeader/);
     assert.match(heat, /heatmapDayChips/);
     assert.match(heat, /winnerChildLabel/);
+    assert.match(heat, /compactVariationLabel/);
+    assert.match(heat, /VariationChipLine/);
+    assert.match(heat, /bg-zinc-950/);
+    assert.match(heat, /text-\[10px\]/);
     assert.match(heat, /data-full-width/);
     assert.match(heat, /table-fixed/);
     assert.match(heat, /organicAsin/);
+    assert.doesNotMatch(heat, /text-\[7px\]/);
     assert.doesNotMatch(heat, /KeywordChildSlot/);
     assert.doesNotMatch(heat, /child \{slot\.asin\}/);
     assert.doesNotMatch(heat, /variationChipsForDay/);
@@ -575,6 +581,21 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.equal(shortVariationLabel("B0CLHVCPL5", "Scent: Unscented"), "Unscented");
     assert.equal(shortVariationLabel("B0CLHVCPL5", null), "CPL5");
     assert.equal(shortVariationLabel("B0CLHVCPL5", ""), "CPL5");
+    assert.equal(
+      compactVariationLabel("1 Ounce (Pack of 1) / Vanilla & Sandalwood"),
+      "Vanilla & Sandalwood",
+    );
+    assert.equal(
+      compactVariationLabel("Vanilla & Sandalwood / Extra Strength"),
+      "Vanilla & Sandalwood",
+    );
+    assert.equal(compactVariationLabel("Sweet Orange / 3-pack"), "Sweet Orange");
+    assert.equal(compactVariationLabel("Unscented"), "Unscented");
+    assert.equal(compactVariationLabel(""), "");
+    assert.equal(
+      compactVariationLabel("Honey Lavender Chamomile Reserve Blend", { maxLen: 18 }),
+      "Honey Lavender Ch…",
+    );
   });
 
   test("variation chips show stored children only and Δ vs prior day", () => {
