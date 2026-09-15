@@ -4,7 +4,7 @@
  * Not paid cash. Paid SoT remains fba_reimbursements
  * (GET_FBA_REIMBURSEMENTS_DATA). This queue is rebuilt from:
  *   - GET_LEDGER_DETAIL_VIEW_DATA (eventType=Adjustments)
- *   - inbound shipped − received shorts
+ *   - inbound shipped − received shorts (SP-API live + Sellerboard CLOSED)
  * minus units already reimbursed for the same SKU + reason group.
  *
  * Amazon has no SP-API for open claims / eligibility. Do not fake
@@ -114,17 +114,57 @@ export const CASE_QUEUE_GAP =
   "Amazon has no SP-API for eligible / open claims. " +
   "GET_FBA_FULFILLMENT_INVENTORY_ADJUSTMENTS_DATA was deprecated 2023-01-31. " +
   "This queue is inferred from GET_LEDGER_DETAIL_VIEW_DATA (Adjustments) plus " +
-  "inbound shipped-vs-received, then minus paid fba_reimbursements. " +
-  "It is not invented from the paid desk.";
+  "inbound shipped-vs-received (SP-API live rows and Sellerboard CLOSED history), " +
+  "then minus paid fba_reimbursements. " +
+  "It is not invented from the paid desk. Dashboard never calls Sellerboard.";
 
 export const CASE_QUEUE_SOURCES = [
   "GET_LEDGER_DETAIL_VIEW_DATA (eventType=Adjustments)",
-  "FBA inbound v0 QuantityShipped − QuantityReceived",
+  "FBA inbound v0 QuantityShipped − QuantityReceived (SP-API live only)",
+  "Sellerboard CLOSED inbound shorts (Dana MCP → warehouse)",
   "GET_FBA_REIMBURSEMENTS_DATA (dedupe only)",
 ] as const;
 
-export type CaseStatus = "needs_case" | "already_reimbursed" | "found_offset";
-export type CaseSource = "ledger_adjustment" | "inbound_discrepancy";
+export const HOW_TO_FILE_INBOUND_TITLE = "How to file inbound shorts";
+
+export const HOW_TO_FILE_INBOUND =
+  "Lost inbound / inbound short is filed from the shipment tracker + IDR / lost inbound — " +
+  "not the ledger Reference ID damage path. Use the real FBA* shipment ID, FC, and " +
+  "shipped / received / short qty. Inbound shorts may come from Sellerboard CLOSED history " +
+  "when the SP-API warehouse has no CLOSED rows (live WORKING / IN_TRANSIT / RECEIVING only).";
+
+export const HOW_TO_FILE_INBOUND_STEPS = [
+  {
+    title: "Confirm CLOSED (or stale RECEIVING)",
+    body:
+      "Only CLOSED or stale RECEIVING (≥21 days) shorts are eligible. WORKING / IN_TRANSIT zeros do not alert.",
+  },
+  {
+    title: "Check Paid / Reimbursements first",
+    body: "Skip units already paid for Lost inbound on the same SKU.",
+  },
+  {
+    title: "File via shipment tracker + IDR / lost inbound",
+    body:
+      "Open the FBA* shipment tracker. File IDR / lost inbound with shipment ID, SKU/ASIN, FC, shipped, received, and short. Do not paste a ledger Reference ID as if it were a shipment.",
+  },
+  {
+    title: "Sellerboard CLOSED history",
+    body:
+      "SP-API inbound warehouse only keeps live WORKING / IN_TRANSIT / RECEIVING rows. Dana upserts Sellerboard CLOSED shorts into the warehouse. This desk reads fba_case_events — it does not call Sellerboard.",
+  },
+  {
+    title: "Dismiss after filing",
+    body:
+      "Clear the Overview alert once the Amazon case is submitted. Needs case is marked submitted (evidence kept). A new shipment / event_key still alerts.",
+  },
+] as const;
+
+export type CaseStatus = "needs_case" | "already_reimbursed" | "found_offset" | "case_submitted";
+export type CaseSource = "ledger_adjustment" | "inbound_discrepancy" | "sellerboard_inbound";
+export const INBOUND_SOURCES: readonly CaseSource[] = ["inbound_discrepancy", "sellerboard_inbound"];
+export const STATUS_CASE_SUBMITTED = "case_submitted";
+export const NEEDS_CASE_HREF = "/reimbursements?tab=eligible";
 
 export interface CaseEventRow {
   event_key: string;
@@ -135,6 +175,8 @@ export interface CaseEventRow {
   fnsku?: string | null;
   product_name?: string | null;
   quantity: number | null;
+  quantity_shipped?: number | null;
+  quantity_received?: number | null;
   reason: string | null;
   reason_group: string | null;
   fulfillment_center?: string | null;
@@ -150,6 +192,8 @@ export interface CaseEventRow {
   synced_at?: string | null;
   disposition?: string | null;
   classification_version?: string | null;
+  dismissed_at?: string | null;
+  dismissed_note?: string | null;
 }
 
 export type CaseSortKey =
@@ -199,6 +243,47 @@ export function caseDay(row: Pick<CaseEventRow, "event_date">): string {
 
 export function isNeedsCase(row: Pick<CaseEventRow, "status" | "quantity">): boolean {
   return row.status === "needs_case" && caseQty(row) > 0;
+}
+
+export function isCaseSubmitted(row: Pick<CaseEventRow, "status">): boolean {
+  return row.status === STATUS_CASE_SUBMITTED;
+}
+
+export function isInboundSource(source: string | null | undefined): boolean {
+  return source === "inbound_discrepancy" || source === "sellerboard_inbound";
+}
+
+export function sourceLabel(source: string | null | undefined): string {
+  if (source === "sellerboard_inbound") return "Sellerboard CLOSED";
+  if (source === "inbound_discrepancy") return "Inbound short";
+  return "Ledger adjustment";
+}
+
+export function inboundShipped(row: Pick<CaseEventRow, "quantity_shipped">): number | null {
+  if (row.quantity_shipped == null || row.quantity_shipped === "") return null;
+  const n = Number(row.quantity_shipped);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function inboundReceived(row: Pick<CaseEventRow, "quantity_received">): number | null {
+  if (row.quantity_received == null || row.quantity_received === "") return null;
+  const n = Number(row.quantity_received);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Overview alert: active Lost_Inbound short with a real FBA* id. */
+export function isActiveInboundAlert(row: CaseEventRow): boolean {
+  if (!isNeedsCase(row)) return false;
+  if (reasonGroup(row.reason, row.disposition) !== "lost_inbound") return false;
+  return Boolean(fbaShipmentId(row.shipment_id));
+}
+
+export function filterInboundAlerts(rows: CaseEventRow[]): CaseEventRow[] {
+  return rows.filter(isActiveInboundAlert);
+}
+
+export function filterSubmittedCases(rows: CaseEventRow[]): CaseEventRow[] {
+  return rows.filter(isCaseSubmitted);
 }
 
 export function isEligibleNeedsCase(row: CaseEventRow): boolean {
@@ -484,6 +569,8 @@ export interface ReesePackageEvent {
   sku: string | null;
   asin: string | null;
   quantity: number;
+  quantity_shipped?: number | null;
+  quantity_received?: number | null;
   reason: string | null;
   reason_group: string | null;
   fulfillment_center?: string | null;
@@ -533,6 +620,8 @@ export function buildReesePackage(
       sku: r.sku,
       asin: r.asin,
       quantity: caseQty(r),
+      quantity_shipped: inboundShipped(r),
+      quantity_received: inboundReceived(r),
       reason: r.reason,
       reason_group: r.reason_group,
       fulfillment_center: r.fulfillment_center,
@@ -587,6 +676,8 @@ export function renderReeseMarkdown(pkg: Omit<ReesePackage, "markdown">): string
     "",
     SELLER_CENTRAL_LINK_LIMIT,
     "",
+    HOW_TO_FILE_INBOUND,
+    "",
   ];
   const groups: Record<string, ReesePackageEvent[]> = {};
   for (const ev of pkg.events) {
@@ -606,17 +697,19 @@ export function renderReeseMarkdown(pkg: Omit<ReesePackage, "markdown">): string
     const rows = groups[key] || [];
     if (!rows.length) continue;
     lines.push(`## ${headings[key] ?? key} (${rows.length})`, "");
-    lines.push("| Date | SKU | ASIN | Qty | FC | Shipment | Reference ID | Est $ | Seller Central |");
-    lines.push("| --- | --- | --- | ---: | --- | --- | --- | ---: | --- |");
+    lines.push("| Date | SKU | ASIN | Qty | Shipped | Received | FC | Shipment | Reference ID | Est $ | Seller Central |");
+    lines.push("| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- | ---: | --- |");
     for (const r of rows) {
       const estCell = r.estimated_amount != null && r.estimated_amount !== ""
         ? Number(r.estimated_amount).toFixed(2)
         : "—";
       const shipment = fbaShipmentId(r.shipment_id) || "—";
       const ref = r.reference_id && r.reference_id !== shipment ? r.reference_id : "—";
+      const shipped = inboundShipped(r);
+      const received = inboundReceived(r);
       const fileCell = r.seller_central_url || IDR_INSTRUCTION;
       lines.push(
-        `| ${r.event_date} | \`${r.sku || "—"}\` | ${r.asin || "—"} | ${r.quantity} | ${r.fulfillment_center || "—"} | ${shipment} | ${ref} | ${estCell} | ${fileCell} |`,
+        `| ${r.event_date} | \`${r.sku || "—"}\` | ${r.asin || "—"} | ${r.quantity} | ${shipped ?? "—"} | ${received ?? "—"} | ${r.fulfillment_center || "—"} | ${shipment} | ${ref} | ${estCell} | ${fileCell} |`,
       );
     }
     lines.push("");

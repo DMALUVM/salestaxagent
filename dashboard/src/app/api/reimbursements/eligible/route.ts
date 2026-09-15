@@ -5,12 +5,15 @@ import {
   CASE_QUEUE_GAP,
   CASE_QUEUE_SOURCES,
   CLASSIFICATION_VERSION,
+  HOW_TO_FILE_INBOUND,
   MINI_RESYNC_HINT,
   SELLER_CENTRAL_LINK_LIMIT,
   defaultCaseRange,
   evaluateCaseQa,
   eventQueryBounds,
+  filterInboundAlerts,
   filterNeedsCase,
+  filterSubmittedCases,
   inCaseRange,
   normalizeCaseRow,
   recentNeedsCase,
@@ -19,7 +22,7 @@ import {
 import { alertWindow } from "@/lib/reimbursements-desk";
 
 const SELECT =
-  "event_key,source,event_date,sku,asin,fnsku,product_name,quantity,reason,reason_group,fulfillment_center,shipment_id,reference_id,disposition,estimated_amount,amount_basis,status,matched_reimbursement_id,matched_reimbursed_qty,seller_central_url,seller_central_link_kind,synced_at,classification_version";
+  "event_key,source,event_date,sku,asin,fnsku,product_name,quantity,quantity_shipped,quantity_received,reason,reason_group,fulfillment_center,shipment_id,reference_id,disposition,estimated_amount,amount_basis,status,matched_reimbursement_id,matched_reimbursed_qty,seller_central_url,seller_central_link_kind,synced_at,classification_version,dismissed_at,dismissed_note";
 
 const SELECT_FALLBACK =
   "event_key,source,event_date,sku,asin,fnsku,product_name,quantity,reason,reason_group,fulfillment_center,shipment_id,reference_id,disposition,estimated_amount,amount_basis,status,matched_reimbursement_id,matched_reimbursed_qty,seller_central_url,seller_central_link_kind,synced_at";
@@ -77,7 +80,8 @@ async function paginateCases(
  * GET /api/reimbursements/eligible — Needs-case queue (not paid cash).
  *
  * Warehouse SoT is fba_case_events, rebuilt from ledger Adjustments +
- * inbound shorts. GET_FBA_REIMBURSEMENTS_DATA (dedupe only) never
+ * inbound shorts (SP-API live + Sellerboard CLOSED upserts). Never
+ * calls Sellerboard. GET_FBA_REIMBURSEMENTS_DATA (dedupe only) never
  * seeds this queue. Query: start, end as YYYY-MM-DD (Amazon LA).
  * Defaults to last 90 closed LA days.
  */
@@ -107,6 +111,8 @@ export async function GET(request: Request) {
     const storedNeeds = windowRows.filter((r) => r.status === "needs_case" && Number(r.quantity ?? 0) > 0);
     const qa = evaluateCaseQa(storedNeeds);
     const needs = filterNeedsCase(windowRows);
+    const submitted = filterSubmittedCases(windowRows);
+    const inboundAlerts = filterInboundAlerts(needs);
     const alerts = recentNeedsCase(inFetch, asOf);
     const syncedAt = needs.reduce<string | null>((best, r) => {
       if (r.synced_at && (!best || r.synced_at > best)) return r.synced_at;
@@ -123,6 +129,7 @@ export async function GET(request: Request) {
       tableMissing: missing,
       gap: CASE_QUEUE_GAP,
       sources: CASE_QUEUE_SOURCES,
+      howToInbound: HOW_TO_FILE_INBOUND,
       sellerCentralLinkLimit: SELLER_CENTRAL_LINK_LIMIT,
       autoSubmit: false,
       classificationVersion: CLASSIFICATION_VERSION,
@@ -130,6 +137,8 @@ export async function GET(request: Request) {
       qa,
       syncedAt,
       rows: needs,
+      submittedRows: submitted,
+      inboundAlerts,
       alertRows: alerts,
     });
   } catch (e) {
@@ -145,6 +154,7 @@ export async function GET(request: Request) {
         tableMissing: false,
         gap: CASE_QUEUE_GAP,
         sources: CASE_QUEUE_SOURCES,
+        howToInbound: HOW_TO_FILE_INBOUND,
         sellerCentralLinkLimit: SELLER_CENTRAL_LINK_LIMIT,
         autoSubmit: false,
         classificationVersion: CLASSIFICATION_VERSION,
@@ -156,9 +166,11 @@ export async function GET(request: Request) {
         },
         syncedAt: null,
         rows: [],
+        submittedRows: [],
+        inboundAlerts: [],
         alertRows: [],
       });
     }
-    return Response.json({ error: message, rows: [], alertRows: [] }, { status: 500 });
+    return Response.json({ error: message, rows: [], submittedRows: [], inboundAlerts: [], alertRows: [] }, { status: 500 });
   }
 }

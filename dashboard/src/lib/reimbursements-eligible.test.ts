@@ -8,27 +8,35 @@ import {
   CASE_QUEUE_DEFAULT_DAYS,
   CASE_QUEUE_GAP,
   CASE_QUEUE_SOURCE_NOTE,
+  CASE_QUEUE_SOURCES,
   CLASSIFICATION_VERSION,
+  HOW_TO_FILE_INBOUND,
+  HOW_TO_FILE_INBOUND_STEPS,
   HOW_TO_FILE_INTRO,
   HOW_TO_FILE_NO_DEEP_LINK,
   HOW_TO_FILE_STEPS,
   HOW_TO_FILE_TITLE,
   IDR_INSTRUCTION,
+  NEEDS_CASE_HREF,
   NO_INBOUND_DISCREPANCIES,
   NOTIFY_BLOCK_COPY,
   REESE_AGENT_ID,
   REESE_AGENT_NAME,
   REESE_PACKAGE_CONTRACT,
   SELLER_CENTRAL_LINK_LIMIT,
+  STATUS_CASE_SUBMITTED,
   apiUrl,
   buildReesePackage,
   defaultCaseRange,
   evaluateCaseQa,
   fbaShipmentId,
+  filterInboundAlerts,
   filterNeedsCase,
+  filterSubmittedCases,
   formatCasePacket,
   inCaseRange,
   inboundEmptyCopy,
+  isActiveInboundAlert,
   isFbaShipmentId,
   isNeedsCase,
   normalizeCaseRow,
@@ -39,6 +47,7 @@ import {
   searchCaseRows,
   sellerCentralHref,
   sortCaseRows,
+  sourceLabel,
   summarizeCases,
   type CaseEventRow,
 } from "./reimbursements-eligible";
@@ -354,5 +363,110 @@ describe("Reese package + page contract", () => {
     assert.match(pyQueue, /Do not invent Eligible rows from paid-only/);
     assert.match(api, /GET_FBA_REIMBURSEMENTS_DATA \(dedupe only/);
     assert.doesNotMatch(api, /from\("fba_reimbursements"\)/);
+  });
+
+  test("Sellerboard CLOSED is a warehouse source — dashboard never calls Sellerboard", () => {
+    assert.ok(CASE_QUEUE_SOURCES.some((s) => /Sellerboard CLOSED/.test(s)));
+    assert.match(HOW_TO_FILE_INBOUND, /Sellerboard CLOSED/);
+    assert.match(HOW_TO_FILE_INBOUND, /shipment tracker/);
+    assert.match(HOW_TO_FILE_INBOUND, /Reference ID/);
+    assert.ok(HOW_TO_FILE_INBOUND_STEPS.some((s) => /Sellerboard CLOSED/.test(s.title + s.body)));
+    assert.doesNotMatch(ui, /sellerboard\.(com|io)/i);
+    assert.match(ui, /sourceLabel/);
+    assert.match(ui, /HOW_TO_FILE_INBOUND/);
+    assert.match(ui, /Shipped/);
+    assert.match(ui, /Received/);
+    assert.match(ui, /HOW_TO_FILE_INBOUND/);
+    assert.match(page, /does not auto-file/);
+    const alertsApi = readFileSync(path.join(here, "../app/api/reimbursements/inbound-alerts/route.ts"), "utf8");
+    assert.doesNotMatch(alertsApi, /sellerboard\.(com|io)|oauth/i);
+    assert.match(alertsApi, /fba_case_events/);
+    assert.match(alertsApi, /case_submitted/);
+    assert.match(alertsApi, /amazonWrite:\s*false/);
+    const overview = readFileSync(path.join(here, "../app/page.tsx"), "utf8");
+    assert.match(overview, /InboundDiscrepancyAlerts/);
+    const alertUi = readFileSync(path.join(here, "../components/inbound-discrepancy-alerts.tsx"), "utf8");
+    assert.match(alertUi, /NEEDS_CASE_HREF|\/reimbursements\?tab=eligible/);
+    assert.match(alertUi, /Dismiss/);
+    assert.doesNotMatch(alertUi, /Sellerise/);
+  });
+});
+
+describe("inbound alerts + dismiss", () => {
+  test("active Lost_Inbound with FBA id alerts; submitted / transit zeros do not", () => {
+    const open = row({
+      event_key: "inbound|FBA19K98F8VN|SKU-C",
+      event_date: "2026-08-20",
+      source: "sellerboard_inbound",
+      reason: "Lost_Inbound",
+      reason_group: "lost_inbound",
+      shipment_id: "FBA19K98F8VN",
+      quantity: 77,
+      quantity_shipped: 540,
+      quantity_received: 463,
+      fulfillment_center: "SMF3",
+    });
+    const submitted = row({
+      event_key: "inbound|FBA19OLD|SKU-C",
+      event_date: "2026-08-01",
+      source: "sellerboard_inbound",
+      reason: "Lost_Inbound",
+      reason_group: "lost_inbound",
+      shipment_id: "FBA19OLD",
+      status: STATUS_CASE_SUBMITTED,
+      quantity: 3,
+    });
+    const ledgerNoFba = row({
+      event_key: "adj|x",
+      event_date: "2026-08-02",
+      reason: "Lost_Inbound",
+      reason_group: "lost_inbound",
+      shipment_id: null,
+      quantity: 2,
+    });
+    const paid = row({
+      event_key: "inbound|FBA19PAID|SKU-C",
+      event_date: "2026-08-03",
+      source: "inbound_discrepancy",
+      reason: "Lost_Inbound",
+      shipment_id: "FBA19PAID",
+      status: "already_reimbursed",
+      quantity: 0,
+    });
+    assert.equal(isActiveInboundAlert(open), true);
+    assert.equal(isActiveInboundAlert(submitted), false);
+    assert.equal(isActiveInboundAlert(ledgerNoFba), false);
+    assert.equal(isActiveInboundAlert(paid), false);
+    assert.deepEqual(filterInboundAlerts([open, submitted, ledgerNoFba, paid]).map((r) => r.event_key), [
+      open.event_key,
+    ]);
+    assert.equal(filterNeedsCase([open, submitted]).length, 1);
+    assert.equal(filterSubmittedCases([open, submitted])[0].event_key, submitted.event_key);
+    assert.equal(sourceLabel("sellerboard_inbound"), "Sellerboard CLOSED");
+    assert.equal(sourceLabel("inbound_discrepancy"), "Inbound short");
+  });
+
+  test("new event_key still alerts after a dismiss", () => {
+    const dismissed = row({
+      event_key: "inbound|FBA19OLD|SKU-C",
+      event_date: "2026-08-01",
+      source: "sellerboard_inbound",
+      reason: "Lost_Inbound",
+      shipment_id: "FBA19OLD",
+      status: STATUS_CASE_SUBMITTED,
+      quantity: 3,
+    });
+    const fresh = row({
+      event_key: "inbound|FBA19NEW|SKU-C",
+      event_date: "2026-09-01",
+      source: "sellerboard_inbound",
+      reason: "Lost_Inbound",
+      shipment_id: "FBA19NEW",
+      quantity: 2,
+      fulfillment_center: "SMF3",
+    });
+    const open = filterInboundAlerts([dismissed, fresh]);
+    assert.deepEqual(open.map((r) => r.shipment_id), ["FBA19NEW"]);
+    assert.equal(NEEDS_CASE_HREF, "/reimbursements?tab=eligible");
   });
 });

@@ -9,10 +9,14 @@ Sources
 1. fba_inventory_adjustments — GET_LEDGER_DETAIL_VIEW_DATA Adjustments
    (Damaged_Warehouse / Lost_Warehouse / Lost_Inbound, negative qty)
 2. inventory_inbound_shipments + items — shipped > received after close
+   (SP-API live WORKING / IN_TRANSIT / RECEIVING only — no CLOSED history)
+3. sellerboard_inbound_discrepancies — Dana MCP upserts Sellerboard CLOSED
+   shorts (real FBA* shipment_ids). Dashboard never calls Sellerboard.
 
 Dedupe: units already paid in fba_reimbursements for the same SKU + reason
 group, with approval on/after the event (plus a 7-day settle pad), leave
-the Needs-case list.
+the Needs-case list. Same FBA shipment_id + SKU from SP-API and Sellerboard
+collapses to one row.
 
 This module never opens Seller Central cases.
 """
@@ -123,6 +127,7 @@ NO_INBOUND_DISCREPANCIES = (
 
 CLOSED_INBOUND = frozenset({"CLOSED"})
 STALE_INBOUND = frozenset({"RECEIVING", "DELIVERED", "CHECKED_IN"})
+OPEN_INBOUND = frozenset({"WORKING", "IN_TRANSIT", "SHIPPED", "READY_TO_SHIP"})
 STALE_INBOUND_DAYS = 21
 FOUND_OFFSET_DAYS = 30
 PAID_LOOKAHEAD_DAYS = 90
@@ -131,9 +136,20 @@ PAID_SETTLE_PAD_DAYS = 7
 STATUS_NEEDS_CASE = "needs_case"
 STATUS_ALREADY_REIMBURSED = "already_reimbursed"
 STATUS_FOUND_OFFSET = "found_offset"
+STATUS_CASE_SUBMITTED = "case_submitted"
 
 SOURCE_LEDGER = "ledger_adjustment"
 SOURCE_INBOUND = "inbound_discrepancy"
+SOURCE_SELLERBOARD = "sellerboard_inbound"
+INBOUND_SOURCES = frozenset({SOURCE_INBOUND, SOURCE_SELLERBOARD})
+
+HOW_TO_FILE_INBOUND = (
+    "Lost inbound / inbound short is filed from the shipment tracker + "
+    "IDR / lost inbound — not the ledger Reference ID damage path. "
+    "Use the real FBA* shipment ID, FC, and shipped / received / short qty. "
+    "Inbound shorts may come from Sellerboard CLOSED history when the SP-API "
+    "warehouse has no CLOSED rows (live WORKING / IN_TRANSIT / RECEIVING only)."
+)
 
 AMOUNT_BASIS_RECENT = "recent_reimbursement"
 AMOUNT_BASIS_UNKNOWN = "unknown"
@@ -258,6 +274,8 @@ def inbound_discrepancies(
             "fnsku": None,
             "product_name": None,
             "quantity": short,
+            "quantity_shipped": shipped,
+            "quantity_received": received,
             "reason": "Lost_Inbound",
             "reason_group": "lost_inbound",
             "fulfillment_center": fc,
@@ -269,6 +287,184 @@ def inbound_discrepancies(
             "seller_central_link_kind": kind,
         })
     return out
+
+
+def _int_or_none(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def sellerboard_inbound_discrepancies(
+    rows: Iterable[dict],
+    as_of: date,
+    start: date,
+    end: date,
+) -> list[dict]:
+    """CLOSED (or stale receiving) Sellerboard shorts → Lost_Inbound events.
+
+    Dana upserts ``sellerboard_inbound_discrepancies`` (or already-shaped
+    ``fba_case_events`` with source sellerboard_inbound). WORKING / IN_TRANSIT
+    zeros are never case-eligible.
+    """
+    out: list[dict] = []
+    for raw in rows:
+        sid = str(raw.get("shipment_id") or "")
+        sku = normalize_sku(raw.get("sku"))
+        if sku == "UNKNOWN" and not sid:
+            continue
+        status = (raw.get("shipment_status") or "CLOSED").upper()
+        ship = {
+            "shipment_status": status,
+            "last_updated_at": raw.get("last_updated_at") or raw.get("closed_at"),
+            "received_at": raw.get("received_at") or raw.get("closed_at"),
+        }
+        if not inbound_ready(ship, as_of):
+            continue
+        shipped = _int_or_none(raw.get("quantity_shipped"))
+        received = _int_or_none(raw.get("quantity_received"))
+        short = _int_or_none(raw.get("quantity_short"))
+        if short is None:
+            qty = _int_or_none(raw.get("quantity"))
+            if shipped is not None and received is not None:
+                short = shipped - received
+            elif qty is not None and qty > 0:
+                short = qty
+            else:
+                continue
+        if short <= 0:
+            continue
+        if shipped is None and received is not None:
+            shipped = received + short
+        if received is None and shipped is not None:
+            received = shipped - short
+        event_day = (
+            _parse_day(raw.get("event_date"))
+            or _parse_day(raw.get("closed_at"))
+            or _parse_day(raw.get("last_updated_at"))
+        )
+        if event_day is None or event_day < start or event_day > end:
+            continue
+        fba = fba_shipment_id(sid)
+        if not fba:
+            continue
+        url, kind = seller_central_link(fba, None)
+        fc = raw.get("fulfillment_center") or raw.get("destination_fc")
+        out.append({
+            "event_key": inbound_event_key(fba, sku),
+            "source": SOURCE_SELLERBOARD,
+            "event_date": event_day,
+            "sku": sku,
+            "asin": raw.get("asin") or None,
+            "fnsku": raw.get("fnsku") or None,
+            "product_name": raw.get("product_name") or None,
+            "quantity": short,
+            "quantity_shipped": shipped,
+            "quantity_received": received,
+            "reason": "Lost_Inbound",
+            "reason_group": "lost_inbound",
+            "fulfillment_center": fc,
+            "shipment_id": fba,
+            "reference_id": None,
+            "disposition": None,
+            "classification_version": CLASSIFICATION_VERSION,
+            "seller_central_url": url,
+            "seller_central_link_kind": kind,
+        })
+    return out
+
+
+def inbound_source_key(row: dict) -> tuple[str, str] | None:
+    sid = fba_shipment_id(row.get("shipment_id"))
+    sku = normalize_sku(row.get("sku"))
+    if not sid or sku == "UNKNOWN":
+        return None
+    return sid, sku
+
+
+def merge_inbound_sources(
+    spapi: Iterable[dict],
+    sellerboard: Iterable[dict],
+) -> list[dict]:
+    """One Lost_Inbound row per FBA shipment + SKU.
+
+    Prefer SP-API ``inbound_discrepancy`` when both exist; keep Sellerboard
+    when SP-API warehouse has no CLOSED row for that shipment.
+    """
+    by_key: dict[tuple[str, str], dict] = {}
+    for ev in sellerboard:
+        key = inbound_source_key(ev)
+        if key:
+            by_key[key] = ev
+    for ev in spapi:
+        key = inbound_source_key(ev)
+        if not key:
+            continue
+        existing = by_key.get(key)
+        row = dict(ev)
+        if existing:
+            row.setdefault("quantity_shipped", existing.get("quantity_shipped"))
+            row.setdefault("quantity_received", existing.get("quantity_received"))
+            if not row.get("fulfillment_center"):
+                row["fulfillment_center"] = existing.get("fulfillment_center")
+            if not row.get("asin"):
+                row["asin"] = existing.get("asin")
+        by_key[key] = row
+    return list(by_key.values())
+
+
+def existing_sellerboard_rows(existing: Iterable[dict]) -> list[dict]:
+    """Dana-upserted fba_case_events with source sellerboard_inbound."""
+    out: list[dict] = []
+    for row in existing:
+        if row.get("source") != SOURCE_SELLERBOARD:
+            continue
+        out.append(row)
+    return out
+
+
+def preserve_submitted_status(
+    events: list[dict],
+    existing: Iterable[dict],
+) -> list[dict]:
+    """Keep Dave's case_submitted dismiss across Mini rebuilds.
+
+    Paid / found-offset wins. New event_keys (new shipment) stay Needs case.
+    """
+    prior: dict[str, dict] = {}
+    for row in existing:
+        key = str(row.get("event_key") or "").strip()
+        if key and row.get("status") == STATUS_CASE_SUBMITTED:
+            prior[key] = row
+    out: list[dict] = []
+    for ev in events:
+        row = dict(ev)
+        key = str(row.get("event_key") or "").strip()
+        saved = prior.get(key)
+        if saved and row.get("status") == STATUS_NEEDS_CASE:
+            row["status"] = STATUS_CASE_SUBMITTED
+            row["dismissed_at"] = saved.get("dismissed_at")
+            row["dismissed_note"] = saved.get("dismissed_note")
+        out.append(row)
+    return out
+
+
+def is_active_inbound_alert(row: dict) -> bool:
+    """Overview alert: CLOSED/stale inbound short, not submitted / paid / zero."""
+    if row.get("status") != STATUS_NEEDS_CASE:
+        return False
+    if int(row.get("quantity") or 0) <= 0:
+        return False
+    if reason_group(row.get("reason"), row.get("disposition")) != "lost_inbound":
+        return False
+    source = row.get("source")
+    if source in INBOUND_SOURCES:
+        return bool(fba_shipment_id(row.get("shipment_id")))
+    # Ledger Lost_Inbound with a real FBA* id is the same discrepancy.
+    return bool(fba_shipment_id(row.get("shipment_id")))
 
 
 def _unreconciled(row: dict) -> int | None:
@@ -528,13 +724,19 @@ def build_case_events(
     start: date,
     end: date,
     as_of: date | None = None,
+    sellerboard_rows: Iterable[dict] | None = None,
+    existing_events: Iterable[dict] | None = None,
 ) -> list[dict]:
     """Pure builder — no I/O. Returns rows ready for fba_case_events."""
     as_of = as_of or end
     adj_list = list(adjustments)
     paid_list = list(reimbursements)
+    existing_list = list(existing_events or [])
     ledger = adjustment_candidates(adj_list, start, end)
-    inbound = inbound_discrepancies(shipments, shipment_items, as_of, start, end)
+    spapi_inbound = inbound_discrepancies(shipments, shipment_items, as_of, start, end)
+    sb_raw = list(sellerboard_rows or []) + existing_sellerboard_rows(existing_list)
+    sb_inbound = sellerboard_inbound_discrepancies(sb_raw, as_of, start, end)
+    inbound = merge_inbound_sources(spapi_inbound, sb_inbound)
     # Prefer inbound row when the same FBA id + SKU also appears as Lost_Inbound
     # on the ledger — one Needs-case line, shipment link kept.
     inbound_keys = {(e["shipment_id"], e["sku"]) for e in inbound if e.get("shipment_id")}
@@ -547,6 +749,7 @@ def build_case_events(
     merged = apply_found_offsets(ledger_kept + inbound, found_offsets(adj_list))
     merged = _enrich_asin(merged, adj_list, paid_list)
     out = apply_paid_dedupe(merged, paid_list)
+    out = preserve_submitted_status(out, existing_list)
     for row in out:
         row["classification_version"] = CLASSIFICATION_VERSION
         row["reason_group"] = reason_group(row.get("reason"), row.get("disposition"))
@@ -595,7 +798,7 @@ def orphan_needs_case_keys(existing: Iterable[dict]) -> list[str]:
         key = str(row.get("event_key") or "").strip()
         if not key:
             continue
-        if row.get("source") == SOURCE_INBOUND and reason_group(row.get("reason")) == "lost_inbound":
+        if row.get("source") in INBOUND_SOURCES and reason_group(row.get("reason")) == "lost_inbound":
             continue
         entry = lookup_reason(row.get("reason"))
         if entry and entry.eligible:
@@ -704,6 +907,16 @@ def sync_case_queue(
         log.warning("Inbound tables unavailable: %s", e)
         shipments, items = [], []
     try:
+        sellerboard = _with_one_retry(fetch_all, "sellerboard_inbound_discrepancies")
+    except Exception as e:
+        log.warning("sellerboard_inbound_discrepancies unavailable: %s", e)
+        sellerboard = []
+    try:
+        existing_events = _with_one_retry(fetch_all, "fba_case_events")
+    except Exception as e:
+        log.warning("fba_case_events unavailable for Sellerboard/dismiss merge: %s", e)
+        existing_events = []
+    try:
         paid = _with_one_retry(fetch_all, "fba_reimbursements")
     except Exception as e:
         log.warning("fba_reimbursements unavailable: %s", e)
@@ -717,6 +930,8 @@ def sync_case_queue(
         start=start,
         end=end,
         as_of=end,
+        sellerboard_rows=sellerboard,
+        existing_events=existing_events,
     )
     negatives = negative_adjustments_in_window(adjustments, start, end)
     qa = evaluate_queue_qa(

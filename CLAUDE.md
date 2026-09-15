@@ -76,6 +76,12 @@ values are ledger transaction IDs, not FBA shipment IDs. Do not apply
 `migration_rls_lockdown.sql` for this work. After rebuild, delete any
 stale D/O `needs_case` orphans left by upsert-only.
 
+Sellerboard CLOSED inbound shorts are a durable Needs-case source:
+Dana upserts `sellerboard_inbound_discrepancies` (MCP, not Vercel).
+SP-API inbound warehouse has no CLOSED history. Dashboard reads
+`fba_case_events` only. Dismissing an Overview inbound alert sets
+`status=case_submitted` (evidence kept).
+
 ## Source Quarantine
 
 `amazon_custom_combined_tax` and `amazon_tax_report` are quarantined.
