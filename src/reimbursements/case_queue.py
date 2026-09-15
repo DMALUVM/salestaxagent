@@ -1,0 +1,540 @@
+"""Build the FBA Needs-case queue from live warehouse sources.
+
+Eligible / open cases are inferred. Amazon has no SP-API for "open claims"
+or reimbursement eligibility. Do not invent Eligible rows from paid-only
+GET_FBA_REIMBURSEMENTS_DATA.
+
+Sources
+-------
+1. fba_inventory_adjustments — GET_LEDGER_DETAIL_VIEW_DATA Adjustments
+   (Damaged_Warehouse / Lost_Warehouse / Lost_Inbound, negative qty)
+2. inventory_inbound_shipments + items — shipped > received after close
+
+Dedupe: units already paid in fba_reimbursements for the same SKU + reason
+group, with approval on/after the event (plus a 7-day settle pad), leave
+the Needs-case list.
+
+This module never opens Seller Central cases.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from datetime import date, datetime, timedelta, timezone
+from typing import Iterable
+
+from src.sku_normalize import normalize_sku
+
+log = logging.getLogger(__name__)
+
+FBA_SHIPMENT_RE = re.compile(r"^FBA[A-Z0-9]+$", re.IGNORECASE)
+
+SC_SUPPORT_HUB = "https://sellercentral.amazon.com/help/hub/contact-us"
+SC_INBOUND_SHIPMENT = (
+    "https://sellercentral.amazon.com/gp/fba/inbound-shipment-workflow/index.html"
+    "?shipmentId={shipment_id}"
+)
+SC_LEDGER_HUB = "https://sellercentral.amazon.com/reportcentral/INVENTORY_LEDGER/1"
+
+# Honest: Amazon does not publish a stable pre-filled "open this case" URL.
+SELLER_CENTRAL_LINK_LIMIT = (
+    "No stable Seller Central deep link opens a pre-filled FBA case. "
+    "FBA shipment IDs link to the inbound shipment tracker. "
+    "Everything else lands on Get Support (help/hub/contact-us). "
+    "Dave submits; this desk never auto-files."
+)
+
+CLOSED_INBOUND = frozenset({"CLOSED"})
+STALE_INBOUND = frozenset({"RECEIVING", "DELIVERED", "CHECKED_IN"})
+STALE_INBOUND_DAYS = 21
+FOUND_OFFSET_DAYS = 30
+PAID_LOOKAHEAD_DAYS = 90
+PAID_SETTLE_PAD_DAYS = 7
+
+ELIGIBLE_REASON_GROUPS = frozenset({
+    "warehouse_damage",
+    "lost_inbound",
+    "lost_warehouse",
+})
+
+STATUS_NEEDS_CASE = "needs_case"
+STATUS_ALREADY_REIMBURSED = "already_reimbursed"
+STATUS_FOUND_OFFSET = "found_offset"
+
+SOURCE_LEDGER = "ledger_adjustment"
+SOURCE_INBOUND = "inbound_discrepancy"
+
+AMOUNT_BASIS_RECENT = "recent_reimbursement"
+AMOUNT_BASIS_UNKNOWN = "unknown"
+
+
+def _reason_key(reason: str | None) -> str:
+    return (reason or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def reason_group(reason: str | None) -> str:
+    """Map Amazon ledger / reimbursements reason → desk group."""
+    key = _reason_key(reason)
+    if key in {
+        "damaged_warehouse", "warehouse_damage", "warehousedamage",
+        "damaged_inbound", "damagedinbound",
+    }:
+        return "warehouse_damage"
+    if key in {"lost_inbound", "lostinbound", "inbound_lost", "m"}:
+        return "lost_inbound"
+    if key in {"lost_warehouse", "lostwarehouse", "warehouse_lost"}:
+        return "lost_warehouse"
+    return "other"
+
+
+def is_found_reason(reason: str | None) -> bool:
+    key = _reason_key(reason)
+    return key in {"found", "found_warehouse", "foundwarehouse", "7"} or key.startswith("found")
+
+
+def is_eligible_loss(reason: str | None, quantity: int) -> bool:
+    return quantity < 0 and reason_group(reason) in ELIGIBLE_REASON_GROUPS
+
+
+def inbound_event_key(shipment_id: str, sku: str) -> str:
+    return f"inbound|{shipment_id}|{normalize_sku(sku)}"
+
+
+def _parse_day(value: object) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return dt.date()
+    except ValueError:
+        return None
+
+
+def _fba_id(value: str | None) -> str | None:
+    raw = (value or "").strip().upper()
+    if FBA_SHIPMENT_RE.match(raw):
+        return raw
+    return None
+
+
+def seller_central_link(shipment_id: str | None, reference_id: str | None) -> tuple[str, str]:
+    """Best available SC URL and a documented kind.
+
+    Inbound FBA ids → shipment tracker. Otherwise Get Support hub.
+    """
+    sid = _fba_id(shipment_id) or _fba_id(reference_id)
+    if sid:
+        return SC_INBOUND_SHIPMENT.format(shipment_id=sid), "inbound_shipment"
+    return SC_SUPPORT_HUB, "support_hub"
+
+
+def inbound_ready(ship: dict, as_of: date) -> bool:
+    """True when a short-receive is case-eligible (not still in transit)."""
+    status = (ship.get("shipment_status") or "").upper()
+    if status in CLOSED_INBOUND:
+        return True
+    if status not in STALE_INBOUND:
+        return False
+    updated = _parse_day(ship.get("last_updated_at") or ship.get("received_at"))
+    if not updated:
+        return False
+    return (as_of - updated).days >= STALE_INBOUND_DAYS
+
+
+def inbound_discrepancies(
+    shipments: Iterable[dict],
+    items: Iterable[dict],
+    as_of: date,
+    start: date,
+    end: date,
+) -> list[dict]:
+    """CLOSED (or stale receiving) rows where shipped > received."""
+    ships = {str(s.get("shipment_id") or ""): s for s in shipments if s.get("shipment_id")}
+    out: list[dict] = []
+    for it in items:
+        sid = str(it.get("shipment_id") or "")
+        ship = ships.get(sid)
+        if not ship or not inbound_ready(ship, as_of):
+            continue
+        try:
+            shipped = int(it.get("quantity_shipped") or 0)
+            received = int(it.get("quantity_received") or 0)
+        except (TypeError, ValueError):
+            continue
+        short = shipped - received
+        if short <= 0:
+            continue
+        event_day = (
+            _parse_day(ship.get("closed_at"))
+            or _parse_day(ship.get("received_at"))
+            or _parse_day(ship.get("last_updated_at"))
+            or _parse_day(ship.get("shipped_at"))
+        )
+        if event_day is None or event_day < start or event_day > end:
+            continue
+        sku = normalize_sku(it.get("sku"))
+        fc = ship.get("destination_fc")
+        ref = sid
+        url, kind = seller_central_link(sid, None)
+        out.append({
+            "event_key": inbound_event_key(sid, sku),
+            "source": SOURCE_INBOUND,
+            "event_date": event_day,
+            "sku": sku,
+            "asin": it.get("asin") or None,
+            "fnsku": None,
+            "product_name": None,
+            "quantity": short,
+            "reason": "Lost_Inbound",
+            "reason_group": "lost_inbound",
+            "fulfillment_center": fc,
+            "shipment_id": sid,
+            "reference_id": ref,
+            "disposition": None,
+            "seller_central_url": url,
+            "seller_central_link_kind": kind,
+        })
+    return out
+
+
+def adjustment_candidates(adjustments: Iterable[dict], start: date, end: date) -> list[dict]:
+    """Negative eligible-reason ledger adjustments in the window."""
+    out: list[dict] = []
+    for row in adjustments:
+        day = _parse_day(row.get("event_date"))
+        if day is None or day < start or day > end:
+            continue
+        try:
+            qty = int(row.get("quantity") or 0)
+        except (TypeError, ValueError):
+            continue
+        reason = row.get("reason")
+        if not is_eligible_loss(reason, qty):
+            continue
+        sku = normalize_sku(row.get("sku"))
+        ref = row.get("reference_id")
+        sid = _fba_id(ref)
+        url, kind = seller_central_link(sid, ref)
+        out.append({
+            "event_key": row.get("event_key") or "",
+            "source": SOURCE_LEDGER,
+            "event_date": day,
+            "sku": sku,
+            "asin": row.get("asin"),
+            "fnsku": row.get("fnsku"),
+            "product_name": row.get("product_name"),
+            "quantity": abs(qty),
+            "reason": reason or "Unknown",
+            "reason_group": reason_group(reason),
+            "fulfillment_center": row.get("fulfillment_center"),
+            "shipment_id": sid,
+            "reference_id": ref,
+            "disposition": row.get("disposition"),
+            "seller_central_url": url,
+            "seller_central_link_kind": kind,
+        })
+    return out
+
+
+def found_offsets(adjustments: Iterable[dict]) -> list[tuple[date, str, str, int]]:
+    """(date, sku, fc, qty) for Found / Found_Warehouse (positive qty)."""
+    out: list[tuple[date, str, str, int]] = []
+    for row in adjustments:
+        if not is_found_reason(row.get("reason")):
+            continue
+        try:
+            qty = int(row.get("quantity") or 0)
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0:
+            continue
+        day = _parse_day(row.get("event_date"))
+        if day is None:
+            continue
+        out.append((
+            day,
+            normalize_sku(row.get("sku")),
+            (row.get("fulfillment_center") or "").upper(),
+            qty,
+        ))
+    return out
+
+
+def apply_found_offsets(events: list[dict], found: list[tuple[date, str, str, int]]) -> list[dict]:
+    """Reduce lost/damage qty when a later Found lands for the same SKU+FC."""
+    pool = [{"day": d, "sku": s, "fc": f, "qty": q} for d, s, f, q in found]
+    out: list[dict] = []
+    for ev in sorted(events, key=lambda e: (e["event_date"], e["event_key"])):
+        left = int(ev["quantity"])
+        sku = ev["sku"]
+        fc = (ev.get("fulfillment_center") or "").upper()
+        for item in pool:
+            if left <= 0:
+                break
+            if item["qty"] <= 0 or item["sku"] != sku or item["fc"] != fc:
+                continue
+            delta = (item["day"] - ev["event_date"]).days
+            if delta < 0 or delta > FOUND_OFFSET_DAYS:
+                continue
+            take = min(left, item["qty"])
+            item["qty"] -= take
+            left -= take
+        row = dict(ev)
+        if left <= 0:
+            row["quantity"] = 0
+            row["status"] = STATUS_FOUND_OFFSET
+            row["matched_reimbursement_id"] = None
+            row["matched_reimbursed_qty"] = 0
+        else:
+            row["quantity"] = left
+        out.append(row)
+    return out
+
+
+def _paid_units(row: dict) -> int:
+    total = int(row.get("qty_total") or 0)
+    if total != 0:
+        return max(total, 0)
+    return max(int(row.get("qty_cash") or 0) + int(row.get("qty_inventory") or 0), 0)
+
+
+def paid_pool(reimbursements: Iterable[dict]) -> list[dict]:
+    """Positive paid units grouped for consumption."""
+    pool: list[dict] = []
+    for row in reimbursements:
+        group = reason_group(row.get("reason"))
+        if group not in ELIGIBLE_REASON_GROUPS:
+            continue
+        units = _paid_units(row)
+        if units <= 0:
+            continue
+        day = _parse_day(row.get("approval_date"))
+        if day is None:
+            continue
+        pool.append({
+            "sku": normalize_sku(row.get("sku")),
+            "group": group,
+            "day": day,
+            "qty": units,
+            "reimbursement_id": row.get("reimbursement_id"),
+            "amount_per_unit": float(row.get("amount_per_unit") or 0) or None,
+            "amount_total": float(row.get("amount_total") or 0),
+        })
+    return pool
+
+
+def estimate_unit_rate(paid: list[dict], sku: str, group: str) -> tuple[float | None, str]:
+    """Recent positive amount_per_unit for the same SKU (prefer same group)."""
+    matches = [
+        p for p in paid
+        if p["sku"] == sku and p.get("amount_per_unit") and p["amount_per_unit"] > 0
+    ]
+    same = [p for p in matches if p["group"] == group]
+    use = same or matches
+    if not use:
+        return None, AMOUNT_BASIS_UNKNOWN
+    use.sort(key=lambda p: p["day"], reverse=True)
+    return float(use[0]["amount_per_unit"]), AMOUNT_BASIS_RECENT
+
+
+def apply_paid_dedupe(events: list[dict], reimbursements: Iterable[dict]) -> list[dict]:
+    """Subtract paid units; leftover stays Needs case."""
+    pool = paid_pool(reimbursements)
+    out: list[dict] = []
+    for ev in sorted(events, key=lambda e: (e["event_date"], e["event_key"])):
+        if ev.get("status") == STATUS_FOUND_OFFSET:
+            ev.setdefault("estimated_amount", None)
+            ev.setdefault("amount_basis", AMOUNT_BASIS_UNKNOWN)
+            ev.setdefault("matched_reimbursement_id", None)
+            ev.setdefault("matched_reimbursed_qty", 0)
+            out.append(ev)
+            continue
+        left = int(ev["quantity"])
+        matched_id = None
+        matched_qty = 0
+        sku = ev["sku"]
+        group = ev["reason_group"]
+        event_day: date = ev["event_date"]
+        for item in pool:
+            if left <= 0:
+                break
+            if item["qty"] <= 0 or item["sku"] != sku or item["group"] != group:
+                continue
+            earliest = event_day - timedelta(days=PAID_SETTLE_PAD_DAYS)
+            latest = event_day + timedelta(days=PAID_LOOKAHEAD_DAYS)
+            if item["day"] < earliest or item["day"] > latest:
+                continue
+            take = min(left, item["qty"])
+            item["qty"] -= take
+            left -= take
+            matched_qty += take
+            matched_id = item.get("reimbursement_id") or matched_id
+        rate, basis = estimate_unit_rate(pool, sku, group)
+        row = dict(ev)
+        row["matched_reimbursement_id"] = matched_id
+        row["matched_reimbursed_qty"] = matched_qty
+        if left <= 0:
+            row["quantity"] = 0
+            row["status"] = STATUS_ALREADY_REIMBURSED
+            row["estimated_amount"] = None
+            row["amount_basis"] = AMOUNT_BASIS_UNKNOWN
+        else:
+            row["quantity"] = left
+            row["status"] = STATUS_NEEDS_CASE
+            if rate is not None:
+                row["estimated_amount"] = round(rate * left, 2)
+                row["amount_basis"] = basis
+            else:
+                row["estimated_amount"] = None
+                row["amount_basis"] = AMOUNT_BASIS_UNKNOWN
+        out.append(row)
+    return out
+
+
+def _enrich_asin(events: list[dict], adjustments: Iterable[dict], paid: Iterable[dict]) -> list[dict]:
+    by_sku: dict[str, str] = {}
+    for row in list(adjustments) + list(paid):
+        sku = normalize_sku(row.get("sku"))
+        asin = (row.get("asin") or "").strip()
+        if sku != "UNKNOWN" and asin and sku not in by_sku:
+            by_sku[sku] = asin
+    out = []
+    for ev in events:
+        row = dict(ev)
+        if not row.get("asin"):
+            row["asin"] = by_sku.get(row["sku"])
+        out.append(row)
+    return out
+
+
+def build_case_events(
+    *,
+    adjustments: Iterable[dict],
+    shipments: Iterable[dict],
+    shipment_items: Iterable[dict],
+    reimbursements: Iterable[dict],
+    start: date,
+    end: date,
+    as_of: date | None = None,
+) -> list[dict]:
+    """Pure builder — no I/O. Returns rows ready for fba_case_events."""
+    as_of = as_of or end
+    adj_list = list(adjustments)
+    paid_list = list(reimbursements)
+    ledger = adjustment_candidates(adj_list, start, end)
+    inbound = inbound_discrepancies(shipments, shipment_items, as_of, start, end)
+    # Prefer inbound row when the same FBA id + SKU also appears as Lost_Inbound
+    # on the ledger — one Needs-case line, shipment link kept.
+    inbound_keys = {(e["shipment_id"], e["sku"]) for e in inbound if e.get("shipment_id")}
+    ledger_kept = []
+    for ev in ledger:
+        sid = ev.get("shipment_id")
+        if ev["reason_group"] == "lost_inbound" and sid and (sid, ev["sku"]) in inbound_keys:
+            continue
+        ledger_kept.append(ev)
+    merged = apply_found_offsets(ledger_kept + inbound, found_offsets(adj_list))
+    merged = _enrich_asin(merged, adj_list, paid_list)
+    return apply_paid_dedupe(merged, paid_list)
+
+
+def _stamp(rows: list[dict]) -> list[dict]:
+    now = datetime.now(timezone.utc).isoformat()
+    out = []
+    for row in rows:
+        rec = dict(row)
+        day = rec.get("event_date")
+        if isinstance(day, date):
+            rec["event_date"] = day.isoformat()
+        rec["synced_at"] = now
+        out.append(rec)
+    return out
+
+
+def sync_case_queue(
+    days: int | None = None,
+    dry_run: bool = False,
+    fetch_ledger: bool = True,
+    on_poll: callable | None = None,
+) -> dict:
+    """Pull ledger Adjustments (optional) and rebuild fba_case_events."""
+    from src.amazon_sp.adjustments import fetch_ledger_adjustments
+    from src.db import fetch_all, upsert_rows
+    from src.rules import SPAPI_CASE_QUEUE_DAYS, amazon_as_of
+
+    window = SPAPI_CASE_QUEUE_DAYS if days is None else max(1, min(int(days), 365))
+    end = amazon_as_of()
+    start = end - timedelta(days=window)
+
+    adj_summary: dict = {}
+    if fetch_ledger:
+        try:
+            adj_summary = fetch_ledger_adjustments(start, end, dry_run=dry_run, on_poll=on_poll)
+        except Exception as e:
+            log.warning("Ledger adjustments pull failed; rebuilding from warehouse: %s", e)
+            adj_summary = {"error": str(e)[:300], "rows_inserted": 0}
+
+    if dry_run:
+        adjustments = adj_summary.get("records") or []
+    else:
+        try:
+            adjustments = fetch_all("fba_inventory_adjustments")
+        except Exception:
+            adjustments = adj_summary.get("records") or []
+
+    try:
+        shipments = fetch_all("inventory_inbound_shipments")
+        items = fetch_all("inventory_inbound_shipment_items")
+    except Exception as e:
+        log.warning("Inbound tables unavailable: %s", e)
+        shipments, items = [], []
+    try:
+        paid = fetch_all("fba_reimbursements")
+    except Exception as e:
+        log.warning("fba_reimbursements unavailable: %s", e)
+        paid = []
+
+    events = build_case_events(
+        adjustments=adjustments,
+        shipments=shipments,
+        shipment_items=items,
+        reimbursements=paid,
+        start=start,
+        end=end,
+        as_of=end,
+    )
+    needs = [e for e in events if e.get("status") == STATUS_NEEDS_CASE]
+    stamped = _stamp(events)
+    summary = {
+        "report_type": "fba_case_queue",
+        "period": f"{start} to {end}",
+        "days": window,
+        "adjustments_inserted": adj_summary.get("rows_inserted", 0),
+        "adjustments_error": adj_summary.get("error"),
+        "events_total": len(events),
+        "needs_case": len(needs),
+        "already_reimbursed": sum(1 for e in events if e.get("status") == STATUS_ALREADY_REIMBURSED),
+        "found_offset": sum(1 for e in events if e.get("status") == STATUS_FOUND_OFFSET),
+        "needs_units": sum(int(e.get("quantity") or 0) for e in needs),
+        "dry_run": dry_run,
+        "rows_inserted": 0,
+        "seller_central_link_limit": SELLER_CENTRAL_LINK_LIMIT,
+        "auto_submit": False,
+    }
+    if dry_run:
+        summary["events"] = stamped
+        return summary
+
+    if stamped:
+        inserted = upsert_rows("fba_case_events", stamped, on_conflict="event_key")
+        summary["rows_inserted"] = inserted
+    return summary
