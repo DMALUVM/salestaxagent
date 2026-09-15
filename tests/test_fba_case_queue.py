@@ -112,6 +112,29 @@ def test_stale_receiving_is_ready():
     assert inbound_ready(ship, date(2026, 9, 14)) is False
 
 
+def test_stale_receiving_prefers_received_at_over_stuck_last_updated():
+    """FBA19MVLNNJ2-shaped: LastUpdatedDate stuck at ship, received_at later."""
+    ship = {
+        "shipment_id": "FBA19MVLNNJ2",
+        "shipment_status": "RECEIVING",
+        "received_at": "2026-08-29",
+        "closed_at": None,
+        "last_updated_at": "2026-08-25",
+    }
+    # 21-day clock starts at received_at (Aug 29), not stuck ship time (Aug 25).
+    assert inbound_ready(ship, date(2026, 9, 15)) is False
+    assert inbound_ready(ship, date(2026, 9, 18)) is False
+    assert inbound_ready(ship, date(2026, 9, 19)) is True
+    # closed_at wins over last_updated when received_at is missing.
+    ship_closed_age = {
+        "shipment_status": "DELIVERED",
+        "received_at": None,
+        "closed_at": "2026-08-20",
+        "last_updated_at": "2026-09-10",
+    }
+    assert inbound_ready(ship_closed_age, date(2026, 9, 14)) is True
+
+
 def test_found_offsets_same_sku_fc():
     events = build_case_events(
         adjustments=[
