@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   ACTION_LABELS, ACTION_STYLES, actionTypeOf, doThisOf, whyOf,
-  suggestedBidOf, matchTypesOf, adGroupsOf,
+  suggestedBidOf, matchTypesOf, adGroupsOf, parseEvidence,
   buildPlanMarkdown, type RecLike,
 } from "@/lib/ppc-actions";
 
@@ -1777,6 +1777,47 @@ export default function PPCPage() {
                                 <dd className="font-medium">{doThisOf(r)}</dd>
                                 <dt className="text-muted-foreground">Why</dt>
                                 <dd>{whyOf(r)}</dd>
+                                {(() => {
+                                  const ev = parseEvidence(r);
+                                  const w = ev.window as {
+                                    start?: string; end?: string; days?: number;
+                                    as_of?: string; st_fresh_through?: string;
+                                    closed_days_only?: boolean;
+                                  } | undefined;
+                                  if (!w?.start && !w?.end && ev.st_fresh_through == null) return null;
+                                  return (
+                                    <>
+                                      <dt className="text-muted-foreground">Window</dt>
+                                      <dd className="tabular-nums">
+                                        {w?.start && w?.end
+                                          ? `${w.start} → ${w.end}`
+                                          : (w?.days ? `${w.days} days` : "—")}
+                                        {w?.closed_days_only ? " · closed days, America/Los_Angeles" : ""}
+                                        {ev.attribution === "orders_14d" ? " · orders_14d" : ""}
+                                      </dd>
+                                      <dt className="text-muted-foreground">ST freshness</dt>
+                                      <dd>
+                                        warehouse through {String(ev.st_fresh_through ?? w?.st_fresh_through ?? "—")}
+                                        {ev.stale === true || ev.verified === false
+                                          ? " — STALE vs closed as-of; 0-order is unverified"
+                                          : " — covers closed as-of"}
+                                      </dd>
+                                    </>
+                                  );
+                                })()}
+                                {(() => {
+                                  const ev = parseEvidence(r);
+                                  const siblings = Array.isArray(ev.sibling_campaigns)
+                                    ? ev.sibling_campaigns.filter((x): x is string => typeof x === "string")
+                                    : [];
+                                  if (!siblings.length) return null;
+                                  return (
+                                    <>
+                                      <dt className="text-muted-foreground">Elsewhere</dt>
+                                      <dd>Converts on sibling Exact: {siblings.join(", ")} — campaign-scoped only</dd>
+                                    </>
+                                  );
+                                })()}
                                 <dt className="text-muted-foreground">
                                   {r.entity_type === "campaign" ? "Campaign" : r.entity_type === "keyword" ? "Keyword" : "Search term"}
                                 </dt>

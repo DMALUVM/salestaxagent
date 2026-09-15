@@ -46,9 +46,13 @@ test("drilldown campaigns are sorted by spend descending", () => {
 });
 
 test("the page renders one row per term and no legacy per-day fields", () => {
+  const start = PAGE.indexOf('tab === "search" &&');
+  const end = PAGE.indexOf('tab === "campaigns"');
+  assert.ok(start >= 0 && end > start, "search tab block must exist");
+  const searchTab = PAGE.slice(start, end);
   for (const legacy of ["orders_14d", "sales_14d", "s.match_type}", "s.campaign_name}"]) {
-    assert.ok(!PAGE.includes(legacy),
-      `page still reads ${legacy} — that is the per-day row shape`);
+    assert.ok(!searchTab.includes(legacy),
+      `search table still reads ${legacy} — that is the per-day row shape`);
   }
   assert.ok(PAGE.includes("campaign_count > 1"), "multi-campaign badge must exist");
 });

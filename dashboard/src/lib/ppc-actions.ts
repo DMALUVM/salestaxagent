@@ -12,6 +12,7 @@
 export type ActionType =
   | "negate_exact"
   | "negate_phrase"
+  | "pause_keyword"
   | "harvest_exact"
   | "reduce_bid"
   | "increase_bid"
@@ -22,6 +23,7 @@ export type ActionType =
 export const ACTION_LABELS: Record<ActionType, string> = {
   negate_exact: "Negate exact",
   negate_phrase: "Negate phrase",
+  pause_keyword: "Pause keyword",
   harvest_exact: "Harvest exact",
   reduce_bid: "Reduce bid",
   increase_bid: "Increase bid",
@@ -33,6 +35,7 @@ export const ACTION_LABELS: Record<ActionType, string> = {
 export const ACTION_STYLES: Record<ActionType, string> = {
   negate_exact: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900",
   negate_phrase: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900",
+  pause_keyword: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900",
   harvest_exact: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
   reduce_bid: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900",
   increase_bid: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900",
@@ -43,6 +46,8 @@ export const ACTION_STYLES: Record<ActionType, string> = {
 /** Legacy rows (and Python-engine rows) carry no action_type — derive it. */
 const TYPE_TO_ACTION: Record<string, ActionType> = {
   NEGATE_SEARCH_TERM: "negate_exact",
+  PAUSE_KEYWORD: "pause_keyword",
+  REVIEW_SEARCH_TERM: "review_campaign",
   HARVEST_SEARCH_TERM: "harvest_exact",
   REDUCE_BID: "reduce_bid",
   INCREASE_BID: "increase_bid",
@@ -107,8 +112,11 @@ export function whyOf(rec: RecLike): string {
   if (orders !== null) bits.push(`${orders} order${orders === 1 ? "" : "s"}`);
   if (clicks !== null) bits.push(`${clicks} clicks`);
   if (acos !== null) bits.push(`ACOS ${acos.toFixed(0)}%`);
-  const w = ev.window as { days?: number } | undefined;
-  if (w?.days) bits.push(`${w.days}-day window`);
+  const w = ev.window as { days?: number; start?: string; end?: string } | undefined;
+  if (w?.start && w?.end) bits.push(`${w.start} → ${w.end}`);
+  else if (w?.days) bits.push(`${w.days}-day window`);
+  if (ev.attribution === "orders_14d") bits.push("orders_14d");
+  if (ev.stale === true || ev.verified === false) bits.push("ST stale — unverified");
   return bits.length ? bits.join(" · ") : "No evidence recorded.";
 }
 
