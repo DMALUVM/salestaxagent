@@ -17,6 +17,8 @@ import {
   organicRankSnapshotRows,
   DEFAULT_HEATMAP_SORT,
   asOrganicChild,
+  childSlotHoverTitle,
+  childSlotRank,
   shortOrganicChild,
   cellHoverTitle,
   cellPriorRank,
@@ -27,6 +29,7 @@ import {
   emptyCopyForFamily,
   filterProgress,
   formatCellRank,
+  formatChildSlotRank,
   formatSignedDelta,
   heatmapSortCaption,
   rankDelta,
@@ -361,6 +364,96 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.deepEqual(otherDay, { key: "week", dir: "asc", week: "2026-09-07" });
   });
 
+  test("Keyword CHILD pill rank is the stored slot current — never invented", () => {
+    const withRank = childSlotRank({
+      organic_child_asin: "b0clhvcpl5",
+      current: 14,
+      previous: 18,
+    });
+    assert.deepEqual(withRank, { asin: "B0CLHVCPL5", rank: 14, delta: 4 });
+    assert.equal(formatChildSlotRank(withRank?.rank), "#14");
+    assert.equal(formatSignedDelta(withRank?.delta), "↑4");
+    assert.equal(
+      childSlotHoverTitle(withRank!),
+      "Child ASIN holding the latest organic rank: B0CLHVCPL5 · #14 (↑4)",
+    );
+
+    const rankOnly = childSlotRank({
+      organic_child_asin: "B0CLHVCPL5",
+      current: 9,
+      previous: null,
+    });
+    assert.deepEqual(rankOnly, { asin: "B0CLHVCPL5", rank: 9, delta: null });
+    assert.equal(formatChildSlotRank(rankOnly?.rank), "#9");
+    assert.equal(formatSignedDelta(rankOnly?.delta), "");
+    assert.equal(
+      childSlotHoverTitle(rankOnly!),
+      "Child ASIN holding the latest organic rank: B0CLHVCPL5 · #9",
+    );
+
+    const absentRank = childSlotRank({
+      organic_child_asin: "B0CLHVCPL5",
+      current: null,
+      previous: 12,
+    });
+    assert.deepEqual(absentRank, { asin: "B0CLHVCPL5", rank: null, delta: null });
+    assert.equal(formatChildSlotRank(absentRank?.rank), "");
+    assert.equal(
+      childSlotHoverTitle(absentRank!),
+      "Child ASIN holding the latest organic rank: B0CLHVCPL5",
+    );
+
+    assert.equal(childSlotRank({
+      organic_child_asin: null,
+      current: 3,
+      previous: 4,
+    }), null);
+    assert.equal(formatChildSlotRank(null), "");
+    assert.equal(formatChildSlotRank(0), "");
+    assert.equal(formatChildSlotRank(-2), "");
+  });
+
+  test("progress rows expose child slot rank from organic_position, not a sibling list", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [
+        {
+          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-11",
+          organic_position: 18, organic_asin: "B0CLHVCPL5",
+        },
+        {
+          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-12",
+          organic_position: 12, organic_asin: "B0CLHVCPL5",
+        },
+        {
+          phrase: "plain", asin: "B0CLHTF8YN", as_of: "2026-09-12",
+          organic_position: 7,
+        },
+      ],
+    });
+    const lip = progress.rows.find((r) => r.keyword_normalized === "tallow lip balm");
+    assert.deepEqual(childSlotRank(lip!), {
+      asin: "B0CLHVCPL5", rank: 12, delta: 6,
+    });
+    const noChild = progress.rows.find((r) => r.keyword_normalized === "plain");
+    assert.equal(childSlotRank(noChild!), null);
+  });
+
+  test("CHILD pill stays when warehouse has the child ASIN but no rank", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "eos lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-12",
+        organic_position: null, organic_asin: "B0CLHVCPL5",
+      }],
+    });
+    const row = progress.rows[0];
+    assert.equal(row.organic_child_asin, "B0CLHVCPL5");
+    assert.equal(row.current, null);
+    assert.deepEqual(childSlotRank(row), {
+      asin: "B0CLHVCPL5", rank: null, delta: null,
+    });
+    assert.equal(formatChildSlotRank(row.current), "");
+  });
+
   test("stores the child ASIN that holds the organic slot per day", () => {
     const progress = buildOrganicRankProgress({
       snapshots: [
@@ -452,8 +545,10 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.match(heat, /cycleHeatmapSort/);
     assert.match(heat, /aria-sort/);
     assert.match(heat, /SortHeader/);
-    assert.match(heat, /organic_child_asin/);
-    assert.match(heat, /child \{row\.organic_child_asin\}/);
+    assert.match(heat, /KeywordChildSlot/);
+    assert.match(heat, /childSlotRank/);
+    assert.match(heat, /formatChildSlotRank/);
+    assert.match(heat, /child \{slot\.asin\}/);
     assert.match(heat, /organicAsin/);
     assert.match(heat, /shortOrganicChild/);
     assert.doesNotMatch(heat, /Deo stays empty/);

@@ -270,6 +270,43 @@ export function latestOrganicChild(
   return null;
 }
 
+/**
+ * Rank for the CHILD pill in the Keyword column.
+ *
+ * Warehouse stores one organic_asin per hero×phrase×day. That slot’s rank
+ * is HeatmapRow.current — never a sibling array. Missing current stays
+ * null (pill still renders; rank is omitted). Δ only when both sides exist.
+ */
+export type ChildSlotRank = {
+  asin: string;
+  rank: number | null;
+  delta: number | null;
+};
+
+export function childSlotRank(
+  row: Pick<HeatmapRow, "organic_child_asin" | "current" | "previous">,
+): ChildSlotRank | null {
+  const asin = asOrganicChild(row.organic_child_asin);
+  if (!asin) return null;
+  return {
+    asin,
+    rank: asRank(row.current),
+    delta: rankDelta(row.previous, row.current),
+  };
+}
+
+/** Keyword-column rank: blank when missing — never an em-dash placeholder. */
+export function formatChildSlotRank(rank: number | null | undefined): string {
+  const r = asRank(rank);
+  return r == null ? "" : `#${r}`;
+}
+
+export function childSlotHoverTitle(slot: ChildSlotRank): string {
+  const rankBit = slot.rank != null ? ` · #${slot.rank}` : "";
+  const deltaBit = slot.delta != null ? ` (${formatSignedDelta(slot.delta)})` : "";
+  return `Child ASIN holding the latest organic rank: ${slot.asin}${rankBit}${deltaBit}`;
+}
+
 export function cellHoverTitle(args: {
   previous: number | null | undefined;
   current: number | null | undefined;

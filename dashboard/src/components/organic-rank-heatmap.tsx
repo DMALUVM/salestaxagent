@@ -12,6 +12,8 @@ import {
   WOW_MOVE_POSITIONS,
   WOW_TOP_N,
   asOrganicChild,
+  childSlotHoverTitle,
+  childSlotRank,
   shortOrganicChild,
   cellHoverTitle,
   cellPriorRank,
@@ -20,6 +22,7 @@ import {
   emptyCopyForFamily,
   filterProgress,
   formatCellRank,
+  formatChildSlotRank,
   formatSfr,
   formatSignedDelta,
   heatmapSortCaption,
@@ -186,12 +189,14 @@ export function OrganicRankHeatmap() {
               <p className="mt-1 text-[11px] text-muted-foreground">
                 Keywords × day from SoldScope Rank Tracker daily RT snapshots.
                 SFR is Brand Analytics (`abaSearchFrequencyRank`) — never
-                invented from SoldScope search volume. The child chip is the
+                invented from SoldScope search volume.                 The child chip is the
                 variation holding the organic slot (`organicAsin`); hover a
-                day for that date&apos;s child when SoldScope sent it. Cell
-                fill is absolute rank (greener = better). The small Δ is
-                movement vs the prior snapshot, or vs SoldScope previous
-                position when only one as_of column is stored.
+                day for that date&apos;s child when SoldScope sent it. The
+                Keyword CHILD pill shows that slot&apos;s current rank in
+                the blank space beside it — never a sibling we did not
+                store. Cell fill is absolute rank (greener = better). The
+                small Δ is movement vs the prior snapshot, or vs SoldScope
+                previous position when only one as_of column is stored.
               </p>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -327,14 +332,7 @@ export function OrganicRankHeatmap() {
                             <div className="text-[9px] uppercase tracking-wide text-muted-foreground">
                               {row.family} · {row.asin}
                             </div>
-                            {row.organic_child_asin && (
-                              <span
-                                className="mt-0.5 inline-flex max-w-full truncate rounded border border-border/70 bg-muted/70 px-1 py-px font-mono text-[8px] font-medium uppercase tracking-wide text-foreground/80"
-                                title={`Child ASIN holding the latest organic rank: ${row.organic_child_asin}`}
-                              >
-                                child {row.organic_child_asin}
-                              </span>
-                            )}
+                            <KeywordChildSlot row={row} />
                           </td>
                           <td className="px-1.5 py-1.5">
                             <RankSpark row={row} weeks={weeks} />
@@ -379,6 +377,43 @@ export function OrganicRankHeatmap() {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function childDeltaTone(delta: number | null): string {
+  if (delta == null) return "";
+  if (delta > 0) return "text-emerald-600 dark:text-emerald-400";
+  if (delta < 0) return "text-rose-600 dark:text-rose-400";
+  return "text-muted-foreground/70";
+}
+
+function KeywordChildSlot({ row }: { row: HeatmapRow }) {
+  const slot = childSlotRank(row);
+  if (!slot) return null;
+  const rankLabel = formatChildSlotRank(slot.rank);
+  const deltaLabel = formatSignedDelta(slot.delta);
+  return (
+    <div className="mt-0.5 flex min-w-0 items-center gap-1">
+      <span
+        className="inline-flex min-w-0 max-w-[9.5rem] truncate rounded border border-border/70 bg-muted/70 px-1 py-px font-mono text-[8px] font-medium uppercase tracking-wide text-foreground/80"
+        title={childSlotHoverTitle(slot)}
+      >
+        child {slot.asin}
+      </span>
+      {rankLabel ? (
+        <span
+          className="shrink-0 font-mono text-[8px] font-semibold tabular-nums text-foreground/80"
+          title={childSlotHoverTitle(slot)}
+        >
+          {rankLabel}
+        </span>
+      ) : null}
+      {deltaLabel ? (
+        <span className={`shrink-0 text-[8px] font-semibold leading-none ${childDeltaTone(slot.delta)}`}>
+          {deltaLabel}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -493,7 +528,9 @@ function Legend() {
         Trend is prior → current (lower toward #1 reads as up).
         Child chip is the variation holding that day&apos;s organic slot
         (full ASIN under the keyword; last 4 in each cell; full on hover).
-        Omitted when SoldScope did not send it.
+        Rank beside the keyword CHILD pill is that slot&apos;s current
+        position (Δ when both snapshots exist). Omitted when SoldScope
+        did not send the child; rank stays blank when the warehouse has none.
       </p>
     </div>
   );
