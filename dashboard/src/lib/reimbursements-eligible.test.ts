@@ -7,6 +7,8 @@ import { windowStart } from "./as-of";
 import {
   CASE_QUEUE_DEFAULT_DAYS,
   CASE_QUEUE_GAP,
+  CLASSIFICATION_VERSION,
+  NOTIFY_BLOCK_COPY,
   REESE_AGENT_ID,
   REESE_AGENT_NAME,
   REESE_PACKAGE_CONTRACT,
@@ -15,9 +17,16 @@ import {
   apiUrl,
   buildReesePackage,
   defaultCaseRange,
+  evaluateCaseQa,
+  fbaShipmentId,
   filterNeedsCase,
   inCaseRange,
+  isFbaShipmentId,
   isNeedsCase,
+  normalizeCaseRow,
+  notifyGateErrors,
+  reasonGroup,
+  reasonLabel,
   recentNeedsCase,
   searchCaseRows,
   sellerCentralHref,
@@ -35,6 +44,8 @@ function row(partial: Partial<CaseEventRow> & Pick<CaseEventRow, "event_key" | "
     reason: "Lost_Warehouse",
     reason_group: "lost_warehouse",
     status: "needs_case",
+    fulfillment_center: "ONT8",
+    classification_version: CLASSIFICATION_VERSION,
     ...partial,
   };
 }
@@ -110,31 +121,78 @@ describe("needs-case vs paid", () => {
     assert.equal(apiUrl("/api/reimbursements/eligible/sync"), "/api/reimbursements/eligible/sync");
   });
 
-  test("Seller Central href prefers stored URL then FBA shipment tracker", () => {
+  test("Seller Central href is FBA tracker only — digit refs are not shipments", () => {
     assert.equal(
       sellerCentralHref({ seller_central_url: "https://example.com/x" }),
-      "https://example.com/x",
+      SC_SUPPORT_HUB,
     );
     assert.match(
       sellerCentralHref({ seller_central_url: null, shipment_id: "FBA16ABCDE" }),
       /inbound-shipment-workflow.*FBA16ABCDE/,
     );
     assert.equal(
-      sellerCentralHref({ seller_central_url: null, shipment_id: null, reference_id: "xyz" }),
+      sellerCentralHref({ seller_central_url: null, shipment_id: null, reference_id: "20080126439780" }),
       SC_SUPPORT_HUB,
     );
+    assert.equal(isFbaShipmentId("20080126439780"), false);
+    assert.equal(fbaShipmentId(null, "20080126439780"), null);
+    assert.equal(fbaShipmentId("FBA16ABCDE", "20080126439780"), "FBA16ABCDE");
+  });
+
+  test("M is lost_warehouse not lost_inbound; 7 is damage not Found", () => {
+    assert.equal(reasonGroup("M"), "lost_warehouse");
+    assert.notEqual(reasonGroup("M"), "lost_inbound");
+    assert.equal(reasonLabel("M"), "M — Inventory misplaced");
+    assert.equal(reasonGroup("7"), "warehouse_damage");
+    assert.equal(reasonGroup("Q"), "other");
+    const stale = normalizeCaseRow(row({
+      event_key: "stale-m",
+      event_date: "2026-08-01",
+      reason: "M",
+      reason_group: "lost_inbound",
+      shipment_id: "20080126439780",
+      reference_id: "20080126439780",
+    }));
+    assert.equal(stale.reason_group, "lost_warehouse");
+    assert.equal(stale.shipment_id, null);
+    assert.equal(stale.seller_central_link_kind, "support_manual");
+  });
+
+  test("notify gate refuses unknown / missing FC / outdated classification", () => {
+    const bad = row({
+      event_key: "bad",
+      event_date: "2026-08-01",
+      reason: "ZZZ",
+      fulfillment_center: "",
+      classification_version: "old",
+    });
+    const qa = evaluateCaseQa([bad]);
+    assert.equal(qa.ok, false);
+    const errors = notifyGateErrors([bad], qa);
+    assert.ok(errors.length > 0);
+    assert.match(NOTIFY_BLOCK_COPY, /Do not prep/);
+    const good = row({
+      event_key: "good",
+      event_date: "2026-08-01",
+      reason: "M",
+      fulfillment_center: "ONT8",
+      classification_version: CLASSIFICATION_VERSION,
+    });
+    assert.equal(evaluateCaseQa([good]).ok, true);
+    assert.deepEqual(notifyGateErrors([good], evaluateCaseQa([good])), []);
   });
 });
 
 describe("Reese package + page contract", () => {
   const here = path.dirname(new URL(import.meta.url).pathname);
   const page = readFileSync(path.join(here, "../app/reimbursements/page.tsx"), "utf8");
-  const desk = readFileSync(path.join(here, "../components/reimbursements-eligible.tsx"), "utf8");
+  const ui = readFileSync(path.join(here, "../components/reimbursements-eligible.tsx"), "utf8");
   const api = readFileSync(path.join(here, "../app/api/reimbursements/eligible/route.ts"), "utf8");
   const notify = readFileSync(path.join(here, "../app/api/reimbursements/eligible/notify/route.ts"), "utf8");
   const sync = readFileSync(path.join(here, "../app/api/reimbursements/eligible/sync/route.ts"), "utf8");
   const pyPkg = readFileSync(path.join(here, "../../../src/reimbursements/case_package.py"), "utf8");
   const pyQueue = readFileSync(path.join(here, "../../../src/reimbursements/case_queue.py"), "utf8");
+  const pyLegend = readFileSync(path.join(here, "../../../src/reimbursements/reason_legend.py"), "utf8");
 
   test("buildReesePackage is v1, Reese-targeted, no auto-submit", () => {
     const pkg = buildReesePackage(
@@ -188,13 +246,29 @@ describe("Reese package + page contract", () => {
     assert.doesNotMatch(api, /Sellerise/);
     assert.match(api, /fba_case_events/);
     assert.match(sync, /reimbursements_case_sync/);
-    assert.match(desk, /Enqueue 90D queue rebuild/);
-    assert.match(desk, /Enqueueing\.\.\./);
-    assert.doesNotMatch(desk, />\s*Sync queue\s*</);
-    assert.match(desk, /\.\/\.venv\/bin\/python -m src\.main reimbursements-case-sync/);
+    assert.match(ui, /Enqueue 90D queue rebuild/);
+    assert.match(ui, /Enqueueing\.\.\./);
+    assert.doesNotMatch(ui, />\s*Sync queue\s*</);
+    assert.match(ui, /\.\/\.venv\/bin\/python -m src\.main reimbursements-case-sync/);
     assert.match(sync, /\.\/\.venv\/bin\/python -m src\.main reimbursements-case-sync/);
     assert.match(CASE_QUEUE_GAP, /no SP-API for eligible/);
     assert.match(SELLER_CENTRAL_LINK_LIMIT, /No stable Seller Central deep link/);
+    assert.match(SELLER_CENTRAL_LINK_LIMIT, /NOT a pre-filled/);
+  });
+
+  test("UI splits FC, Shipment, and Reference ID — never uses reference as shipment", () => {
+    assert.match(ui, />FC</);
+    assert.match(ui, />Shipment</);
+    assert.match(ui, />Reference ID</);
+    assert.match(ui, /Support \(manual\)/);
+    assert.doesNotMatch(ui, /FC \/ Shipment/);
+    assert.doesNotMatch(ui, /shipment_id \|\| r\.reference_id/);
+    assert.match(notify, /status:\s*422/);
+    assert.match(notify, /NOTIFY_BLOCK_COPY/);
+    assert.match(api, /qa/);
+    assert.match(pyLegend, /Inventory misplaced/);
+    assert.match(pyQueue, /Digit ``reference_id`` values are ledger transaction IDs/);
+    assert.doesNotMatch(pyQueue, /"m".*lost_inbound/);
   });
 
   test("queue is not built from paid-only reimbursements", () => {

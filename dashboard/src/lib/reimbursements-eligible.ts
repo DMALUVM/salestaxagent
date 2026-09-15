@@ -15,11 +15,19 @@ import {
   REIMBURSEMENTS_ALERT_DAYS,
   REIMBURSEMENTS_DEFAULT_DAYS,
   REASON_GROUP_LABELS,
+  type ReasonFilter,
+} from "./reimbursements-desk";
+import {
+  CLASSIFICATION_VERSION,
+  MINI_RESYNC_HINT,
+  NOTIFY_BLOCK_COPY,
+  UNKNOWN_REASON_MAX_PCT,
+  isEligibleLossReason,
+  isUnknownReason,
   reasonGroup,
   reasonLabel,
-  type ReasonFilter,
   type ReasonGroup,
-} from "./reimbursements-desk";
+} from "./reimbursements-reason-legend";
 
 export const REESE_AGENT_ID = "74a7ce8a-6754-4bf1-90aa-afa1f4cd774c";
 export const REESE_AGENT_NAME = "Reese · Reimbursements";
@@ -34,8 +42,26 @@ export const SC_INBOUND_SHIPMENT =
 
 export const SELLER_CENTRAL_LINK_LIMIT =
   "No stable Seller Central deep link opens a pre-filled FBA case. " +
-  "FBA shipment IDs link to the inbound shipment tracker. " +
-  "Everything else lands on Get Support. Dave submits; this desk never auto-files.";
+  "Only real FBA* shipment IDs link to the inbound shipment tracker. " +
+  "Ledger reference / transaction IDs (digit strings) are not shipment IDs. " +
+  "Support (manual) opens Get Support — it is NOT a pre-filled lost-inbound or warehouse case. " +
+  "Dave submits; this desk never auto-files.";
+
+export const SUPPORT_MANUAL_LIMIT =
+  "Support (manual) opens Seller Central Get Support. It is not a pre-filled " +
+  "lost-inbound case and does not carry FC / Reference ID. Copy those fields first.";
+
+export {
+  CLASSIFICATION_VERSION,
+  MINI_RESYNC_HINT,
+  NOTIFY_BLOCK_COPY,
+  UNKNOWN_REASON_MAX_PCT,
+  isEligibleLossReason,
+  isUnknownReason,
+  reasonGroup,
+  reasonLabel,
+};
+export type { ReasonFilter, ReasonGroup };
 
 export const CASE_QUEUE_GAP =
   "Amazon has no SP-API for eligible / open claims. " +
@@ -75,6 +101,8 @@ export interface CaseEventRow {
   seller_central_url?: string | null;
   seller_central_link_kind?: string | null;
   synced_at?: string | null;
+  disposition?: string | null;
+  classification_version?: string | null;
 }
 
 export type CaseSortKey =
@@ -86,8 +114,24 @@ export type CaseSortKey =
   | "estimated_amount"
   | "shipment_id";
 
-export { REASON_GROUP_LABELS, reasonGroup, reasonLabel };
-export type { ReasonFilter, ReasonGroup };
+export { REASON_GROUP_LABELS };
+
+const FBA_SHIPMENT_RE = /^FBA[A-Z0-9]+$/i;
+
+export function isFbaShipmentId(value: string | null | undefined): boolean {
+  return FBA_SHIPMENT_RE.test(String(value ?? "").trim());
+}
+
+/** First real FBA* id. Digit ledger transaction IDs are not shipments. */
+export function fbaShipmentId(
+  ...candidates: Array<string | null | undefined>
+): string | null {
+  for (const value of candidates) {
+    const raw = String(value ?? "").trim().toUpperCase();
+    if (FBA_SHIPMENT_RE.test(raw)) return raw;
+  }
+  return null;
+}
 
 function money(value: number): number {
   return Math.round(value * 100) / 100;
@@ -110,6 +154,24 @@ export function isNeedsCase(row: Pick<CaseEventRow, "status" | "quantity">): boo
   return row.status === "needs_case" && caseQty(row) > 0;
 }
 
+export function isEligibleNeedsCase(row: CaseEventRow): boolean {
+  return isNeedsCase(row) && isEligibleLossReason(row.reason, row.disposition);
+}
+
+export function normalizeCaseRow(row: CaseEventRow): CaseEventRow {
+  const group = reasonGroup(row.reason, row.disposition);
+  const shipment = fbaShipmentId(row.shipment_id);
+  const kind = shipment ? "inbound_shipment" : "support_manual";
+  const url = shipment ? `${SC_INBOUND_SHIPMENT}${shipment}` : SC_SUPPORT_HUB;
+  return {
+    ...row,
+    reason_group: group,
+    shipment_id: shipment,
+    seller_central_link_kind: kind,
+    seller_central_url: url,
+  };
+}
+
 export function defaultCaseRange(now: Date = new Date()): {
   asOf: string;
   start: string;
@@ -130,12 +192,12 @@ export function inCaseRange(row: Pick<CaseEventRow, "event_date">, start: string
 }
 
 export function filterNeedsCase(rows: CaseEventRow[]): CaseEventRow[] {
-  return rows.filter(isNeedsCase);
+  return rows.filter(isEligibleNeedsCase);
 }
 
 export function filterCaseGroup(rows: CaseEventRow[], filter: ReasonFilter): CaseEventRow[] {
   if (filter === "all") return rows;
-  return rows.filter((row) => reasonGroup(row.reason_group || row.reason) === filter);
+  return rows.filter((row) => reasonGroup(row.reason, row.disposition) === filter);
 }
 
 export function searchCaseRows(rows: CaseEventRow[], query: string): CaseEventRow[] {
@@ -146,7 +208,7 @@ export function searchCaseRows(rows: CaseEventRow[], query: string): CaseEventRo
       row.sku,
       row.asin,
       row.reason,
-      reasonLabel(row.reason),
+      reasonLabel(row.reason, row.disposition),
       row.shipment_id,
       row.reference_id,
       row.fulfillment_center,
@@ -170,10 +232,10 @@ export function sortCaseRows(
     if (key === "estimated_amount") return (caseAmount(a) - caseAmount(b)) * sign;
     if (key === "event_date") return caseDay(a).localeCompare(caseDay(b)) * sign;
     const av = String(
-      key === "reason" ? reasonLabel(a.reason) : (a[key] ?? ""),
+      key === "reason" ? reasonLabel(a.reason, a.disposition) : (a[key] ?? ""),
     ).toLowerCase();
     const bv = String(
-      key === "reason" ? reasonLabel(b.reason) : (b[key] ?? ""),
+      key === "reason" ? reasonLabel(b.reason, b.disposition) : (b[key] ?? ""),
     ).toLowerCase();
     return av.localeCompare(bv) * sign;
   });
@@ -199,7 +261,7 @@ export function summarizeCases(rows: CaseEventRow[]): {
   for (const row of rows) {
     const q = caseQty(row);
     const amt = caseAmount(row);
-    const g = reasonGroup(row.reason_group || row.reason);
+    const g = reasonGroup(row.reason, row.disposition);
     groups[g].events += 1;
     groups[g].units += q;
     groups[g].estimated = money(groups[g].estimated + amt);
@@ -236,15 +298,110 @@ export function eventQueryBounds(start: string, end: string): { gte: string; lte
 }
 
 export function sellerCentralHref(row: Pick<CaseEventRow, "seller_central_url" | "shipment_id" | "reference_id">): string {
-  if (row.seller_central_url) return row.seller_central_url;
-  const sid = String(row.shipment_id || row.reference_id || "");
-  if (/^FBA[A-Z0-9]+$/i.test(sid)) return `${SC_INBOUND_SHIPMENT}${sid.toUpperCase()}`;
+  const sid = fbaShipmentId(row.shipment_id);
+  if (sid) return `${SC_INBOUND_SHIPMENT}${sid}`;
+  if (row.seller_central_url && isFbaShipmentId(row.shipment_id)) return row.seller_central_url;
   return SC_SUPPORT_HUB;
+}
+
+export function isInboundTrackerLink(row: Pick<CaseEventRow, "shipment_id">): boolean {
+  return Boolean(fbaShipmentId(row.shipment_id));
 }
 
 export function linkKindLabel(kind: string | null | undefined): string {
   if (kind === "inbound_shipment") return "Shipment tracker";
-  return "Get Support hub";
+  return "Support (manual)";
+}
+
+export interface CaseQa {
+  ok: boolean;
+  errors: string[];
+  classification_version: string;
+  unknown_reason_pct: number;
+  needs_case: number;
+  outdated_classification: number;
+  missing_fc: number;
+}
+
+export function evaluateCaseQa(
+  rows: CaseEventRow[],
+  opts?: { classificationVersion?: string },
+): CaseQa {
+  const version = opts?.classificationVersion ?? CLASSIFICATION_VERSION;
+  const errors: string[] = [];
+  const needs = rows.filter(isNeedsCase);
+  const unknownRows = needs.filter((r) => isUnknownReason(r.reason, r.disposition));
+  const pct = needs.length ? Math.round((1000 * unknownRows.length) / needs.length) / 10 : 0;
+  if (pct > UNKNOWN_REASON_MAX_PCT) {
+    errors.push(
+      `${pct}% of Needs-case rows have unknown reason codes (max ${UNKNOWN_REASON_MAX_PCT}%). ${MINI_RESYNC_HINT}`,
+    );
+  }
+  let outdated = 0;
+  let missingFc = 0;
+  for (const row of needs) {
+    if (isUnknownReason(row.reason, row.disposition)) {
+      errors.push(`${row.event_key}: unknown reason code ${JSON.stringify(row.reason)}`);
+    }
+    if (!String(row.fulfillment_center ?? "").trim()) {
+      missingFc += 1;
+      errors.push(`${row.event_key}: missing FC`);
+    }
+    if (row.classification_version !== version) {
+      outdated += 1;
+    }
+  }
+  if (outdated && needs.length) {
+    errors.push(
+      `${outdated} Needs-case row(s) have missing or outdated classification_version (want ${version}). ${MINI_RESYNC_HINT}`,
+    );
+  }
+  if (missingFc) {
+    errors.push(`${missingFc} Needs-case row(s) are missing fulfillment_center (FC).`);
+  }
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const err of errors) {
+    if (seen.has(err)) continue;
+    seen.add(err);
+    deduped.push(err);
+  }
+  return {
+    ok: deduped.length === 0,
+    errors: deduped,
+    classification_version: version,
+    unknown_reason_pct: pct,
+    needs_case: needs.length,
+    outdated_classification: outdated,
+    missing_fc: missingFc,
+  };
+}
+
+export function notifyGateErrors(rows: CaseEventRow[], qa?: CaseQa): string[] {
+  const errors: string[] = [];
+  if (qa && !qa.ok) errors.push(...qa.errors);
+  const version = CLASSIFICATION_VERSION;
+  for (const row of rows.filter(isNeedsCase)) {
+    if (isUnknownReason(row.reason, row.disposition)) {
+      errors.push(`${row.event_key}: unknown reason code ${JSON.stringify(row.reason)}`);
+    }
+    if (!String(row.fulfillment_center ?? "").trim()) {
+      errors.push(`${row.event_key}: missing FC`);
+    }
+    if (row.classification_version !== version) {
+      errors.push(
+        `${row.event_key}: classification_version outdated (${JSON.stringify(row.classification_version)} != ${JSON.stringify(version)})`,
+      );
+    }
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const err of errors) {
+    if (seen.has(err)) continue;
+    seen.add(err);
+    out.push(err);
+  }
+  return out;
 }
 
 export interface ReesePackageEvent {
@@ -306,7 +463,7 @@ export function buildReesePackage(
       reason: r.reason,
       reason_group: r.reason_group,
       fulfillment_center: r.fulfillment_center,
-      shipment_id: r.shipment_id,
+      shipment_id: fbaShipmentId(r.shipment_id),
       reference_id: r.reference_id,
       estimated_amount: r.estimated_amount ?? null,
       seller_central_url: sellerCentralHref(r),
@@ -370,15 +527,16 @@ export function renderReeseMarkdown(pkg: Omit<ReesePackage, "markdown">): string
     const rows = groups[key] || [];
     if (!rows.length) continue;
     lines.push(`## ${headings[key] ?? key} (${rows.length})`, "");
-    lines.push("| Date | SKU | ASIN | Qty | FC / Shipment | Est $ | Seller Central |");
-    lines.push("| --- | --- | --- | ---: | --- | ---: | --- |");
+    lines.push("| Date | SKU | ASIN | Qty | FC | Shipment | Reference ID | Est $ | Seller Central |");
+    lines.push("| --- | --- | --- | ---: | --- | --- | --- | ---: | --- |");
     for (const r of rows) {
       const estCell = r.estimated_amount != null && r.estimated_amount !== ""
         ? Number(r.estimated_amount).toFixed(2)
         : "—";
-      const loc = r.shipment_id || r.fulfillment_center || r.reference_id || "—";
+      const shipment = fbaShipmentId(r.shipment_id) || "—";
+      const ref = r.reference_id && r.reference_id !== shipment ? r.reference_id : "—";
       lines.push(
-        `| ${r.event_date} | \`${r.sku || "—"}\` | ${r.asin || "—"} | ${r.quantity} | ${loc} | ${estCell} | ${r.seller_central_url} |`,
+        `| ${r.event_date} | \`${r.sku || "—"}\` | ${r.asin || "—"} | ${r.quantity} | ${r.fulfillment_center || "—"} | ${shipment} | ${ref} | ${estCell} | ${r.seller_central_url} |`,
       );
     }
     lines.push("");

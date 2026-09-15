@@ -59,6 +59,9 @@ describe("reason grouping", () => {
     assert.equal(isAlertReason("CustomerReturn"), false);
     assert.equal(reasonLabel("Damaged_Warehouse"), "Warehouse damage");
     assert.equal(reasonLabel("Lost_Inbound"), "Lost inbound");
+    assert.equal(reasonGroup("M"), "lost_warehouse");
+    assert.notEqual(reasonGroup("M"), "lost_inbound");
+    assert.equal(reasonLabel("M"), "M — Inventory misplaced");
   });
 });
 
