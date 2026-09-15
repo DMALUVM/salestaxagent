@@ -22,6 +22,7 @@ import {
   shortOrganicChild,
   shortVariationLabel,
   heatmapDayChips,
+  isTopTenOrganic,
   keywordChildLegend,
   rowHasThemeCatalog,
   variationChipsForDay,
@@ -713,6 +714,65 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
       label: "Vanilla & Sandalwood / Extra Strength",
     }]);
     assert.equal(legend.some((item) => /B0CLHYY3BB/i.test(item.label)), false);
+  });
+
+  test("top-10 child variations are always listed in the day cell", () => {
+    assert.equal(isTopTenOrganic(1), true);
+    assert.equal(isTopTenOrganic(10), true);
+    assert.equal(isTopTenOrganic(11), false);
+    assert.equal(isTopTenOrganic(0), false);
+    assert.equal(isTopTenOrganic(null), false);
+
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "chapstick", asin: "B0CLHTF8YN", as_of: "2026-09-15",
+        organic_position: 22, organic_asin: "B0CLHVCPL5",
+      }],
+      variationSnapshots: [
+        {
+          phrase: "chapstick", asin: "B0CLHTF8YN", as_of: "2026-09-15",
+          variation_asin: "B0CLHVCPL5", theme: "Unscented",
+          organic_position: 4,
+        },
+        {
+          phrase: "chapstick", asin: "B0CLHTF8YN", as_of: "2026-09-15",
+          variation_asin: "B0CLHVLG2F", theme: "Assorted",
+          organic_position: 8,
+        },
+        {
+          phrase: "chapstick", asin: "B0CLHTF8YN", as_of: "2026-09-15",
+          variation_asin: "B0ORANGE001", theme: "Sweet Orange",
+          organic_position: 44,
+        },
+      ],
+    });
+    const row = progress.rows[0];
+    const chips = heatmapDayChips(row, "2026-09-15", progress.weeks);
+    assert.deepEqual(chips.map((c) => ({ label: c.label, rank: c.rank })), [
+      { label: "Unscented", rank: 4 },
+      { label: "Assorted", rank: 8 },
+      { label: "Sweet Orange", rank: 44 },
+    ]);
+    assert.equal(winnerChildLabel(row, "2026-09-15"), "Unscented");
+    assert.equal(row.current, 22);
+  });
+
+  test("matching top-10 winner is not chipped twice when family rank equals variation", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "eos lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-15",
+        organic_position: 6, organic_asin: "B0CLHVCPL5",
+      }],
+      variationSnapshots: [{
+        phrase: "eos lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-15",
+        variation_asin: "B0CLHVCPL5", theme: "Unscented",
+        organic_position: 6,
+      }],
+    });
+    const row = progress.rows[0];
+    assert.equal(row.current, 6);
+    assert.equal(winnerChildLabel(row, "2026-09-15"), "Unscented");
+    assert.deepEqual(heatmapDayChips(row, "2026-09-15", progress.weeks), []);
   });
 
   test("PPC layout opts the heatmap out of the max-w-6xl gutter", () => {

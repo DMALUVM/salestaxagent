@@ -193,8 +193,10 @@ export function OrganicRankHeatmap() {
                 invented from SoldScope search volume. Each cell is the
                 family-winner rank (greener = better). A theme under the
                 number is that winning child — never a second rank for the
-                same ASIN. Extra theme+#N chips are other tracked children
-                that actually ranked that day. Empty is &quot;—&quot;.
+                same ASIN unless that child is top 10 on variations.
+                Extra theme+#N chips are other tracked children that
+                actually ranked that day; anyone at #1–#10 is always
+                listed. Empty is &quot;—&quot;.
               </p>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -416,14 +418,14 @@ function RankCell({
   const move = classifyMovement(prior, rank);
   const chip = deltaChip(move.direction);
   const child = asOrganicChild(organicAsin);
-  const extras = chips.filter((c) => c.asin !== child);
+  const winnerChipped = Boolean(child && chips.some((c) => c.asin === child));
   const hoverBits = [
     cellHoverTitle({
       previous: prior, current: rank, sfr,
       organicAsin: child, amazonChoice,
     }),
     winnerLabel ? `theme ${winnerLabel}` : "",
-    ...extras.map((c) => variationSlotHoverTitle(c)),
+    ...chips.map((c) => variationSlotHoverTitle(c)),
   ].filter(Boolean);
   return (
     <span
@@ -438,14 +440,14 @@ function RankCell({
           {formatSignedDelta(move.delta)}
         </span>
       )}
-      {winnerLabel ? (
+      {winnerLabel && !winnerChipped ? (
         <span className="mt-0.5 max-w-full truncate text-[7px] font-medium leading-none opacity-90">
           {winnerLabel}
         </span>
       ) : null}
-      {extras.length > 0 ? (
+      {chips.length > 0 ? (
         <span className="mt-0.5 flex w-full flex-col items-center gap-px">
-          {extras.map((c) => (
+          {chips.map((c) => (
             <span key={c.asin} className="inline-flex max-w-full items-center gap-0.5 text-[7px] leading-none opacity-95">
               <span className="truncate">{c.label}</span>
               <span className="shrink-0 font-mono tabular-nums">{c.rank != null ? `#${c.rank}` : ""}</span>
@@ -526,10 +528,11 @@ function Legend() {
         meaningful (≥{WOW_MOVE_POSITIONS} positions or crossing top {WOW_TOP_N}).
         Trend is prior → current (lower toward #1 reads as up).
         Cell # is the family-winner phrases/v2 rank. The theme under it
-        is that winning child (SoldScope theme when stored — never a
-        second # for the same ASIN). Extra theme+#N chips are other
-        tracked children with a stored variation rank that day. Missing
-        children are omitted, never invented.
+        is that winning child (SoldScope theme when stored — never an
+        ASIN CHILD pill + theme). Extra theme+#N chips are other
+        tracked children with a stored variation rank that day.
+        Children at organic 1–10 are always listed in the day cell.
+        Missing children are omitted, never invented.
       </p>
     </div>
   );

@@ -437,34 +437,49 @@ export function keywordChildLegend(
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+/** Child variation rank 1–10 must always appear as theme+#N in the day cell. */
+export function isTopTenOrganic(rank: number | null | undefined): boolean {
+  const n = asRank(rank);
+  return n != null && n <= 10;
+}
+
 /**
  * Extra day-cell chips: one identity and one rank per child ASIN.
  *
  * Rank source of truth when phrases/v2 and variations-heatmap disagree
- * for the same ASIN (do not render both numbers):
+ * for the same ASIN (do not render both numbers — except top-10):
  *   - Cell primary # / fill / sort / spark stay on the family-winner
  *     phrases/v2 `organic_position` (`positions[week]`).
- *   - If that winning `organic_asin` also has a variation snapshot,
- *     omit it from extra chips — even when the two ranks differ.
- *     Theme catalog labels the winner (no second #). Variation rank
- *     is preferred only for non-winner children that actually have a
- *     stored variation row.
- *   - Phrases/v2 organic_position is used for a child only when that
- *     child is not already covered by a variation row.
+ *   - Variation snapshot rank is the SoT for a child's chip when a
+ *     variation row exists. Theme catalog labels the child (never an
+ *     ASIN CHILD pill + theme for the same ASIN).
+ *   - Non-winner children with a stored variation rank are always
+ *     chipped (11+ stay compact).
+ *   - Winner is omitted from extra chips when their variation rank is
+ *     missing or >10 — the cell # + theme already identify them.
+ *   - If the winner's variation rank is 1–10, always list theme+#N.
+ *     That top-10 child rank must never be hidden behind “winner only”,
+ *     even when it differs from the family-winner phrases position.
+ *     When the two ranks match, skip the extra chip (already listed).
  */
 export function heatmapDayChips(
-  row: Pick<HeatmapRow, "variation_slots" | "organic_child_asins" | "organic_child_asin">,
+  row: Pick<HeatmapRow, "variation_slots" | "organic_child_asins" | "organic_child_asin" | "positions">,
   week: string,
   weeks: string[],
 ): VariationChip[] {
   const winner = asOrganicChild(row.organic_child_asins[week]);
+  const familyRank = asRank(row.positions?.[week]);
   const seen = new Set<string>();
   const out: VariationChip[] = [];
   for (const chip of variationChipsForDay(row, week, weeks)) {
     if (seen.has(chip.asin)) continue;
     seen.add(chip.asin);
     if (chip.rank == null) continue;
-    if (winner && chip.asin === winner) continue;
+    const topTen = isTopTenOrganic(chip.rank);
+    if (winner && chip.asin === winner) {
+      if (!topTen) continue;
+      if (familyRank != null && familyRank === chip.rank) continue;
+    }
     out.push(chip);
   }
   return out;
