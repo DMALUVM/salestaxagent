@@ -53,8 +53,8 @@ function CopyableName({
   }
 
   return (
-    <div className={`flex items-start gap-1 ${compact ? "min-w-0 max-w-[12rem]" : "min-w-[8rem] max-w-[18rem]"}`}>
-      <div className="min-w-0">
+    <div className={`flex min-w-0 items-start gap-1 overflow-hidden ${compact ? "max-w-[12rem]" : "max-w-[18rem]"}`}>
+      <div className="min-w-0 overflow-hidden">
         <span className="font-mono text-xs whitespace-normal break-words select-all leading-snug">
           {text}
         </span>
@@ -75,6 +75,36 @@ function CopyableName({
           ? <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Copied</span>
           : <ClipboardCopy className="h-3 w-3" />}
       </Button>
+    </div>
+  );
+}
+
+/** One copyable campaign name. A second copy block only when id is a distinct SP-API id. */
+function CampaignIdentity({ name, id }: { name: string; id: string }) {
+  const idDiffers = Boolean(id && id !== name);
+  return (
+    <div className="min-w-0 max-w-[18rem] overflow-hidden">
+      <CopyableName value={name} label="campaign name" />
+      {idDiffers ? (
+        <div className="mt-1">
+          <p className="text-[10px] text-muted-foreground">Campaign ID</p>
+          <CopyableName value={id} label="campaign id" compact />
+        </div>
+      ) : id ? (
+        <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
+          Campaign ID same as name (no SP-API id on pasted 1.0)
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function AdsVerifyNote({ note }: { note: string }) {
+  return (
+    <div className="bleeders-10-verify-note rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5">
+      <p className="whitespace-normal break-words text-[11px] leading-snug text-amber-800 dark:text-amber-300">
+        {note}
+      </p>
     </div>
   );
 }
@@ -275,7 +305,7 @@ export function PpcBleeders10({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-28">Done / Skipped</TableHead>
+                  <TableHead className="w-36">Done / Skipped</TableHead>
                   <TableHead>Rank</TableHead>
                   <TableHead className="min-w-[22rem]">Action + how-to</TableHead>
                   <TableHead>Campaign</TableHead>
@@ -298,18 +328,17 @@ export function PpcBleeders10({
                     && bleeders10TermsEqual(r.search_term, r.keyword);
                   const evidenceOpen = openEvidence === r.checklist_id;
                   const metricsOk = whyMetricsMatch(r);
-                  const idDiffers = Boolean(r.campaign_id && r.campaign_id !== r.campaign_name);
                   return (
                     <Fragment key={r.checklist_id}>
                     <TableRow className={status !== "open" ? "opacity-60" : ""}>
-                      <TableCell className="align-top">
-                        <div className="flex flex-col gap-1">
+                      <TableCell className="align-top w-36 overflow-hidden whitespace-normal">
+                        <div className="flex flex-col gap-1.5">
                           {status === "already_applied" ? (
                             <Badge variant="outline" className="text-[10px] text-emerald-700 dark:text-emerald-400">
                               Already applied in Ads
                             </Badge>
                           ) : null}
-                          <div className="flex gap-1">
+                          <div className="flex flex-wrap gap-1">
                             <Button
                               variant={status === "done" ? "default" : "outline"}
                               size="sm"
@@ -331,46 +360,31 @@ export function PpcBleeders10({
                             type="button"
                             variant="ghost"
                             size="xs"
+                            className="w-fit"
                             onClick={() => setOpenEvidence(evidenceOpen ? null : r.checklist_id)}
                           >
                             {evidenceOpen ? "Hide evidence" : "Evidence"}
                           </Button>
                           {r.applied_reason && status !== "open" ? (
-                            <p className="max-w-[14rem] text-[10px] leading-snug text-muted-foreground">{r.applied_reason}</p>
-                          ) : null}
-                          {status === "open" && r.ads_verify_note ? (
-                            <p className="max-w-[14rem] text-[10px] leading-snug text-amber-700 dark:text-amber-400">{r.ads_verify_note}</p>
+                            <p className="max-w-[10rem] overflow-hidden whitespace-normal break-words text-[10px] leading-snug text-muted-foreground">{r.applied_reason}</p>
                           ) : null}
                         </div>
                       </TableCell>
                       <TableCell className="align-top"><Badge variant="outline" className="text-[10px]">{r.rank}</Badge></TableCell>
-                      <TableCell className="align-top min-w-[22rem] max-w-[28rem] whitespace-normal">
-                        <p className="text-xs font-medium text-foreground">{r.action_label}</p>
-                        <p className="mt-1 text-[11px] leading-snug text-foreground/90">{r.suggested_action}</p>
+                      <TableCell className="align-top min-w-[22rem] max-w-[28rem] overflow-hidden whitespace-normal">
+                        <p className="text-xs font-medium leading-snug text-foreground">{r.action_label}</p>
+                        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{r.suggested_action}</p>
                       </TableCell>
-                      <TableCell className="align-top whitespace-normal">
-                        <CopyableName value={r.campaign_name} label="campaign name" />
-                        {r.campaign_id ? (
-                          <div className="mt-1">
-                            <p className="text-[10px] text-muted-foreground">
-                              {idDiffers
-                                ? "Campaign ID"
-                                : "Campaign ID (= name; no SP-API id on pasted 1.0)"}
-                            </p>
-                            <CopyableName value={r.campaign_id} label="campaign id" compact />
-                          </div>
-                        ) : null}
-                        <p className="mt-1 text-[10px] tabular-nums text-muted-foreground">
-                          {data.window.window_start}..{data.window.window_end}
-                        </p>
+                      <TableCell className="align-top overflow-hidden whitespace-normal">
+                        <CampaignIdentity name={r.campaign_name} id={r.campaign_id} />
                       </TableCell>
-                      <TableCell className="align-top whitespace-normal">
+                      <TableCell className="align-top overflow-hidden whitespace-normal">
                         <CopyableName value={r.ad_group_name} label="ad group name" />
                       </TableCell>
-                      <TableCell className="align-top whitespace-normal">
+                      <TableCell className="align-top overflow-hidden whitespace-normal">
                         <CopyableName value={r.search_term} label="search term" />
                       </TableCell>
-                      <TableCell className="align-top whitespace-normal">
+                      <TableCell className="align-top overflow-hidden whitespace-normal">
                         <CopyableName
                           value={r.keyword ?? ""}
                           label="keyword"
@@ -387,9 +401,9 @@ export function PpcBleeders10({
                       <TableCell className="align-top text-right tabular-nums">{r.orders}</TableCell>
                       <TableCell className="align-top text-right tabular-nums">${fmtD(r.sales_14d)}</TableCell>
                       <TableCell className="align-top text-right tabular-nums">${fmtD(r.spend)}</TableCell>
-                      <TableCell className="align-top text-[11px] whitespace-normal max-w-[18rem]">
+                      <TableCell className="align-top max-w-[18rem] overflow-hidden whitespace-normal text-[11px] leading-snug">
                         <p className="mb-1 text-[10px] text-muted-foreground">
-                          Verify in Ads: SP Search Term report for {data.window.window_start}..{data.window.window_end},
+                          Verify in Ads: SP Search Term report,
                           campaign {r.campaign_name || "?"}, term {r.search_term || "?"}.
                         </p>
                         {!metricsOk ? (
@@ -400,6 +414,13 @@ export function PpcBleeders10({
                         {r.why}
                       </TableCell>
                     </TableRow>
+                    {status === "open" && r.ads_verify_note ? (
+                      <TableRow className="bg-amber-500/5 hover:bg-amber-500/5">
+                        <TableCell colSpan={TABLE_COL_COUNT} className="overflow-hidden whitespace-normal py-2">
+                          <AdsVerifyNote note={r.ads_verify_note} />
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
                     {evidenceOpen ? (
                       <TableRow className="bg-muted/40">
                         <TableCell colSpan={TABLE_COL_COUNT} className="whitespace-normal">
