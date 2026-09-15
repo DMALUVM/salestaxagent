@@ -264,8 +264,8 @@ describe("This week Recovery list is not the 1.0 10", () => {
     assert.match(ui, /\{r\.orders\}/);
     assert.match(ui, /r\.sales_14d/);
     assert.match(ui, /navigator\.clipboard/);
-    assert.match(ui, /CopyableName value=\{r\.campaign_name\}/);
-    assert.match(ui, /CopyableName value=\{r\.campaign_id\}/);
+    assert.match(ui, /CopyableName value=\{r\.campaign_name\}|CampaignIdentity name=\{r\.campaign_name\}/);
+    assert.match(ui, /CampaignIdentity name=\{r\.campaign_name\} id=\{r\.campaign_id\}/);
     assert.match(ui, /CopyableName value=\{r\.ad_group_name\}/);
     assert.match(ui, /CopyableName value=\{r\.search_term\}/);
     assert.match(ui, /CopyableName value=\{r\.match_type\}/);
@@ -273,8 +273,17 @@ describe("This week Recovery list is not the 1.0 10", () => {
     assert.match(ui, /Verify in Ads: SP Search Term report/);
     assert.match(ui, /data\.window\.window_start/);
     assert.match(ui, /data\.window\.window_end/);
-    assert.match(ui, /CopyableName value=\{r\.campaign_id\} label="campaign id"/);
+    assert.match(ui, /idDiffers/);
+    assert.match(ui, /CopyableName value=\{id\} label="campaign id"/);
+    assert.match(ui, /Campaign ID same as name \(no SP-API id on pasted 1\.0\)/);
+    assert.doesNotMatch(ui, /Campaign ID \(= name/);
+    assert.match(ui, /bleeders-10-verify-note/);
+    assert.match(ui, /AdsVerifyNote note=\{r\.ads_verify_note\}/);
     assert.match(ui, /Hide evidence/);
     assert.doesNotMatch(ui, /max-w-\[12rem\] truncate/);
+    assert.doesNotMatch(
+      ui,
+      /CampaignIdentity[\s\S]{0,200}window_start\.\.\{data\.window\.window_end\}/,
+    );
   });
 });
