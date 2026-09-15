@@ -2220,10 +2220,11 @@ def sqp_status_cmd():
 def soldscope_weekly_sync_cmd(dry_run):
     """Weekly SoldScope history for the three parent hero ASINs.
 
-    Observe-only Amazon intel (sales / BSR / price). Rank Tracker lists
-    existing groups and pulls phrases when a hero matches — never POSTs
-    create group/phrase. Not a replacement for SP-API or Ads sync.
-    Requires SOLDSCOPE_API_TOKEN. Scheduled Sunday 10:30 ET.
+    Observe-only Amazon intel (sales / BSR / price / ratings / SV / KR).
+    Rank Tracker is reuse-only (never POSTs create group/phrase) and is
+    also pulled daily via soldscope-daily-rt. Not a replacement for
+    SP-API or Ads sync. Requires SOLDSCOPE_API_TOKEN.
+    Scheduled Sunday 10:30 ET.
     """
     from src.db import job_finish, job_start
     from src.soldscope.sync import sync_weekly
@@ -2261,6 +2262,52 @@ def soldscope_weekly_sync_cmd(dry_run):
             f"bsr={written.get('bsr', 0)} price={written.get('price', 0)} "
             f"rank={written.get('rank', 0)}"
         )
+    if r.get("quota_remaining") is not None:
+        click.echo(f"  quota rem : {r.get('quota_remaining')} (reset {r.get('quota_reset')})")
+    for n in r.get("notes") or []:
+        click.echo(f"  note      : {n}")
+    for e in r.get("errors") or []:
+        click.echo(f"  ✗ {e}")
+
+
+@cli.command("soldscope-daily-rt")
+@click.option("--dry-run/--apply", default=False,
+              help="Parse + call API but skip warehouse upserts")
+def soldscope_daily_rt_cmd(dry_run):
+    """Daily reuse-only Rank Tracker snapshots for hero groups.
+
+    GET existing lip/balm/deo Rank Tracker groups and phrases only.
+    Never POSTs create group/phrase. No sales/BSR/price/ratings/SV/KR.
+    Requires SOLDSCOPE_API_TOKEN. Scheduled daily 10:30 ET.
+    """
+    from src.db import job_finish, job_start
+    from src.soldscope.sync import sync_daily_rt
+
+    run_id = None if dry_run else job_start("soldscope_daily_rt")
+    try:
+        r = sync_daily_rt(dry_run=dry_run)
+    except Exception as e:
+        if run_id:
+            job_finish(run_id, "fail", str(e)[:500])
+        raise click.ClickException(str(e)[:400])
+
+    status = r.get("status") or "fail"
+    msg = r.get("message") or status
+    if run_id:
+        job_finish(run_id, status, msg, stats={
+            "written": r.get("written"),
+            "counts": r.get("counts"),
+            "quota_remaining": r.get("quota_remaining"),
+        })
+
+    click.echo(f"{'DRY RUN — ' if dry_run else ''}SoldScope daily RT: {status}")
+    click.echo(f"  {msg}")
+    click.echo(f"  ASINs     : {', '.join(r.get('asins') or [])}")
+    counts = r.get("counts") or {}
+    written = r.get("written") or {}
+    click.echo(f"  rows      : rank={counts.get('rank', 0)}")
+    if not dry_run:
+        click.echo(f"  written   : rank={written.get('rank', 0)}")
     if r.get("quota_remaining") is not None:
         click.echo(f"  quota rem : {r.get('quota_remaining')} (reset {r.get('quota_reset')})")
     for n in r.get("notes") or []:
@@ -5484,17 +5531,28 @@ def run():
         click.echo("[Scheduler] GitHub backup weekly Sunday 09:00")
 
         # SoldScope weekly intel — Sunday 10:30 ET, after the Sunday ads
-        # backfills and GitHub backup. Hero history only. Rank Tracker is
-        # read-only (0 groups → note + empty). No Ads wait-loops.
+        # backfills and GitHub backup. Hero history + ratings + SV + KR.
+        # Rank Tracker is reuse-only (0 groups → note + empty) and is
+        # also scheduled daily below. No Ads wait-loops.
         _ss_sched = {
             "day_of_week": "sun",
             "hour": 10,
             "minute": 30,
             "timezone": AGENT_TZ_NAME,
         }
+        _ss_rt_sched = {
+            "hour": 10,
+            "minute": 30,
+            "timezone": AGENT_TZ_NAME,
+        }
         try:
             from src.soldscope.sync import load_config as _ss_cfg
-            _ss_sched = (_ss_cfg().get("schedule") or _ss_sched)
+            _ss_loaded = _ss_cfg()
+            _ss_sched = (_ss_loaded.get("schedule") or _ss_sched)
+            _ss_rt_sched = (
+                (_ss_loaded.get("rank_tracker") or {}).get("schedule")
+                or _ss_rt_sched
+            )
         except Exception:
             pass
         scheduler.add_job(
@@ -5515,7 +5573,27 @@ def run():
             f"{int(_ss_sched.get('hour', 10)):02d}:"
             f"{int(_ss_sched.get('minute', 30)):02d} "
             f"{_ss_sched.get('timezone', AGENT_TZ_NAME)} "
-            "(hero history + RT observe-only)"
+            "(hero history; RT reuse-only fallback)"
+        )
+        # Daily Rank Tracker reuse-only — every day 10:30 ET. GET existing
+        # hero groups/phrases only. Never create groups. No history/SV/KR.
+        scheduler.add_job(
+            _run_soldscope_daily_rt,
+            "cron",
+            hour=int(_ss_rt_sched.get("hour", 10)),
+            minute=int(_ss_rt_sched.get("minute", 30)),
+            timezone=_ss_rt_sched.get("timezone", AGENT_TZ_NAME),
+            id="soldscope_daily_rt",
+            misfire_grace_time=7200,
+            coalesce=True,
+            max_instances=1,
+        )
+        click.echo(
+            f"[Scheduler] SoldScope daily RT "
+            f"{int(_ss_rt_sched.get('hour', 10)):02d}:"
+            f"{int(_ss_rt_sched.get('minute', 30)):02d} "
+            f"{_ss_rt_sched.get('timezone', AGENT_TZ_NAME)} "
+            "(reuse-only GET; create_groups=false)"
         )
 
         # Competitor reverse-ASIN KR — Sunday after hero SoldScope.
@@ -7131,6 +7209,27 @@ def _run_soldscope_weekly_sync():
         })
     except Exception as e:
         print(f"[SoldScope] Error: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+
+
+def _run_soldscope_daily_rt():
+    """Daily reuse-only Rank Tracker snapshots. Fail soft if token missing / 402."""
+    from src.db import job_finish, job_start
+    from src.soldscope.sync import sync_daily_rt
+
+    run_id = job_start("soldscope_daily_rt")
+    try:
+        r = sync_daily_rt()
+        status = r.get("status") or "fail"
+        msg = r.get("message") or status
+        print(f"[SoldScope daily RT] {status}: {msg}")
+        job_finish(run_id, status, msg, stats={
+            "written": r.get("written"),
+            "counts": r.get("counts"),
+            "quota_remaining": r.get("quota_remaining"),
+        })
+    except Exception as e:
+        print(f"[SoldScope daily RT] Error: {e}")
         job_finish(run_id, "fail", str(e)[:500])
 
 

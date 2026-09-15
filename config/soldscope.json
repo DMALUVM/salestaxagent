@@ -1,5 +1,5 @@
 {
-  "_doc": "SoldScope v1 — additive warehouse that enriches existing /ppc, /ppc/gno, and Amazon Ops surfaces. Weekly sales/BSR/price (research only), ratings-history, capped search-volume for keywords we already show, Rank Tracker read-only. Never POST create. Not a Pulse/Ads/sales_daily source and not a second sales desk. Token is SOLDSCOPE_API_TOKEN only.",
+  "_doc": "SoldScope v1 — additive warehouse that enriches existing /ppc, /ppc/gno, and Amazon Ops surfaces. Weekly sales/BSR/price (research only), ratings-history, capped search-volume for keywords we already show. Rank Tracker reuse-only daily snapshots (create_groups always false — never POST create). Not a Pulse/Ads/sales_daily source and not a second sales desk. Token is SOLDSCOPE_API_TOKEN only.",
   "marketplace": "US",
   "days": 90,
   "asins": [
@@ -15,7 +15,13 @@
   },
   "rank_tracker": {
     "enabled": true,
-    "create_groups": false
+    "create_groups": false,
+    "heatmap_days": 30,
+    "schedule": {
+      "hour": 10,
+      "minute": 30,
+      "timezone": "America/New_York"
+    }
   },
   "search_volume": {
     "enabled": true,
