@@ -47,6 +47,18 @@ export type WowDirection = "improved" | "worsened";
 export type WowReason = "moved" | "entered_top_n" | "exited_top_n";
 export type MoveDirection = "improved" | "worsened" | "unchanged" | "unknown";
 export type HeatmapSortKey = "sfr" | "keyword" | "rank" | "moved";
+export type HeatmapSortDir = "asc" | "desc";
+
+/** Preset toolbar keys, plus `week` for a daily rank column (`week` ISO date). */
+export type HeatmapSortSpec = {
+  key: HeatmapSortKey | "week";
+  dir: HeatmapSortDir;
+  /** ISO date (`YYYY-MM-DD`) of a daily rank column when key === "week". */
+  week?: string;
+};
+
+/** Default grid order: SFR ascending (more frequent first). Null SFR last. */
+export const DEFAULT_HEATMAP_SORT: HeatmapSortSpec = { key: "sfr", dir: "asc" };
 
 export type WowFlag = {
   direction: WowDirection;
@@ -304,40 +316,121 @@ export function sparklineGeometry(
   return { points, polyline, direction };
 }
 
-export function sortHeatmapRows(rows: HeatmapRow[], sort: HeatmapSortKey): HeatmapRow[] {
-  const copy = [...rows];
-  if (sort === "keyword") {
-    return copy.sort((a, b) => a.keyword_normalized.localeCompare(b.keyword_normalized));
+function keywordTie(a: HeatmapRow, b: HeatmapRow): number {
+  return a.keyword_normalized.localeCompare(b.keyword_normalized);
+}
+
+/**
+ * Compare two optional ranks / SFR values.
+ * Null / missing always sort last (after every finite value), regardless of
+ * `dir`. Amazon rank and ABA SFR: lower number is better / more frequent.
+ * Returns 0 when both are null or equal so the caller can tie-break.
+ */
+function compareNullableRank(
+  a: number | null | undefined,
+  b: number | null | undefined,
+  dir: HeatmapSortDir,
+): number {
+  const left = asRank(a);
+  const right = asRank(b);
+  if (left == null && right == null) return 0;
+  if (left == null) return 1;
+  if (right == null) return -1;
+  if (left === right) return 0;
+  return dir === "asc" ? left - right : right - left;
+}
+
+export function parseHeatmapSort(sort: HeatmapSortKey | HeatmapSortSpec): HeatmapSortSpec {
+  if (typeof sort === "string") return { key: sort, dir: "asc" };
+  return {
+    key: sort.key,
+    dir: sort.dir === "desc" ? "desc" : "asc",
+    week: sort.week,
+  };
+}
+
+/**
+ * Header click cycle: new column → asc → desc → default SFR asc.
+ * Asc on rank/SFR is lower-number first (better rank / more frequent).
+ */
+export function cycleHeatmapSort(
+  current: HeatmapSortKey | HeatmapSortSpec,
+  next: { key: HeatmapSortKey | "week"; week?: string },
+): HeatmapSortSpec {
+  const cur = parseHeatmapSort(current);
+  const same = cur.key === next.key && (next.key !== "week" || cur.week === next.week);
+  if (!same) return { key: next.key, dir: "asc", week: next.week };
+  if (cur.dir === "asc") return { key: next.key, dir: "desc", week: next.week };
+  return { ...DEFAULT_HEATMAP_SORT };
+}
+
+export function heatmapSortCaption(sort: HeatmapSortKey | HeatmapSortSpec): string {
+  const spec = parseHeatmapSort(sort);
+  if (spec.key === "keyword") {
+    return spec.dir === "asc" ? "sorted A–Z" : "sorted Z–A";
   }
-  if (sort === "rank") {
+  if (spec.key === "rank") {
+    return spec.dir === "asc"
+      ? "sorted by current rank (best / #1 first)"
+      : "sorted by current rank (worst first)";
+  }
+  if (spec.key === "week") {
+    const day = spec.week ?? "day";
+    return spec.dir === "asc"
+      ? `sorted by ${day} (best / #1 first)`
+      : `sorted by ${day} (worst first)`;
+  }
+  if (spec.key === "moved") {
+    return spec.dir === "asc" ? "movers first" : "still first";
+  }
+  return spec.dir === "asc"
+    ? "sorted by SFR (more frequent first)"
+    : "sorted by SFR (less frequent first)";
+}
+
+export function sortHeatmapRows(
+  rows: HeatmapRow[],
+  sort: HeatmapSortKey | HeatmapSortSpec,
+): HeatmapRow[] {
+  const spec = parseHeatmapSort(sort);
+  const copy = [...rows];
+  const sign = spec.dir === "asc" ? 1 : -1;
+  if (spec.key === "keyword") {
     return copy.sort((a, b) => {
-      if (a.current != null && b.current != null && a.current !== b.current) {
-        return a.current - b.current;
-      }
-      if (a.current != null && b.current == null) return -1;
-      if (a.current == null && b.current != null) return 1;
-      return a.keyword_normalized.localeCompare(b.keyword_normalized);
+      const primary = keywordTie(a, b) * sign;
+      return primary !== 0 ? primary : keywordTie(a, b);
     });
   }
-  if (sort === "moved") {
+  if (spec.key === "rank") {
+    return copy.sort((a, b) => {
+      const primary = compareNullableRank(a.current, b.current, spec.dir);
+      return primary !== 0 ? primary : keywordTie(a, b);
+    });
+  }
+  if (spec.key === "week") {
+    const week = spec.week ?? "";
+    return copy.sort((a, b) => {
+      const primary = compareNullableRank(a.positions[week], b.positions[week], spec.dir);
+      return primary !== 0 ? primary : keywordTie(a, b);
+    });
+  }
+  if (spec.key === "moved") {
     return copy.sort((a, b) => {
       const am = classifyMovement(a.previous, a.current);
       const bm = classifyMovement(b.previous, b.current);
       const as = am.meaningful ? 2 : am.anyMove ? 1 : 0;
       const bs = bm.meaningful ? 2 : bm.anyMove ? 1 : 0;
-      if (as !== bs) return bs - as;
+      if (as !== bs) return (bs - as) * sign;
       const ad = Math.abs(am.delta ?? 0);
       const bd = Math.abs(bm.delta ?? 0);
-      if (ad !== bd) return bd - ad;
-      if (a.sfr != null && b.sfr != null && a.sfr !== b.sfr) return a.sfr - b.sfr;
-      return a.keyword_normalized.localeCompare(b.keyword_normalized);
+      if (ad !== bd) return (bd - ad) * sign;
+      const sfr = compareNullableRank(a.sfr, b.sfr, "asc");
+      return sfr !== 0 ? sfr : keywordTie(a, b);
     });
   }
   return copy.sort((a, b) => {
-    if (a.sfr != null && b.sfr != null && a.sfr !== b.sfr) return a.sfr - b.sfr;
-    if (a.sfr != null && b.sfr == null) return -1;
-    if (a.sfr == null && b.sfr != null) return 1;
-    return a.keyword_normalized.localeCompare(b.keyword_normalized);
+    const primary = compareNullableRank(a.sfr, b.sfr, spec.dir);
+    return primary !== 0 ? primary : keywordTie(a, b);
   });
 }
 

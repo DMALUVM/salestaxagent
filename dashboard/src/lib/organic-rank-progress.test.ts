@@ -15,14 +15,17 @@ import {
   familyHeroAsin,
   lookupOrganicRank,
   organicRankSnapshotRows,
+  DEFAULT_HEATMAP_SORT,
   cellHoverTitle,
   cellPriorRank,
   classifyMovement,
   classifyWowDelta,
+  cycleHeatmapSort,
   emptyCopyForFamily,
   filterProgress,
   formatCellRank,
   formatSignedDelta,
+  heatmapSortCaption,
   rankDelta,
   resolveSfr,
   sortHeatmapRows,
@@ -278,6 +281,62 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     });
     const sorted = sortHeatmapRows(progress.rows, "moved");
     assert.deepEqual(sorted.map((r) => r.keyword_normalized), ["leap", "nudge", "still"]);
+    const stillFirst = sortHeatmapRows(progress.rows, { key: "moved", dir: "desc" });
+    assert.deepEqual(stillFirst.map((r) => r.keyword_normalized), ["still", "nudge", "leap"]);
+  });
+
+  test("header sort: keyword, SFR, day rank; nulls last; keyword A–Z tie-break", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [
+        {
+          phrase: "zeta", asin: "B0CLHTF8YN", as_of: "2026-09-06",
+          organic_position: 2, aba_search_frequency_rank: 50,
+        },
+        {
+          phrase: "alpha", asin: "B0CLHTF8YN", as_of: "2026-09-06",
+          organic_position: 2, aba_search_frequency_rank: 50,
+        },
+        {
+          phrase: "missing", asin: "B0CLHTF8YN", as_of: "2026-09-06",
+          organic_position: null, aba_search_frequency_rank: null,
+        },
+        {
+          phrase: "beta", asin: "B0CLHTF8YN", as_of: "2026-09-06",
+          organic_position: 10, aba_search_frequency_rank: 10,
+        },
+      ],
+    });
+    const names = (key: Parameters<typeof sortHeatmapRows>[1]) =>
+      sortHeatmapRows(progress.rows, key).map((r) => r.keyword_normalized);
+
+    assert.deepEqual(names("keyword"), ["alpha", "beta", "missing", "zeta"]);
+    assert.deepEqual(names({ key: "keyword", dir: "desc" }), ["zeta", "missing", "beta", "alpha"]);
+
+    assert.deepEqual(names("sfr"), ["beta", "alpha", "zeta", "missing"]);
+    assert.deepEqual(names({ key: "sfr", dir: "desc" }), ["alpha", "zeta", "beta", "missing"]);
+
+    const day = { key: "week" as const, week: "2026-09-06", dir: "asc" as const };
+    assert.deepEqual(names(day), ["alpha", "zeta", "beta", "missing"]);
+    assert.deepEqual(names({ ...day, dir: "desc" }), ["beta", "alpha", "zeta", "missing"]);
+
+    assert.deepEqual(names("rank"), ["alpha", "zeta", "beta", "missing"]);
+    assert.deepEqual(names({ key: "rank", dir: "desc" }), ["beta", "alpha", "zeta", "missing"]);
+
+    assert.equal(heatmapSortCaption(day), "sorted by 2026-09-06 (best / #1 first)");
+    assert.equal(heatmapSortCaption({ key: "sfr", dir: "desc" }), "sorted by SFR (less frequent first)");
+  });
+
+  test("header click cycles new column → asc → desc → default SFR", () => {
+    const start = cycleHeatmapSort(DEFAULT_HEATMAP_SORT, { key: "keyword" });
+    assert.deepEqual(start, { key: "keyword", dir: "asc", week: undefined });
+    const desc = cycleHeatmapSort(start, { key: "keyword" });
+    assert.deepEqual(desc, { key: "keyword", dir: "desc", week: undefined });
+    assert.deepEqual(cycleHeatmapSort(desc, { key: "keyword" }), DEFAULT_HEATMAP_SORT);
+
+    const weekAsc = cycleHeatmapSort(DEFAULT_HEATMAP_SORT, { key: "week", week: "2026-09-06" });
+    assert.deepEqual(weekAsc, { key: "week", dir: "asc", week: "2026-09-06" });
+    const otherDay = cycleHeatmapSort(weekAsc, { key: "week", week: "2026-09-07" });
+    assert.deepEqual(otherDay, { key: "week", dir: "asc", week: "2026-09-07" });
   });
 
   test("deo with snapshots is not the stale empty copy", () => {
@@ -340,6 +399,9 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.match(heat, /Daily organic rank/);
     assert.match(heat, /daily RT snapshots/);
     assert.match(heat, /Moved/);
+    assert.match(heat, /cycleHeatmapSort/);
+    assert.match(heat, /aria-sort/);
+    assert.match(heat, /SortHeader/);
     assert.doesNotMatch(heat, /Deo stays empty/);
     assert.doesNotMatch(heat, /until a Rank Tracker group exists/);
   });
