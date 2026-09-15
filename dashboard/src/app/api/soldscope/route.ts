@@ -66,7 +66,7 @@ export async function GET() {
 
     if (sales.missing && bsr.missing && price.missing) {
       out.setupHint =
-        "Run supabase/migration_soldscope.sql, set SOLDSCOPE_API_TOKEN on the Mini, then wait for soldscope_daily_rt (daily 10:30 ET) and soldscope_weekly_sync (Sunday 10:30 ET).";
+        "Run supabase/migration_soldscope.sql, set SOLDSCOPE_API_TOKEN on the Mini, then wait for soldscope_daily_rt (daily 06:15 ET) and soldscope_weekly_sync (Sunday 10:30 ET).";
       return Response.json(out);
     }
 

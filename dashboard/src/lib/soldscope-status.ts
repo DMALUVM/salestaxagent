@@ -59,6 +59,8 @@ export type SoldScopeRankRow = {
   aba_total_click_share?: number | null;
   aba_total_conv_share?: number | null;
   organic_page?: number | null;
+  organic_asin?: string | null;
+  amazon_choice?: boolean | null;
   as_of?: string | null;
   group_id?: number | null;
 };

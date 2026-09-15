@@ -16,8 +16,10 @@ import {
   lookupOrganicRank,
   organicRankSnapshotRows,
   DEFAULT_HEATMAP_SORT,
+  asOrganicChild,
   cellHoverTitle,
   cellPriorRank,
+  latestOrganicChild,
   classifyMovement,
   classifyWowDelta,
   cycleHeatmapSort,
@@ -211,6 +213,23 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.equal(cellHoverTitle({ previous: 12, current: 12, sfr: 80 }), "12 → 12 (0) · SFR 80");
     assert.equal(cellHoverTitle({ previous: null, current: 12, sfr: null }), "— → 12 · SFR —");
     assert.equal(cellHoverTitle({ previous: 18, current: null }), "18 → —");
+    assert.equal(
+      cellHoverTitle({
+        previous: 18, current: 12, sfr: 80,
+        organicAsin: "b0childlip1", amazonChoice: true,
+      }),
+      "18 → 12 (↑6) · SFR 80 · child B0CHILDLIP1 · Amazon's Choice",
+    );
+    assert.equal(
+      cellHoverTitle({ previous: 12, current: 12, organicAsin: null, amazonChoice: false }),
+      "12 → 12 (0)",
+    );
+    assert.equal(asOrganicChild("  b0childlip1 "), "B0CHILDLIP1");
+    assert.equal(asOrganicChild(""), null);
+    assert.equal(
+      latestOrganicChild({ "2026-09-11": null, "2026-09-12": "B0DAYCHILD" }, ["2026-09-11", "2026-09-12"]),
+      "B0DAYCHILD",
+    );
   });
 
   test("one-week sparkline is prior→current; cell prior uses SoldScope previous", () => {
@@ -339,6 +358,34 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.deepEqual(otherDay, { key: "week", dir: "asc", week: "2026-09-07" });
   });
 
+  test("stores the child ASIN that holds the organic slot per day", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [
+        {
+          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-11",
+          organic_position: 6, organic_asin: "B0DAYCHILD", amazon_choice: true,
+        },
+        {
+          phrase: "tallow lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-12",
+          organic_position: 4, organic_asin: "b0todaychild",
+        },
+        {
+          phrase: "chapstick", asin: "B0CLHTF8YN", as_of: "2026-09-12",
+          organic_position: 20,
+        },
+      ],
+    });
+    const lip = progress.rows.find((r) => r.keyword_normalized === "tallow lip balm");
+    assert.equal(lip?.organic_child_asin, "B0TODAYCHILD");
+    assert.equal(lip?.organic_child_asins["2026-09-11"], "B0DAYCHILD");
+    assert.equal(lip?.organic_child_asins["2026-09-12"], "B0TODAYCHILD");
+    assert.equal(lip?.amazon_choices["2026-09-11"], true);
+    assert.equal(lip?.amazon_choices["2026-09-12"], null);
+    const chap = progress.rows.find((r) => r.keyword_normalized === "chapstick");
+    assert.equal(chap?.organic_child_asin, null);
+    assert.equal(chap?.organic_child_asins["2026-09-12"], null);
+  });
+
   test("deo with snapshots is not the stale empty copy", () => {
     const progress = buildOrganicRankProgress({
       snapshots: [{
@@ -402,6 +449,9 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.match(heat, /cycleHeatmapSort/);
     assert.match(heat, /aria-sort/);
     assert.match(heat, /SortHeader/);
+    assert.match(heat, /organic_child_asin/);
+    assert.match(heat, /child \{row\.organic_child_asin\}/);
+    assert.match(heat, /organicAsin/);
     assert.doesNotMatch(heat, /Deo stays empty/);
     assert.doesNotMatch(heat, /until a Rank Tracker group exists/);
   });

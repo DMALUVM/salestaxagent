@@ -2278,7 +2278,7 @@ def soldscope_daily_rt_cmd(dry_run):
 
     GET existing lip/balm/deo Rank Tracker groups and phrases only.
     Never POSTs create group/phrase. No sales/BSR/price/ratings/SV/KR.
-    Requires SOLDSCOPE_API_TOKEN. Scheduled daily 10:30 ET.
+    Requires SOLDSCOPE_API_TOKEN. Scheduled daily 06:15 ET.
     """
     from src.db import job_finish, job_start
     from src.soldscope.sync import sync_daily_rt
@@ -5541,8 +5541,8 @@ def run():
             "timezone": AGENT_TZ_NAME,
         }
         _ss_rt_sched = {
-            "hour": 10,
-            "minute": 30,
+            "hour": 6,
+            "minute": 15,
             "timezone": AGENT_TZ_NAME,
         }
         try:
@@ -5575,13 +5575,15 @@ def run():
             f"{_ss_sched.get('timezone', AGENT_TZ_NAME)} "
             "(hero history; RT reuse-only fallback)"
         )
-        # Daily Rank Tracker reuse-only — every day 10:30 ET. GET existing
-        # hero groups/phrases only. Never create groups. No history/SV/KR.
+        # Daily Rank Tracker reuse-only — every day 06:15 ET so rank
+        # data is ready by ~07:00. 06:30 is already inventory_sync +
+        # cpa_exports; 05:00/05:30 are ads campaigns / search terms.
+        # GET existing hero groups/phrases only. Never create groups.
         scheduler.add_job(
             _run_soldscope_daily_rt,
             "cron",
-            hour=int(_ss_rt_sched.get("hour", 10)),
-            minute=int(_ss_rt_sched.get("minute", 30)),
+            hour=int(_ss_rt_sched.get("hour", 6)),
+            minute=int(_ss_rt_sched.get("minute", 15)),
             timezone=_ss_rt_sched.get("timezone", AGENT_TZ_NAME),
             id="soldscope_daily_rt",
             misfire_grace_time=7200,
