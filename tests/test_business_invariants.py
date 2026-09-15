@@ -96,6 +96,10 @@ class TestBusinessRulesConfig:
         assert self.cfg["spapi"]["reimbursements_days"] >= 90
         assert self.cfg["spapi"]["reimbursements_days"] >= self.cfg["spapi"]["max_chunk_days"]
 
+    def test_spapi_case_queue_window_matches_paid_desk(self):
+        assert self.cfg["spapi"]["case_queue_days"] >= 90
+        assert self.cfg["spapi"]["case_queue_days"] >= self.cfg["spapi"]["max_chunk_days"]
+
 
 # ── 2. Rules module exposes correct constants ─────────────────
 

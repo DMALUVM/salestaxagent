@@ -122,9 +122,14 @@ export default function AmazonOpsPage() {
             Sales & Traffic (Brand Analytics) + Reimbursements
           </p>
         </div>
-        <Link href="/reimbursements">
-          <Button variant="outline" size="sm">Reimbursements desk</Button>
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/reimbursements">
+            <Button variant="outline" size="sm">Already reimbursed</Button>
+          </Link>
+          <Link href="/reimbursements?tab=eligible">
+            <Button variant="outline" size="sm">Needs case</Button>
+          </Link>
+        </div>
       </div>
 
       {!hasTraffic && !hasReimb ? (
@@ -272,9 +277,14 @@ export default function AmazonOpsPage() {
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between gap-2">
                     <CardTitle className="text-sm font-medium">FBA Reimbursements (30d)</CardTitle>
-                    <Link href="/reimbursements">
-                      <Button variant="outline" size="sm">Reimbursements desk</Button>
-                    </Link>
+                    <div className="flex flex-wrap gap-2">
+                      <Link href="/reimbursements">
+                        <Button variant="outline" size="sm">Already reimbursed</Button>
+                      </Link>
+                      <Link href="/reimbursements?tab=eligible">
+                        <Button variant="outline" size="sm">Needs case</Button>
+                      </Link>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>
