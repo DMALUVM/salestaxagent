@@ -40,9 +40,8 @@ export async function GET() {
       .gte("event_date", bounds.gte)
       .lte("event_date", bounds.lte)
       .eq("status", "needs_case")
-      .eq("reason_group", "lost_inbound")
       .order("event_date", { ascending: false })
-      .limit(500);
+      .limit(2000);
     if (error && (error.code === "PGRST204" || (error.message || "").includes("quantity_shipped"))) {
       const retry = await sb
         .from("fba_case_events")
@@ -50,9 +49,8 @@ export async function GET() {
         .gte("event_date", bounds.gte)
         .lte("event_date", bounds.lte)
         .eq("status", "needs_case")
-        .eq("reason_group", "lost_inbound")
         .order("event_date", { ascending: false })
-        .limit(500);
+        .limit(2000);
       data = retry.data;
       error = retry.error;
     }
