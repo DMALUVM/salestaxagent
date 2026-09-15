@@ -32,9 +32,11 @@ from src.soldscope.client import (
     get_sales_history,
     get_search_volume,
     get_kr_asin_results,
+    get_phrase_variations_heatmap,
     list_group_products,
     list_kr_searches,
     list_product_phrases,
+    list_product_variations,
     list_rank_groups,
     create_single_asin_search,
     token_present,
@@ -54,6 +56,7 @@ SALES_TABLE = "soldscope_sales_history"
 BSR_TABLE = "soldscope_bsr_history"
 PRICE_TABLE = "soldscope_price_history"
 RANK_TABLE = "soldscope_rank_snapshots"
+VARIATION_TABLE = "soldscope_rank_variation_snapshots"
 RATINGS_TABLE = "soldscope_ratings_history"
 VOLUME_TABLE = "soldscope_search_volume"
 KR_TABLE = "soldscope_keyword_research"
@@ -62,6 +65,7 @@ SALES_CONFLICT = "asin,marketplace,date"
 BSR_CONFLICT = "asin,marketplace,date,category_id"
 PRICE_CONFLICT = "asin,marketplace,date"
 RANK_CONFLICT = "asin,marketplace,group_id,phrase,as_of"
+VARIATION_CONFLICT = "asin,marketplace,group_id,phrase,variation_asin,as_of"
 RATINGS_CONFLICT = "asin,marketplace,date"
 VOLUME_CONFLICT = "keyword_normalized,marketplace"
 KR_CONFLICT = "asin,marketplace,keyword_normalized,search_id"
@@ -336,6 +340,148 @@ def phrase_heatmap_days(p: dict) -> dict[str, dict]:
 def phrase_heatmap_ranks(p: dict) -> dict[str, int]:
     """Rank-only view of ``phrase_heatmap_days`` (null/blank/≤0 skipped)."""
     return {day: int(info["rank"]) for day, info in phrase_heatmap_days(p).items()}
+
+
+def phrase_has_ranking_interest(p: dict) -> bool:
+    """True when phrases/v2 has a current organic slot or heatmap history."""
+    if phrase_organic_position(p) is not None:
+        return True
+    return bool(phrase_heatmap_days(p))
+
+
+def variation_theme_label(theme: Any) -> str | None:
+    """Short theme for chips. ``Color: Peppermint`` → ``Peppermint``.
+
+    Empty / missing stays None — never invent a scent from the ASIN.
+    """
+    raw = str(theme or "").strip()
+    if not raw:
+        return None
+    parts = [p.strip() for p in raw.split("/") if str(p).strip()]
+    values: list[str] = []
+    for part in parts:
+        if ":" in part:
+            value = part.split(":", 1)[1].strip()
+        else:
+            value = part
+        if value:
+            values.append(value)
+    label = " / ".join(values).strip()
+    return label or None
+
+
+def product_tracks_variations(prod: dict | None) -> bool:
+    """SoldScope product/group flags. False when explicitly off or missing."""
+    if not isinstance(prod, dict):
+        return False
+    if prod.get("trackVariations") is True or prod.get("track_variations") is True:
+        return True
+    n = _int(_first_present(prod, "variationsCount", "variations_count"))
+    return n is not None and n > 0
+
+
+def should_pull_variations(product: dict | None, group: dict | None = None) -> bool:
+    """Pull child heatmaps only when SoldScope already tracks variations."""
+    return product_tracks_variations(product) or product_tracks_variations(group)
+
+
+def variation_catalog_from_payload(body: dict) -> list[dict]:
+    """Parse GET .../variations. Skip rows with no ASIN. Theme optional."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in _page_items(body):
+        if not isinstance(item, dict):
+            continue
+        asin = str(item.get("asin") or "").strip().upper()
+        if not asin or asin in seen:
+            continue
+        seen.add(asin)
+        raw_theme = item.get("theme")
+        theme = variation_theme_label(raw_theme if isinstance(raw_theme, str) else None)
+        out.append({
+            "asin": asin,
+            "theme": theme,
+            "theme_raw": raw_theme if isinstance(raw_theme, str) else None,
+        })
+    return out
+
+
+def variation_heatmap_days(row: dict) -> dict[str, dict]:
+    """Parse variations-heatmap ``r_YYYY-MM-DD`` objects.
+
+    SoldScope ``rank`` 0 means not found — treat as missing (same as
+    phrases/v2). Never persist 0 as an organic position.
+    """
+    out: dict[str, dict] = {}
+    if not isinstance(row, dict):
+        return out
+    for key, raw in row.items():
+        m = HEATMAP_DAY_KEY.match(str(key))
+        if not m:
+            continue
+        day: dict[str, Any] = {}
+        if isinstance(raw, dict):
+            n = _int(_first_present(raw, "rank", "organicPosition", "organic_position"))
+            choice = phrase_amazon_choice(raw)
+            if choice is not None:
+                day["amazon_choice"] = choice
+        else:
+            n = _int(raw)
+        if n is None or n <= 0:
+            continue
+        day["rank"] = n
+        out[m.group(1)] = day
+    return out
+
+
+def variation_rows_from_heatmap(
+    items: list[dict],
+    *,
+    asin: str,
+    marketplace: str,
+    group_id: int,
+    product_id: int | None,
+    phrase_id: int | None,
+    phrase: str,
+    pulled_at: str,
+    theme_by_asin: dict[str, str | None] | None = None,
+) -> list[dict]:
+    """One warehouse row per child ASIN × as_of. Skip 0 / blank ranks."""
+    themes = theme_by_asin or {}
+    rows: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        child = str(item.get("asin") or "").strip().upper()
+        if not child:
+            continue
+        theme = variation_theme_label(item.get("theme")) or themes.get(child)
+        for day_iso, day in variation_heatmap_days(item).items():
+            key = (child, day_iso)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({
+                "asin": asin,
+                "marketplace": marketplace,
+                "group_id": int(group_id),
+                "product_id": product_id,
+                "phrase_id": phrase_id,
+                "phrase": phrase,
+                "variation_asin": child,
+                "theme": theme,
+                "organic_position": day.get("rank"),
+                "amazon_choice": day.get("amazon_choice"),
+                "as_of": day_iso,
+                "pulled_at": pulled_at,
+                "raw": {
+                    "theme": item.get("theme"),
+                    "amazonChoice": day.get("amazon_choice"),
+                    "heatmap": True,
+                },
+            })
+    return rows
 
 
 def group_primary_asin(g: dict) -> str | None:
@@ -705,6 +851,11 @@ def upsert_key(table: str, row: dict) -> tuple:
             row["asin"], row["marketplace"], int(row["group_id"]),
             row["phrase"], row["as_of"],
         )
+    if table == VARIATION_TABLE:
+        return (
+            row["asin"], row["marketplace"], int(row["group_id"]),
+            row["phrase"], row["variation_asin"], row["as_of"],
+        )
     if table == RATINGS_TABLE:
         return (row["asin"], row["marketplace"], row["date"])
     if table == VOLUME_TABLE:
@@ -859,6 +1010,43 @@ def collect_phrases(
     return phrases
 
 
+def collect_variations(group_id: int, product_id: int) -> list[dict]:
+    """Observe-only child ASINs already tracked on this parent product."""
+    body = list_product_variations(group_id, product_id)
+    return variation_catalog_from_payload(body)
+
+
+def collect_variations_heatmap(
+    group_id: int,
+    product_id: int,
+    phrase_id: int,
+    *,
+    heatmap_from: date | None = None,
+    heatmap_to: date | None = None,
+) -> list[dict]:
+    """Paginate variations-heatmap. perPage 100; stop when a page is short."""
+    items: list[dict] = []
+    page = 1
+    while True:
+        body = get_phrase_variations_heatmap(
+            group_id,
+            product_id,
+            phrase_id,
+            page=page,
+            per_page=100,
+            heatmap_date_from=heatmap_from.isoformat() if heatmap_from else None,
+            heatmap_date_to=heatmap_to.isoformat() if heatmap_to else None,
+        )
+        batch = [p for p in _page_items(body) if isinstance(p, dict)]
+        items.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+        if page > 20:
+            break
+    return items
+
+
 def _phrase_snapshot_row(
     p: dict,
     *,
@@ -1000,8 +1188,113 @@ def _pick_product_id(products: list[dict], asin: str) -> int | None:
 def _empty_written() -> dict[str, int]:
     return {
         "sales": 0, "bsr": 0, "price": 0, "rank": 0,
+        "rank_variations": 0,
         "ratings": 0, "search_volume": 0, "keyword_research": 0,
     }
+
+
+def _product_by_id(products: list[dict], product_id: int | None) -> dict:
+    if product_id is None:
+        return {}
+    for p in products:
+        if _int(p.get("id")) == int(product_id):
+            return p
+    return {}
+
+
+def _pull_variation_rows_for_product(
+    *,
+    group: dict,
+    product: dict,
+    phrases: list[dict],
+    asin: str,
+    marketplace: str,
+    group_id: int,
+    product_id: int,
+    heat_from: date,
+    heat_to: date,
+    pulled_at: str,
+    notes: list[str],
+) -> list[dict]:
+    """Child-ASIN heatmap for one parent. Fail soft per phrase. Never invent."""
+    if not should_pull_variations(product, group):
+        return []
+    try:
+        catalog = collect_variations(group_id, product_id)
+    except QuotaExceeded:
+        raise
+    except Exception as e:
+        log.info(
+            "SoldScope RT variations list skipped group %s product %s: %s",
+            group_id, product_id, e,
+        )
+        notes.append(f"RT group {group_id} variations list skipped: {e}")
+        return []
+    log.info(
+        "SoldScope RT variations: group %s product %s listed %s child ASIN(s)",
+        group_id, product_id, len(catalog),
+    )
+    if not catalog:
+        notes.append(
+            f"RT group {group_id} ({asin}) listed 0 variations — "
+            "no child snapshots."
+        )
+        return []
+    theme_by_asin = {v["asin"]: v.get("theme") for v in catalog}
+    rows: list[dict] = []
+    pulled = 0
+    skipped = 0
+    errors = 0
+    for p in phrases:
+        if not phrase_has_ranking_interest(p):
+            skipped += 1
+            continue
+        phrase = str(p.get("phrase") or "").strip()
+        phrase_id = _int(p.get("id"))
+        if not phrase or phrase_id is None:
+            skipped += 1
+            continue
+        try:
+            items = collect_variations_heatmap(
+                group_id,
+                product_id,
+                phrase_id,
+                heatmap_from=heat_from,
+                heatmap_to=heat_to,
+            )
+        except QuotaExceeded:
+            raise
+        except Exception as e:
+            errors += 1
+            log.info(
+                "SoldScope RT variations-heatmap skipped group %s phrase %s (%s): %s",
+                group_id, phrase_id, phrase, e,
+            )
+            continue
+        pulled += 1
+        rows.extend(variation_rows_from_heatmap(
+            items,
+            asin=asin,
+            marketplace=marketplace,
+            group_id=group_id,
+            product_id=product_id,
+            phrase_id=phrase_id,
+            phrase=phrase,
+            pulled_at=pulled_at,
+            theme_by_asin=theme_by_asin,
+        ))
+    log.info(
+        "SoldScope RT variations-heatmap: group %s product %s "
+        "pulled %s phrase(s), skipped %s, errors %s, rows %s",
+        group_id, product_id, pulled, skipped, errors, len(rows),
+    )
+    notes.append(
+        f"RT group {group_id} ({asin}): {len(catalog)} variation(s), "
+        f"{pulled} phrase heatmap(s), {len(rows)} child snapshot(s)"
+        + (f", {errors} phrase error(s)" if errors else "")
+        + "."
+    )
+    return rows
 
 
 def pull_rank_tracker_snapshots(
@@ -1011,19 +1304,21 @@ def pull_rank_tracker_snapshots(
     pulled_at: str,
     as_of: date | None = None,
     heatmap_days: int | None = None,
-) -> tuple[list[dict], list[str]]:
+) -> tuple[list[dict], list[dict], list[str]]:
     """Reuse-only GET of existing hero Rank Tracker groups.
 
     Never POSTs create-group / create-phrase. Zero groups → empty + note.
     ``as_of`` defaults to ``date.today()`` (Mini calendar; America/New_York).
     phrases/v2 heatmap=true expands ``r_YYYY-MM-DD`` into extra as_of rows.
+    When a product already tracks variations, also GET .../variations and
+    per-phrase variations-heatmap (observe-only, fail soft per phrase).
     """
     hero_asins = [str(a).strip().upper() for a in asins if str(a).strip()]
     notes: list[str] = []
     groups = collect_rank_groups(marketplace=marketplace)
     if not groups:
         notes.append(RT_EMPTY_NOTE)
-        return [], notes
+        return [], [], notes
 
     matched = match_hero_groups(groups, hero_asins)
     matched = attach_hero_asins_from_products(
@@ -1034,7 +1329,7 @@ def pull_rank_tracker_snapshots(
             f"Rank Tracker has {len(groups)} group(s) but none "
             "match hero ASINs — observe-only, not creating groups."
         )
-        return [], notes
+        return [], [], notes
 
     snapshot_day = as_of or date.today()
     heat_from, heat_to = heatmap_window(
@@ -1042,6 +1337,7 @@ def pull_rank_tracker_snapshots(
         today=snapshot_day,
     )
     rank_rows: list[dict] = []
+    variation_rows: list[dict] = []
     for g in matched:
         asin = str(g.get("asin") or "").strip().upper()
         gid = int(g["id"])
@@ -1064,6 +1360,20 @@ def pull_rank_tracker_snapshots(
             as_of=snapshot_day,
             pulled_at=pulled_at,
         ))
+        prod = _product_by_id(products, pid)
+        variation_rows.extend(_pull_variation_rows_for_product(
+            group=g,
+            product=prod,
+            phrases=phrases,
+            asin=asin,
+            marketplace=marketplace,
+            group_id=gid,
+            product_id=pid,
+            heat_from=heat_from,
+            heat_to=heat_to,
+            pulled_at=pulled_at,
+            notes=notes,
+        ))
     missing = [
         a for a in hero_asins
         if a not in {str(g.get("asin") or "").strip().upper() for g in matched}
@@ -1073,7 +1383,8 @@ def pull_rank_tracker_snapshots(
         f"Rank Tracker matched {len(matched)} hero group(s), "
         f"{len(rank_rows)} phrase snapshot(s) "
         f"(heatmap {heat_from.isoformat()}→{heat_to.isoformat()}, "
-        f"{len(as_of_days)} as_of day(s))."
+        f"{len(as_of_days)} as_of day(s)), "
+        f"{len(variation_rows)} child-variation snapshot(s)."
     )
     if missing:
         notes.append(
@@ -1081,7 +1392,7 @@ def pull_rank_tracker_snapshots(
             + ", ".join(missing)
             + " — empty snapshots, not creating groups."
         )
-    return rank_rows, notes
+    return rank_rows, variation_rows, notes
 
 
 def sync_weekly(*, dry_run: bool = False) -> dict:
@@ -1143,6 +1454,7 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
     bsr_rows: list[dict] = []
     price_rows: list[dict] = []
     rank_rows: list[dict] = []
+    variation_rows: list[dict] = []
     ratings_rows: list[dict] = []
     volume_rows: list[dict] = []
     kr_rows: list[dict] = []
@@ -1199,7 +1511,7 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
 
     if quota is None and cfg["rank_tracker"]["enabled"]:
         try:
-            rank_rows, rt_notes = pull_rank_tracker_snapshots(
+            rank_rows, variation_rows, rt_notes = pull_rank_tracker_snapshots(
                 marketplace=marketplace,
                 asins=cfg["asins"],
                 pulled_at=pulled_at,
@@ -1320,6 +1632,9 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
         written["bsr"] = upsert_rows(BSR_TABLE, bsr_rows, on_conflict=BSR_CONFLICT)
         written["price"] = upsert_rows(PRICE_TABLE, price_rows, on_conflict=PRICE_CONFLICT)
         written["rank"] = upsert_rows(RANK_TABLE, rank_rows, on_conflict=RANK_CONFLICT)
+        written["rank_variations"] = upsert_rows(
+            VARIATION_TABLE, variation_rows, on_conflict=VARIATION_CONFLICT,
+        )
         written["ratings"] = upsert_rows(
             RATINGS_TABLE, ratings_rows, on_conflict=RATINGS_CONFLICT,
         )
@@ -1332,6 +1647,7 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
 
     total_in = (
         len(sales_rows) + len(bsr_rows) + len(price_rows) + len(rank_rows)
+        + len(variation_rows)
         + len(ratings_rows) + len(volume_rows) + len(kr_rows)
     )
     history_empty = not (sales_rows or bsr_rows or price_rows)
@@ -1349,7 +1665,8 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
     message = (
         f"{len(cfg['asins'])} hero ASIN(s), {len(sales_rows)} sales / "
         f"{len(bsr_rows)} bsr / {len(price_rows)} price / "
-        f"{len(rank_rows)} rank / {len(ratings_rows)} ratings / "
+        f"{len(rank_rows)} rank / {len(variation_rows)} variation / "
+        f"{len(ratings_rows)} ratings / "
         f"{len(volume_rows)} search-volume / {len(kr_rows)} KR row(s)"
     )
     if dry_run:
@@ -1368,6 +1685,7 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
             "bsr": len(bsr_rows),
             "price": len(price_rows),
             "rank": len(rank_rows),
+            "rank_variations": len(variation_rows),
             "ratings": len(ratings_rows),
             "search_volume": len(volume_rows),
             "keyword_research": len(kr_rows),
@@ -1388,6 +1706,7 @@ def sync_daily_rt(*, dry_run: bool = False) -> dict:
     pulled_at = datetime.now(timezone.utc).isoformat()
     cfg = load_config()
     rank_rows: list[dict] = []
+    variation_rows: list[dict] = []
     quota: QuotaExceeded | None = None
 
     if cfg["dropped_asins"]:
@@ -1451,7 +1770,7 @@ def sync_daily_rt(*, dry_run: bool = False) -> dict:
         }
     else:
         try:
-            rank_rows, rt_notes = pull_rank_tracker_snapshots(
+            rank_rows, variation_rows, rt_notes = pull_rank_tracker_snapshots(
                 marketplace=cfg["marketplace"],
                 asins=cfg["asins"],
                 pulled_at=pulled_at,
@@ -1472,16 +1791,20 @@ def sync_daily_rt(*, dry_run: bool = False) -> dict:
         from src.db import upsert_rows
 
         written["rank"] = upsert_rows(RANK_TABLE, rank_rows, on_conflict=RANK_CONFLICT)
+        written["rank_variations"] = upsert_rows(
+            VARIATION_TABLE, variation_rows, on_conflict=VARIATION_CONFLICT,
+        )
 
-    if quota and not rank_rows and not written["rank"]:
+    if quota and not rank_rows and not written["rank"] and not written["rank_variations"]:
         status = "fail"
     elif quota or errors:
-        status = "partial" if rank_rows or written["rank"] else "fail"
+        status = "partial" if rank_rows or variation_rows or written["rank"] else "fail"
     else:
         status = "success"
 
     message = (
-        f"{len(cfg['asins'])} hero ASIN(s), {len(rank_rows)} daily RT snapshot(s)"
+        f"{len(cfg['asins'])} hero ASIN(s), {len(rank_rows)} daily RT snapshot(s), "
+        f"{len(variation_rows)} child-variation snapshot(s)"
     )
     if dry_run:
         message = "DRY RUN — " + message
@@ -1499,6 +1822,7 @@ def sync_daily_rt(*, dry_run: bool = False) -> dict:
             "bsr": 0,
             "price": 0,
             "rank": len(rank_rows),
+            "rank_variations": len(variation_rows),
             "ratings": 0,
             "search_volume": 0,
             "keyword_research": 0,

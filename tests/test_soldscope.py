@@ -87,6 +87,12 @@ def test_observe_only_refuses_writes_and_discovery():
     ss.assert_read_only("GET", "/common/ratings-history")
     ss.assert_read_only("GET", "/rank-tracker/groups")
     ss.assert_read_only("GET", "/rank-tracker/groups/12/products/7/phrases/v2")
+    ss.assert_read_only("GET", "/rank-tracker/groups/12/products/7/variations")
+    ss.assert_read_only(
+        "GET",
+        "/rank-tracker/groups/12/products/7/phrases/101/variations-heatmap",
+    )
+    ss.assert_read_only("GET", "/rank-tracker/groups/12/products-with-stats")
     ss.assert_read_only("GET", "/keyword-research/searches")
     ss.assert_read_only("GET", "/keyword-research/searches/asin/single/42")
     with pytest.raises(ss.SoldScopeError, match="Refusing"):
@@ -199,6 +205,7 @@ def test_empty_rt_groups_is_clean_noop(monkeypatch):
     assert syn.EMPTY_HISTORY_NOTE in r["notes"]
     assert r["written"] == {
         "sales": 0, "bsr": 0, "price": 0, "rank": 0,
+        "rank_variations": 0,
         "ratings": 0, "search_volume": 0, "keyword_research": 0,
     }
     assert r["counts"]["ratings"] == 0
@@ -833,10 +840,11 @@ def test_daily_rt_as_of_is_today(monkeypatch):
     monkeypatch.setattr(syn, "list_product_phrases", lambda *a, **k: {
         "data": [{"id": 1, "phrase": "tallow lip balm", "organicPosition": 4}],
     })
-    rows, notes = syn.pull_rank_tracker_snapshots(
+    rows, variation_rows, notes = syn.pull_rank_tracker_snapshots(
         marketplace="US", asins=["B0CLHTF8YN"], pulled_at="now",
     )
     assert len(rows) == 1
+    assert variation_rows == []
     assert rows[0]["as_of"] == "2026-09-14"
     assert any("matched 1 hero" in n for n in notes)
 
@@ -986,7 +994,7 @@ def test_pull_requests_heatmap_and_upserts_returned_days(monkeypatch):
         "data": [{"id": 6051, "asin": "B0CLHTF8YN"}],
     })
     monkeypatch.setattr(syn, "list_product_phrases", phrases)
-    rows, notes = syn.pull_rank_tracker_snapshots(
+    rows, variation_rows, notes = syn.pull_rank_tracker_snapshots(
         marketplace="US", asins=["B0CLHTF8YN"], pulled_at="now",
         heatmap_days=30,
     )
@@ -994,4 +1002,189 @@ def test_pull_requests_heatmap_and_upserts_returned_days(monkeypatch):
     assert called[0]["heatmap_date_from"] == "2026-08-16"
     assert called[0]["heatmap_date_to"] == "2026-09-14"
     assert {r["as_of"] for r in rows} == {"2026-09-11", "2026-09-12", "2026-09-14"}
+    assert variation_rows == []
     assert any("2026-08-16→2026-09-14" in n for n in notes)
+
+
+def test_variation_migration_documents_zero_as_not_found():
+    sql = (ROOT / "supabase" / "migration_soldscope_rank_variations.sql").read_text()
+    assert "soldscope_rank_variation_snapshots" in sql
+    assert "0" in sql and "not found" in sql
+    assert "enable row level security" in sql
+    assert "Dana can apply via Supabase MCP after merge" in sql
+
+
+def test_variation_theme_label_prefers_value_after_colon():
+    assert syn.variation_theme_label("Color: Peppermint") == "Peppermint"
+    assert syn.variation_theme_label("Scent: Sweet Orange / Size: 3-pack") == (
+        "Sweet Orange / 3-pack"
+    )
+    assert syn.variation_theme_label("Unscented") == "Unscented"
+    assert syn.variation_theme_label("  ") is None
+    assert syn.variation_theme_label(None) is None
+    assert syn.variation_theme_label("") is None
+
+
+def test_variation_catalog_and_heatmap_skip_zero_ranks():
+    catalog = syn.variation_catalog_from_payload({
+        "data": [
+            {"asin": "b0clhvcpl5", "theme": "Scent: Unscented"},
+            {"asin": "B0CLHVLG2F", "theme": "Assorted"},
+            {"asin": "", "theme": "Ghost"},
+            {"theme": "No ASIN"},
+        ],
+    })
+    assert [(c["asin"], c["theme"]) for c in catalog] == [
+        ("B0CLHVCPL5", "Unscented"),
+        ("B0CLHVLG2F", "Assorted"),
+    ]
+
+    rows = syn.variation_rows_from_heatmap(
+        [
+            {
+                "asin": "B0CLHVCPL5",
+                "theme": "Scent: Unscented",
+                "r_2026-09-13": {"rank": 126, "amazon_choice": False},
+                "r_2026-09-14": {"rank": 0, "amazon_choice": False},
+                "r_2026-09-12": {"rank": None},
+                "r_2026-09-11": 118,
+            },
+            {
+                "asin": "B0CLHVLG2F",
+                "theme": "Assorted",
+                "r_2026-09-13": {"rank": 0},
+            },
+            {"asin": "B0CLHV3V5C", "theme": "Peppermint"},
+        ],
+        asin="B0CLHTF8YN",
+        marketplace="US",
+        group_id=3537,
+        product_id=6051,
+        phrase_id=99,
+        phrase="lip balm",
+        pulled_at="now",
+        theme_by_asin={"B0CLHV3V5C": "Peppermint"},
+    )
+    by_key = {(r["variation_asin"], r["as_of"]): r for r in rows}
+    assert set(by_key) == {
+        ("B0CLHVCPL5", "2026-09-13"),
+        ("B0CLHVCPL5", "2026-09-11"),
+    }
+    assert by_key[("B0CLHVCPL5", "2026-09-13")]["organic_position"] == 126
+    assert by_key[("B0CLHVCPL5", "2026-09-13")]["theme"] == "Unscented"
+    assert by_key[("B0CLHVCPL5", "2026-09-13")]["amazon_choice"] is False
+    assert by_key[("B0CLHVCPL5", "2026-09-11")]["organic_position"] == 118
+    assert "B0CLHVLG2F" not in {r["variation_asin"] for r in rows}
+    assert syn.phrase_has_ranking_interest({
+        "phrase": "lip balm", "organicPosition": 12,
+    })
+    assert syn.phrase_has_ranking_interest({
+        "phrase": "lip balm", "r_2026-09-13": {"rank": 8},
+    })
+    assert not syn.phrase_has_ranking_interest({
+        "phrase": "lip balm", "organicPosition": 0,
+    })
+    assert syn.product_tracks_variations({
+        "trackVariations": True, "variationsCount": 4,
+    })
+    assert syn.product_tracks_variations({"variationsCount": 4})
+    assert not syn.product_tracks_variations({
+        "trackVariations": False, "variationsCount": 0,
+    })
+    assert not syn.product_tracks_variations({"id": 6051, "asin": "B0CLHTF8YN"})
+
+
+def test_variations_heatmap_client_sends_date_window(monkeypatch):
+    seen: list[dict] = []
+
+    def fake_request(method, path, *, params=None, timeout=45):
+        seen.append({"method": method, "path": path, "params": params})
+        return {"data": []}, {}
+
+    monkeypatch.setattr(ss, "request", fake_request)
+    ss.list_product_variations(3537, 6051)
+    ss.get_phrase_variations_heatmap(
+        3537, 6051, 99,
+        heatmap_date_from="2026-08-16", heatmap_date_to="2026-09-14",
+    )
+    ss.list_group_products_with_stats(3537)
+    assert seen[0]["path"].endswith("/products/6051/variations")
+    assert seen[1]["path"].endswith("/phrases/99/variations-heatmap")
+    assert seen[1]["params"]["heatmapDateFrom"] == "2026-08-16"
+    assert seen[1]["params"]["resultsType"] == "organic"
+    assert seen[2]["path"].endswith("/products-with-stats")
+
+
+def test_pull_variation_heatmap_fail_soft_per_phrase(monkeypatch):
+    heat_calls: list[int] = []
+
+    def heat(gid, pid, phrase_id, **kwargs):
+        heat_calls.append(phrase_id)
+        if phrase_id == 2:
+            raise ss.SoldScopeError("SoldScope GET ... failed (400): no heatmap")
+        return {"data": [{
+            "asin": "B0CLHVCPL5",
+            "theme": "Unscented",
+            "r_2026-09-14": {"rank": 126},
+        }]}
+
+    monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [{
+        "id": 3537, "asin": "B0CLHTF8YN",
+        "trackVariations": True, "variationsCount": 4,
+    }])
+    monkeypatch.setattr(syn, "list_group_products", lambda gid: {
+        "data": [{
+            "id": 6051, "asin": "B0CLHTF8YN",
+            "trackVariations": True, "variationsCount": 4,
+        }],
+    })
+    monkeypatch.setattr(syn, "list_product_phrases", lambda *a, **k: {
+        "data": [
+            {"id": 1, "phrase": "lip balm", "organicPosition": 40},
+            {"id": 2, "phrase": "broken phrase", "organicPosition": 12},
+            {"id": 3, "phrase": "no rank today", "organicPosition": 0},
+        ],
+    })
+    monkeypatch.setattr(syn, "list_product_variations", lambda *a, **k: {
+        "data": [
+            {"asin": "B0CLHVCPL5", "theme": "Unscented"},
+            {"asin": "B0CLHVLG2F", "theme": "Assorted"},
+        ],
+    })
+    monkeypatch.setattr(syn, "get_phrase_variations_heatmap", heat)
+
+    rows, variation_rows, notes = syn.pull_rank_tracker_snapshots(
+        marketplace="US", asins=["B0CLHTF8YN"], pulled_at="now",
+        as_of=date(2026, 9, 14), heatmap_days=30,
+    )
+    assert len(rows) == 3
+    assert heat_calls == [1, 2]
+    assert [(r["phrase"], r["variation_asin"], r["organic_position"]) for r in variation_rows] == [
+        ("lip balm", "B0CLHVCPL5", 126),
+    ]
+    assert any("1 phrase heatmap" in n and "1 phrase error" in n for n in notes)
+    assert any("child-variation snapshot" in n for n in notes)
+
+
+def test_daily_rt_counts_variation_rows(monkeypatch):
+    monkeypatch.setattr(syn, "token_present", lambda: True)
+    monkeypatch.setattr(syn, "check_auth", lambda: {"account": {"id": 1}})
+    _daily_rt_history_booms(monkeypatch)
+
+    def pull(**kwargs):
+        return (
+            [{"asin": "B0CLHTF8YN", "phrase": "lip balm", "as_of": "2026-09-14"}],
+            [{
+                "asin": "B0CLHTF8YN", "phrase": "lip balm",
+                "variation_asin": "B0CLHVCPL5", "as_of": "2026-09-14",
+                "organic_position": 126, "theme": "Unscented",
+            }],
+            ["variation note"],
+        )
+
+    monkeypatch.setattr(syn, "pull_rank_tracker_snapshots", pull)
+    r = syn.sync_daily_rt(dry_run=True)
+    assert r["status"] == "success"
+    assert r["counts"]["rank"] == 1
+    assert r["counts"]["rank_variations"] == 1
+    assert "child-variation snapshot" in r["message"]
