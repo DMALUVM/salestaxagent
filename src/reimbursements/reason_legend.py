@@ -5,8 +5,10 @@ Letter **M is Inventory misplaced → lost_warehouse**. It is never Lost inbound
 
 Needs-case eligibility is only misplaced (M / Lost_Warehouse) and warehouse
 damage (E/6/7/H/K/U / Damaged_*), plus real inbound shorts (Lost_Inbound
-full text / inbound_discrepancy). Q/P disposition churn, G disposed, and
-N ownership/correction are excluded. Code **7 is Damaged at FC, not Found**.
+full text / inbound_discrepancy). Q/P disposition churn, D/G disposed,
+and N/O corrections are excluded. **Disposition alone never promotes a
+letter into Needs case.** Code **7 is Damaged at FC, not Found**.
+**D is disposed, O is a correction** — never warehouse_damage.
 
 After a deploy, Mini must rebuild:
 
@@ -16,7 +18,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CLASSIFICATION_VERSION = "ledger-legend-2026-09-15"
+CLASSIFICATION_VERSION = "ledger-legend-2026-09-15-do"
+
+# Letter/digit codes that may enter Needs case. Disposition cannot add more.
+ELIGIBLE_LETTER_CODES = frozenset({"M", "E", "6", "7", "H", "K", "U"})
 
 ELIGIBLE_REASON_GROUPS = frozenset({
     "warehouse_damage",
@@ -101,8 +106,16 @@ LEDGER_REASON_LEGEND: tuple[ReasonLegendRow, ...] = (
         "Reclass into FC-damaged.",
     ),
     ReasonLegendRow(
+        "D", "-", "Inventory disposed of", "disposed", False,
+        "Same family as G. Exclude from Needs case. Disposition must not promote D.",
+    ),
+    ReasonLegendRow(
         "G", "-", "Disposed", "disposed", False,
         "Charity / disposal. Exclude from Needs case.",
+    ),
+    ReasonLegendRow(
+        "O", "-", "Inventory correction", "correction", False,
+        "Incorrectly received OR Amazon already reimbursed. Exclude from Needs case. Disposition must not promote O.",
     ),
     ReasonLegendRow(
         "N", "+", "Ownership / correction", "correction", False,
@@ -176,22 +189,20 @@ def is_letter_or_digit_code(reason: str | None) -> bool:
 def reason_group(reason: str | None, disposition: str | None = None) -> str:
     """Map Amazon ledger / reimbursements reason → desk group.
 
-    M → lost_warehouse (never lost_inbound). Disposition is a secondary
-    warehouse-damage signal only when the reason itself is unknown.
+    M → lost_warehouse (never lost_inbound). Disposition is never a
+    promotion path: D/O/Q/P/G/N and unknown letters stay ``other`` even
+    when disposition is WAREHOUSE_DAMAGED.
     """
+    del disposition  # kept for call-site compatibility; not a classifier
     entry = lookup_reason(reason)
-    if entry:
-        if entry.group in ELIGIBLE_REASON_GROUPS:
-            return entry.group
-        return "other"
-    disp = (disposition or "").strip().upper().replace(" ", "_").replace("-", "_")
-    if disp in WAREHOUSE_DAMAGE_DISPOSITIONS:
-        return "warehouse_damage"
+    if entry and entry.group in ELIGIBLE_REASON_GROUPS:
+        return entry.group
     return "other"
 
 
 def reason_label(reason: str | None, disposition: str | None = None) -> str:
     """Human label. Letter codes render as ``M — Inventory misplaced``."""
+    del disposition
     raw = (reason or "").strip()
     entry = lookup_reason(raw)
     if entry:
@@ -199,9 +210,6 @@ def reason_label(reason: str | None, disposition: str | None = None) -> str:
             return f"{raw.upper()} — {entry.label}"
         return entry.label
     if not raw:
-        disp = (disposition or "").strip()
-        if disp and reason_group(None, disp) == "warehouse_damage":
-            return f"{disp} — Warehouse damage"
         return "Unknown"
     return raw.replace("_", " ").replace("-", " ")
 
@@ -221,13 +229,18 @@ def is_eligible_loss(
     disposition: str | None = None,
     unreconciled_qty: int | None = None,
 ) -> bool:
-    """Negative qty of an eligible loss type, not Q/P/G/N/F."""
+    """Negative qty of an eligible letter/full-text loss. Not D/O/Q/P/G/N/F.
+
+    Disposition is ignored — WAREHOUSE_DAMAGED cannot rescue an excluded
+    or unknown letter into Needs case.
+    """
+    del disposition
     if quantity >= 0:
         return False
     entry = lookup_reason(reason)
-    if entry and not entry.eligible:
+    if not entry or not entry.eligible:
         return False
-    group = reason_group(reason, disposition)
+    group = entry.group
     if group not in ELIGIBLE_REASON_GROUPS:
         return False
     if group == "lost_warehouse" and unreconciled_qty is not None:
@@ -240,12 +253,9 @@ def is_eligible_loss(
 
 
 def is_unknown_reason(reason: str | None, disposition: str | None = None) -> bool:
-    """True when the code is not in the legend and disposition does not classify it."""
-    if lookup_reason(reason):
-        return False
-    if reason_group(reason, disposition) != "other":
-        return False
-    return True
+    """True when the code is not in the legend. Disposition does not classify it."""
+    del disposition
+    return lookup_reason(reason) is None
 
 
 def is_known_excluded(reason: str | None) -> bool:

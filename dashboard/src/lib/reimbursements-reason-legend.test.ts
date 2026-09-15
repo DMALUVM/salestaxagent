@@ -21,7 +21,7 @@ describe("Amazon ledger reason legend", () => {
     assert.equal(reasonGroup("M"), "lost_warehouse");
     assert.notEqual(reasonGroup("M"), "lost_inbound");
     assert.equal(reasonLabel("M"), "M — Inventory misplaced");
-    assert.equal(CLASSIFICATION_VERSION, "ledger-legend-2026-09-15");
+    assert.equal(CLASSIFICATION_VERSION, "ledger-legend-2026-09-15-do");
   });
 
   test("7 is Damaged at FC, not Found", () => {
@@ -32,12 +32,21 @@ describe("Amazon ledger reason legend", () => {
     assert.equal(isEligibleLossReason("F"), false);
   });
 
-  test("Q/P/G/N are not Needs-case reasons", () => {
-    for (const code of ["Q", "P", "G", "N"]) {
+  test("Q/P/G/N/D/O are not Needs-case reasons", () => {
+    for (const code of ["Q", "P", "G", "N", "D", "O"]) {
       assert.equal(isEligibleLossReason(code), false);
+      assert.equal(reasonGroup(code, "WAREHOUSE_DAMAGED"), "other");
     }
     assert.equal(isUnknownReason("Q"), false);
+    assert.equal(isUnknownReason("D"), false);
+    assert.equal(isUnknownReason("O"), false);
     assert.equal(isUnknownReason("ZZZ"), true);
+    assert.equal(isEligibleLossReason("D", "WAREHOUSE_DAMAGED"), false);
+    assert.equal(isEligibleLossReason("O", "WAREHOUSE_DAMAGED"), false);
+    assert.equal(isEligibleLossReason("E"), true);
+    assert.equal(isEligibleLossReason("7"), true);
+    assert.notEqual(reasonGroup("D", "WAREHOUSE_DAMAGED"), "warehouse_damage");
+    assert.notEqual(reasonGroup("O", "WAREHOUSE_DAMAGED"), "warehouse_damage");
   });
 
   test("full-text reasons keep today's groups", () => {
