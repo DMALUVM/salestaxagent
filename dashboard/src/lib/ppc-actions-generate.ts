@@ -4,7 +4,8 @@
  *
  * The dashboard generate endpoint cannot call Python, so this copy must emit
  * the same closed-day window, the same orders_14d attribution, the same
- * pause-vs-negate lever, and the same stale-warehouse guard.
+ * pause-vs-negate lever, the same stale-warehouse guard, and the same
+ * fat-zero floors (spend >= $5, clicks >= 3; rollup P2 at >= $25).
  *
  * Nothing here writes to Amazon.
  */
@@ -13,12 +14,13 @@ export const ATTRIBUTION_FIELD = "orders_14d";
 export const ATTRIBUTION_NOTE =
   "Amazon Ads 14-day click attribution from ads_search_terms_daily.orders_14d";
 
-export const MIN_SPEND_NEGATE = 5;
+export const MIN_SPEND_NEGATE = 5;       // per-term floor for negate/pause/review AND rollup
 export const MIN_SPEND_HARVEST = 3;
 export const MIN_SPEND_REDUCE = 5;
 export const MIN_CLICKS_REDUCE = 5;
+export const MIN_CLICKS_WASTE = 3;       // exclude one-click noise from waste + rollup
 export const MIN_ORDERS_HARVEST = 1;
-export const MIN_WASTE_ROLLUP = 5;
+export const MIN_WASTE_ROLLUP = 25;      // campaign fat-zero floor; was 5 — tiny campaigns spam P1
 export const MAX_WASTE_ROLLUPS = 5;
 export const MIN_BID = 0.02;
 
@@ -107,6 +109,11 @@ export function warehouseFreshness(rows: SearchTermRow[], expectedEnd: string): 
     st_min: dates.length ? dates.reduce((a, b) => (a < b ? a : b)) : null,
     st_stale: freshThrough === null || freshThrough < expectedEnd,
   };
+}
+
+/** Fat zero: 0 orders_14d AND spend >= $5 AND clicks >= 3. */
+export function isWasteEligible(e: { orders: number; spend: number; clicks: number }): boolean {
+  return e.orders === 0 && e.spend >= MIN_SPEND_NEGATE && e.clicks >= MIN_CLICKS_WASTE;
 }
 
 /** pause_keyword when Exact KW equals the search term; else negate_exact. */
@@ -336,12 +343,28 @@ export function scoreSearchTermActions(args: {
     }
   }
 
-  const campaignWaste = new Map<string, { spend: number; terms: number; campaign_id: string }>();
+  const campaignWaste = new Map<string, {
+    spend: number; terms: number; campaign_id: string;
+    raw_terms: number; raw_spend: number;
+    term_rows: Array<{ search_term: string; spend: number; clicks: number }>;
+  }>();
   for (const t of byTerm.values()) {
     if (t.orders !== 0) continue;
-    const e = campaignWaste.get(t.campaign_name) ?? { spend: 0, terms: 0, campaign_id: t.campaign_id };
-    e.spend += t.spend;
-    e.terms += 1;
+    const e = campaignWaste.get(t.campaign_name) ?? {
+      spend: 0, terms: 0, campaign_id: t.campaign_id,
+      raw_terms: 0, raw_spend: 0, term_rows: [],
+    };
+    e.raw_terms += 1;
+    e.raw_spend += t.spend;
+    if (isWasteEligible(t)) {
+      e.spend += t.spend;
+      e.terms += 1;
+      e.term_rows.push({
+        search_term: t.search_term,
+        spend: round2(t.spend),
+        clicks: t.clicks,
+      });
+    }
     campaignWaste.set(t.campaign_name, e);
   }
   const topWaste = [...campaignWaste.entries()]
@@ -349,9 +372,12 @@ export function scoreSearchTermActions(args: {
     .slice(0, MAX_WASTE_ROLLUPS)
     .filter(([, w]) => w.spend >= MIN_WASTE_ROLLUP);
   for (const [name, w] of topWaste) {
+    const bySpend = [...w.term_rows].sort((a, b) => b.spend - a.spend);
+    const floors = `0 ${ATTRIBUTION_FIELD}, spend >= ${usd(MIN_SPEND_NEGATE)}, ` +
+      `clicks >= ${MIN_CLICKS_WASTE}; pennies and one-click excluded`;
     recs.push(makeRec({
       type: "WASTED_SPEND_ROLLUP",
-      priority: "P1",
+      priority: "P2",
       impact_estimate: round2(w.spend),
       entity_type: "campaign",
       entity_name: name,
@@ -360,16 +386,27 @@ export function scoreSearchTermActions(args: {
       ad_group_id: "",
       evidence: {
         action_type: "review_campaign",
-        why: `${usd(w.spend)} across ${w.terms} search terms with 0 ${ATTRIBUTION_FIELD}${windowSuffix}.`,
+        why: `${usd(w.spend)} across ${w.terms} qualifying fat-zero search terms (${floors})${windowSuffix}.`,
         spend: round2(w.spend), orders: 0, zero_order_terms: w.terms,
+        qualifying_terms: w.terms,
+        qualifying_spend: round2(w.spend),
+        min_spend_negate: MIN_SPEND_NEGATE,
+        min_clicks_waste: MIN_CLICKS_WASTE,
+        min_waste_rollup: MIN_WASTE_ROLLUP,
+        pennies_excluded: true,
+        one_click_excluded: true,
+        raw_zero_order_terms: w.raw_terms,
+        raw_zero_order_spend: round2(w.raw_spend),
+        excluded_noise_terms: w.raw_terms - w.terms,
+        qualifying_terms_by_spend: bySpend,
         window: { ...window, ...freshness },
         verified: !freshness.st_stale,
         attribution: ATTRIBUTION_FIELD,
       },
       suggested_action:
         `Open campaign "${name}" → Search terms report for ${window.start} → ${window.end} ` +
-        `(closed days, America/Los_Angeles), sort by Spend, and review the ${w.terms} terms ` +
-        `with 0 ${ATTRIBUTION_FIELD} (${usd(w.spend)} of wasted spend). The individual rows ` +
+        `(closed days, America/Los_Angeles), sort by Spend, and review the ${w.terms} ` +
+        `qualifying fat-zero terms (${floors}). ${usd(w.spend)} at stake. The individual rows ` +
         `list the biggest offenders — pause Exact KW=term, do not negate those.`,
     }));
   }
@@ -399,7 +436,7 @@ function zeroOrderRec(args: {
 }): RecDraft | null {
   const { t, cpc, adGroupId, adGroups, matchTypes, camp, term, where, scope,
     window, windowSuffix, freshness, siblings } = args;
-  if (t.spend < MIN_SPEND_NEGATE || t.orders !== 0) return null;
+  if (!isWasteEligible(t)) return null;
 
   const lever = resolveZeroOrderLever(t.keyword, t.search_term, t.match_types);
   const siblingNote = siblings.length

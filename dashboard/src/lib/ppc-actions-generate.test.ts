@@ -5,9 +5,13 @@ import path from "node:path";
 
 import {
   ATTRIBUTION_FIELD,
+  MIN_CLICKS_WASTE,
+  MIN_SPEND_NEGATE,
+  MIN_WASTE_ROLLUP,
   aggregateTerms,
   closedLookbackWindow,
   filterClosedWindow,
+  isWasteEligible,
   resolveZeroOrderLever,
   scoreSearchTermActions,
   siblingExactConverters,
@@ -231,6 +235,117 @@ describe("stale warehouse and sibling Exact converters", () => {
   });
 });
 
+describe("fat-zero waste eligibility and rollup", () => {
+  test("floors stay at $5 / 3 clicks / $25 campaign", () => {
+    assert.ok(MIN_SPEND_NEGATE >= 5);
+    assert.equal(MIN_CLICKS_WASTE, 3);
+    assert.ok(MIN_WASTE_ROLLUP >= 25);
+    assert.equal(isWasteEligible({ orders: 0, spend: 12, clicks: 5 }), true);
+    assert.equal(isWasteEligible({ orders: 0, spend: 4, clicks: 1 }), false);
+    assert.equal(isWasteEligible({ orders: 0, spend: 20, clicks: 1 }), false);
+    assert.equal(isWasteEligible({ orders: 0, spend: 4, clicks: 5 }), false);
+    assert.equal(isWasteEligible({ orders: 1, spend: 12, clicks: 5 }), false);
+  });
+
+  test("one-click $4 term does not enter rollup or negate", () => {
+    const recs = scoreSearchTermActions({
+      rows: [row({
+        clicks: 1, spend: 4, keyword: "other", match_type: "BROAD",
+        search_term: "one click noise",
+      })],
+      targetAcos: 30, lookbackDays: 7, asOf: AS_OF, stFreshThrough: AS_OF,
+    });
+    const types = new Set(recs.map((r) => r.type));
+    assert.equal(types.has("NEGATE_SEARCH_TERM"), false);
+    assert.equal(types.has("PAUSE_KEYWORD"), false);
+    assert.equal(types.has("REVIEW_SEARCH_TERM"), false);
+    assert.equal(types.has("WASTED_SPEND_ROLLUP"), false);
+  });
+
+  test("5-click $12 zero-order term does negate, no rollup under $25", () => {
+    const recs = scoreSearchTermActions({
+      rows: [row({
+        clicks: 5, spend: 12, keyword: "other", match_type: "BROAD",
+        search_term: "fat zero",
+      })],
+      targetAcos: 30, lookbackDays: 7, asOf: AS_OF, stFreshThrough: AS_OF,
+    });
+    const waste = recs.filter((r) => r.type === "NEGATE_SEARCH_TERM");
+    assert.equal(waste.length, 1);
+    assert.equal(waste[0].evidence.spend, 12);
+    assert.equal(waste[0].evidence.clicks, 5);
+    assert.equal(waste[0].evidence.orders, 0);
+    assert.equal(recs.some((r) => r.type === "WASTED_SPEND_ROLLUP"), false);
+  });
+
+  test("rollup impact equals the sum of qualifying terms only", () => {
+    const auto = "SP - Auto Loose - Tallow";
+    const fat = [
+      row({
+        search_term: "fat a", campaign_name: auto, campaign_id: "auto-1",
+        keyword: "tallow", match_type: "BROAD", clicks: 8, spend: 18,
+      }),
+      row({
+        search_term: "fat b", campaign_name: auto, campaign_id: "auto-1",
+        keyword: "tallow", match_type: "BROAD", clicks: 5, spend: 12,
+      }),
+    ];
+    const oneClick = Array.from({ length: 50 }, (_, i) => row({
+      search_term: `one click ${i}`, campaign_name: auto, campaign_id: "auto-1",
+      keyword: "tallow", match_type: "BROAD", clicks: 1, spend: 4,
+    }));
+    const pennies = Array.from({ length: 20 }, (_, i) => row({
+      search_term: `penny ${i}`, campaign_name: auto, campaign_id: "auto-1",
+      keyword: "tallow", match_type: "BROAD", clicks: 2, spend: 0.5,
+    }));
+    const recs = scoreSearchTermActions({
+      rows: [...fat, ...oneClick, ...pennies],
+      targetAcos: 30, lookbackDays: 7, asOf: AS_OF, stFreshThrough: AS_OF,
+    });
+    const rollup = recs.filter((r) => r.type === "WASTED_SPEND_ROLLUP");
+    assert.equal(rollup.length, 1);
+    assert.equal(rollup[0].priority, "P2");
+    assert.equal(rollup[0].impact_estimate, 30);
+    const ev = rollup[0].evidence;
+    assert.equal(ev.qualifying_terms, 2);
+    assert.equal(ev.qualifying_spend, 30);
+    assert.equal(ev.zero_order_terms, 2);
+    assert.equal(ev.min_spend_negate, MIN_SPEND_NEGATE);
+    assert.equal(ev.min_clicks_waste, MIN_CLICKS_WASTE);
+    assert.equal(ev.min_waste_rollup, MIN_WASTE_ROLLUP);
+    assert.equal(ev.pennies_excluded, true);
+    assert.equal(ev.one_click_excluded, true);
+    assert.equal(ev.raw_zero_order_terms, 72);
+    assert.equal(ev.excluded_noise_terms, 70);
+    assert.equal(ev.raw_zero_order_spend, 30 + 50 * 4 + 20 * 0.5);
+    const names = (ev.qualifying_terms_by_spend as Array<{ search_term: string }>)
+      .map((t) => t.search_term);
+    assert.deepEqual(names, ["fat a", "fat b"]);
+    assert.match(rollup[0].suggested_action, /qualifying/);
+    assert.match(rollup[0].suggested_action, /pennies and one-click excluded/);
+    assert.match(String(ev.why), /pennies and one-click excluded/);
+    assert.doesNotMatch(rollup[0].suggested_action, /316/);
+    assert.doesNotMatch(rollup[0].suggested_action, /72/);
+    const negates = recs.filter((r) => r.type === "NEGATE_SEARCH_TERM");
+    assert.deepEqual(new Set(negates.map((r) => r.entity_name)), new Set(["fat a", "fat b"]));
+  });
+
+  test("campaign with only penny zeros produces no WASTED_SPEND_ROLLUP", () => {
+    const recs = scoreSearchTermActions({
+      rows: Array.from({ length: 100 }, (_, i) => row({
+        search_term: `n${i}`, campaign_name: "Auto Loose", campaign_id: "auto-1",
+        keyword: "tallow", match_type: "BROAD", clicks: 1, spend: 0.4,
+      })),
+      targetAcos: 30, lookbackDays: 7, asOf: AS_OF, stFreshThrough: AS_OF,
+    });
+    const types = new Set(recs.map((r) => r.type));
+    assert.equal(types.has("WASTED_SPEND_ROLLUP"), false);
+    assert.equal(types.has("NEGATE_SEARCH_TERM"), false);
+    assert.equal(types.has("PAUSE_KEYWORD"), false);
+    assert.equal(types.has("REVIEW_SEARCH_TERM"), false);
+  });
+});
+
 describe("generate path stays on the shared scorer", () => {
   test("dashboard generate no longer hardcodes last-N-days negate copy", () => {
     const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/route.ts"), "utf8");
@@ -247,6 +362,9 @@ describe("generate path stays on the shared scorer", () => {
     );
     assert.match(py, /amazon_as_of/);
     assert.match(py, /score_search_term_actions/);
+    assert.match(py, /MIN_CLICKS_WASTE = 3/);
+    assert.match(py, /MIN_WASTE_ROLLUP = 25/);
+    assert.match(py, /is_waste_eligible/);
     assert.doesNotMatch(py, /date\.today\(\) - timedelta/);
     assert.doesNotMatch(py, /over the last \{lookback_days\} days/);
   });
