@@ -1105,8 +1105,8 @@ def ads_actions_cmd(target_acos, days):
         raise click.ClickException(f"Recommendation generation failed: {e}")
 
     if not recs:
-        msg = (f"No recommendations — no search term data in the last {days} days, "
-               f"or everything is within the {target_acos:.1f}% target")
+        msg = (f"No recommendations — no search term data in the last {days} "
+               f"closed days, or everything is within the {target_acos:.1f}% target")
         click.echo(msg)
         job_finish(run_id, "success", msg,
                    stats={"count": 0, "target_acos": target_acos,
@@ -7036,7 +7036,7 @@ def _run_ads_actions():
         return
 
     if not recs:
-        msg = "No recommendations — no search term data in the last 7 days"
+        msg = "No recommendations — no search term data in the last 7 closed days"
         print(f"[Ads actions] {msg}")
         # Still record the target so the dashboard's break-even line stays
         # current on a quiet night instead of falling back to config.

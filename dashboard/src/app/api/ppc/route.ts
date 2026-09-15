@@ -18,6 +18,7 @@ import { adsSnapshotFromWarehouse } from "@/lib/ppc-bleeders-10-ads";
 import type { WeeklyCampaignRef, WeeklyPlacementRef, WeeklyTermRef } from "@/lib/ppc-weekly-blake-recovery-0905";
 import { loadSoldScopeKeywordIntel } from "@/lib/soldscope-load";
 import { attachKeywordIntel } from "@/lib/soldscope-status";
+import { scoreSearchTermActions } from "@/lib/ppc-actions-generate";
 
 /** Raw per-day rollup of ads_campaigns_daily (all campaigns summed). */
 interface DailyBase {
@@ -979,11 +980,23 @@ export async function POST(request: Request) {
       }
 
       const sb = getServerSupabase();
-      const cutoff = windowStart(amazonAsOf(), rangeDays);
+      const asOf = amazonAsOf();
+      const cutoff = windowStart(asOf, rangeDays);
 
-      // Load search terms inside the window, paginated — the PostgREST
+      // Warehouse max date — if ST lags the closed as-of, 0-order cards must
+      // not ship as P0 gospel. Queried separately so freshness is not inferred
+      // from the window slice alone.
+      let stFreshThrough: string | null = null;
+      try {
+        const hi = await sb.from("ads_search_terms_daily")
+          .select("date").order("date", { ascending: false }).limit(1);
+        stFreshThrough = hi.data?.[0]?.date ? String(hi.data[0].date) : null;
+      } catch { /* */ }
+
+      // Load search terms inside the closed window, paginated — the PostgREST
       // 1,000-row default would silently truncate the input set and generate
-      // recommendations from partial spend.
+      // recommendations from partial spend. Upper bound is as-of: today is
+      // still accruing and is never scored.
       const TERM_COLS = "date,search_term,campaign_id,campaign_name,ad_group_id,ad_group_name,keyword,match_type,spend,sales_14d,orders_14d,clicks";
       const terms: Array<Record<string, unknown>> = [];
       let offset = 0;
@@ -992,6 +1005,7 @@ export async function POST(request: Request) {
         const { data, error } = await sb.from("ads_search_terms_daily")
           .select(TERM_COLS)
           .gte("date", cutoff)
+          .lte("date", asOf)
           .order("date", { ascending: true })
           .order("search_term", { ascending: true })
           .order("campaign_id", { ascending: true })
@@ -1018,199 +1032,30 @@ export async function POST(request: Request) {
           if (min && max) available = min === max ? String(min) : `${min} → ${max}`;
         } catch { /* */ }
         return Response.json({
-          ok: true, count: 0, window: { days: rangeDays, from: cutoff },
+          ok: true, count: 0,
+          window: { days: rangeDays, start: cutoff, end: asOf, from: cutoff,
+            as_of: asOf, st_fresh_through: stFreshThrough, closed_days_only: true,
+            attribution: "orders_14d" },
           message: available
-            ? `No search term data in the ${rangeDays}D window (available: ${available}) — run Ads sync or pick a wider range`
+            ? `No search term data in the ${rangeDays} closed-day window ${cutoff} → ${asOf} (available: ${available}) — run Ads sync or pick a wider range`
             : "No search term data — run Ads sync first",
         });
       }
 
-      // Roll the window up per search term before applying thresholds. Rules
-      // are stated in whole-window dollars ("$5 spend, 0 orders"), so scoring
-      // each daily row on its own both under-fires (a term bleeding $0.50/day
-      // for 30 days never trips $5) and duplicates a rec per day.
-      //
-      // The key is (search_term, campaign_id) — exactly the grain of the
-      // table's UNIQUE (type, entity_name, campaign_id). Keying any finer (ad
-      // group, match type) lets one campaign emit two recs for the same term,
-      // which the insert would reject outright.
-      interface Agg {
-        search_term: string; campaign_id: string; campaign_name: string;
-        ad_group_ids: Set<string>; ad_group_names: Set<string>;
-        keyword: string; match_types: Set<string>;
-        spend: number; sales: number; orders: number; clicks: number;
-      }
-      const byTerm = new Map<string, Agg>();
-      for (const st of terms) {
-        const searchTerm = String(st.search_term ?? "");
-        const campaignId = String(st.campaign_id ?? "");
-        const key = searchTerm + "\u241F" + campaignId;
-        const e = byTerm.get(key) ?? {
-          search_term: searchTerm, campaign_id: campaignId,
-          campaign_name: String(st.campaign_name ?? ""),
-          ad_group_ids: new Set<string>(), ad_group_names: new Set<string>(),
-          keyword: String(st.keyword ?? ""), match_types: new Set<string>(),
-          spend: 0, sales: 0, orders: 0, clicks: 0,
-        };
-        e.spend += Number(st.spend ?? 0);
-        e.sales += Number(st.sales_14d ?? 0);
-        e.orders += Number(st.orders_14d ?? 0);
-        e.clicks += Number(st.clicks ?? 0);
-        if (st.ad_group_id) e.ad_group_ids.add(String(st.ad_group_id));
-        if (st.ad_group_name) e.ad_group_names.add(String(st.ad_group_name));
-        if (st.match_type) e.match_types.add(String(st.match_type).toLowerCase());
-        if (!e.keyword && st.keyword) e.keyword = String(st.keyword);
-        byTerm.set(key, e);
-      }
-
-      /** Names the ad group in an instruction, honestly when there are several. */
-      function adGroupPhrase(t: Agg): string {
-        const names = [...t.ad_group_names].filter(Boolean);
-        if (names.length === 1) return `ad group "${names[0]}"`;
-        if (names.length > 1) return `each of the ${names.length} ad groups that served it`;
-        return "the ad group that served it";
-      }
-
-      // Generate recs server-side (same rules as src/amazon_ads/actions_engine.py).
-      // Each rec carries a literal Seller Central instruction in
-      // suggested_action and its structured basis in evidence, so the table,
-      // the drawer and the exported plan all read from one place.
-      const win = { days: rangeDays, from: cutoff };
-      const recs: Array<Record<string, unknown>> = [];
-      const round2 = (n: number) => Math.round(n * 100) / 100;
-      const usd = (n: number) => "$" + n.toFixed(2);
-      const windowSuffix = " over the last " + rangeDays + " days";
-
-      for (const t of byTerm.values()) {
-        // ACOS is recomputed from the window totals — the stored per-row acos
-        // column is rounded to 1dp and cannot be summed across days.
-        const acos = t.sales > 0 ? (t.spend / t.sales) * 100 : 0;
-        const cpc = t.clicks > 0 ? t.spend / t.clicks : 0;
-        const matchTypes = [...t.match_types].filter(Boolean);
-        const adGroupId = [...t.ad_group_ids][0] ?? "";
-        const adGroups = [...t.ad_group_names].filter(Boolean);
-        const camp = '"' + t.campaign_name + '"';
-        const term = '"' + t.search_term + '"';
-
-        // P0: NEGATE — spend >= $5, 0 orders
-        if (t.spend >= 5 && t.orders === 0) {
-          recs.push({
-            type: "NEGATE_SEARCH_TERM", priority: "P0",
-            impact_estimate: round2(t.spend),
-            entity_type: "search_term", entity_name: t.search_term,
-            campaign_name: t.campaign_name, campaign_id: t.campaign_id,
-            ad_group_id: adGroupId,
-            evidence: {
-              action_type: "negate_exact",
-              why: "Spent " + usd(t.spend) + " on " + t.clicks + " clicks with 0 orders" + windowSuffix + ".",
-              spend: round2(t.spend), orders: 0, clicks: t.clicks, sales: 0, acos: null,
-              cpc: round2(cpc), match_types: matchTypes, ad_groups: adGroups, window: win,
-            },
-            suggested_action:
-              "In Campaign Manager, open campaign " + camp + " → " + adGroupPhrase(t) +
-              " → Negative keywords, and add " + term + " as a Negative exact keyword. " +
-              "It has spent " + usd(t.spend) + " with 0 orders" + windowSuffix + ".",
-            status: "open",
-          });
-        }
-
-        // P1: HARVEST — converting, good ACOS. Skipped when the term already
-        // runs as an exact keyword, since there is nothing left to harvest.
-        if (t.orders >= 1 && acos > 0 && acos <= targetAcos && t.spend >= 3 && !t.match_types.has("exact")) {
-          const startBid = round2(Math.max(cpc, 0.02));
-          recs.push({
-            type: "HARVEST_SEARCH_TERM", priority: "P1",
-            impact_estimate: round2(t.sales),
-            entity_type: "search_term", entity_name: t.search_term,
-            campaign_name: t.campaign_name, campaign_id: t.campaign_id,
-            ad_group_id: adGroupId,
-            evidence: {
-              action_type: "harvest_exact",
-              why: t.orders + " order(s) at " + acos.toFixed(0) + "% ACOS on " + usd(t.spend) +
-                " spend (target " + targetAcos + "%)" + windowSuffix + ".",
-              spend: round2(t.spend), orders: t.orders, clicks: t.clicks,
-              sales: round2(t.sales), acos: round2(acos), cpc: round2(cpc),
-              suggested_bid: startBid, target_acos: targetAcos,
-              match_types: matchTypes, ad_groups: adGroups, window: win,
-            },
-            suggested_action:
-              "Add " + term + " as an Exact match keyword in campaign " + camp + " → " + adGroupPhrase(t) +
-              " (or your manual exact campaign), starting near its current CPC of " + usd(startBid) + ". " +
-              "Then add it as a Negative exact in " + adGroupPhrase(t) +
-              ", where it currently serves, so the two do not compete.",
-            status: "open",
-          });
-        }
-
-        // P1: REDUCE_BID
-        if (acos > targetAcos * 1.5 && t.clicks >= 5 && t.orders > 0 && t.spend >= 5) {
-          const savings = round2(t.spend * (1 - targetAcos / Math.max(acos, 1)));
-          // Scale the current CPC by how far ACOS overshoots the target.
-          const newBid = round2(Math.max(cpc * (targetAcos / acos), 0.02));
-          const kw = t.keyword || t.search_term;
-          recs.push({
-            type: "REDUCE_BID", priority: "P1",
-            impact_estimate: savings,
-            entity_type: "keyword", entity_name: kw,
-            campaign_name: t.campaign_name, campaign_id: t.campaign_id,
-            ad_group_id: adGroupId,
-            evidence: {
-              action_type: "reduce_bid",
-              why: "ACOS " + acos.toFixed(0) + "% vs " + targetAcos + "% target on " + usd(t.spend) +
-                " spend, " + t.orders + " order(s), " + t.clicks + " clicks" + windowSuffix + ".",
-              spend: round2(t.spend), orders: t.orders, clicks: t.clicks,
-              sales: round2(t.sales), acos: round2(acos), cpc: round2(cpc),
-              suggested_bid: newBid, target_acos: targetAcos,
-              match_types: matchTypes, ad_groups: adGroups, window: win,
-            },
-            suggested_action:
-              "Open campaign " + camp + " → " + adGroupPhrase(t) +
-              " → Keywords, and lower the bid on \"" + kw + "\" from about " + usd(cpc) +
-              " to " + usd(newBid) + " to pull it toward the " + targetAcos + "% ACOS target. " +
-              "Re-check in 7 days before cutting further.",
-            status: "open",
-          });
-        }
-      }
-
-      // P1: WASTED_SPEND_ROLLUP — top campaigns by zero-order spend. Parity
-      // with actions_engine.py, which the dashboard's "Waste" label expects.
-      const campaignWaste = new Map<string, { spend: number; terms: number; campaign_id: string }>();
-      for (const t of byTerm.values()) {
-        if (t.orders !== 0) continue;
-        const e = campaignWaste.get(t.campaign_name) ?? { spend: 0, terms: 0, campaign_id: t.campaign_id };
-        e.spend += t.spend;
-        e.terms += 1;
-        campaignWaste.set(t.campaign_name, e);
-      }
-      const topWaste = [...campaignWaste.entries()]
-        .sort((a, b) => b[1].spend - a[1].spend)
-        .slice(0, 5)
-        .filter(([, w]) => w.spend >= 5);
-      for (const [name, w] of topWaste) {
-        recs.push({
-          type: "WASTED_SPEND_ROLLUP", priority: "P1",
-          impact_estimate: round2(w.spend),
-          entity_type: "campaign", entity_name: name,
-          campaign_name: name, campaign_id: w.campaign_id, ad_group_id: "",
-          evidence: {
-            action_type: "review_campaign",
-            why: usd(w.spend) + " across " + w.terms + " search terms with 0 orders" + windowSuffix + ".",
-            spend: round2(w.spend), orders: 0, zero_order_terms: w.terms, window: win,
-          },
-          suggested_action:
-            "Open campaign \"" + name + "\" → Search terms report for the last " + rangeDays +
-            " days, sort by Spend, and add Negative exact keywords for the " + w.terms +
-            " terms with 0 orders (" + usd(w.spend) + " of wasted spend). " +
-            "The individual P0 rows below list the biggest offenders.",
-          status: "open",
-        });
-      }
-
-      const priorityOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2 };
-      recs.sort((a, b) =>
-        (priorityOrder[String(a.priority)] ?? 9) - (priorityOrder[String(b.priority)] ?? 9) ||
-        Number(b.impact_estimate) - Number(a.impact_estimate));
+      // Same rules as src/amazon_ads/actions_engine.py — closed LA days,
+      // orders_14d attribution, pause when Exact KW = term, no stale 0-order P0.
+      const recs = scoreSearchTermActions({
+        rows: terms,
+        targetAcos,
+        lookbackDays: rangeDays,
+        asOf,
+        stFreshThrough,
+      });
+      const win = {
+        days: rangeDays, start: cutoff, end: asOf, from: cutoff,
+        as_of: asOf, st_fresh_through: stFreshThrough, closed_days_only: true,
+        attribution: "orders_14d",
+      };
 
       // Replace the open queue. Both writes are checked: an unchecked insert
       // after a successful delete would wipe the queue and still report ok.
@@ -1230,7 +1075,7 @@ export async function POST(request: Request) {
 
       return Response.json({
         ok: true, count: recs.length,
-        window: { ...win, terms: byTerm.size, rows: terms.length },
+        window: { ...win, rows: terms.length },
         target_acos: targetAcos,
       });
     }
