@@ -30,6 +30,7 @@ import {
   type ReasonFilter,
   type ReimbursementDeskRow,
 } from "@/lib/reimbursements-desk";
+import { apiUrl } from "@/lib/reimbursements-eligible";
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -96,7 +97,7 @@ export default function ReimbursementsDeskPage() {
   function load(rangeStart = start, rangeEnd = end) {
     setLoading(true);
     const params = new URLSearchParams({ start: rangeStart, end: rangeEnd });
-    fetch(`/api/reimbursements?${params}`)
+    fetch(apiUrl(`/api/reimbursements?${params}`))
       .then((r) => r.json())
       .then((d) => {
         setData(d);
@@ -193,7 +194,7 @@ export default function ReimbursementsDeskPage() {
               setSyncing(true);
               setSyncMsg(null);
               try {
-                const r = await fetch("/api/reimbursements/sync", {
+                const r = await fetch(apiUrl("/api/reimbursements/sync"), {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ days: 90 }),

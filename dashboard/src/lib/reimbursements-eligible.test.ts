@@ -12,6 +12,7 @@ import {
   REESE_PACKAGE_CONTRACT,
   SC_SUPPORT_HUB,
   SELLER_CENTRAL_LINK_LIMIT,
+  apiUrl,
   buildReesePackage,
   defaultCaseRange,
   filterNeedsCase,
@@ -103,6 +104,10 @@ describe("needs-case vs paid", () => {
     assert.equal(searchCaseRows(rows, "fba123")[0].event_key, "b");
     const sorted = sortCaseRows(rows, "quantity", "desc");
     assert.equal(sorted[0].sku, "DEO");
+  });
+
+  test("apiUrl is origin-absolute so basic-auth userinfo cannot enter fetch", () => {
+    assert.equal(apiUrl("/api/reimbursements/eligible/sync"), "/api/reimbursements/eligible/sync");
   });
 
   test("Seller Central href prefers stored URL then FBA shipment tracker", () => {

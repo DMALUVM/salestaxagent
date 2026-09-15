@@ -277,6 +277,13 @@ export interface ReesePackage {
   markdown: string;
 }
 
+/** Resolve API paths against origin so basic-auth userinfo in the page URL
+ *  cannot leak into fetch() (Chrome rejects credentialed relative URLs). */
+export function apiUrl(path: string): string {
+  if (typeof window === "undefined") return path;
+  return `${window.location.origin}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 export const REESE_PACKAGE_CONTRACT = "fba_case_package/v1";
 
 const PACKAGE_PURPOSE =

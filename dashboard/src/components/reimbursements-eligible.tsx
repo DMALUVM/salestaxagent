@@ -17,6 +17,7 @@ import {
   REASON_GROUP_LABELS,
   REESE_AGENT_NAME,
   SELLER_CENTRAL_LINK_LIMIT,
+  apiUrl,
   caseAmount,
   caseDay,
   caseQty,
@@ -90,7 +91,7 @@ export function ReimbursementsEligiblePanel() {
   function load(rangeStart = start, rangeEnd = end) {
     setLoading(true);
     const params = new URLSearchParams({ start: rangeStart, end: rangeEnd });
-    fetch(`/api/reimbursements/eligible?${params}`)
+    fetch(apiUrl(`/api/reimbursements/eligible?${params}`))
       .then((r) => r.json())
       .then((d) => {
         setData(d);
@@ -155,7 +156,7 @@ export function ReimbursementsEligiblePanel() {
               setSyncing(true);
               setMsg(null);
               try {
-                const r = await fetch("/api/reimbursements/eligible/sync", {
+                const r = await fetch(apiUrl("/api/reimbursements/eligible/sync"), {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ days: 90 }),
@@ -182,7 +183,7 @@ export function ReimbursementsEligiblePanel() {
               setMsg(null);
               setCopied(false);
               try {
-                const r = await fetch("/api/reimbursements/eligible/notify", {
+                const r = await fetch(apiUrl("/api/reimbursements/eligible/notify"), {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ start, end, source: "dashboard" }),
