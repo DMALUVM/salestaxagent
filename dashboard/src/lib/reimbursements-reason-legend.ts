@@ -4,6 +4,8 @@
  * Twin of src/reimbursements/reason_legend.py.
  * Letter M = Inventory misplaced → lost_warehouse. NEVER lost inbound.
  * Code 7 = Damaged at FC, NOT Found.
+ * D = disposed, O = correction — NEVER warehouse_damage. Disposition
+ * does not promote excluded or unknown letters into Needs case.
  *
  * After deploy, Mini must:
  *   python -m src.main reimbursements-case-sync --days 90
@@ -14,7 +16,10 @@ export type ReasonGroup =
   | "lost_warehouse"
   | "other";
 
-export const CLASSIFICATION_VERSION = "ledger-legend-2026-09-15";
+export const CLASSIFICATION_VERSION = "ledger-legend-2026-09-15-do";
+
+/** Letter/digit codes that may enter Needs case. Disposition cannot add more. */
+export const ELIGIBLE_LETTER_CODES = new Set(["M", "E", "6", "7", "H", "K", "U"]);
 
 export const UNKNOWN_REASON_MAX_PCT = 5;
 
@@ -132,12 +137,28 @@ export const LEDGER_REASON_LEGEND: readonly ReasonLegendRow[] = [
     notes: "Reclass into FC-damaged.",
   },
   {
+    code: "D",
+    sign: "-",
+    label: "Inventory disposed of",
+    group: "disposed",
+    eligible: false,
+    notes: "Same family as G. Exclude from Needs case. Disposition must not promote D.",
+  },
+  {
     code: "G",
     sign: "-",
     label: "Disposed",
     group: "disposed",
     eligible: false,
     notes: "Charity / disposal. Exclude from Needs case.",
+  },
+  {
+    code: "O",
+    sign: "-",
+    label: "Inventory correction",
+    group: "correction",
+    eligible: false,
+    notes: "Incorrectly received OR Amazon already reimbursed. Exclude from Needs case. Disposition must not promote O.",
   },
   {
     code: "N",
@@ -237,23 +258,18 @@ export function isLetterOrDigitCode(reason: string | null | undefined): boolean 
 
 export function reasonGroup(
   reason: string | null | undefined,
-  disposition?: string | null,
+  _disposition?: string | null,
 ): ReasonGroup {
   const entry = lookupReason(reason);
-  if (entry) {
-    if (ELIGIBLE_REASON_GROUPS.has(entry.group as ReasonGroup)) {
-      return entry.group as ReasonGroup;
-    }
-    return "other";
+  if (entry && ELIGIBLE_REASON_GROUPS.has(entry.group as ReasonGroup)) {
+    return entry.group as ReasonGroup;
   }
-  const disp = (disposition ?? "").trim().toUpperCase().replace(/[\s-]+/g, "_");
-  if (WAREHOUSE_DAMAGE_DISPOSITIONS.has(disp)) return "warehouse_damage";
   return "other";
 }
 
 export function reasonLabel(
   reason: string | null | undefined,
-  disposition?: string | null,
+  _disposition?: string | null,
 ): string {
   const raw = (reason ?? "").trim();
   const entry = lookupReason(raw);
@@ -261,13 +277,7 @@ export function reasonLabel(
     if (isLetterOrDigitCode(raw)) return `${raw.toUpperCase()} — ${entry.label}`;
     return entry.label;
   }
-  if (!raw) {
-    const disp = (disposition ?? "").trim();
-    if (disp && reasonGroup(null, disp) === "warehouse_damage") {
-      return `${disp} — Warehouse damage`;
-    }
-    return "Unknown";
-  }
+  if (!raw) return "Unknown";
   return raw.replace(/_/g, " ").replace(/-/g, " ");
 }
 
@@ -280,18 +290,14 @@ export function isFoundReason(reason: string | null | undefined): boolean {
 
 export function isEligibleLossReason(
   reason: string | null | undefined,
-  disposition?: string | null,
+  _disposition?: string | null,
 ): boolean {
-  const entry = lookupReason(reason);
-  if (entry) return entry.eligible;
-  return ELIGIBLE_REASON_GROUPS.has(reasonGroup(reason, disposition));
+  return Boolean(lookupReason(reason)?.eligible);
 }
 
 export function isUnknownReason(
   reason: string | null | undefined,
-  disposition?: string | null,
+  _disposition?: string | null,
 ): boolean {
-  if (lookupReason(reason)) return false;
-  if (reasonGroup(reason, disposition) !== "other") return false;
-  return true;
+  return lookupReason(reason) === undefined;
 }
