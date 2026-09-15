@@ -221,6 +221,13 @@ def phrase_organic_asin(p: dict) -> str | None:
     return a or None
 
 
+def phrase_mobile_organic_asin(p: dict) -> str | None:
+    """phrases/v2 mobileOrganicAsin when SoldScope returns it."""
+    raw = _first_present(p, "mobileOrganicAsin", "mobile_organic_asin")
+    a = str(raw or "").strip().upper()
+    return a or None
+
+
 def phrase_amazon_choice(p: dict) -> bool | None:
     """Amazon's Choice when SoldScope sends it. Missing stays None."""
     raw = _first_present(p, "amazonChoice", "amazon_choice")
@@ -902,6 +909,7 @@ def _phrase_snapshot_row(
             "abaTotalClickShare": p.get("abaTotalClickShare") if current else None,
             "abaTotalConvShare": p.get("abaTotalConvShare") if current else None,
             "organicAsin": organic_asin,
+            "mobileOrganicAsin": phrase_mobile_organic_asin(p) if current else None,
             "amazonChoice": amazon_choice,
             "heatmap": not current,
         },

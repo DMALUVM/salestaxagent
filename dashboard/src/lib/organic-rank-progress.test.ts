@@ -17,6 +17,7 @@ import {
   organicRankSnapshotRows,
   DEFAULT_HEATMAP_SORT,
   asOrganicChild,
+  shortOrganicChild,
   cellHoverTitle,
   cellPriorRank,
   latestOrganicChild,
@@ -226,6 +227,8 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     );
     assert.equal(asOrganicChild("  b0childlip1 "), "B0CHILDLIP1");
     assert.equal(asOrganicChild(""), null);
+    assert.equal(shortOrganicChild("B0CHILDLIP1"), "LIP1");
+    assert.equal(shortOrganicChild(null), "");
     assert.equal(
       latestOrganicChild({ "2026-09-11": null, "2026-09-12": "B0DAYCHILD" }, ["2026-09-11", "2026-09-12"]),
       "B0DAYCHILD",
@@ -452,6 +455,7 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.match(heat, /organic_child_asin/);
     assert.match(heat, /child \{row\.organic_child_asin\}/);
     assert.match(heat, /organicAsin/);
+    assert.match(heat, /shortOrganicChild/);
     assert.doesNotMatch(heat, /Deo stays empty/);
     assert.doesNotMatch(heat, /until a Rank Tracker group exists/);
   });

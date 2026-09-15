@@ -251,6 +251,13 @@ export function asOrganicChild(asin: string | null | undefined): string | null {
   return a || null;
 }
 
+/** Last 4 of a child ASIN for heatmap cells. Full value stays on hover. */
+export function shortOrganicChild(asin: string | null | undefined): string {
+  const a = asOrganicChild(asin);
+  if (!a) return "";
+  return a.length <= 4 ? a : a.slice(-4);
+}
+
 export function latestOrganicChild(
   asins: Record<string, string | null | undefined> | null | undefined,
   weeks: string[],

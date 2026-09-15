@@ -330,6 +330,7 @@ def test_rank_rows_map_organic_position_sfr_and_previous():
             "phrase": "tallow lip balm",
             "organicPosition": 7,
             "organicAsin": "b0childlip1",
+            "mobileOrganicAsin": "b0mobilelip",
             "amazonChoice": True,
             "organicPreviousPosition": 14,
             "organicPage": 1,
@@ -350,6 +351,7 @@ def test_rank_rows_map_organic_position_sfr_and_previous():
     row = rows[0]
     assert row["organic_position"] == 7
     assert row["organic_asin"] == "B0CHILDLIP1"
+    assert row["raw"]["mobileOrganicAsin"] == "B0MOBILELIP"
     assert row["amazon_choice"] is True
     assert row["organic_previous_position"] == 14
     assert row["organic_page"] == 1
@@ -421,6 +423,7 @@ def test_phrase_helpers_treat_zero_and_blank_as_missing():
     assert syn.phrase_organic_previous({"organicPreviousPosition": None}) is None
     assert syn.phrase_organic_asin({"organicAsin": "b0childlip1"}) == "B0CHILDLIP1"
     assert syn.phrase_organic_asin({"organic_asin": ""}) is None
+    assert syn.phrase_mobile_organic_asin({"mobileOrganicAsin": "b0x"}) == "B0X"
     assert syn.phrase_amazon_choice({"amazon_choice": False}) is False
     assert syn.phrase_amazon_choice({}) is None
 
