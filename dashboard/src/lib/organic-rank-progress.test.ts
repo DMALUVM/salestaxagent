@@ -21,9 +21,13 @@ import {
   childSlotRank,
   shortOrganicChild,
   shortVariationLabel,
+  heatmapDayChips,
+  keywordChildLegend,
+  rowHasThemeCatalog,
   variationChipsForDay,
   variationThemeLabel,
   variationSlotHoverTitle,
+  winnerChildLabel,
   cellHoverTitle,
   cellPriorRank,
   latestOrganicChild,
@@ -549,14 +553,14 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.match(heat, /cycleHeatmapSort/);
     assert.match(heat, /aria-sort/);
     assert.match(heat, /SortHeader/);
-    assert.match(heat, /KeywordChildSlot/);
-    assert.match(heat, /childSlotRank/);
-    assert.match(heat, /formatChildSlotRank/);
-    assert.match(heat, /child \{slot\.asin\}/);
+    assert.match(heat, /heatmapDayChips/);
+    assert.match(heat, /winnerChildLabel/);
+    assert.match(heat, /data-full-width/);
+    assert.match(heat, /table-fixed/);
     assert.match(heat, /organicAsin/);
-    assert.match(heat, /shortOrganicChild/);
-    assert.match(heat, /variationChipsForDay/);
-    assert.match(heat, /VariationChipView/);
+    assert.doesNotMatch(heat, /KeywordChildSlot/);
+    assert.doesNotMatch(heat, /child \{slot\.asin\}/);
+    assert.doesNotMatch(heat, /variationChipsForDay/);
     assert.doesNotMatch(heat, /Deo stays empty/);
     assert.doesNotMatch(heat, /until a Rank Tracker group exists/);
   });
@@ -643,8 +647,79 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     const row = progress.rows[0];
     assert.deepEqual(row.variation_slots["2026-09-14"], []);
     assert.deepEqual(variationChipsForDay(row, "2026-09-14", progress.weeks), []);
+    assert.deepEqual(heatmapDayChips(row, "2026-09-14", progress.weeks), []);
+    assert.equal(winnerChildLabel(row, "2026-09-14"), "CPL5");
     assert.deepEqual(childSlotRank(row), {
       asin: "B0CLHVCPL5", rank: 9, delta: null,
     });
+  });
+
+  test("same ASIN is one chip — theme label, no conflicting family+variation ranks", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-15",
+        organic_position: 133, organic_asin: "B0CLHVCPL5",
+      }],
+      variationSnapshots: [
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-15",
+          variation_asin: "B0CLHVCPL5", theme: "Scent: Unscented",
+          organic_position: 126,
+        },
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-15",
+          variation_asin: "B0CLHVLG2F", theme: "Assorted",
+          organic_position: 88,
+        },
+      ],
+    });
+    const row = progress.rows[0];
+    assert.equal(row.current, 133);
+    assert.equal(row.organic_child_asin, "B0CLHVCPL5");
+    assert.equal(rowHasThemeCatalog(row), true);
+    assert.equal(winnerChildLabel(row, "2026-09-15"), "Unscented");
+    const extras = heatmapDayChips(row, "2026-09-15", progress.weeks);
+    assert.deepEqual(extras.map((c) => ({ asin: c.asin, label: c.label, rank: c.rank })), [
+      { asin: "B0CLHVLG2F", label: "Assorted", rank: 88 },
+    ]);
+    assert.equal(extras.some((c) => c.asin === "B0CLHVCPL5"), false);
+    const labels = [winnerChildLabel(row, "2026-09-15"), ...extras.map((c) => c.label)];
+    assert.equal(labels.includes("B0CLHVCPL5"), false);
+    assert.equal(labels.includes("CPL5"), false);
+    const ranksForWinner = extras.filter((c) => c.asin === "B0CLHVCPL5").map((c) => c.rank);
+    assert.deepEqual(ranksForWinner, []);
+  });
+
+  test("theme-preferred label: never ASIN CHILD + theme for the same variation", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "salt and stone deodorant", asin: "B0HBSZ71XQ", as_of: "2026-09-15",
+        organic_position: 200, organic_asin: "B0CLHYY3BB",
+      }],
+      variationSnapshots: [{
+        phrase: "salt and stone deodorant", asin: "B0HBSZ71XQ", as_of: "2026-09-15",
+        variation_asin: "B0CLHYY3BB",
+        theme: "Scent: Vanilla & Sandalwood / Size: Extra Strength",
+        organic_position: 202,
+      }],
+    });
+    const row = progress.rows[0];
+    assert.equal(row.current, 200);
+    assert.equal(winnerChildLabel(row, "2026-09-15"), "Vanilla & Sandalwood / Extra Strength");
+    assert.deepEqual(heatmapDayChips(row, "2026-09-15", progress.weeks), []);
+    const legend = keywordChildLegend(row);
+    assert.deepEqual(legend, [{
+      asin: "B0CLHYY3BB",
+      label: "Vanilla & Sandalwood / Extra Strength",
+    }]);
+    assert.equal(legend.some((item) => /B0CLHYY3BB/i.test(item.label)), false);
+  });
+
+  test("PPC layout opts the heatmap out of the max-w-6xl gutter", () => {
+    const root = process.cwd();
+    const layout = readFileSync(path.join(root, "src/app/layout.tsx"), "utf8");
+    const ppc = readFileSync(path.join(root, "src/app/ppc/layout.tsx"), "utf8");
+    assert.match(layout, /has-\[\[data-full-width\]\]:max-w-none/);
+    assert.match(ppc, /data-full-width/);
   });
 });

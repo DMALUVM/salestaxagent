@@ -373,6 +373,103 @@ export function variationChipsForDay(
   });
 }
 
+export type ChildLegendItem = {
+  asin: string;
+  label: string;
+};
+
+export function rowHasThemeCatalog(
+  row: Pick<HeatmapRow, "variation_slots">,
+): boolean {
+  return Object.values(row.variation_slots ?? {}).some((slots) =>
+    slots.some((s) => Boolean(variationThemeLabel(s.theme))),
+  );
+}
+
+/**
+ * Theme (or last-4 fallback) for the family-winner child on a day.
+ * Never returns a rank — the cell primary # is the family phrases/v2 position.
+ */
+export function winnerChildLabel(
+  row: Pick<HeatmapRow, "variation_slots" | "organic_child_asins">,
+  week: string,
+): string | null {
+  const winner = asOrganicChild(row.organic_child_asins[week]);
+  if (!winner) return null;
+  const dayHit = (row.variation_slots[week] ?? []).find((s) => s.asin === winner);
+  const dayTheme = variationThemeLabel(dayHit?.theme);
+  if (dayTheme) return dayTheme;
+  for (const slots of Object.values(row.variation_slots ?? {})) {
+    const hit = slots.find((s) => s.asin === winner);
+    const theme = variationThemeLabel(hit?.theme);
+    if (theme) return theme;
+  }
+  return rowHasThemeCatalog(row) ? null : shortOrganicChild(winner) || null;
+}
+
+/**
+ * Unique children that appear on the row, theme-preferred, no ranks.
+ * Used as a compact keyword-column legend — never an ASIN+theme pair.
+ */
+export function keywordChildLegend(
+  row: Pick<HeatmapRow, "variation_slots" | "organic_child_asins">,
+): ChildLegendItem[] {
+  const byAsin = new Map<string, string | null>();
+  for (const slots of Object.values(row.variation_slots ?? {})) {
+    for (const slot of slots) {
+      const asin = asOrganicChild(slot.asin);
+      if (!asin) continue;
+      const theme = variationThemeLabel(slot.theme);
+      const prev = byAsin.get(asin);
+      if (!byAsin.has(asin) || (!prev && theme)) byAsin.set(asin, theme);
+    }
+  }
+  for (const child of Object.values(row.organic_child_asins ?? {})) {
+    const asin = asOrganicChild(child);
+    if (asin && !byAsin.has(asin)) byAsin.set(asin, null);
+  }
+  return [...byAsin.entries()]
+    .map(([asin, theme]) => ({
+      asin,
+      label: theme || shortOrganicChild(asin),
+    }))
+    .filter((item) => item.label)
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Extra day-cell chips: one identity and one rank per child ASIN.
+ *
+ * Rank source of truth when phrases/v2 and variations-heatmap disagree
+ * for the same ASIN (do not render both numbers):
+ *   - Cell primary # / fill / sort / spark stay on the family-winner
+ *     phrases/v2 `organic_position` (`positions[week]`).
+ *   - If that winning `organic_asin` also has a variation snapshot,
+ *     omit it from extra chips — even when the two ranks differ.
+ *     Theme catalog labels the winner (no second #). Variation rank
+ *     is preferred only for non-winner children that actually have a
+ *     stored variation row.
+ *   - Phrases/v2 organic_position is used for a child only when that
+ *     child is not already covered by a variation row.
+ */
+export function heatmapDayChips(
+  row: Pick<HeatmapRow, "variation_slots" | "organic_child_asins" | "organic_child_asin">,
+  week: string,
+  weeks: string[],
+): VariationChip[] {
+  const winner = asOrganicChild(row.organic_child_asins[week]);
+  const seen = new Set<string>();
+  const out: VariationChip[] = [];
+  for (const chip of variationChipsForDay(row, week, weeks)) {
+    if (seen.has(chip.asin)) continue;
+    seen.add(chip.asin);
+    if (chip.rank == null) continue;
+    if (winner && chip.asin === winner) continue;
+    out.push(chip);
+  }
+  return out;
+}
+
 export function latestOrganicChild(
   asins: Record<string, string | null | undefined> | null | undefined,
   weeks: string[],
