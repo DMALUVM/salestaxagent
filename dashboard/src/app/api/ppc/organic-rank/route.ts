@@ -5,8 +5,9 @@ import { SOLDSCOPE_OBSERVE_ONLY } from "@/lib/soldscope-status";
 
 /**
  * GET /api/ppc/organic-rank — daily Rank Tracker heatmap + movement flags.
- * Reads soldscope_rank_snapshots and joins ABA SFR + sqp_weekly /
- * keyword_organic_rank. Observe-only. Empty tables stay empty.
+ * Reads soldscope_rank_snapshots + soldscope_rank_variation_snapshots
+ * and joins ABA SFR + sqp_weekly / keyword_organic_rank. Observe-only.
+ * Empty tables stay empty. Missing child ranks are omitted, never invented.
  */
 export async function GET() {
   try {

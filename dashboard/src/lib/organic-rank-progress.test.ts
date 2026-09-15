@@ -20,6 +20,10 @@ import {
   childSlotHoverTitle,
   childSlotRank,
   shortOrganicChild,
+  shortVariationLabel,
+  variationChipsForDay,
+  variationThemeLabel,
+  variationSlotHoverTitle,
   cellHoverTitle,
   cellPriorRank,
   latestOrganicChild,
@@ -551,7 +555,96 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.match(heat, /child \{slot\.asin\}/);
     assert.match(heat, /organicAsin/);
     assert.match(heat, /shortOrganicChild/);
+    assert.match(heat, /variationChipsForDay/);
+    assert.match(heat, /VariationChipView/);
     assert.doesNotMatch(heat, /Deo stays empty/);
     assert.doesNotMatch(heat, /until a Rank Tracker group exists/);
+  });
+
+  test("variation theme label prefers the value after a colon", () => {
+    assert.equal(variationThemeLabel("Color: Peppermint"), "Peppermint");
+    assert.equal(variationThemeLabel("Scent: Sweet Orange / Size: 3-pack"), "Sweet Orange / 3-pack");
+    assert.equal(variationThemeLabel("Unscented"), "Unscented");
+    assert.equal(variationThemeLabel("  "), null);
+    assert.equal(variationThemeLabel(null), null);
+    assert.equal(shortVariationLabel("B0CLHVCPL5", "Scent: Unscented"), "Unscented");
+    assert.equal(shortVariationLabel("B0CLHVCPL5", null), "CPL5");
+    assert.equal(shortVariationLabel("B0CLHVCPL5", ""), "CPL5");
+  });
+
+  test("variation chips show stored children only and Δ vs prior day", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-13",
+          organic_position: 40, organic_asin: "B0CLHVCPL5",
+        },
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-14",
+          organic_position: 38, organic_asin: "B0CLHVCPL5",
+        },
+      ],
+      variationSnapshots: [
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-13",
+          variation_asin: "B0CLHVCPL5", theme: "Scent: Unscented",
+          organic_position: 130,
+        },
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-14",
+          variation_asin: "b0clhvcpl5", theme: "Unscented",
+          organic_position: 126,
+        },
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-14",
+          variation_asin: "B0CLHVLG2F", theme: "Assorted",
+          organic_position: 88,
+        },
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-14",
+          variation_asin: "B0CLHV3V5C", theme: "Peppermint",
+          organic_position: 0,
+        },
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-14",
+          variation_asin: "", theme: "Ghost",
+          organic_position: 3,
+        },
+      ],
+    });
+    const row = progress.rows.find((r) => r.keyword_normalized === "lip balm");
+    assert.ok(row);
+    assert.equal(row!.variation_slots["2026-09-14"].length, 2);
+    assert.equal(row!.variation_slots["2026-09-13"][0]?.theme, "Unscented");
+    const chips = variationChipsForDay(row!, "2026-09-14", progress.weeks);
+    assert.deepEqual(chips.map((c) => c.label), ["Unscented", "Assorted"]);
+    assert.equal(chips[0].winner, true);
+    assert.equal(chips[0].rank, 126);
+    assert.equal(chips[0].delta, 4);
+    assert.equal(chips[1].winner, false);
+    assert.equal(chips[1].rank, 88);
+    assert.equal(chips[1].delta, null);
+    assert.equal(
+      variationSlotHoverTitle(chips[0]),
+      "Child B0CLHVCPL5 (Unscented) · #126 (↑4) · family winner",
+    );
+    assert.deepEqual(variationChipsForDay(row!, "2026-09-13", progress.weeks).map((c) => c.asin), [
+      "B0CLHVCPL5",
+    ]);
+  });
+
+  test("does not invent variation chips when SoldScope sent none", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "chapstick", asin: "B0CLHTF8YN", as_of: "2026-09-14",
+        organic_position: 9, organic_asin: "B0CLHVCPL5",
+      }],
+    });
+    const row = progress.rows[0];
+    assert.deepEqual(row.variation_slots["2026-09-14"], []);
+    assert.deepEqual(variationChipsForDay(row, "2026-09-14", progress.weeks), []);
+    assert.deepEqual(childSlotRank(row), {
+      asin: "B0CLHVCPL5", rank: 9, delta: null,
+    });
   });
 });

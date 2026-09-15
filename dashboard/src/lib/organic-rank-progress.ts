@@ -81,6 +81,35 @@ export type RankSnapshot = {
   group_id?: number | null;
 };
 
+/** Per-child rank from soldscope_rank_variation_snapshots. Never invent. */
+export type VariationSnapshot = {
+  phrase?: string | null;
+  asin?: string | null;
+  variation_asin?: string | null;
+  theme?: string | null;
+  organic_position?: number | null;
+  amazon_choice?: boolean | null;
+  as_of?: string | null;
+  group_id?: number | null;
+};
+
+export type VariationDaySlot = {
+  asin: string;
+  theme: string | null;
+  rank: number | null;
+  amazon_choice: boolean | null;
+};
+
+export type VariationChip = {
+  asin: string;
+  theme: string | null;
+  label: string;
+  rank: number | null;
+  delta: number | null;
+  amazon_choice: boolean | null;
+  winner: boolean;
+};
+
 export type SqpJoinRow = {
   asin?: string | null;
   query_normalized?: string | null;
@@ -113,6 +142,8 @@ export type HeatmapRow = {
   amazon_choices: Record<string, boolean | null>;
   /** Latest (or most recent stored) child ASIN for the keyword chip. */
   organic_child_asin: string | null;
+  /** Tracked child ranks per day. Missing children are omitted — never invented. */
+  variation_slots: Record<string, VariationDaySlot[]>;
   previous: number | null;
   current: number | null;
   wow: WowFlag | null;
@@ -256,6 +287,90 @@ export function shortOrganicChild(asin: string | null | undefined): string {
   const a = asOrganicChild(asin);
   if (!a) return "";
   return a.length <= 4 ? a : a.slice(-4);
+}
+
+/**
+ * SoldScope theme → short chip label.
+ * ``Color: Peppermint`` / ``Scent: Sweet Orange / Size: 3-pack`` → values only.
+ * Empty theme stays null — fall back to last-4 of the ASIN at render time.
+ */
+export function variationThemeLabel(theme: string | null | undefined): string | null {
+  const raw = String(theme ?? "").trim();
+  if (!raw) return null;
+  const parts = raw.split("/").map((p) => p.trim()).filter(Boolean);
+  const values = parts.map((part) => {
+    const idx = part.indexOf(":");
+    return idx >= 0 ? part.slice(idx + 1).trim() : part;
+  }).filter(Boolean);
+  const label = values.join(" / ").trim();
+  return label || null;
+}
+
+export function shortVariationLabel(
+  asin: string | null | undefined,
+  theme?: string | null,
+): string {
+  return variationThemeLabel(theme) || shortOrganicChild(asin);
+}
+
+export function variationSlotHoverTitle(slot: VariationChip): string {
+  const rankBit = slot.rank != null ? ` · #${slot.rank}` : " · —";
+  const deltaBit = slot.delta != null ? ` (${formatSignedDelta(slot.delta)})` : "";
+  const winnerBit = slot.winner ? " · family winner" : "";
+  const themeBit = slot.theme ? ` (${slot.theme})` : "";
+  return `Child ${slot.asin}${themeBit}${rankBit}${deltaBit}${winnerBit}`;
+}
+
+export function sortVariationSlots(
+  slots: VariationDaySlot[],
+  winnerAsin?: string | null,
+): VariationDaySlot[] {
+  const winner = asOrganicChild(winnerAsin);
+  return [...slots].sort((a, b) => {
+    if (winner) {
+      if (a.asin === winner && b.asin !== winner) return -1;
+      if (b.asin === winner && a.asin !== winner) return 1;
+    }
+    const left = asRank(a.rank);
+    const right = asRank(b.rank);
+    if (left != null && right != null && left !== right) return left - right;
+    if (left != null && right == null) return -1;
+    if (left == null && right != null) return 1;
+    return a.asin.localeCompare(b.asin);
+  });
+}
+
+/**
+ * Compact chips for one keyword×day. Δ vs the prior day's slot for that ASIN
+ * when both ranks exist. Missing children are omitted — never fabricated.
+ */
+export function variationChipsForDay(
+  row: Pick<HeatmapRow, "variation_slots" | "organic_child_asins" | "organic_child_asin">,
+  week: string,
+  weeks: string[],
+): VariationChip[] {
+  const slots = sortVariationSlots(
+    row.variation_slots[week] ?? [],
+    row.organic_child_asins[week] ?? row.organic_child_asin,
+  );
+  const idx = weeks.indexOf(week);
+  const priorWeek = idx > 0 ? weeks[idx - 1] : null;
+  const priorByAsin = new Map(
+    (priorWeek ? row.variation_slots[priorWeek] ?? [] : []).map((s) => [s.asin, s]),
+  );
+  const winner = asOrganicChild(row.organic_child_asins[week] ?? row.organic_child_asin);
+  return slots.map((slot) => {
+    const prior = priorByAsin.get(slot.asin);
+    return {
+      asin: slot.asin,
+      theme: variationThemeLabel(slot.theme),
+      label: shortVariationLabel(slot.asin, slot.theme),
+      rank: asRank(slot.rank),
+      delta: rankDelta(prior?.rank, slot.rank),
+      amazon_choice: slot.amazon_choice,
+      winner: winner != null && slot.asin === winner,
+    };
+  });
 }
 
 export function latestOrganicChild(
@@ -549,6 +664,7 @@ function latestByKey<T>(
 
 export function buildOrganicRankProgress(input: {
   snapshots: RankSnapshot[];
+  variationSnapshots?: VariationSnapshot[];
   sqpRows?: SqpJoinRow[];
   korRows?: KorJoinRow[];
   weekCap?: number;
@@ -583,6 +699,7 @@ export function buildOrganicRankProgress(input: {
     positions: Record<string, number | null>;
     organic_child_asins: Record<string, string | null>;
     amazon_choices: Record<string, boolean | null>;
+    variation_slots: Record<string, VariationDaySlot[]>;
     previous_from_api: number | null;
   };
   const series = new Map<string, Series>();
@@ -610,6 +727,7 @@ export function buildOrganicRankProgress(input: {
       positions: {},
       organic_child_asins: {},
       amazon_choices: {},
+      variation_slots: {},
       previous_from_api: null,
     };
     if (shownWeeks.includes(asOf)) {
@@ -629,6 +747,34 @@ export function buildOrganicRankProgress(input: {
       cur.previous_from_api = asRank(row.organic_previous_position);
     }
     series.set(seriesKey, cur);
+  }
+
+  const datedVariations = [...(input.variationSnapshots ?? [])].sort((a, b) =>
+    String(a.as_of ?? "").localeCompare(String(b.as_of ?? "")),
+  );
+  for (const row of datedVariations) {
+    const asin = String(row.asin ?? "").trim().toUpperCase();
+    if (!locked.has(asin)) continue;
+    const phrase = String(row.phrase ?? "").trim();
+    const keyNorm = normalizeKeyword(phrase);
+    if (!keyNorm) continue;
+    const cur = series.get(`${asin}|${keyNorm}`);
+    if (!cur) continue;
+    const asOf = String(row.as_of ?? "").slice(0, 10);
+    if (!shownWeeks.includes(asOf)) continue;
+    const child = asOrganicChild(row.variation_asin);
+    if (!child) continue;
+    const rank = asRank(row.organic_position);
+    if (rank == null) continue;
+    const slots = cur.variation_slots[asOf] ?? [];
+    if (slots.some((s) => s.asin === child)) continue;
+    slots.push({
+      asin: child,
+      theme: variationThemeLabel(row.theme),
+      rank,
+      amazon_choice: typeof row.amazon_choice === "boolean" ? row.amazon_choice : null,
+    });
+    cur.variation_slots[asOf] = slots;
   }
 
   const lastWeek = shownWeeks[shownWeeks.length - 1] ?? null;
@@ -657,6 +803,12 @@ export function buildOrganicRankProgress(input: {
         shownWeeks.map((w) => [w, s.amazon_choices[w] ?? null]),
       ),
       organic_child_asin: latestOrganicChild(s.organic_child_asins, shownWeeks),
+      variation_slots: Object.fromEntries(
+        shownWeeks.map((w) => [w, sortVariationSlots(
+          s.variation_slots[w] ?? [],
+          asOrganicChild(s.organic_child_asins[w]),
+        )]),
+      ),
       previous,
       current,
       wow: classifyWowDelta(previous, current),

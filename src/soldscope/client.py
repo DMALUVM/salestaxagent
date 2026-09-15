@@ -26,6 +26,8 @@ BASE_URL = "https://www.soldscope.com/api"
 OBSERVE_ONLY = True
 
 # GET paths this client is allowed to call. Writes are never allowed.
+# Rank Tracker variations + variations-heatmap are observe-only reuse of
+# already-tracked child ASINs (not metered KR / create / track toggles).
 _ALLOWED_GET_EXACT = frozenset({
     "/auth/check",
     "/common/sales-history",
@@ -39,7 +41,12 @@ _ALLOWED_GET_EXACT = frozenset({
 _ALLOWED_GET_PATTERNS = (
     re.compile(r"^/rank-tracker/groups/\d+$"),
     re.compile(r"^/rank-tracker/groups/\d+/products$"),
+    re.compile(r"^/rank-tracker/groups/\d+/products-with-stats$"),
     re.compile(r"^/rank-tracker/groups/\d+/products/\d+/phrases/v2$"),
+    re.compile(r"^/rank-tracker/groups/\d+/products/\d+/variations$"),
+    re.compile(
+        r"^/rank-tracker/groups/\d+/products/\d+/phrases/\d+/variations-heatmap$"
+    ),
     re.compile(r"^/keyword-research/searches/asin/single/\d+$"),
 )
 _KR_CREATE_PATH = "/keyword-research/searches/asin/single"
@@ -360,6 +367,66 @@ def list_product_phrases(
     body, _ = request(
         "GET",
         f"/rank-tracker/groups/{int(group_id)}/products/{int(product_id)}/phrases/v2",
+        params=params,
+    )
+    return body if isinstance(body, dict) else {}
+
+
+def list_group_products_with_stats(
+    group_id: int,
+    *,
+    page: int = 1,
+    per_page: int = 100,
+    full_data: bool = True,
+) -> dict:
+    """Observe-only products-with-stats. Diagnostics — never a write."""
+    params: dict[str, Any] = {"page": page, "perPage": per_page}
+    if full_data:
+        params["fullData"] = True
+    body, _ = request(
+        "GET",
+        f"/rank-tracker/groups/{int(group_id)}/products-with-stats",
+        params=params,
+    )
+    return body if isinstance(body, dict) else {}
+
+
+def list_product_variations(group_id: int, product_id: int) -> dict:
+    """Observe-only child ASINs already tracked on a parent product."""
+    body, _ = request(
+        "GET",
+        f"/rank-tracker/groups/{int(group_id)}/products/{int(product_id)}/variations",
+    )
+    return body if isinstance(body, dict) else {}
+
+
+def get_phrase_variations_heatmap(
+    group_id: int,
+    product_id: int,
+    phrase_id: int,
+    *,
+    page: int = 1,
+    per_page: int = 100,
+    heatmap_date_from: str | None = None,
+    heatmap_date_to: str | None = None,
+    results_type: str = "organic",
+) -> dict:
+    """Reuse-only per-child heatmap. rank 0 = not found. Not metered KR."""
+    params: dict[str, Any] = {
+        "page": page,
+        "perPage": per_page,
+        "resultsType": results_type,
+    }
+    if heatmap_date_from:
+        params["heatmapDateFrom"] = heatmap_date_from
+    if heatmap_date_to:
+        params["heatmapDateTo"] = heatmap_date_to
+    body, _ = request(
+        "GET",
+        (
+            f"/rank-tracker/groups/{int(group_id)}/products/{int(product_id)}"
+            f"/phrases/{int(phrase_id)}/variations-heatmap"
+        ),
         params=params,
     )
     return body if isinstance(body, dict) else {}
