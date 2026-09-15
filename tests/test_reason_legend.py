@@ -8,8 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.reimbursements.case_queue import (
-    LINK_KIND_SUPPORT_MANUAL,
-    SC_SUPPORT_HUB,
+    LINK_KIND_IDR,
     STATUS_NEEDS_CASE,
     build_case_events,
     fail_if_empty_adjustments_pull,
@@ -128,8 +127,8 @@ def test_reference_id_digit_string_is_not_shipment():
     assert fba_shipment_id(None, ref) is None
     assert fba_shipment_id("FBA16ABCDE", ref) == "FBA16ABCDE"
     url, kind = seller_central_link(None, ref)
-    assert url == SC_SUPPORT_HUB
-    assert kind == LINK_KIND_SUPPORT_MANUAL
+    assert url is None
+    assert kind == LINK_KIND_IDR
 
 
 def test_build_events_maps_m_and_keeps_reference_out_of_shipment():
@@ -158,7 +157,8 @@ def test_build_events_maps_m_and_keeps_reference_out_of_shipment():
     assert ev["reason_label"] == "M — Inventory misplaced"
     assert ev["shipment_id"] is None
     assert ev["reference_id"] == "20080126439780"
-    assert ev["seller_central_link_kind"] == LINK_KIND_SUPPORT_MANUAL
+    assert ev["seller_central_link_kind"] == LINK_KIND_IDR
+    assert ev["seller_central_url"] is None
     assert ev["classification_version"] == CLASSIFICATION_VERSION
 
 

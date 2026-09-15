@@ -10,8 +10,12 @@ from datetime import date
 from typing import Iterable
 
 from src.reimbursements.case_queue import (
+    HOW_TO_FILE_INTRO,
+    HOW_TO_FILE_NO_DEEP_LINK,
+    HOW_TO_FILE_STEPS,
+    HOW_TO_FILE_TITLE,
+    IDR_INSTRUCTION,
     SC_LEDGER_HUB,
-    SC_SUPPORT_HUB,
     SELLER_CENTRAL_LINK_LIMIT,
     STATUS_NEEDS_CASE,
     fba_shipment_id,
@@ -88,8 +92,16 @@ def build_case_package(
             "reference_id": r.get("reference_id"),
             "estimated_amount": r.get("estimated_amount"),
             "amount_basis": r.get("amount_basis"),
-            "seller_central_url": r.get("seller_central_url") or SC_SUPPORT_HUB,
-            "seller_central_link_kind": r.get("seller_central_link_kind") or "support_manual",
+            "seller_central_url": (
+                r.get("seller_central_url")
+                if fba_shipment_id(r.get("shipment_id"))
+                else None
+            ),
+            "seller_central_link_kind": (
+                r.get("seller_central_link_kind")
+                if fba_shipment_id(r.get("shipment_id"))
+                else "idr_instructions"
+            ),
             "classification_version": r.get("classification_version") or CLASSIFICATION_VERSION,
             "reason_label": reason_label(r.get("reason"), r.get("disposition")),
             "status": "needs_case",
@@ -119,7 +131,8 @@ def build_case_package(
             "Eligible-claims API (does not exist)",
         ],
         "seller_central_link_limit": SELLER_CENTRAL_LINK_LIMIT,
-        "support_hub": SC_SUPPORT_HUB,
+        "idr_instruction": IDR_INSTRUCTION,
+        "how_to_file_title": HOW_TO_FILE_TITLE,
         "ledger_report_hub": SC_LEDGER_HUB,
         "classification_version": CLASSIFICATION_VERSION,
         "mini_resync": MINI_RESYNC_HINT,
@@ -150,12 +163,18 @@ def render_package_markdown(package: dict) -> str:
         f"- Target agent: `{package.get('target', {}).get('agent_id', REESE_AGENT_ID)}`",
         f"- Classification: `{package.get('classification_version', CLASSIFICATION_VERSION)}`",
         "",
-        "## Seller Central links",
+        f"## {HOW_TO_FILE_TITLE}",
+        "",
+        HOW_TO_FILE_INTRO,
+        "",
+        *[f"{i}. **{title}** — {body}" for i, (title, body) in enumerate(HOW_TO_FILE_STEPS, 1)],
+        "",
+        HOW_TO_FILE_NO_DEEP_LINK,
+        "",
+        f"- {IDR_INSTRUCTION}",
+        f"- Inventory ledger report: {SC_LEDGER_HUB}",
         "",
         SELLER_CENTRAL_LINK_LIMIT,
-        "",
-        f"- Get Support: {SC_SUPPORT_HUB}",
-        f"- Inventory ledger report: {SC_LEDGER_HUB}",
         "",
     ]
     by_group: dict[str, list[dict]] = {}
@@ -185,7 +204,7 @@ def render_package_markdown(package: dict) -> str:
             ref = r.get("reference_id") or "—"
             if shipment != "—" and ref == shipment:
                 ref = "—"
-            url = r.get("seller_central_url") or SC_SUPPORT_HUB
+            url = r.get("seller_central_url") or IDR_INSTRUCTION
             lines.append(
                 f"| {r.get('event_date')} | `{r.get('sku') or '—'}` | "
                 f"{r.get('asin') or '—'} | {r.get('quantity')} | "

@@ -7,12 +7,18 @@ import { windowStart } from "./as-of";
 import {
   CASE_QUEUE_DEFAULT_DAYS,
   CASE_QUEUE_GAP,
+  CASE_QUEUE_SOURCE_NOTE,
   CLASSIFICATION_VERSION,
+  HOW_TO_FILE_INTRO,
+  HOW_TO_FILE_NO_DEEP_LINK,
+  HOW_TO_FILE_STEPS,
+  HOW_TO_FILE_TITLE,
+  IDR_INSTRUCTION,
+  NO_INBOUND_DISCREPANCIES,
   NOTIFY_BLOCK_COPY,
   REESE_AGENT_ID,
   REESE_AGENT_NAME,
   REESE_PACKAGE_CONTRACT,
-  SC_SUPPORT_HUB,
   SELLER_CENTRAL_LINK_LIMIT,
   apiUrl,
   buildReesePackage,
@@ -20,7 +26,9 @@ import {
   evaluateCaseQa,
   fbaShipmentId,
   filterNeedsCase,
+  formatCasePacket,
   inCaseRange,
+  inboundEmptyCopy,
   isFbaShipmentId,
   isNeedsCase,
   normalizeCaseRow,
@@ -135,20 +143,43 @@ describe("needs-case vs paid", () => {
 
   test("Seller Central href is FBA tracker only — digit refs are not shipments", () => {
     assert.equal(
-      sellerCentralHref({ seller_central_url: "https://example.com/x" }),
-      SC_SUPPORT_HUB,
+      sellerCentralHref({ seller_central_url: "https://sellercentral.amazon.com/help/hub/contact-us" }),
+      null,
     );
     assert.match(
-      sellerCentralHref({ seller_central_url: null, shipment_id: "FBA16ABCDE" }),
+      sellerCentralHref({ seller_central_url: null, shipment_id: "FBA16ABCDE" }) ?? "",
       /inbound-shipment-workflow.*FBA16ABCDE/,
     );
     assert.equal(
       sellerCentralHref({ seller_central_url: null, shipment_id: null, reference_id: "20080126439780" }),
-      SC_SUPPORT_HUB,
+      null,
     );
     assert.equal(isFbaShipmentId("20080126439780"), false);
     assert.equal(fbaShipmentId(null, "20080126439780"), null);
     assert.equal(fbaShipmentId("FBA16ABCDE", "20080126439780"), "FBA16ABCDE");
+  });
+
+  test("case packet and inbound empty copy stay honest", () => {
+    const packet = formatCasePacket(row({
+      event_key: "adj|7",
+      event_date: "2026-08-10",
+      reason: "7",
+      reason_group: "warehouse_damage",
+      reference_id: "20080126439780",
+      fulfillment_center: "PHX6",
+      fnsku: "X2",
+      quantity: 1,
+    }));
+    assert.match(packet, /20080126439780/);
+    assert.match(packet, /PHX6/);
+    assert.match(packet, /not a shipment ID/);
+    assert.match(packet, /Inventory Defect and Reimbursement/);
+    assert.doesNotMatch(packet, /help\/hub\/contact-us/);
+    assert.equal(inboundEmptyCopy([]), NO_INBOUND_DISCREPANCIES);
+    assert.equal(
+      inboundEmptyCopy([row({ event_key: "in", event_date: "2026-08-01", source: "inbound_discrepancy" })]),
+      null,
+    );
   });
 
   test("M is lost_warehouse not lost_inbound; 7 is damage not Found", () => {
@@ -170,7 +201,8 @@ describe("needs-case vs paid", () => {
     }));
     assert.equal(stale.reason_group, "lost_warehouse");
     assert.equal(stale.shipment_id, null);
-    assert.equal(stale.seller_central_link_kind, "support_manual");
+    assert.equal(stale.seller_central_link_kind, "idr_instructions");
+    assert.equal(stale.seller_central_url, null);
   });
 
   test("notify gate refuses unknown / missing FC / outdated classification", () => {
@@ -239,6 +271,9 @@ describe("Reese package + page contract", () => {
     assert.equal(pkg.summary.units, 2);
     assert.match(pkg.markdown, /Needs-case package/);
     assert.match(pkg.markdown, /Do not auto-file/);
+    assert.match(pkg.markdown, /How to file/);
+    assert.match(pkg.markdown, /Inventory Defect and Reimbursement/);
+    assert.doesNotMatch(pkg.markdown, /help\/hub\/contact-us/);
   });
 
   test("Reese id and no auto-submit", () => {
@@ -270,7 +305,10 @@ describe("Reese package + page contract", () => {
     assert.match(ui, />FC</);
     assert.match(ui, />Shipment</);
     assert.match(ui, />Reference ID</);
-    assert.match(ui, /Support \(manual\)/);
+    assert.match(ui, /Copy case packet/);
+    assert.match(ui, /HOW_TO_FILE_TITLE/);
+    assert.doesNotMatch(ui, /Support \(manual\)/);
+    assert.doesNotMatch(ui, /help\/hub\/contact-us/);
     assert.doesNotMatch(ui, /FC \/ Shipment/);
     assert.doesNotMatch(ui, /shipment_id \|\| r\.reference_id/);
     assert.match(notify, /status:\s*422/);
@@ -279,6 +317,37 @@ describe("Reese package + page contract", () => {
     assert.match(pyLegend, /Inventory misplaced/);
     assert.match(pyQueue, /Digit ``reference_id`` values are ledger transaction IDs/);
     assert.doesNotMatch(pyQueue, /"m".*lost_inbound/);
+  });
+
+  test("How to file copy is on the Needs case dashboard", () => {
+    assert.equal(HOW_TO_FILE_TITLE, "How to file");
+    assert.match(HOW_TO_FILE_INTRO, /codes 7 \/ E/);
+    assert.match(HOW_TO_FILE_INTRO, /Damaged at FC/);
+    const titles = HOW_TO_FILE_STEPS.map((s) => s.title).join(" | ");
+    const bodies = HOW_TO_FILE_STEPS.map((s) => s.body).join(" ");
+    assert.match(titles, /Check Paid \/ Reimbursements report first/);
+    assert.match(titles, /File within 60 days/);
+    assert.match(bodies, /already paid within ~60 days/);
+    assert.match(bodies, /ledger transaction ID/);
+    assert.match(bodies, /Inventory Defect and Reimbursement/);
+    assert.match(bodies, /Inventory Adjustments \/ Ledger Adjustments/);
+    assert.match(bodies, /One case per event|Do not batch/);
+    assert.match(HOW_TO_FILE_NO_DEEP_LINK, /no stable deep link/);
+    assert.match(HOW_TO_FILE_NO_DEEP_LINK, /Support hub/);
+    assert.equal(IDR_INSTRUCTION, "Open IDR (Inventory → Inventory Defect and Reimbursement)");
+    assert.match(CASE_QUEUE_SOURCE_NOTE, /ledger adjustments with eligible codes/);
+    assert.match(CASE_QUEUE_SOURCE_NOTE, /CLOSED\/stale inbound/);
+    assert.equal(NO_INBOUND_DISCREPANCIES, "No CLOSED inbound discrepancies in warehouse right now");
+    assert.match(ui, /HOW_TO_FILE_TITLE/);
+    assert.match(ui, /HOW_TO_FILE_STEPS/);
+    assert.match(ui, /Copy case packet/);
+    assert.match(ui, /IDR_INSTRUCTION/);
+    assert.match(ui, /NO_INBOUND_DISCREPANCIES/);
+    assert.match(ui, /CASE_QUEUE_SOURCE_NOTE/);
+    assert.match(pyQueue, /How to file/);
+    assert.match(pyQueue, /Inventory Defect and Reimbursement/);
+    assert.match(pyPkg, /HOW_TO_FILE_TITLE/);
+    assert.doesNotMatch(pyPkg, /Get Support: https:\/\/sellercentral/);
   });
 
   test("queue is not built from paid-only reimbursements", () => {
