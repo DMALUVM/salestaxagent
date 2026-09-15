@@ -433,7 +433,8 @@ function zeroOrderRec(args: {
         intended_lever: lever,
         why: `UNVERIFIED — ST warehouse through ${freshness.st_fresh_through || "none"}, ` +
           `expected closed as-of ${String(window.end)}. ${metrics} Refresh ` +
-          `ads_search_terms_daily before any ${intended}.`,
+          `ads_search_terms_daily before any ` +
+          `${lever === "pause_keyword" ? "keyword pause" : "negate"}.`,
       },
       suggested_action:
         `Do not ${intended} yet. Search-term warehouse ends ${freshness.st_fresh_through || "none"}; ` +

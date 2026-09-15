@@ -439,7 +439,8 @@ def _zero_order_rec(
                 "why": (f"UNVERIFIED — ST warehouse through "
                         f"{freshness.get('st_fresh_through') or 'none'}, expected "
                         f"closed as-of {window['end']}. {metrics} Refresh "
-                        f"ads_search_terms_daily before any {intended}."),
+                        f"ads_search_terms_daily before any "
+                        f"{'keyword pause' if lever == 'pause_keyword' else 'negate'}."),
             },
             action=(f"Do not {intended} yet. Search-term warehouse ends "
                     f"{freshness.get('st_fresh_through') or 'none'}; Ads may have "
