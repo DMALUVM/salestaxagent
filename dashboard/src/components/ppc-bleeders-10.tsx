@@ -8,7 +8,10 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
+  BLEEDERS_10_BLURB,
   BLEEDERS_10_TITLE,
+  BLEEDERS_10_VERIFY,
+  bleeders10TermsEqual,
   recTypeOfBleeders10,
   type Bleeders10Payload,
   type Bleeders10Row,
@@ -20,6 +23,45 @@ function fmtD(n: number) {
 }
 
 type Status = Bleeders10Row["status"];
+
+function CopyValue({
+  value,
+  hint,
+}: {
+  value: string | null | undefined;
+  hint?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const text = String(value ?? "").trim();
+  async function copy() {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* clipboard can be blocked; value stays visible */
+    }
+  }
+  return (
+    <div className="min-w-[8rem] max-w-[14rem]">
+      <button
+        type="button"
+        onClick={copy}
+        title={text ? `Copy ${text}` : "Nothing to copy"}
+        className="text-left text-xs font-medium text-foreground break-words hover:underline"
+      >
+        {text || "—"}{" "}
+        <span className="text-[10px] font-normal text-muted-foreground">
+          {copied ? "copied" : text ? "⧉" : ""}
+        </span>
+      </button>
+      {hint ? (
+        <p className="mt-0.5 text-[10px] text-emerald-700 dark:text-emerald-400">{hint}</p>
+      ) : null}
+    </div>
+  );
+}
 
 export function PpcBleeders10({
   data,
@@ -67,6 +109,9 @@ export function PpcBleeders10({
             impact_estimate: row.spend,
             evidence: {
               why: row.why,
+              action_label: row.action_label,
+              suggested_action: row.suggested_action,
+              keyword: row.keyword,
               clicks: row.clicks,
               spend: row.spend,
               sales: row.sales_14d,
@@ -127,13 +172,13 @@ export function PpcBleeders10({
               Open <strong className="text-foreground">{openCount}</strong>
             </span>
           </div>
-          <p className="text-sm text-foreground">
-            Window 2026-06-30..08-31 (63d, SP search terms). Nonbrand search-term
-            CVR 25.79% (~1-in-4). Click floor 6 (1.5×). pause_keyword iff term =
-            exact KW; else negative_exact. Pasted 10 — not This week. Nothing
-            writes to Amazon.
-          </p>
-          {data.notes.slice(0, 3).map((n) => (
+          <p className="text-sm text-foreground">{BLEEDERS_10_BLURB}</p>
+          <div className="space-y-0.5 rounded-md border bg-muted/40 p-2 text-[11px] text-foreground">
+            <p><span className="text-muted-foreground">Window:</span> {data.window.label}</p>
+            <p><span className="text-muted-foreground">Campaign:</span> listed on each row — open that campaign in Ads to verify.</p>
+            <p>{BLEEDERS_10_VERIFY}</p>
+          </div>
+          {data.notes.filter((n) => n !== BLEEDERS_10_BLURB).slice(0, 3).map((n) => (
             <p key={n.slice(0, 48)} className="text-[11px] text-muted-foreground">{n}</p>
           ))}
         </CardContent>
@@ -169,10 +214,11 @@ export function PpcBleeders10({
                 <TableRow>
                   <TableHead className="w-28">Done / Skipped</TableHead>
                   <TableHead>Rank</TableHead>
-                  <TableHead>Action</TableHead>
+                  <TableHead className="min-w-[22rem]">Action + how-to</TableHead>
                   <TableHead>Campaign</TableHead>
                   <TableHead>Ad group</TableHead>
-                  <TableHead>Term</TableHead>
+                  <TableHead>Search term</TableHead>
+                  <TableHead>Keyword / targeting</TableHead>
                   <TableHead className="text-right">SS Vol</TableHead>
                   <TableHead>Match</TableHead>
                   <TableHead className="text-right">Clicks</TableHead>
@@ -183,6 +229,8 @@ export function PpcBleeders10({
               <TableBody>
                 {shown.map((r) => {
                   const status = local[r.checklist_id] ?? r.status;
+                  const sameExact = r.action === "pause_keyword"
+                    && bleeders10TermsEqual(r.search_term, r.keyword);
                   return (
                     <TableRow key={r.checklist_id} className={status !== "open" ? "opacity-60" : ""}>
                       <TableCell>
@@ -206,12 +254,23 @@ export function PpcBleeders10({
                         </div>
                       </TableCell>
                       <TableCell><Badge variant="outline" className="text-[10px]">{r.rank}</Badge></TableCell>
-                      <TableCell className="text-xs whitespace-nowrap">{r.action}</TableCell>
+                      <TableCell className="min-w-[22rem] max-w-[28rem] whitespace-normal">
+                        <p className="text-xs font-medium text-foreground">{r.action_label}</p>
+                        <p className="mt-1 text-[11px] leading-snug text-foreground/90">{r.suggested_action}</p>
+                      </TableCell>
                       <TableCell className="text-xs max-w-[12rem] truncate" title={r.campaign_name}>
                         {r.campaign_name}
                       </TableCell>
                       <TableCell className="text-xs max-w-[10rem] truncate">{r.ad_group_name || "—"}</TableCell>
-                      <TableCell className="text-xs max-w-[10rem] truncate">{r.search_term}</TableCell>
+                      <TableCell>
+                        <CopyValue value={r.search_term} />
+                      </TableCell>
+                      <TableCell>
+                        <CopyValue
+                          value={r.keyword}
+                          hint={sameExact ? "same Exact KW as the search term" : undefined}
+                        />
+                      </TableCell>
                       <TableCell className="text-right tabular-nums text-xs text-muted-foreground" title="SoldScope search volume when stored">
                         {formatSoldScopeVol(r.soldscope_sv)}
                       </TableCell>
