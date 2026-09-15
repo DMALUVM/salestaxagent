@@ -260,14 +260,16 @@ export function sourceLabel(source: string | null | undefined): string {
 }
 
 export function inboundShipped(row: Pick<CaseEventRow, "quantity_shipped">): number | null {
-  if (row.quantity_shipped == null || row.quantity_shipped === "") return null;
-  const n = Number(row.quantity_shipped);
+  const raw = row.quantity_shipped as unknown;
+  if (raw == null || String(raw).trim() === "") return null;
+  const n = Number(raw);
   return Number.isFinite(n) ? n : null;
 }
 
 export function inboundReceived(row: Pick<CaseEventRow, "quantity_received">): number | null {
-  if (row.quantity_received == null || row.quantity_received === "") return null;
-  const n = Number(row.quantity_received);
+  const raw = row.quantity_received as unknown;
+  if (raw == null || String(raw).trim() === "") return null;
+  const n = Number(raw);
   return Number.isFinite(n) ? n : null;
 }
 

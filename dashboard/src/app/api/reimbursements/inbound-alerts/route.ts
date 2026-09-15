@@ -34,7 +34,7 @@ export async function GET() {
   try {
     const sb = getServerSupabase();
     const bounds = eventQueryBounds(range.start, range.end);
-    let { data, error } = await sb
+    const first = await sb
       .from("fba_case_events")
       .select(SELECT)
       .gte("event_date", bounds.gte)
@@ -42,6 +42,8 @@ export async function GET() {
       .eq("status", "needs_case")
       .order("event_date", { ascending: false })
       .limit(2000);
+    let data: CaseEventRow[] | null = (first.data ?? null) as CaseEventRow[] | null;
+    let error = first.error;
     if (error && (error.code === "PGRST204" || (error.message || "").includes("quantity_shipped"))) {
       const retry = await sb
         .from("fba_case_events")
@@ -51,7 +53,7 @@ export async function GET() {
         .eq("status", "needs_case")
         .order("event_date", { ascending: false })
         .limit(2000);
-      data = retry.data;
+      data = (retry.data ?? null) as CaseEventRow[] | null;
       error = retry.error;
     }
     if (error) {
