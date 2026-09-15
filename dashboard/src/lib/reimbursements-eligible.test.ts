@@ -129,6 +129,7 @@ describe("needs-case vs paid", () => {
 describe("Reese package + page contract", () => {
   const here = path.dirname(new URL(import.meta.url).pathname);
   const page = readFileSync(path.join(here, "../app/reimbursements/page.tsx"), "utf8");
+  const desk = readFileSync(path.join(here, "../components/reimbursements-eligible.tsx"), "utf8");
   const api = readFileSync(path.join(here, "../app/api/reimbursements/eligible/route.ts"), "utf8");
   const notify = readFileSync(path.join(here, "../app/api/reimbursements/eligible/notify/route.ts"), "utf8");
   const sync = readFileSync(path.join(here, "../app/api/reimbursements/eligible/sync/route.ts"), "utf8");
@@ -187,6 +188,11 @@ describe("Reese package + page contract", () => {
     assert.doesNotMatch(api, /Sellerise/);
     assert.match(api, /fba_case_events/);
     assert.match(sync, /reimbursements_case_sync/);
+    assert.match(desk, /Enqueue 90D queue rebuild/);
+    assert.match(desk, /Enqueueing\.\.\./);
+    assert.doesNotMatch(desk, />\s*Sync queue\s*</);
+    assert.match(desk, /\.\/\.venv\/bin\/python -m src\.main reimbursements-case-sync/);
+    assert.match(sync, /\.\/\.venv\/bin\/python -m src\.main reimbursements-case-sync/);
     assert.match(CASE_QUEUE_GAP, /no SP-API for eligible/);
     assert.match(SELLER_CENTRAL_LINK_LIMIT, /No stable Seller Central deep link/);
   });

@@ -162,8 +162,8 @@ export function ReimbursementsEligiblePanel() {
                   body: JSON.stringify({ days: 90 }),
                 });
                 const j = await r.json();
-                if (!r.ok) throw new Error(j.error || "Sync failed");
-                setMsg(j.message || "Sync enqueued");
+                if (!r.ok) throw new Error(j.error || "Enqueue failed");
+                setMsg(j.message || "Needs-case rebuild enqueued");
               } catch (e) {
                 setMsg(e instanceof Error ? e.message : String(e));
               } finally {
@@ -172,7 +172,7 @@ export function ReimbursementsEligiblePanel() {
             }}
           >
             <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
-            Sync queue
+            {syncing ? "Enqueueing..." : "Enqueue 90D queue rebuild"}
           </Button>
           <Button
             variant="outline"
@@ -255,7 +255,7 @@ export function ReimbursementsEligiblePanel() {
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               Apply <code>supabase/migration_fba_case_queue.sql</code> then{" "}
-              <code>python -m src.main reimbursements-case-sync --days 90</code>
+              <code>./.venv/bin/python -m src.main reimbursements-case-sync --days 90</code>
             </p>
           </CardContent>
         </Card>
@@ -264,8 +264,8 @@ export function ReimbursementsEligiblePanel() {
           <CardContent className="py-12 text-center">
             <p className="text-sm text-muted-foreground">No open Needs-case rows in this window.</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Nightly Mini rebuilds the queue after paid reimbursements. Or Sync queue /
-              <code> python -m src.main reimbursements-case-sync --days 90</code>
+              Nightly Mini rebuilds the queue after paid reimbursements. Or Enqueue 90D queue rebuild /
+              <code> ./.venv/bin/python -m src.main reimbursements-case-sync --days 90</code>
             </p>
           </CardContent>
         </Card>

@@ -289,6 +289,12 @@ describe("dashboard control labels match handlers", () => {
     assert.doesNotMatch(page, />\s*Sync\s*</);
   });
 
+  test("Needs-case Sync queue is an enqueue, not a live Amazon pull", () => {
+    const page = src("src/components/reimbursements-eligible.tsx");
+    assert.match(page, /Enqueue 90D queue rebuild/);
+    assert.doesNotMatch(page, />\s*Sync queue\s*</);
+  });
+
   test("orphan /filings redirects to calendar", () => {
     const page = src("src/app/filings/page.tsx");
     assert.match(page, /redirect\(\"\/calendar\"\)/);

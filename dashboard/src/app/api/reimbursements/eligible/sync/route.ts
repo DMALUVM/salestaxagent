@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
           error: error.message,
           hint:
             "Could not enqueue reimbursements_case_sync. Confirm agent_jobs exists. "
-            + "Or on the Mini: python -m src.main reimbursements-case-sync --days " + days,
+            + "Or on the Mini: ./.venv/bin/python -m src.main reimbursements-case-sync --days " + days,
         },
         { status: 500 },
       );
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     return Response.json(
       {
         error: e instanceof Error ? e.message : String(e),
-        hint: "Run on the Mini: python -m src.main reimbursements-case-sync --days 90",
+        hint: "Run on the Mini: ./.venv/bin/python -m src.main reimbursements-case-sync --days 90",
       },
       { status: 500 },
     );
