@@ -345,11 +345,22 @@ def list_product_phrases(
     *,
     page: int = 1,
     per_page: int = 1000,
+    heatmap: bool = False,
+    heatmap_date_from: str | None = None,
+    heatmap_date_to: str | None = None,
 ) -> dict:
+    """Reuse-only phrases/v2. heatmap=true adds r_YYYY-MM-DD history (max 92d)."""
+    params: dict[str, Any] = {"page": page, "perPage": per_page}
+    if heatmap:
+        params["heatmap"] = True
+        if heatmap_date_from:
+            params["heatmapDateFrom"] = heatmap_date_from
+        if heatmap_date_to:
+            params["heatmapDateTo"] = heatmap_date_to
     body, _ = request(
         "GET",
         f"/rank-tracker/groups/{int(group_id)}/products/{int(product_id)}/phrases/v2",
-        params={"page": page, "perPage": per_page},
+        params=params,
     )
     return body if isinstance(body, dict) else {}
 

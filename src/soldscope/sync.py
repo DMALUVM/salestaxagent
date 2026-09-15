@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
 
@@ -69,6 +70,9 @@ DEFAULT_KR_MAX_KEYWORDS = 80
 
 DEFAULT_SV_MAX_KEYWORDS = 20
 DEFAULT_RATINGS_DAYS = 365
+DEFAULT_RT_HEATMAP_DAYS = 30
+RT_HEATMAP_MAX_DAYS = 92
+HEATMAP_DAY_KEY = re.compile(r"^r_(\d{4}-\d{2}-\d{2})$")
 
 MISSING_TOKEN_MESSAGE = (
     "SOLDSCOPE_API_TOKEN is not set. Add it to the Mini .env (launchd) "
@@ -124,6 +128,9 @@ def load_config() -> dict:
         "rank_tracker": {
             "enabled": bool(rt.get("enabled", True)),
             "create_groups": False,
+            "heatmap_days": _clamp_heatmap_days(
+                (rt.get("heatmap_days") or DEFAULT_RT_HEATMAP_DAYS),
+            ),
             "schedule": {
                 "hour": int((rt.get("schedule") or {}).get("hour", 10)),
                 "minute": int((rt.get("schedule") or {}).get("minute", 30)),
@@ -242,6 +249,41 @@ def phrase_sfr(p: dict) -> int | None:
 
 def phrase_share(p: dict, *keys: str) -> float | None:
     return _num(_first_present(p, *keys))
+
+
+def _clamp_heatmap_days(value: Any) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = DEFAULT_RT_HEATMAP_DAYS
+    return max(1, min(n, RT_HEATMAP_MAX_DAYS))
+
+
+def heatmap_window(days: int, *, today: date | None = None) -> tuple[date, date]:
+    """Inclusive [from, to] window, capped at SoldScope's 92-day heatmap max."""
+    end = today or date.today()
+    span = _clamp_heatmap_days(days)
+    start = end - timedelta(days=span - 1)
+    return start, end
+
+
+def phrase_heatmap_ranks(p: dict) -> dict[str, int]:
+    """Parse phrases/v2 ``r_YYYY-MM-DD`` heatmap objects. Skip null/blank/≤0."""
+    out: dict[str, int] = {}
+    if not isinstance(p, dict):
+        return out
+    for key, raw in p.items():
+        m = HEATMAP_DAY_KEY.match(str(key))
+        if not m:
+            continue
+        if isinstance(raw, dict):
+            n = _int(_first_present(raw, "rank", "organicPosition", "organic_position"))
+        else:
+            n = _int(raw)
+        if n is None or n <= 0:
+            continue
+        out[m.group(1)] = n
+    return out
 
 
 def group_primary_asin(g: dict) -> str | None:
@@ -735,11 +777,26 @@ def collect_rank_groups(*, marketplace: str) -> list[dict]:
     return groups
 
 
-def collect_phrases(group_id: int, product_id: int) -> list[dict]:
+def collect_phrases(
+    group_id: int,
+    product_id: int,
+    *,
+    heatmap_from: date | None = None,
+    heatmap_to: date | None = None,
+) -> list[dict]:
     phrases: list[dict] = []
     page = 1
+    heatmap = heatmap_from is not None and heatmap_to is not None
     while True:
-        body = list_product_phrases(group_id, product_id, page=page, per_page=1000)
+        body = list_product_phrases(
+            group_id,
+            product_id,
+            page=page,
+            per_page=1000,
+            heatmap=heatmap,
+            heatmap_date_from=heatmap_from.isoformat() if heatmap_from else None,
+            heatmap_date_to=heatmap_to.isoformat() if heatmap_to else None,
+        )
         items = [p for p in _page_items(body) if isinstance(p, dict)]
         phrases.extend(items)
         if len(items) < 1000:
@@ -748,6 +805,56 @@ def collect_phrases(group_id: int, product_id: int) -> list[dict]:
         if page > 20:
             break
     return phrases
+
+
+def _phrase_snapshot_row(
+    p: dict,
+    *,
+    asin: str,
+    marketplace: str,
+    group_id: int,
+    product_id: int | None,
+    phrase: str,
+    as_of: str,
+    organic_position: int | None,
+    pulled_at: str,
+    current: bool,
+) -> dict:
+    return {
+        "asin": asin,
+        "marketplace": marketplace,
+        "group_id": int(group_id),
+        "product_id": product_id,
+        "phrase_id": _int(p.get("id")),
+        "phrase": phrase,
+        "organic_position": organic_position,
+        "organic_previous_position": phrase_organic_previous(p) if current else None,
+        "sponsored_position": _int(_first_present(
+            p, "sponsoredPosition", "sponsored_position",
+        )) if current else None,
+        "search_volume": _int(p.get("searchVolume")) if current else None,
+        # SFR SoT = ABA via SoldScope. Attach current ABA only on today's row.
+        "aba_search_frequency_rank": phrase_sfr(p) if current else None,
+        "aba_total_click_share": phrase_share(
+            p, "abaTotalClickShare", "aba_total_click_share",
+        ) if current else None,
+        "aba_total_conv_share": phrase_share(
+            p, "abaTotalConvShare", "aba_total_conv_share",
+        ) if current else None,
+        "organic_page": _int(_first_present(p, "organicPage", "organic_page")) if current else None,
+        "as_of": as_of,
+        "pulled_at": pulled_at,
+        "raw": {
+            "organicPage": p.get("organicPage") if current else None,
+            "sponsoredPage": p.get("sponsoredPage") if current else None,
+            "cpc": p.get("cpc") if current else None,
+            "organicPreviousPosition": p.get("organicPreviousPosition") if current else None,
+            "abaSearchFrequencyRank": p.get("abaSearchFrequencyRank") if current else None,
+            "abaTotalClickShare": p.get("abaTotalClickShare") if current else None,
+            "abaTotalConvShare": p.get("abaTotalConvShare") if current else None,
+            "heatmap": not current,
+        },
+    }
 
 
 def rank_rows_from_phrases(
@@ -760,47 +867,54 @@ def rank_rows_from_phrases(
     as_of: date,
     pulled_at: str,
 ) -> list[dict]:
+    """One warehouse row per phrase × as_of. Heatmap days come from r_YYYY-MM-DD.
+
+    Null / missing heatmap ranks are skipped — days are never invented.
+    Today's organicPosition row is always written when the phrase exists.
+    """
     rows: list[dict] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
+    today_iso = as_of.isoformat()
     for p in phrases:
         phrase = str(p.get("phrase") or "").strip()
-        if not phrase or phrase in seen:
+        if not phrase:
             continue
-        seen.add(phrase)
-        rows.append({
-            "asin": asin,
-            "marketplace": marketplace,
-            "group_id": int(group_id),
-            "product_id": product_id,
-            "phrase_id": _int(p.get("id")),
-            "phrase": phrase,
-            "organic_position": phrase_organic_position(p),
-            "organic_previous_position": phrase_organic_previous(p),
-            "sponsored_position": _int(_first_present(
-                p, "sponsoredPosition", "sponsored_position",
-            )),
-            "search_volume": _int(p.get("searchVolume")),
-            # SFR SoT = ABA via SoldScope. search_volume stays a separate estimate.
-            "aba_search_frequency_rank": phrase_sfr(p),
-            "aba_total_click_share": phrase_share(
-                p, "abaTotalClickShare", "aba_total_click_share",
-            ),
-            "aba_total_conv_share": phrase_share(
-                p, "abaTotalConvShare", "aba_total_conv_share",
-            ),
-            "organic_page": _int(_first_present(p, "organicPage", "organic_page")),
-            "as_of": as_of.isoformat(),
-            "pulled_at": pulled_at,
-            "raw": {
-                "organicPage": p.get("organicPage"),
-                "sponsoredPage": p.get("sponsoredPage"),
-                "cpc": p.get("cpc"),
-                "organicPreviousPosition": p.get("organicPreviousPosition"),
-                "abaSearchFrequencyRank": p.get("abaSearchFrequencyRank"),
-                "abaTotalClickShare": p.get("abaTotalClickShare"),
-                "abaTotalConvShare": p.get("abaTotalConvShare"),
-            },
-        })
+        heatmap = phrase_heatmap_ranks(p)
+        today_pos = phrase_organic_position(p)
+        if today_pos is None:
+            today_pos = heatmap.get(today_iso)
+        today_key = (phrase, today_iso)
+        if today_key not in seen:
+            seen.add(today_key)
+            rows.append(_phrase_snapshot_row(
+                p,
+                asin=asin,
+                marketplace=marketplace,
+                group_id=group_id,
+                product_id=product_id,
+                phrase=phrase,
+                as_of=today_iso,
+                organic_position=today_pos,
+                pulled_at=pulled_at,
+                current=True,
+            ))
+        for day_iso, rank in heatmap.items():
+            key = (phrase, day_iso)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(_phrase_snapshot_row(
+                p,
+                asin=asin,
+                marketplace=marketplace,
+                group_id=group_id,
+                product_id=product_id,
+                phrase=phrase,
+                as_of=day_iso,
+                organic_position=rank,
+                pulled_at=pulled_at,
+                current=False,
+            ))
     return rows
 
 
@@ -828,11 +942,13 @@ def pull_rank_tracker_snapshots(
     asins: Iterable[str],
     pulled_at: str,
     as_of: date | None = None,
+    heatmap_days: int | None = None,
 ) -> tuple[list[dict], list[str]]:
     """Reuse-only GET of existing hero Rank Tracker groups.
 
     Never POSTs create-group / create-phrase. Zero groups → empty + note.
     ``as_of`` defaults to ``date.today()`` (Mini calendar; America/New_York).
+    phrases/v2 heatmap=true expands ``r_YYYY-MM-DD`` into extra as_of rows.
     """
     hero_asins = [str(a).strip().upper() for a in asins if str(a).strip()]
     notes: list[str] = []
@@ -853,6 +969,10 @@ def pull_rank_tracker_snapshots(
         return [], notes
 
     snapshot_day = as_of or date.today()
+    heat_from, heat_to = heatmap_window(
+        heatmap_days if heatmap_days is not None else DEFAULT_RT_HEATMAP_DAYS,
+        today=snapshot_day,
+    )
     rank_rows: list[dict] = []
     for g in matched:
         asin = str(g.get("asin") or "").strip().upper()
@@ -864,7 +984,9 @@ def pull_rank_tracker_snapshots(
         if pid is None:
             notes.append(f"RT group {gid} ({asin}) has no product id — skipped phrases.")
             continue
-        phrases = collect_phrases(gid, pid)
+        phrases = collect_phrases(
+            gid, pid, heatmap_from=heat_from, heatmap_to=heat_to,
+        )
         rank_rows.extend(rank_rows_from_phrases(
             phrases,
             asin=asin,
@@ -878,9 +1000,12 @@ def pull_rank_tracker_snapshots(
         a for a in hero_asins
         if a not in {str(g.get("asin") or "").strip().upper() for g in matched}
     ]
+    as_of_days = sorted({str(r.get("as_of") or "") for r in rank_rows if r.get("as_of")})
     notes.append(
         f"Rank Tracker matched {len(matched)} hero group(s), "
-        f"{len(rank_rows)} phrase snapshot(s)."
+        f"{len(rank_rows)} phrase snapshot(s) "
+        f"(heatmap {heat_from.isoformat()}→{heat_to.isoformat()}, "
+        f"{len(as_of_days)} as_of day(s))."
     )
     if missing:
         notes.append(
@@ -1010,6 +1135,7 @@ def sync_weekly(*, dry_run: bool = False) -> dict:
                 marketplace=marketplace,
                 asins=cfg["asins"],
                 pulled_at=pulled_at,
+                heatmap_days=int(cfg["rank_tracker"]["heatmap_days"]),
             )
             notes.extend(rt_notes)
         except QuotaExceeded as e:
@@ -1261,6 +1387,7 @@ def sync_daily_rt(*, dry_run: bool = False) -> dict:
                 marketplace=cfg["marketplace"],
                 asins=cfg["asins"],
                 pulled_at=pulled_at,
+                heatmap_days=int(cfg["rank_tracker"]["heatmap_days"]),
             )
             notes.extend(rt_notes)
         except QuotaExceeded as e:

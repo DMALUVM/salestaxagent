@@ -16,6 +16,7 @@
   "rank_tracker": {
     "enabled": true,
     "create_groups": false,
+    "heatmap_days": 30,
     "schedule": {
       "hour": 10,
       "minute": 30,

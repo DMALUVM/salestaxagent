@@ -28,6 +28,7 @@ def test_config_heroes_are_asin_title_parents_only():
     loaded = syn.load_config()
     assert loaded["asins"] == list(HEROES)
     assert loaded["rank_tracker"]["create_groups"] is False
+    assert loaded["rank_tracker"]["heatmap_days"] == 30
     assert loaded["rank_tracker"]["schedule"]["hour"] == 10
     assert loaded["rank_tracker"]["schedule"]["minute"] == 30
     assert loaded["rank_tracker"]["schedule"]["timezone"] == "America/New_York"
@@ -75,6 +76,8 @@ def test_observe_only_refuses_writes_and_discovery():
         ("POST", "/keyword-research/searches/asin/multi"),
         ("DELETE", "/rank-tracker/groups"),
         ("PUT", "/rank-tracker/tags/1"),
+        ("GET", "/rank-tracker/groups/1/products/7/heatmap-widgets"),
+        ("GET", "/rank-tracker/groups/1/positions-chart-data/99"),
     ]:
         with pytest.raises(ss.SoldScopeError, match="Refusing"):
             ss.assert_read_only(method, path)
@@ -840,3 +843,112 @@ def test_daily_rt_job_is_scheduled_every_day():
     assert "sync_daily_rt" in runner
     assert "sync_weekly" not in runner
     assert "create_missing" not in runner
+
+
+def test_heatmap_window_clamps_to_soldscope_max():
+    start, end = syn.heatmap_window(30, today=date(2026, 9, 14))
+    assert end == date(2026, 9, 14)
+    assert start == date(2026, 8, 16)
+    start_max, end_max = syn.heatmap_window(200, today=date(2026, 9, 14))
+    assert (end_max - start_max).days == 91
+    assert syn._clamp_heatmap_days(0) == 1
+    assert syn._clamp_heatmap_days("nope") == 30
+
+
+def test_phrase_heatmap_ranks_skip_null_and_do_not_invent():
+    ranks = syn.phrase_heatmap_ranks({
+        "phrase": "tallow lip balm",
+        "organicPosition": 4,
+        "r_2026-09-11": {"date": "2026-09-11", "rank": 6, "amazon_choice": False},
+        "r_2026-09-12": {"date": "2026-09-12", "rank": 5, "amazon_choice": False},
+        "r_2026-09-13": {"date": "2026-09-13", "rank": None, "amazon_choice": False},
+        "r_2026-09-10": {"date": "2026-09-10", "rank": 0},
+        "not_a_day": {"rank": 1},
+    })
+    assert ranks == {"2026-09-11": 6, "2026-09-12": 5}
+    assert "2026-09-13" not in ranks
+    assert "2026-09-10" not in ranks
+
+
+def test_rank_rows_expand_heatmap_days_without_inventing():
+    rows = syn.rank_rows_from_phrases(
+        [{
+            "id": 1,
+            "phrase": "tallow lip balm",
+            "organicPosition": 4,
+            "abaSearchFrequencyRank": 80,
+            "r_2026-09-11": {"date": "2026-09-11", "rank": 6},
+            "r_2026-09-12": {"date": "2026-09-12", "rank": 5},
+            "r_2026-09-13": {"date": "2026-09-13", "rank": None},
+        }],
+        asin="B0CLHTF8YN",
+        marketplace="US",
+        group_id=3537,
+        product_id=6051,
+        as_of=date(2026, 9, 14),
+        pulled_at="now",
+    )
+    by_day = {r["as_of"]: r for r in rows}
+    assert set(by_day) == {"2026-09-11", "2026-09-12", "2026-09-14"}
+    assert by_day["2026-09-11"]["organic_position"] == 6
+    assert by_day["2026-09-12"]["organic_position"] == 5
+    assert by_day["2026-09-14"]["organic_position"] == 4
+    assert by_day["2026-09-14"]["aba_search_frequency_rank"] == 80
+    assert by_day["2026-09-11"]["aba_search_frequency_rank"] is None
+    assert "2026-09-13" not in by_day
+
+
+def test_list_product_phrases_sends_heatmap_query(monkeypatch):
+    seen: list[dict] = []
+
+    def fake_request(method, path, *, params=None, timeout=45):
+        seen.append({"method": method, "path": path, "params": params})
+        return {"data": []}, {}
+
+    monkeypatch.setattr(ss, "request", fake_request)
+    ss.list_product_phrases(
+        3537, 6051, heatmap=True,
+        heatmap_date_from="2026-08-16", heatmap_date_to="2026-09-14",
+    )
+    assert seen[0]["method"] == "GET"
+    assert seen[0]["path"].endswith("/phrases/v2")
+    assert seen[0]["params"]["heatmap"] is True
+    assert seen[0]["params"]["heatmapDateFrom"] == "2026-08-16"
+    assert seen[0]["params"]["heatmapDateTo"] == "2026-09-14"
+    assert "heatmap-widgets" not in inspect.getsource(ss)
+
+
+def test_pull_requests_heatmap_and_upserts_returned_days(monkeypatch):
+    class FakeDate(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 9, 14)
+
+    monkeypatch.setattr(syn, "date", FakeDate)
+    called: list[dict] = []
+
+    def phrases(gid, pid, **kwargs):
+        called.append(kwargs)
+        return {"data": [{
+            "id": 1, "phrase": "tallow lip balm",
+            "organicPosition": 4,
+            "r_2026-09-11": {"date": "2026-09-11", "rank": 6},
+            "r_2026-09-12": {"date": "2026-09-12", "rank": 5},
+        }]}
+
+    monkeypatch.setattr(syn, "collect_rank_groups", lambda **k: [
+        {"id": 3537, "asin": "B0CLHTF8YN"},
+    ])
+    monkeypatch.setattr(syn, "list_group_products", lambda gid: {
+        "data": [{"id": 6051, "asin": "B0CLHTF8YN"}],
+    })
+    monkeypatch.setattr(syn, "list_product_phrases", phrases)
+    rows, notes = syn.pull_rank_tracker_snapshots(
+        marketplace="US", asins=["B0CLHTF8YN"], pulled_at="now",
+        heatmap_days=30,
+    )
+    assert called[0]["heatmap"] is True
+    assert called[0]["heatmap_date_from"] == "2026-08-16"
+    assert called[0]["heatmap_date_to"] == "2026-09-14"
+    assert {r["as_of"] for r in rows} == {"2026-09-11", "2026-09-12", "2026-09-14"}
+    assert any("2026-08-16→2026-09-14" in n for n in notes)
