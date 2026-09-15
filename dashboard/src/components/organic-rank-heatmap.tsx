@@ -12,6 +12,7 @@ import {
   WOW_MOVE_POSITIONS,
   WOW_TOP_N,
   asOrganicChild,
+  shortOrganicChild,
   cellHoverTitle,
   cellPriorRank,
   classifyMovement,
@@ -399,9 +400,10 @@ function RankCell({
   const move = classifyMovement(prior, rank);
   const chip = deltaChip(move.direction);
   const child = asOrganicChild(organicAsin);
+  const childShort = shortOrganicChild(child);
   return (
     <span
-      className={`mx-auto flex h-10 min-w-[3.4rem] flex-col items-center justify-center rounded-md px-1 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] ${tone.cell}`}
+      className={`mx-auto flex min-h-10 min-w-[3.4rem] flex-col items-center justify-center rounded-md px-1 py-0.5 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] ${tone.cell}`}
       title={cellHoverTitle({
         previous: prior, current: rank, sfr,
         organicAsin: child, amazonChoice,
@@ -415,6 +417,11 @@ function RankCell({
           {formatSignedDelta(move.delta)}
         </span>
       )}
+      {childShort ? (
+        <span className="mt-0.5 font-mono text-[8px] leading-none opacity-90">
+          {childShort}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -484,8 +491,9 @@ function Legend() {
         Any 1+ move tints the row; a stronger tint plus the lists means
         meaningful (≥{WOW_MOVE_POSITIONS} positions or crossing top {WOW_TOP_N}).
         Trend is prior → current (lower toward #1 reads as up).
-        Child chip / cell hover is the variation holding that day&apos;s
-        organic slot — omitted when SoldScope did not send it.
+        Child chip is the variation holding that day&apos;s organic slot
+        (full ASIN under the keyword; last 4 in each cell; full on hover).
+        Omitted when SoldScope did not send it.
       </p>
     </div>
   );
@@ -528,6 +536,14 @@ function MoverList({
                 <span className="ml-1 text-[9px] uppercase text-muted-foreground">
                   {row.family}
                 </span>
+                {row.organic_child_asin && (
+                  <span
+                    className="ml-1 font-mono text-[9px] normal-case text-foreground/70"
+                    title={`Child ASIN holding organic rank: ${row.organic_child_asin}`}
+                  >
+                    {shortOrganicChild(row.organic_child_asin)}
+                  </span>
+                )}
               </span>
               <span className="shrink-0 tabular-nums text-muted-foreground">
                 {row.previous ?? "—"}→{row.current ?? "—"}
