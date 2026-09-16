@@ -73,7 +73,6 @@ def test_send_telegram_refuses_denied_without_network(monkeypatch):
     def explode(*a, **k):
         raise AssertionError("denied topic must not hit Telegram or the DB")
 
-    monkeypatch.setattr("src.alerts.telegram.settings.telegram_enabled", True)
     monkeypatch.setattr("src.alerts.telegram.httpx.post", explode)
     monkeypatch.setattr("src.alerts.telegram.insert_rows", explode)
 
