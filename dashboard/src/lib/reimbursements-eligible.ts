@@ -375,15 +375,55 @@ export function sortCaseRows(
   });
 }
 
+export type CaseCardTotals = {
+  events: number;
+  units: number;
+  estimated: number;
+  estimatedKnown?: boolean;
+};
+
+function formatCardCount(n: number): string {
+  return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function formatCardMoney(n: number): string {
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Giant KPI: event count. Never units — units look like case volume. */
+export function formatCaseCardHero(events: number): string {
+  return formatCardCount(events);
+}
+
+/**
+ * Secondary glance line. Includes events so a bare units number cannot be
+ * read as "9,904 cases" / "215 cases".
+ */
+export function formatCaseCardGlance(totals: CaseCardTotals): string {
+  const events = `${formatCardCount(totals.events)} ${totals.events === 1 ? "event" : "events"}`;
+  const units = `${formatCardCount(totals.units)} ${totals.units === 1 ? "unit" : "units"}`;
+  if (totals.estimatedKnown) {
+    return `${events} · ${units} · ~$${formatCardMoney(totals.estimated)}`;
+  }
+  return `${events} · ${units}`;
+}
+
+/** Compact 7-day banner fragment: events first, units in parentheses. */
+export function formatCaseAlertGroup(totals: Pick<CaseCardTotals, "events" | "units">): string {
+  const events = `${formatCardCount(totals.events)} ${totals.events === 1 ? "event" : "events"}`;
+  const units = `${formatCardCount(totals.units)} ${totals.units === 1 ? "unit" : "units"}`;
+  return `${events} (${units})`;
+}
+
 export function summarizeCases(rows: CaseEventRow[]): {
   events: number;
   units: number;
   estimated: number;
   estimatedKnown: boolean;
-  groups: Record<ReasonGroup, { events: number; units: number; estimated: number }>;
+  groups: Record<ReasonGroup, CaseCardTotals>;
 } {
-  const empty = () => ({ events: 0, units: 0, estimated: 0 });
-  const groups: Record<ReasonGroup, { events: number; units: number; estimated: number }> = {
+  const empty = (): CaseCardTotals => ({ events: 0, units: 0, estimated: 0, estimatedKnown: false });
+  const groups: Record<ReasonGroup, CaseCardTotals> = {
     warehouse_damage: empty(),
     lost_inbound: empty(),
     lost_warehouse: empty(),
@@ -396,12 +436,14 @@ export function summarizeCases(rows: CaseEventRow[]): {
     const q = caseQty(row);
     const amt = caseAmount(row);
     const g = reasonGroup(row.reason, row.disposition);
+    const known = row.estimated_amount != null && row.estimated_amount !== "";
     groups[g].events += 1;
     groups[g].units += q;
     groups[g].estimated = money(groups[g].estimated + amt);
+    if (known) groups[g].estimatedKnown = true;
     units += q;
     estimated = money(estimated + amt);
-    if (row.estimated_amount != null && row.estimated_amount !== "") estimatedKnown = true;
+    if (known) estimatedKnown = true;
   }
   return { events: rows.length, units, estimated, estimatedKnown, groups };
 }

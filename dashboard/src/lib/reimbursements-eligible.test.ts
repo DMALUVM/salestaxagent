@@ -33,6 +33,9 @@ import {
   filterInboundAlerts,
   filterNeedsCase,
   filterSubmittedCases,
+  formatCaseAlertGroup,
+  formatCaseCardGlance,
+  formatCaseCardHero,
   formatCasePacket,
   inCaseRange,
   inboundEmptyCopy,
@@ -114,8 +117,34 @@ describe("needs-case vs paid", () => {
     assert.equal(s.events, 2);
     assert.equal(s.units, 4);
     assert.equal(s.groups.lost_inbound.units, 3);
+    assert.equal(s.groups.lost_inbound.events, 1);
+    assert.equal(s.groups.lost_inbound.estimatedKnown, true);
     assert.equal(s.groups.warehouse_damage.units, 1);
+    assert.equal(s.groups.warehouse_damage.estimatedKnown, false);
     assert.equal(s.estimatedKnown, true);
+  });
+
+  test("summary card copy promotes events, not units", () => {
+    const screenshot = { events: 81, units: 9904, estimated: 43.86, estimatedKnown: true };
+    assert.equal(formatCaseCardHero(screenshot.events), "81");
+    assert.notEqual(formatCaseCardHero(screenshot.events), formatCaseCardHero(screenshot.units));
+    const glance = formatCaseCardGlance(screenshot);
+    assert.match(glance, /81 events/);
+    assert.match(glance, /9,?904 units/);
+    assert.match(glance, /~\$/);
+    assert.match(glance, /43\.86/);
+    assert.equal(
+      formatCaseCardGlance({ events: 1, units: 1, estimated: 6, estimatedKnown: false }),
+      "1 event · 1 unit",
+    );
+    assert.equal(
+      formatCaseAlertGroup({ events: 2, units: 5 }),
+      "2 events (5 units)",
+    );
+    assert.equal(
+      formatCaseAlertGroup({ events: 1, units: 1 }),
+      "1 event (1 unit)",
+    );
   });
 
   test("default window is 90 closed LA days", () => {
@@ -308,6 +337,19 @@ describe("Reese package + page contract", () => {
     assert.match(CASE_QUEUE_GAP, /no SP-API for eligible/);
     assert.match(SELLER_CENTRAL_LINK_LIMIT, /No stable Seller Central deep link/);
     assert.match(SELLER_CENTRAL_LINK_LIMIT, /NOT a pre-filled/);
+  });
+
+  test("Needs-case KPI cards use event hero, not raw units", () => {
+    assert.match(ui, /formatCaseCardHero/);
+    assert.match(ui, /formatCaseCardGlance/);
+    assert.match(ui, /formatCaseAlertGroup/);
+    assert.match(ui, /CaseSummaryCard/);
+    assert.match(ui, /formatCaseCardHero\(totals\.events\)/);
+    assert.doesNotMatch(ui, /fmt\(summary\.units\)/);
+    assert.doesNotMatch(ui, /fmt\(summary\.groups\.warehouse_damage\.units\)/);
+    assert.doesNotMatch(ui, /fmt\(summary\.groups\.lost_inbound\.units\)/);
+    assert.doesNotMatch(ui, /fmt\(summary\.groups\.lost_warehouse\.units\)/);
+    assert.doesNotMatch(ui, /fmt\(alertSummary\.groups\.\w+\.units\)/);
   });
 
   test("UI splits FC, Shipment, and Reference ID — never uses reference as shipment", () => {

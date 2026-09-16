@@ -37,6 +37,9 @@ import {
   defaultCaseRange,
   fbaShipmentId,
   filterCaseGroup,
+  formatCaseAlertGroup,
+  formatCaseCardGlance,
+  formatCaseCardHero,
   formatCasePacket,
   inboundDiscrepancyCount,
   inboundReceived,
@@ -49,6 +52,7 @@ import {
   sortCaseRows,
   sourceLabel,
   summarizeCases,
+  type CaseCardTotals,
   type CaseEventRow,
   type CaseQa,
   type CaseSortKey,
@@ -457,9 +461,9 @@ export function ReimbursementsEligiblePanel() {
                   {data?.alertStart ? ` (${fmtDay(data.alertStart)} – ${fmtDay(data.asOf)})` : ""}
                 </p>
                 <p className="text-xs opacity-80">
-                  Warehouse damage {fmt(alertSummary.groups.warehouse_damage.units)} u · Lost inbound{" "}
-                  {fmt(alertSummary.groups.lost_inbound.units)} u · Lost warehouse{" "}
-                  {fmt(alertSummary.groups.lost_warehouse.units)} u
+                  Warehouse damage {formatCaseAlertGroup(alertSummary.groups.warehouse_damage)} · Lost inbound{" "}
+                  {formatCaseAlertGroup(alertSummary.groups.lost_inbound)} · Lost warehouse{" "}
+                  {formatCaseAlertGroup(alertSummary.groups.lost_warehouse)}
                   {alertSummary.estimatedKnown ? ` · ~$${fmtD(alertSummary.estimated)}` : ""}.
                   {" "}Prep is Reese’s lane — Dave submits.
                 </p>
@@ -468,31 +472,19 @@ export function ReimbursementsEligiblePanel() {
           )}
 
           <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Needs case</p>
-                <p className="text-2xl font-semibold tabular-nums">{fmt(summary.units)}</p>
-                <p className="text-xs text-muted-foreground">{fmt(summary.events)} events</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Warehouse damage</p>
-                <p className="text-2xl font-semibold tabular-nums">{fmt(summary.groups.warehouse_damage.units)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Lost inbound</p>
-                <p className="text-2xl font-semibold tabular-nums">{fmt(summary.groups.lost_inbound.units)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Lost warehouse</p>
-                <p className="text-2xl font-semibold tabular-nums">{fmt(summary.groups.lost_warehouse.units)}</p>
-              </CardContent>
-            </Card>
+            <CaseSummaryCard title="Needs case" totals={summary} />
+            <CaseSummaryCard
+              title={REASON_GROUP_LABELS.warehouse_damage}
+              totals={summary.groups.warehouse_damage}
+            />
+            <CaseSummaryCard
+              title={REASON_GROUP_LABELS.lost_inbound}
+              totals={summary.groups.lost_inbound}
+            />
+            <CaseSummaryCard
+              title={REASON_GROUP_LABELS.lost_warehouse}
+              totals={summary.groups.lost_warehouse}
+            />
           </div>
 
           <div className="flex flex-wrap gap-1 border-b">
@@ -688,6 +680,24 @@ export function ReimbursementsEligiblePanel() {
         </>
       )}
     </div>
+  );
+}
+
+function CaseSummaryCard({
+  title,
+  totals,
+}: {
+  title: string;
+  totals: CaseCardTotals;
+}) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="text-[10px] text-muted-foreground uppercase">{title}</p>
+        <p className="text-2xl font-semibold tabular-nums">{formatCaseCardHero(totals.events)}</p>
+        <p className="text-xs text-muted-foreground">{formatCaseCardGlance(totals)}</p>
+      </CardContent>
+    </Card>
   );
 }
 
