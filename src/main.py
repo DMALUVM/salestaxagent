@@ -5381,7 +5381,7 @@ def run():
                 coalesce=True,
                 max_instances=1,
             )
-            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (SP 7d, SB/SD 7d×1d chunks, then placements + search terms)")
+            click.echo("[Scheduler] Ads campaigns sync daily at 05:00 (prior-day SP+SB+SD, then 7d lookback ×1d SB/SD, then placements + search terms)")
 
             scheduler.add_job(
                 _run_ads_search_terms_sync,
@@ -5408,6 +5408,20 @@ def run():
                 max_instances=1,
             )
             click.echo("[Scheduler] Ads SB/SD heal daily at 13:00 (fills SP-only days)")
+
+            # 06:20 prior-day gate — one heal shot if lease free, else HOLD.
+            # No wait-loop. Iris reads ads_day_completeness, not CoS.
+            scheduler.add_job(
+                _run_ads_prior_day_gate,
+                "cron",
+                hour=6,
+                minute=20,
+                id="ads_prior_day_gate",
+                misfire_grace_time=3600,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo("[Scheduler] Ads prior-day gate daily at 06:20 (heal once if lease free, else HOLD)")
 
             scheduler.add_job(
                 _run_ads_actions,
@@ -6660,6 +6674,7 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
                       skip_existing_search_term_weeks: bool = False,
                       newest_first_search_terms: bool = False,
                       ad_products: tuple[str, ...] | None = None,
+                      prior_day_first: bool = False,
                       retry: int = 0) -> str:
     """Shared body for the ads sync jobs. Returns the settled status."""
     from src.db import job_start, job_finish
@@ -6679,7 +6694,8 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
                           sb_sd_days=sb_sd_days,
                           skip_existing_search_term_weeks=skip_existing_search_term_weeks,
                           newest_first_search_terms=newest_first_search_terms,
-                          ad_products=ad_products)
+                          ad_products=ad_products,
+                          prior_day_first=prior_day_first)
         status, message = _ads_sync_outcome(result, days)
         camp = result.get("campaigns")
         if isinstance(camp, dict):
@@ -6722,7 +6738,8 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
                     placements_only=placements_only, label=label,
                     sb_sd_days=sb_sd_days,
                     skip_existing_search_term_weeks=skip_existing_search_term_weeks,
-                    newest_first_search_terms=newest_first_search_terms)
+                    newest_first_search_terms=newest_first_search_terms,
+                    prior_day_first=prior_day_first)
                 return "deferred"
         # A chunk that timed out and will be re-fetched tomorrow is routine and
         # stays in the log. Two things do get a push: a total failure, and an ad
@@ -6755,7 +6772,8 @@ def _run_ads_sync_job(job_name: str, *, days: int, campaigns_only: bool = False,
             placements_only=placements_only, label=label,
             sb_sd_days=sb_sd_days,
             skip_existing_search_term_weeks=skip_existing_search_term_weeks,
-            newest_first_search_terms=newest_first_search_terms)
+            newest_first_search_terms=newest_first_search_terms,
+            prior_day_first=prior_day_first)
         # One skip row on the first defer. Later lease-busy hits stay quiet
         # so gap-fill / placements do not spam job_runs every ~15–20m.
         if newly:
@@ -6870,7 +6888,9 @@ def _run_ads_gno_campaigns_sync(retry: int = 0):
 def _run_ads_campaigns_sync(retry: int = 0):
     """05:00 — campaign dailies for the KPI cards and trend chart.
 
-    SP upserts the last 7 closed days on (date, campaign_id), same window
+    Prior-day SP+SB+SD (1 day each) commits first so Iris Morning Brief
+    can see yesterday Display before the 7d SB lookback starts. Then SP
+    upserts the last 7 closed days on (date, campaign_id), same window
     as SB/SD. SB/SD still use 1-day chunks so one timed-out report cannot
     wipe the whole week. After campaigns release the lock this job runs
     placements and search terms itself; those crons are a backup.
@@ -6878,7 +6898,8 @@ def _run_ads_campaigns_sync(retry: int = 0):
     from src.rules import ADS_SB_SD_DAILY_DAYS
     status = _run_ads_sync_job(
         "ads_campaigns_sync", days=7, campaigns_only=True,
-        label="campaigns", sb_sd_days=ADS_SB_SD_DAILY_DAYS, retry=retry)
+        label="campaigns", sb_sd_days=ADS_SB_SD_DAILY_DAYS, retry=retry,
+        prior_day_first=True)
     # A skipped/deferred run is lock-busy or HTTP 425. Chaining here would
     # just skip twice more or stack another 425. The deferred retry of
     # this wrapper re-chains once campaigns actually run.
@@ -6936,6 +6957,40 @@ def _run_ads_sb_sd_heal(retry: int = 0):
         _ads_alert(f"Ads SB/SD heal partial — {'+'.join(bad)} still missing", msg)
     print(f"[Ads heal] {status}: {msg}")
     job_finish(run_id, status, msg, stats=camp if isinstance(camp, dict) else None)
+
+
+def _run_ads_prior_day_gate():
+    """06:20 ET — prior-day completeness + one heal if the ads lease is free.
+
+    If yesterday already has SP+SB+SD, persist CLEAR and exit. If SB or SD
+    is missing and the lease is held, persist HOLD and exit — do not wait
+    for the 05:00 campaigns job. Iris reads ads_day_completeness.
+    """
+    from src.amazon_ads.completeness import run_prior_day_gate
+    from src.db import job_finish, job_start
+
+    run_id = job_start("ads_prior_day_gate")
+    try:
+        out = run_prior_day_gate()
+    except Exception as e:
+        print(f"[Ads gate] Failed: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+        return
+
+    snap = out.get("completeness") or {}
+    action = out.get("action") or ""
+    status_flag = snap.get("status") or "HOLD"
+    reason = snap.get("reason") or action
+    msg = f"{snap.get('date', '?')} {status_flag} ({action}): {reason}"
+    if action == "hold_lease_busy":
+        job_status = "skipped"
+    elif status_flag == "CLEAR":
+        job_status = "success"
+    else:
+        job_status = "partial"
+    print(f"[Ads gate] {msg}")
+    job_finish(run_id, job_status, msg[:500],
+               stats=snap if isinstance(snap, dict) else None)
 
 
 def _run_ads_search_terms_sync(retry: int = 0):
