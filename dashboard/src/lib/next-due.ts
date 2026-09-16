@@ -136,7 +136,7 @@ export function mergeImpliedObligations<T extends FilingRow>(
   nexusRows: NexusRow[],
   dueDays: Record<string, number>,
 ): T[] {
-  const extra: T[] = [];
+  const extra: FilingRow[] = [];
   for (const n of nexusRows) {
     if (n.is_registered !== true) continue;
     const freq = n.assigned_frequency;
@@ -157,7 +157,9 @@ export function mergeImpliedObligations<T extends FilingRow>(
       period_end: next.periodEnd,
       due_date: next.due,
       status: "pending",
-    } as T);
+    });
   }
-  return extra.length ? [...filings, ...extra] : filings;
+  // Synthetic rows are FilingRow (plus implied id). Callers pass FilingEntry
+  // and still render those fields; they are not a full T, so widen once here.
+  return extra.length ? [...filings, ...extra] as unknown as T[] : filings;
 }

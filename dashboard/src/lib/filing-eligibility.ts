@@ -24,6 +24,7 @@ export const SETTLED_STATUSES = new Set(["filed", "not_required"]);
 export const PERIODIC_TYPES = new Set(["monthly", "quarterly", "semi_annual"]);
 
 export interface FilingRow {
+  id?: string;
   state_code: string;
   period_type?: string | null;
   period_label?: string | null;
