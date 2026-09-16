@@ -29,11 +29,16 @@ from src.reimbursements.case_queue import (
     STATUS_CASE_SUBMITTED,
     STATUS_FOUND_OFFSET,
     STATUS_NEEDS_CASE,
+    apply_inbound_balance,
     apply_paid_dedupe,
     build_case_events,
+    collect_live_inbound_qty,
     inbound_discrepancies,
+    inbound_live_short,
+    inbound_match_key,
     inbound_ready,
     is_active_inbound_alert,
+    is_inbound_balanced,
     merge_inbound_sources,
     preserve_submitted_status,
     reason_group,
@@ -626,6 +631,210 @@ def test_inbound_howto_mentions_sellerboard_closed():
     assert "Sellerboard CLOSED" in HOW_TO_FILE_INBOUND
     assert "shipment tracker" in HOW_TO_FILE_INBOUND.lower() or "FBA*" in HOW_TO_FILE_INBOUND
     assert "Reference ID" in HOW_TO_FILE_INBOUND
+
+
+def test_inbound_match_key_is_case_insensitive():
+    assert inbound_match_key("FBA19K98F8VN", "DDPE0001Shop") == (
+        "FBA19K98F8VN",
+        "DDPE0001SHOP",
+    )
+    assert inbound_match_key("fba19k98f8vn", "ddpe0001shop") == inbound_match_key(
+        "FBA19K98F8VN", "DDPE0001SHOP",
+    )
+    assert inbound_live_short(540, 540, 2) == 0
+    assert inbound_live_short(None, None, 0) == 0
+    assert inbound_live_short(None, None, None) is None
+    assert is_inbound_balanced(540, 540) is True
+    assert is_inbound_balanced(540, 538) is False
+    assert is_inbound_balanced(None, None, None) is False
+
+
+def test_balanced_sellerboard_reconciles_needs_case_casefold_sku():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19BALANCED",
+            "sku": "DDPE0001Shop",
+            "asin": "B0CLFSGG49",
+            "fulfillment_center": "HGR6",
+            "quantity_shipped": 540,
+            "quantity_received": 540,
+            "quantity_short": 0,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+        }],
+        existing_events=[{
+            "event_key": "inbound|FBA19BALANCED|DDPE0001SHOP",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "DDPE0001SHOP",
+            "asin": "B0CLFSGG49",
+            "quantity": 2,
+            "quantity_shipped": 540,
+            "quantity_received": 538,
+            "reason": "Lost_Inbound",
+            "reason_group": "lost_inbound",
+            "fulfillment_center": "HGR6",
+            "shipment_id": "FBA19BALANCED",
+            "status": STATUS_NEEDS_CASE,
+        }],
+    )
+    row = next(e for e in events if e["event_key"] == "inbound|FBA19BALANCED|DDPE0001SHOP")
+    assert row["status"] == STATUS_FOUND_OFFSET
+    assert row["quantity"] == 0
+    assert row["quantity_shipped"] == 540
+    assert row["quantity_received"] == 540
+    assert row["dismissed_note"] == "reconciled"
+    assert row.get("dismissed_at") in (None, "")
+    assert is_active_inbound_alert(row) is False
+
+
+def test_still_short_stays_needs_case_and_refreshes_qty():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19SHORT",
+            "sku": "DDPE0001Shop",
+            "fulfillment_center": "LBE1",
+            "quantity_shipped": 540,
+            "quantity_received": 538,
+            "quantity_short": 2,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+        }],
+        existing_events=[{
+            "event_key": "inbound|FBA19SHORT|DDPE0001SHOP",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "DDPE0001SHOP",
+            "quantity": 77,
+            "quantity_shipped": 540,
+            "quantity_received": 463,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19SHORT",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "LBE1",
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19SHORT")
+    assert row["status"] == STATUS_NEEDS_CASE
+    assert row["quantity"] == 2
+    assert row["quantity_received"] == 538
+
+
+def test_does_not_invent_balance_without_ship_recv_or_live_short():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        existing_events=[{
+            "event_key": "inbound|FBA19OPEN|SKU-C",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "SKU-C",
+            "quantity": 3,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19OPEN",
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "SMF3",
+        }],
+    )
+    needs = [e for e in events if e["status"] == STATUS_NEEDS_CASE]
+    assert len(needs) == 1
+    assert needs[0]["quantity"] == 3
+
+
+def test_stored_540_540_reconciles_without_sellerboard_row():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        existing_events=[{
+            "event_key": "inbound|FBA19EVEN|SKU-C",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "SKU-C",
+            "quantity": 2,
+            "quantity_shipped": 540,
+            "quantity_received": 540,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19EVEN",
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "SMF3",
+        }],
+    )
+    row = next(e for e in events if e["event_key"] == "inbound|FBA19EVEN|SKU-C")
+    assert row["status"] == STATUS_FOUND_OFFSET
+    assert row["quantity"] == 0
+    assert is_active_inbound_alert(row) is False
+
+
+def test_apply_inbound_balance_does_not_touch_warehouse_damage():
+    live = collect_live_inbound_qty([], [])
+    out = apply_inbound_balance(
+        [{
+            "event_key": "adj|e",
+            "source": "ledger_adjustment",
+            "sku": "SKU-B",
+            "reason": "E",
+            "quantity": 1,
+            "status": STATUS_NEEDS_CASE,
+        }],
+        live,
+        [],
+    )
+    assert out[0]["status"] == STATUS_NEEDS_CASE
+    assert out[0]["quantity"] == 1
+
+
+def test_manual_reconcile_persists_auto_balance_does_not_block_reopen():
+    out = preserve_submitted_status(
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "status": STATUS_NEEDS_CASE,
+            "quantity": 2,
+        }],
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "status": STATUS_FOUND_OFFSET,
+            "dismissed_at": "2026-09-15T12:00:00Z",
+            "dismissed_note": "reconciled",
+        }],
+    )
+    assert out[0]["status"] == STATUS_FOUND_OFFSET
+    auto = preserve_submitted_status(
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "status": STATUS_NEEDS_CASE,
+            "quantity": 2,
+        }],
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "status": STATUS_FOUND_OFFSET,
+            "dismissed_note": "reconciled",
+        }],
+    )
+    assert auto[0]["status"] == STATUS_NEEDS_CASE
 
 
 def test_deprecated_adjustments_report_is_not_the_source():

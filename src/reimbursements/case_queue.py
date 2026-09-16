@@ -138,6 +138,10 @@ STATUS_ALREADY_REIMBURSED = "already_reimbursed"
 STATUS_FOUND_OFFSET = "found_offset"
 STATUS_CASE_SUBMITTED = "case_submitted"
 
+CLEAR_NOTE_FILED = "filed"
+CLEAR_NOTE_RECONCILED = "reconciled"
+CLEAR_NOTE_NOT_PURSUING = "not_pursuing"
+
 SOURCE_LEDGER = "ledger_adjustment"
 SOURCE_INBOUND = "inbound_discrepancy"
 SOURCE_SELLERBOARD = "sellerboard_inbound"
@@ -399,6 +403,186 @@ def inbound_source_key(row: dict) -> tuple[str, str] | None:
     return sid, sku
 
 
+def inbound_match_key(shipment_id: object, sku: object) -> tuple[str, str] | None:
+    """Case-insensitive (FBA shipment, SKU) key. Sellerboard SKUs are mixed case."""
+    sid = fba_shipment_id(str(shipment_id) if shipment_id is not None else None)
+    sku_n = normalize_sku(None if sku is None else str(sku))
+    if not sid or sku_n == "UNKNOWN":
+        return None
+    return sid, sku_n
+
+
+def inbound_live_short(
+    shipped: int | None,
+    received: int | None,
+    quantity_short: int | None = None,
+) -> int | None:
+    """Live short qty. Prefer shipped−received when both exist; else Sellerboard short.
+
+    Missing ship/recv is not a balance. Never invent a short from case ``quantity``.
+    """
+    if shipped is not None and received is not None:
+        return shipped - received
+    return quantity_short
+
+
+def is_inbound_balanced(
+    shipped: int | None,
+    received: int | None,
+    quantity_short: int | None = None,
+) -> bool:
+    short = inbound_live_short(shipped, received, quantity_short)
+    return short is not None and short <= 0
+
+
+def _is_inbound_event(row: dict) -> bool:
+    if row.get("source") in INBOUND_SOURCES:
+        return True
+    return reason_group(row.get("reason"), row.get("disposition")) == "lost_inbound"
+
+
+def collect_live_inbound_qty(
+    sellerboard_rows: Iterable[dict],
+    shipment_items: Iterable[dict],
+) -> dict[tuple[str, str], dict]:
+    """Latest shipped/received/short by (FBA id, normalized SKU).
+
+    Sellerboard wins over SP-API items. Includes balanced rows (short ≤ 0)
+    so a rebuild can mark ``found_offset``. Does not invent qty from case
+    ``quantity`` or from existing ``fba_case_events`` shorts.
+    """
+    out: dict[tuple[str, str], dict] = {}
+    for it in shipment_items:
+        key = inbound_match_key(it.get("shipment_id"), it.get("sku"))
+        if not key:
+            continue
+        shipped = _int_or_none(it.get("quantity_shipped"))
+        received = _int_or_none(it.get("quantity_received"))
+        short = inbound_live_short(shipped, received, _int_or_none(it.get("quantity_short")))
+        if shipped is None and received is None and short is None:
+            continue
+        out[key] = {
+            "quantity_shipped": shipped,
+            "quantity_received": received,
+            "quantity_short": short,
+        }
+    for raw in sellerboard_rows:
+        key = inbound_match_key(raw.get("shipment_id"), raw.get("sku"))
+        if not key:
+            continue
+        shipped = _int_or_none(raw.get("quantity_shipped"))
+        received = _int_or_none(raw.get("quantity_received"))
+        short = inbound_live_short(shipped, received, _int_or_none(raw.get("quantity_short")))
+        if shipped is None and received is None and short is None:
+            continue
+        out[key] = {
+            "quantity_shipped": shipped,
+            "quantity_received": received,
+            "quantity_short": short,
+        }
+    return out
+
+
+def _mark_inbound_found_offset(row: dict, info: dict | None = None) -> dict:
+    out = dict(row)
+    if info:
+        if info.get("quantity_shipped") is not None:
+            out["quantity_shipped"] = info["quantity_shipped"]
+        if info.get("quantity_received") is not None:
+            out["quantity_received"] = info["quantity_received"]
+    out["quantity"] = 0
+    if out.get("status") != STATUS_ALREADY_REIMBURSED:
+        out["status"] = STATUS_FOUND_OFFSET
+    if not out.get("dismissed_note"):
+        out["dismissed_note"] = CLEAR_NOTE_RECONCILED
+    return out
+
+
+def apply_inbound_balance(
+    events: list[dict],
+    live: dict[tuple[str, str], dict],
+    existing: Iterable[dict] | None = None,
+) -> list[dict]:
+    """Refresh inbound ship/recv and clear Needs case when live short ≤ 0.
+
+    Evidence stays (status ``found_offset``). Does not invent balanced
+    shipments — only clears when Sellerboard/SP-API or stored ship/recv
+    show shipped ≤ received or ``quantity_short <= 0``. Case-insensitive SKU.
+    Auto-reconcile does not set ``dismissed_at`` so a later short can reopen.
+    """
+    existing_list = list(existing or [])
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def _refresh(row: dict) -> dict:
+        rec = dict(row)
+        key = inbound_match_key(rec.get("shipment_id"), rec.get("sku"))
+        info = live.get(key) if key else None
+        if info:
+            if info.get("quantity_shipped") is not None:
+                rec["quantity_shipped"] = info["quantity_shipped"]
+            if info.get("quantity_received") is not None:
+                rec["quantity_received"] = info["quantity_received"]
+        if not _is_inbound_event(rec):
+            return rec
+        shipped = _int_or_none(rec.get("quantity_shipped"))
+        received = _int_or_none(rec.get("quantity_received"))
+        live_short = info.get("quantity_short") if info else None
+        short = inbound_live_short(shipped, received, live_short)
+        if short is not None and short <= 0:
+            return _mark_inbound_found_offset(rec, info)
+        if short is not None and rec.get("status") != STATUS_FOUND_OFFSET:
+            rec["quantity"] = short
+        return rec
+
+    for ev in events:
+        row = _refresh(ev)
+        out.append(row)
+        key = str(row.get("event_key") or "").strip()
+        if key:
+            seen.add(key)
+
+    for prior in existing_list:
+        if prior.get("status") not in (STATUS_NEEDS_CASE, STATUS_CASE_SUBMITTED):
+            continue
+        if not _is_inbound_event(prior):
+            continue
+        match = inbound_match_key(prior.get("shipment_id"), prior.get("sku"))
+        ek = str(prior.get("event_key") or "").strip()
+        if match:
+            ek = ek or inbound_event_key(match[0], match[1])
+        if not ek or ek in seen:
+            continue
+        info = live.get(match) if match else None
+        shipped = (info or {}).get("quantity_shipped")
+        if shipped is None:
+            shipped = _int_or_none(prior.get("quantity_shipped"))
+        received = (info or {}).get("quantity_received")
+        if received is None:
+            received = _int_or_none(prior.get("quantity_received"))
+        short = inbound_live_short(
+            shipped,
+            received,
+            (info or {}).get("quantity_short"),
+        )
+        if short is None or short > 0:
+            continue
+        row = dict(prior)
+        row["event_key"] = ek
+        if match:
+            row["shipment_id"] = match[0]
+            row["sku"] = match[1]
+        row["reason"] = row.get("reason") or "Lost_Inbound"
+        row["reason_group"] = "lost_inbound"
+        out.append(_mark_inbound_found_offset(row, {
+            "quantity_shipped": shipped,
+            "quantity_received": received,
+            "quantity_short": short,
+        }))
+        seen.add(ek)
+    return out
+
+
 def merge_inbound_sources(
     spapi: Iterable[dict],
     sellerboard: Iterable[dict],
@@ -444,14 +628,21 @@ def preserve_submitted_status(
     events: list[dict],
     existing: Iterable[dict],
 ) -> list[dict]:
-    """Keep Dave's case_submitted dismiss across Mini rebuilds.
+    """Keep Dave's case_submitted / manual reconciled dismiss across Mini rebuilds.
 
-    Paid / found-offset wins. New event_keys (new shipment) stay Needs case.
+    Paid / live found-offset wins. Auto-reconcile (found_offset without
+    dismissed_at) is recomputed each sync so a later short can reopen.
+    New event_keys (new shipment) stay Needs case.
     """
     prior: dict[str, dict] = {}
     for row in existing:
         key = str(row.get("event_key") or "").strip()
-        if key and row.get("status") == STATUS_CASE_SUBMITTED:
+        if not key:
+            continue
+        status = row.get("status")
+        if status == STATUS_CASE_SUBMITTED:
+            prior[key] = row
+        elif status == STATUS_FOUND_OFFSET and row.get("dismissed_at"):
             prior[key] = row
     out: list[dict] = []
     for ev in events:
@@ -459,7 +650,7 @@ def preserve_submitted_status(
         key = str(row.get("event_key") or "").strip()
         saved = prior.get(key)
         if saved and row.get("status") == STATUS_NEEDS_CASE:
-            row["status"] = STATUS_CASE_SUBMITTED
+            row["status"] = saved.get("status") or STATUS_CASE_SUBMITTED
             row["dismissed_at"] = saved.get("dismissed_at")
             row["dismissed_note"] = saved.get("dismissed_note")
         out.append(row)
@@ -746,9 +937,12 @@ def build_case_events(
     adj_list = list(adjustments)
     paid_list = list(reimbursements)
     existing_list = list(existing_events or [])
+    items_list = list(shipment_items)
+    sb_live = list(sellerboard_rows or [])
+    live_qty = collect_live_inbound_qty(sb_live, items_list)
     ledger = adjustment_candidates(adj_list, start, end)
-    spapi_inbound = inbound_discrepancies(shipments, shipment_items, as_of, start, end)
-    sb_raw = list(sellerboard_rows or []) + existing_sellerboard_rows(existing_list)
+    spapi_inbound = inbound_discrepancies(shipments, items_list, as_of, start, end)
+    sb_raw = sb_live + existing_sellerboard_rows(existing_list)
     sb_inbound = sellerboard_inbound_discrepancies(sb_raw, as_of, start, end)
     inbound = merge_inbound_sources(spapi_inbound, sb_inbound)
     # Prefer inbound row when the same FBA id + SKU also appears as Lost_Inbound
@@ -761,6 +955,7 @@ def build_case_events(
             continue
         ledger_kept.append(ev)
     merged = apply_found_offsets(ledger_kept + inbound, found_offsets(adj_list))
+    merged = apply_inbound_balance(merged, live_qty, existing_list)
     merged = _enrich_asin(merged, adj_list, paid_list)
     out = apply_paid_dedupe(merged, paid_list)
     out = preserve_submitted_status(out, existing_list)

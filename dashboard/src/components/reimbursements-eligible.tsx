@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -16,6 +17,8 @@ import {
   CASE_QUEUE_SOURCE_NOTE,
   CASE_QUEUE_SOURCES,
   CLASSIFICATION_VERSION,
+  CLEAR_REASON_LABELS,
+  CLEAR_REASONS,
   HOW_TO_FILE_INBOUND,
   HOW_TO_FILE_INBOUND_STEPS,
   HOW_TO_FILE_INBOUND_TITLE,
@@ -24,6 +27,8 @@ import {
   HOW_TO_FILE_STEPS,
   HOW_TO_FILE_TITLE,
   IDR_INSTRUCTION,
+  KPI_EVENTS_LABEL,
+  KPI_UNITS_LABEL,
   MINI_RESYNC_HINT,
   NO_INBOUND_DISCREPANCIES,
   NOTIFY_BLOCK_COPY,
@@ -33,7 +38,10 @@ import {
   apiUrl,
   caseAmount,
   caseDay,
+  caseKpi,
   caseQty,
+  clearReasonLabel,
+  clearResultMessage,
   defaultCaseRange,
   fbaShipmentId,
   filterCaseGroup,
@@ -41,7 +49,6 @@ import {
   inboundDiscrepancyCount,
   inboundReceived,
   inboundShipped,
-  isInboundSource,
   isInboundTrackerLink,
   reasonLabel,
   searchCaseRows,
@@ -52,6 +59,7 @@ import {
   type CaseEventRow,
   type CaseQa,
   type CaseSortKey,
+  type ClearReason,
   type ReasonFilter,
 } from "@/lib/reimbursements-eligible";
 
@@ -116,6 +124,8 @@ export function ReimbursementsEligiblePanel() {
   const [copied, setCopied] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [clearReason, setClearReason] = useState<ClearReason>("filed");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   function load(rangeStart = start, rangeEnd = end) {
     setLoading(true);
@@ -137,6 +147,7 @@ export function ReimbursementsEligiblePanel() {
 
   const rows = data?.rows ?? [];
   const summary = useMemo(() => summarizeCases(rows), [rows]);
+  const kpi = useMemo(() => caseKpi(summary), [summary]);
   const visible = useMemo(
     () => sortCaseRows(searchCaseRows(filterCaseGroup(rows, filter), query), sortKey, sortDir),
     [rows, filter, query, sortKey, sortDir],
@@ -153,18 +164,28 @@ export function ReimbursementsEligiblePanel() {
   const alertSummary = useMemo(() => summarizeCases(alertRows), [alertRows]);
   const inboundCount = inboundDiscrepancyCount(rows);
 
-  async function dismissRow(row: CaseEventRow) {
-    setBusyKey(row.event_key);
+  async function clearRows(keys: string[], reason: ClearReason) {
+    if (!keys.length) return;
+    setBusyKey(keys.length === 1 ? keys[0] : "bulk");
     setMsg(null);
     try {
       const r = await fetch(apiUrl("/api/reimbursements/inbound-alerts"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event_key: row.event_key, note: "filed" }),
+        body: JSON.stringify(
+          keys.length === 1
+            ? { event_key: keys[0], reason, note: reason }
+            : { event_keys: keys, reason, note: reason },
+        ),
       });
       const j = await r.json();
-      if (!r.ok || !j.ok) throw new Error(j.error || "Dismiss failed");
-      setMsg("Marked submitted — kept in history. No Amazon write.");
+      if (!r.ok || !j.ok) throw new Error(j.error || "Clear failed");
+      setMsg(clearResultMessage(reason, keys.length));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const key of keys) next.delete(key);
+        return next;
+      });
       load(start, end);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
@@ -413,7 +434,7 @@ export function ReimbursementsEligiblePanel() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">
-                  Submitted / dismissed ({fmt(submittedRows.length)})
+                  Submitted / cleared ({fmt(submittedRows.length)})
                 </CardTitle>
               </CardHeader>
               <CardContent className="overflow-x-auto p-0">
@@ -425,6 +446,7 @@ export function ReimbursementsEligiblePanel() {
                       <TableHead className="text-right">Short</TableHead>
                       <TableHead>Shipment</TableHead>
                       <TableHead>Source</TableHead>
+                      <TableHead>Reason</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -438,6 +460,7 @@ export function ReimbursementsEligiblePanel() {
                         <TableCell className="text-right tabular-nums">{fmt(caseQty(r))}</TableCell>
                         <TableCell className="text-xs font-mono">{fbaShipmentId(r.shipment_id) || "—"}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{sourceLabel(r.source)}</TableCell>
+                        <TableCell className="text-xs">{clearReasonLabel(r)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -468,31 +491,34 @@ export function ReimbursementsEligiblePanel() {
           )}
 
           <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Needs case</p>
-                <p className="text-2xl font-semibold tabular-nums">{fmt(summary.units)}</p>
-                <p className="text-xs text-muted-foreground">{fmt(summary.events)} events</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Warehouse damage</p>
-                <p className="text-2xl font-semibold tabular-nums">{fmt(summary.groups.warehouse_damage.units)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Lost inbound</p>
-                <p className="text-2xl font-semibold tabular-nums">{fmt(summary.groups.lost_inbound.units)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <p className="text-[10px] text-muted-foreground uppercase">Lost warehouse</p>
-                <p className="text-2xl font-semibold tabular-nums">{fmt(summary.groups.lost_warehouse.units)}</p>
-              </CardContent>
-            </Card>
+            <CaseKpiCard
+              title="Needs case"
+              events={kpi.primary}
+              units={kpi.units}
+              estimated={kpi.estimated}
+              estimatedKnown={kpi.estimatedKnown}
+            />
+            <CaseKpiCard
+              title="Warehouse damage"
+              events={summary.groups.warehouse_damage.events}
+              units={summary.groups.warehouse_damage.units}
+              estimated={summary.groups.warehouse_damage.estimated}
+              estimatedKnown={kpi.estimatedKnown && summary.groups.warehouse_damage.estimated !== 0}
+            />
+            <CaseKpiCard
+              title="Lost inbound"
+              events={summary.groups.lost_inbound.events}
+              units={summary.groups.lost_inbound.units}
+              estimated={summary.groups.lost_inbound.estimated}
+              estimatedKnown={kpi.estimatedKnown && summary.groups.lost_inbound.estimated !== 0}
+            />
+            <CaseKpiCard
+              title="Lost warehouse"
+              events={summary.groups.lost_warehouse.events}
+              units={summary.groups.lost_warehouse.units}
+              estimated={summary.groups.lost_warehouse.estimated}
+              estimatedKnown={kpi.estimatedKnown && summary.groups.lost_warehouse.estimated !== 0}
+            />
           </div>
 
           <div className="flex flex-wrap gap-1 border-b">
@@ -521,18 +547,60 @@ export function ReimbursementsEligiblePanel() {
                 <CardTitle className="text-sm font-medium">
                   Open cases ({fmt(visible.length)})
                 </CardTitle>
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search SKU, ASIN, shipment, reason"
-                  className="max-w-sm"
-                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={clearReason}
+                    onChange={(e) => setClearReason(e.target.value as ClearReason)}
+                    className="h-8 w-[10.5rem] text-xs"
+                    aria-label="Clear reason"
+                  >
+                    {CLEAR_REASONS.map((reason) => (
+                      <option key={reason} value={reason}>
+                        {CLEAR_REASON_LABELS[reason]}
+                      </option>
+                    ))}
+                  </Select>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!selected.size || busyKey === "bulk"}
+                    onClick={() => clearRows([...selected], clearReason)}
+                    title="Clear selected rows. Evidence stays in history. No Amazon write."
+                  >
+                    <Check className="mr-1 h-3.5 w-3.5" />
+                    {busyKey === "bulk" ? "Saving…" : `Clear selected (${selected.size})`}
+                  </Button>
+                  <Input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search SKU, ASIN, shipment, reason"
+                    className="max-w-sm"
+                  />
+                </div>
               </div>
             </CardHeader>
             <CardContent className="overflow-x-auto p-0">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-8">
+                      <input
+                        type="checkbox"
+                        checked={visible.length > 0 && visible.every((r) => selected.has(r.event_key))}
+                        onChange={() => {
+                          const allOn = visible.every((r) => selected.has(r.event_key));
+                          setSelected((prev) => {
+                            const next = new Set(prev);
+                            for (const row of visible) {
+                              if (allOn) next.delete(row.event_key);
+                              else next.add(row.event_key);
+                            }
+                            return next;
+                          });
+                        }}
+                        aria-label="Select all visible cases"
+                      />
+                    </TableHead>
                     <SortHead label="Date" active={sortKey === "event_date"} dir={sortDir} onClick={() => toggleSort("event_date")} />
                     <SortHead label="Reason" active={sortKey === "reason"} dir={sortDir} onClick={() => toggleSort("reason")} />
                     <SortHead label="SKU / ASIN" active={sortKey === "sku"} dir={sortDir} onClick={() => toggleSort("sku")} />
@@ -559,6 +627,21 @@ export function ReimbursementsEligiblePanel() {
                     const received = inboundReceived(r);
                     return (
                       <TableRow key={r.event_key}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            checked={selected.has(r.event_key)}
+                            onChange={() => {
+                              setSelected((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(r.event_key)) next.delete(r.event_key);
+                                else next.add(r.event_key);
+                                return next;
+                              });
+                            }}
+                            aria-label={`Select ${r.sku || r.event_key}`}
+                          />
+                        </TableCell>
                         <TableCell className="text-xs tabular-nums">{day}</TableCell>
                         <TableCell className="text-xs">
                           <span className="font-medium">{reasonLabel(r.reason, r.disposition)}</span>
@@ -621,19 +704,17 @@ export function ReimbursementsEligiblePanel() {
                             <Badge variant="outline" className="text-[10px] font-normal">
                               Needs case
                             </Badge>
-                            {isInboundSource(r.source) && shipment && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-6 px-1.5 text-[10px]"
-                                disabled={busyKey === r.event_key}
-                                onClick={() => dismissRow(r)}
-                                title="Mark submitted after filing. Keeps the row in history."
-                              >
-                                <Check className="mr-0.5 h-3 w-3" />
-                                {busyKey === r.event_key ? "Saving…" : "Mark submitted"}
-                              </Button>
-                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px]"
+                              disabled={busyKey === r.event_key || busyKey === "bulk"}
+                              onClick={() => clearRows([r.event_key], clearReason)}
+                              title="Clear this row with the selected reason. Evidence stays in history. No Amazon write."
+                            >
+                              <Check className="mr-0.5 h-3 w-3" />
+                              {busyKey === r.event_key ? "Saving…" : "Clear / Mark submitted"}
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -648,10 +729,11 @@ export function ReimbursementsEligiblePanel() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">
-                  Submitted / dismissed ({fmt(submittedRows.length)})
+                  Submitted / cleared ({fmt(submittedRows.length)})
                 </CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  Evidence kept after Overview dismiss. New CLOSED shorts (new FBA shipment / event_key) still alert.
+                  Evidence kept after Clear / Overview dismiss (filed, reconciled, not pursuing).
+                  New CLOSED shorts (new FBA shipment / event_key) still alert.
                 </p>
               </CardHeader>
               <CardContent className="overflow-x-auto p-0">
@@ -664,6 +746,7 @@ export function ReimbursementsEligiblePanel() {
                       <TableHead>FC</TableHead>
                       <TableHead>Shipment</TableHead>
                       <TableHead>Source</TableHead>
+                      <TableHead>Reason</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -678,6 +761,7 @@ export function ReimbursementsEligiblePanel() {
                         <TableCell className="text-xs">{r.fulfillment_center || "—"}</TableCell>
                         <TableCell className="text-xs font-mono">{fbaShipmentId(r.shipment_id) || "—"}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{sourceLabel(r.source)}</TableCell>
+                        <TableCell className="text-xs">{clearReasonLabel(r)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -688,6 +772,36 @@ export function ReimbursementsEligiblePanel() {
         </>
       )}
     </div>
+  );
+}
+
+function CaseKpiCard({
+  title,
+  events,
+  units,
+  estimated,
+  estimatedKnown,
+}: {
+  title: string;
+  events: number;
+  units: number;
+  estimated: number;
+  estimatedKnown: boolean;
+}) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="text-[10px] text-muted-foreground uppercase">{title}</p>
+        <p className="text-2xl font-semibold tabular-nums">{fmt(events)}</p>
+        <p className="text-xs text-muted-foreground">
+          {fmt(events)} {KPI_EVENTS_LABEL}
+          {estimatedKnown ? ` · ~$${fmtD(estimated)}` : ""}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {fmt(units)} {KPI_UNITS_LABEL}
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
