@@ -82,6 +82,18 @@ describe("last_filed_through", () => {
     const f = filing({ period_label: "2026-Q3", period_end: "2026-09-30", due_date: "2026-10-20" });
     assert.equal(isOpenObligation(f, n), true);
   });
+
+  test("mid-month last_filed_through leaves the containing monthly period open (VT)", () => {
+    const n = nexus({
+      state_code: "VT", assigned_frequency: "monthly",
+      last_filed_through: "2026-08-17", registration_date: "2026-08-17",
+    });
+    const f = filing({
+      state_code: "VT", period_type: "monthly", period_label: "2026-08",
+      period_end: "2026-08-31", due_date: "2026-09-25",
+    });
+    assert.equal(isOpenObligation(f, n), true);
+  });
 });
 
 describe("frequency mismatch", () => {
@@ -106,6 +118,30 @@ describe("frequency mismatch", () => {
   test("leftover periodics are superseded when the state files casual", () => {
     const f = filing({ period_type: "quarterly", period_label: "2026-Q3", period_end: "2026-09-30", due_date: "2026-10-20" });
     assert.equal(obligationStatus(f, nexus({ assigned_frequency: "casual" }))?.reason, "superseded_frequency");
+  });
+
+  test("leftover monthly is superseded when the state files annual (WY)", () => {
+    const f = filing({
+      state_code: "WY", period_type: "monthly", period_label: "2026-08",
+      period_end: "2026-08-31", due_date: "2026-09-20",
+    });
+    const n = nexus({
+      state_code: "WY", assigned_frequency: "annual",
+      last_filed_through: "2026-08-17", registration_date: "2026-08-21",
+    });
+    assert.equal(obligationStatus(f, n)?.reason, "superseded_frequency");
+  });
+
+  test("annual row stays live when the state files annual (WY)", () => {
+    const f = filing({
+      state_code: "WY", period_type: "annual", period_label: "2026",
+      period_end: "2026-12-31", due_date: "2027-01-20",
+    });
+    const n = nexus({
+      state_code: "WY", assigned_frequency: "annual",
+      last_filed_through: "2026-08-17", registration_date: "2026-08-21",
+    });
+    assert.equal(isOpenObligation(f, n), true);
   });
 });
 

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { markCalendarFiledThrough } from "@/lib/mark-calendar-filed";
 
 /**
  * POST /api/registrations
@@ -78,6 +79,10 @@ export async function POST(request: NextRequest) {
       { error: error.message },
       { status: 500 },
     );
+  }
+
+  if (is_registered && typeof updates.last_filed_through === "string" && updates.last_filed_through) {
+    await markCalendarFiledThrough(sb, state_code, updates.last_filed_through);
   }
 
   if (body.typical_due_day !== undefined || body.notes !== undefined) {

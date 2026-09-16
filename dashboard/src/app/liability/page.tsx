@@ -17,7 +17,9 @@ import {
   STATE_TAX_RATES,
 } from "@/lib/channels";
 import { isRegistered } from "@/lib/compliance-status";
-import { formatLocalYmd } from "@/lib/as-of";
+import { agentToday, formatLocalYmd } from "@/lib/as-of";
+import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
+import { computeNextDue, dueDayByState, mergeImpliedObligations } from "@/lib/next-due";
 import { LoadingState } from "@/components/loading";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -89,78 +91,27 @@ function resolveFiledThrough(
   return latest;
 }
 
-/**
- * Compute the next unfiled period's due date from filed_through + frequency.
- *
- * Rules:
- *   1. Next period starts the day after filed_through.
- *   2. Period end = end of the calendar month/quarter/half/year containing that start.
- *   3. Due date = dueDay of the month after period end.
- *   4. NEVER returns a due date whose period_end <= filed_through.
- *   5. If filed_through is null, returns null (no mass OVERDUE).
- *
- * Examples:
- *   MD quarterly, filed_through=2026-06-30, due_day=20
- *     → next period = Q3 2026 (07-01 to 09-30), due = 2026-10-20
- *   WV monthly, filed_through=2026-06-30, due_day=20
- *     → next period = July 2026 (07-01 to 07-31), due = 2026-08-20
- *   OH semi_annual, filed_through=2026-06-30, due_day=20
- *     → next period = H2 2026 (07-01 to 12-31), due = 2027-01-20
- */
-function computeNextDue(
-  filedThrough: string | null,
-  frequency: string | null,
-  dueDay: number,
+function nextDueFromCalendar(
+  cls: ReturnType<typeof classifyFilings>,
+  stateCode: string,
 ): { due: string; days: number; periodEnd: string } | null {
-  if (!filedThrough || !frequency) return null;
-
-  const ft = new Date(filedThrough + "T00:00:00");
-  // Next period starts the day after filed_through
-  const start = new Date(ft);
-  start.setDate(start.getDate() + 1);
-
-  const y = start.getFullYear();
-  const m = start.getMonth(); // 0-based
-
-  let periodEndDate: Date;
-  const freq = frequency.toLowerCase().replace("-", "_");
-
-  if (freq === "casual") {
-    return null;
+  const overdue = cls.overdue.find((f) => f.state_code === stateCode);
+  if (overdue) {
+    return {
+      due: overdue.due_date,
+      days: -overdue.days_overdue,
+      periodEnd: overdue.period_end ?? "",
+    };
   }
-
-  if (freq === "monthly") {
-    // Period = the calendar month containing `start`
-    periodEndDate = new Date(y, m + 1, 0); // last day of month
-  } else if (freq === "quarterly") {
-    // Quarter containing `start`
-    const qEnd = Math.floor(m / 3) * 3 + 2; // 0-based month of quarter end
-    periodEndDate = new Date(y, qEnd + 1, 0);
-  } else if (freq === "semi_annual" || freq === "semi-annual") {
-    // H1 = Jan-Jun, H2 = Jul-Dec
-    periodEndDate = m < 6 ? new Date(y, 6, 0) : new Date(y, 12, 0);
-  } else if (freq === "annual") {
-    periodEndDate = new Date(y, 12, 0); // Dec 31
-  } else {
-    // Unknown frequency — fall back to monthly
-    periodEndDate = new Date(y, m + 1, 0);
+  const upcoming = cls.upcoming.find((f) => f.state_code === stateCode);
+  if (upcoming) {
+    return {
+      due: upcoming.due_date,
+      days: upcoming.days_until_due,
+      periodEnd: upcoming.period_end ?? "",
+    };
   }
-
-  // Due date = dueDay of month after period end
-  const dueMonth = periodEndDate.getMonth() + 1;
-  const dueYear =
-    dueMonth > 11
-      ? periodEndDate.getFullYear() + 1
-      : periodEndDate.getFullYear();
-  const dueDate = new Date(dueYear, dueMonth % 12, Math.min(dueDay, 28));
-
-  const periodEnd = formatLocalYmd(periodEndDate);
-  const due = formatLocalYmd(dueDate);
-  const days = Math.ceil(
-    (dueDate.getTime() - Date.now()) / 86400000,
-  );
-
-  return { due, days, periodEnd };
+  return null;
 }
 
 interface StateLiability {
@@ -335,6 +286,16 @@ export default function LiabilityPage() {
     if (registered.length === 0) return [];
 
     const rows: StateLiability[] = [];
+    const today = agentToday();
+    const cls = classifyFilings(
+      mergeImpliedObligations(
+        filings as FilingRow[],
+        nexus as unknown as NexusRow[],
+        dueDayByState(rules),
+      ),
+      nexus as unknown as NexusRow[],
+      today,
+    );
 
     for (const n of registered) {
       const sc = n.state_code;
@@ -346,9 +307,9 @@ export default function LiabilityPage() {
       const freq = n.assigned_frequency ?? rule.filing_frequency_default;
       const dueDay = rule.typical_due_day ?? 20;
 
-      // Compute next due from filed_through + frequency.
-      // If filed_through is null → no next_due (amber "Set date" prompt).
-      const nd = computeNextDue(filedThrough, freq, dueDay);
+      // Same open obligation Calendar / Overview use (calendar + implied).
+      const nd = nextDueFromCalendar(cls, sc)
+        ?? computeNextDue(filedThrough, freq, dueDay);
 
       let shopAll = 0;
       let shopSince = 0;
@@ -414,7 +375,7 @@ export default function LiabilityPage() {
       return b.seller_est_tax - a.seller_est_tax;
     });
     return rows;
-  }, [nexus, sales, ruleMap, filings]);
+  }, [nexus, sales, ruleMap, filings, rules]);
 
   if (l1 || l2 || l3 || l4) return <LoadingState />;
 

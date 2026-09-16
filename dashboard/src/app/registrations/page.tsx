@@ -123,6 +123,7 @@ function EditDialog({
             frequency: form.assigned_frequency,
             due_day: dueDay ?? 20,
             registration_date: regDate,
+            last_filed_through: form.last_filed_through || null,
           }),
         }).catch(() => {});
       }

@@ -5,8 +5,9 @@ import { useSupabaseQuery } from "@/lib/hooks";
 import type { NexusStatus, StateRule, SalesByState } from "@/lib/types";
 import { isSellerResponsible, isQuarantinedSource, STATE_TAX_RATES } from "@/lib/channels";
 import { isRegistered } from "@/lib/compliance-status";
-import { agentToday, formatLocalYmd, shiftDays } from "@/lib/as-of";
+import { agentToday, shiftDays } from "@/lib/as-of";
 import { daysBetween } from "@/lib/filing-eligibility";
+import { computeNextDue } from "@/lib/next-due";
 import { LoadingState } from "@/components/loading";
 import { EmptyState } from "@/components/empty-state";
 import { Disclaimer } from "@/components/disclaimer";
@@ -34,78 +35,24 @@ function fmt(n: number): string {
   });
 }
 
-/**
- * Compute next unfiled period due date from filed_through + frequency.
- *
- * Period starts the day after filed_through.  Due date = dueDay of the
- * month after the period end.
- */
-function computeNextDue(
-  filedThrough: string | null,
-  frequency: string | null,
-  dueDay: number,
-): { due: string; days: number; periodEnd: string; periodLabel: string } | null {
-  if (!filedThrough || !frequency) return null;
-
-  const ft = new Date(filedThrough + "T00:00:00");
-  const start = new Date(ft);
-  start.setDate(start.getDate() + 1);
-
-  const y = start.getFullYear();
-  const m = start.getMonth(); // 0-based
-
-  let periodEndDate: Date;
+function displayPeriodLabel(periodLabel: string, frequency: string): string {
   const freq = frequency.toLowerCase().replace("-", "_");
-
-  if (freq === "casual") {
-    return null;
-  }
-
-  if (freq === "monthly") {
-    periodEndDate = new Date(y, m + 1, 0);
-  } else if (freq === "quarterly") {
-    const qEnd = Math.floor(m / 3) * 3 + 2;
-    periodEndDate = new Date(y, qEnd + 1, 0);
-  } else if (freq === "semi_annual" || freq === "semi-annual") {
-    periodEndDate = m < 6 ? new Date(y, 6, 0) : new Date(y, 12, 0);
-  } else if (freq === "annual") {
-    periodEndDate = new Date(y, 12, 0);
-  } else {
-    periodEndDate = new Date(y, m + 1, 0);
-  }
-
-  const dueMonth = periodEndDate.getMonth() + 1;
-  const dueYear =
-    dueMonth > 11
-      ? periodEndDate.getFullYear() + 1
-      : periodEndDate.getFullYear();
-  const dueDate = new Date(dueYear, dueMonth % 12, Math.min(dueDay, 28));
-
-  const periodEnd = formatLocalYmd(periodEndDate);
-  const due = formatLocalYmd(dueDate);
-  const days = daysBetween(agentToday(), due);
-
-  // Build human-readable period label
-  const peMonth = periodEndDate.getMonth();
-  const peYear = periodEndDate.getFullYear();
-  let periodLabel: string;
-  if (freq === "monthly") {
-    periodLabel = periodEndDate.toLocaleString(undefined, {
+  if (freq === "monthly" && /^\d{4}-\d{2}$/.test(periodLabel)) {
+    const [y, m] = periodLabel.split("-").map(Number);
+    return new Date(y, m - 1, 1).toLocaleString(undefined, {
       month: "short",
       year: "numeric",
     });
-  } else if (freq === "quarterly") {
-    const q = Math.floor(peMonth / 3) + 1;
-    periodLabel = `Q${q} ${peYear}`;
-  } else if (freq === "semi_annual" || freq === "semi-annual") {
-    periodLabel = peMonth < 6 ? `H1 ${peYear}` : `H2 ${peYear}`;
-  } else if (freq === "annual") {
-    periodLabel = `${peYear}`;
-  } else {
-    periodLabel = periodEnd;
   }
-
-  return { due, days, periodEnd, periodLabel };
+  if (freq === "quarterly" && /^\d{4}-Q[1-4]$/.test(periodLabel)) {
+    const [y, q] = periodLabel.split("-");
+    return `${q} ${y}`;
+  }
+  if (freq === "semi_annual" && /^\d{4}-H[12]$/.test(periodLabel)) {
+    const [y, h] = periodLabel.split("-");
+    return `${h} ${y}`;
+  }
+  return periodLabel;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +108,8 @@ export default function FilingsPage() {
       const lft = n.last_filed_through;
       const nextDue = computeNextDue(lft, freq, dueDay);
       if (!nextDue) continue;
+      const periodLabel = displayPeriodLabel(nextDue.periodLabel, freq);
+      const daysUntil = daysBetween(agentToday(), nextDue.due);
 
       // Sum seller-responsible sales since last_filed_through.
       // sales_by_state monthly aggregates are actual orders placed in that
@@ -188,10 +137,10 @@ export default function FilingsPage() {
         state_code: n.state_code,
         state_name: rule.state_name,
         frequency: freq,
-        periodLabel: nextDue.periodLabel,
+        periodLabel,
         periodEnd: nextDue.periodEnd,
         dueDate: nextDue.due,
-        daysUntil: nextDue.days,
+        daysUntil,
         shopifySales: Math.round(shopifySince * 100) / 100,
         estTax: Math.round(estTax * 100) / 100,
         rate,

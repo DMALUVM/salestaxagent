@@ -86,6 +86,14 @@ class TestFiledThrough:
                    due_date="2026-10-20")
         assert is_open_obligation(f, n)
 
+    def test_mid_month_filed_through_leaves_monthly_period_open(self):
+        """VT last_filed_through 2026-08-17 does not cover August (ends 31st)."""
+        n = nexus(state_code="VT", assigned_frequency="monthly",
+                  last_filed_through="2026-08-17", registration_date="2026-08-17")
+        f = filing(state_code="VT", period_type="monthly", period_label="2026-08",
+                   period_end="2026-08-31", due_date="2026-09-25")
+        assert is_open_obligation(f, n)
+
 
 class TestFrequencyMismatch:
     def test_stale_cadence_is_superseded(self):
@@ -111,6 +119,22 @@ class TestFrequencyMismatch:
         f = filing(period_type="semi_annual", period_label="2026-H2",
                    period_end="2026-12-31", due_date="2027-01-20")
         assert is_open_obligation(f, nexus(assigned_frequency=None))
+
+    def test_leftover_monthly_is_superseded_when_state_files_annual(self):
+        """WY assigned annual must not keep leftover monthly dues live."""
+        f = filing(state_code="WY", period_type="monthly", period_label="2026-08",
+                   period_end="2026-08-31", due_date="2026-09-20")
+        n = nexus(state_code="WY", assigned_frequency="annual",
+                  last_filed_through="2026-08-17", registration_date="2026-08-21")
+        why = obligation_status(f, n)
+        assert why is not None and why.reason == "superseded_frequency"
+
+    def test_annual_row_stays_live_when_state_files_annual(self):
+        f = filing(state_code="WY", period_type="annual", period_label="2026",
+                   period_end="2026-12-31", due_date="2027-01-20")
+        n = nexus(state_code="WY", assigned_frequency="annual",
+                  last_filed_through="2026-08-17", registration_date="2026-08-21")
+        assert is_open_obligation(f, n)
 
 
 class TestPreRegistration:
@@ -176,6 +200,7 @@ class TestRebuildPreservesSettled:
         monkeypatch.setattr(fc, "fetch_all", fake_fetch_all)
         monkeypatch.setattr(fc, "upsert_rows",
                             lambda t, rows, on_conflict=None: written.extend(rows) or len(rows))
+        monkeypatch.setattr(fc, "delete_rows", lambda *a, **kw: 0)
         monkeypatch.setattr(fc, "log_audit", lambda **kw: None)
 
         result = fc.populate_calendar_for_registered_states(year=2026)
@@ -200,10 +225,62 @@ class TestRebuildPreservesSettled:
                             lambda t, *a, **kw: nexus if t == "nexus_status" else [])
         monkeypatch.setattr(fc, "upsert_rows",
                             lambda t, rows, on_conflict=None: written.extend(rows) or len(rows))
+        monkeypatch.setattr(fc, "delete_rows", lambda *a, **kw: 0)
         monkeypatch.setattr(fc, "log_audit", lambda **kw: None)
 
         fc.populate_calendar_for_registered_states(year=2026)
         assert {r["state_code"] for r in written} == {"TX"}
+
+    def test_populate_deletes_leftover_monthly_when_state_is_annual(self, monkeypatch):
+        import src.calendar.filing_calendar as fc
+
+        existing = [
+            {"id": "m1", "state_code": "WY", "period_type": "monthly",
+             "period_label": "2026-08", "status": "pending"},
+            {"id": "a1", "state_code": "WY", "period_type": "annual",
+             "period_label": "2026", "status": "pending"},
+            {"id": "f1", "state_code": "WY", "period_type": "monthly",
+             "period_label": "2026-07", "status": "filed"},
+        ]
+        nexus = [{"state_code": "WY", "is_registered": True,
+                  "assigned_frequency": "annual"}]
+        deleted: list[dict] = []
+
+        def fake_fetch_all(table, *a, **kw):
+            return {"filing_calendar": existing, "nexus_status": nexus}.get(table, [])
+
+        monkeypatch.setattr(fc, "fetch_all", fake_fetch_all)
+        monkeypatch.setattr(fc, "upsert_rows", lambda t, rows, on_conflict=None: len(rows))
+        monkeypatch.setattr(fc, "delete_rows",
+                            lambda t, filters: deleted.append(filters) or 1)
+        monkeypatch.setattr(fc, "log_audit", lambda **kw: None)
+
+        result = fc.populate_calendar_for_registered_states(year=2026)
+        assert result["stale_removed"] == 1
+        assert deleted == [{"id": "m1"}]
+
+    def test_populate_keeps_hawaii_annual_alongside_periodic(self, monkeypatch):
+        import src.calendar.filing_calendar as fc
+
+        existing = [
+            {"id": "h1", "state_code": "HI", "period_type": "annual",
+             "period_label": "2026", "status": "pending"},
+            {"id": "h2", "state_code": "HI", "period_type": "semi_annual",
+             "period_label": "2026-H2", "status": "pending"},
+        ]
+        nexus = [{"state_code": "HI", "is_registered": True,
+                  "assigned_frequency": "semi_annual"}]
+        deleted: list[dict] = []
+
+        monkeypatch.setattr(fc, "fetch_all",
+                            lambda t, *a, **kw: existing if t == "filing_calendar" else nexus)
+        monkeypatch.setattr(fc, "upsert_rows", lambda t, rows, on_conflict=None: len(rows))
+        monkeypatch.setattr(fc, "delete_rows",
+                            lambda t, filters: deleted.append(filters) or 1)
+        monkeypatch.setattr(fc, "log_audit", lambda **kw: None)
+
+        fc.populate_calendar_for_registered_states(year=2026)
+        assert deleted == []
 
 
 class TestMarkOverdueFilings:
