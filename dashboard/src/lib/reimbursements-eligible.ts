@@ -38,15 +38,17 @@ export const CASE_QUEUE_ALERT_DAYS = REIMBURSEMENTS_ALERT_DAYS;
 export const SC_SUPPORT_HUB = "https://sellercentral.amazon.com/help/hub/contact-us";
 export const SC_LEDGER_HUB = "https://sellercentral.amazon.com/reportcentral/INVENTORY_LEDGER/1";
 export const SC_INBOUND_SHIPMENT =
-  "https://sellercentral.amazon.com/gp/fba/inbound-shipment-workflow/index.html?shipmentId=";
+  "https://sellercentral.amazon.com/fba/inbound-shipment/summary/";
+export const SC_ELIGIBLE_FOR_CLAIM =
+  "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim";
 
 export const SELLER_CENTRAL_LINK_LIMIT =
   "No stable Seller Central deep link opens a pre-filled FBA case. " +
   "Only real FBA* shipment IDs link to the inbound shipment tracker. " +
   "Ledger reference / transaction IDs (digit strings) are not shipment IDs. " +
-  "Warehouse damage is filed in IDR (Inventory → Inventory Defect and Reimbursement), " +
-  "not via a generic Support hub button. That hub is NOT a pre-filled lost-inbound or warehouse case. " +
-  "Dave submits; this desk never auto-files.";
+  "Warehouse damage is filed in IDR (Inventory → Inventory Defect and Reimbursement) " +
+  "at Eligible for claim, not via a generic Support hub button. That hub is NOT a " +
+  "pre-filled lost-inbound or warehouse case. Dave submits; this desk never auto-files.";
 
 export const IDR_INSTRUCTION =
   "Open IDR (Inventory → Inventory Defect and Reimbursement)";
@@ -74,7 +76,9 @@ export const HOW_TO_FILE_STEPS = [
   },
   {
     title: "Preferred: Inventory Defect and Reimbursement (IDR)",
-    body: "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR).",
+    body:
+      "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR), " +
+      "or https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
   },
   {
     title: "Classic path",
@@ -164,7 +168,21 @@ export type CaseStatus = "needs_case" | "already_reimbursed" | "found_offset" | 
 export type CaseSource = "ledger_adjustment" | "inbound_discrepancy" | "sellerboard_inbound";
 export const INBOUND_SOURCES: readonly CaseSource[] = ["inbound_discrepancy", "sellerboard_inbound"];
 export const STATUS_CASE_SUBMITTED = "case_submitted";
+export const STATUS_FOUND_OFFSET = "found_offset";
 export const NEEDS_CASE_HREF = "/reimbursements?tab=eligible";
+
+/** Primary KPI is event count — never units. Units are labeled secondary. */
+export const KPI_EVENTS_LABEL = "events";
+export const KPI_UNITS_LABEL = "units";
+
+export const CLEAR_REASONS = ["filed", "reconciled", "not_pursuing"] as const;
+export type ClearReason = (typeof CLEAR_REASONS)[number];
+export const CLEAR_REASON_LABELS: Record<ClearReason, string> = {
+  filed: "Filed",
+  reconciled: "Reconciled",
+  not_pursuing: "Not pursuing",
+};
+export const MAX_CLEAR_KEYS = 200;
 
 export interface CaseEventRow {
   event_key: string;
@@ -249,6 +267,84 @@ export function isCaseSubmitted(row: Pick<CaseEventRow, "status">): boolean {
   return row.status === STATUS_CASE_SUBMITTED;
 }
 
+export function parseClearReason(value: string | null | undefined): ClearReason {
+  const raw = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (raw === "reconciled" || raw === "found" || raw === "balanced") return "reconciled";
+  if (raw === "not_pursuing" || raw === "notpursuing") return "not_pursuing";
+  return "filed";
+}
+
+export function clearStatusForReason(reason: ClearReason): CaseStatus {
+  return reason === "reconciled" ? STATUS_FOUND_OFFSET : STATUS_CASE_SUBMITTED;
+}
+
+/** Overview `{ note: "filed" }` and explicit `{ reason }` both resolve here. */
+export function resolveClearAction(input: {
+  reason?: string | null;
+  note?: string | null;
+}): { reason: ClearReason; status: CaseStatus; note: string } {
+  const fromReason = input.reason != null && String(input.reason).trim() !== ""
+    ? parseClearReason(input.reason)
+    : parseClearReason(input.note);
+  const rawNote = String(input.note ?? "").trim().slice(0, 400);
+  const note = fromReason === "filed" && rawNote && parseClearReason(rawNote) === "filed"
+    ? rawNote
+    : fromReason;
+  return { reason: fromReason, status: clearStatusForReason(fromReason), note };
+}
+
+export function clearResultMessage(reason: ClearReason, count = 1): string {
+  const n = count === 1 ? "row" : `${count} rows`;
+  if (reason === "reconciled") {
+    return `Marked reconciled — ${n} kept in history. No Amazon write.`;
+  }
+  if (reason === "not_pursuing") {
+    return `Cleared (not pursuing) — ${n} kept in history. No Amazon write.`;
+  }
+  return `Marked submitted — ${n} kept in history. No Amazon write.`;
+}
+
+export function normalizeClearKeys(input: {
+  event_key?: string | null;
+  event_keys?: string[] | null;
+}): string[] {
+  const raw = [
+    ...(Array.isArray(input.event_keys) ? input.event_keys : []),
+    input.event_key ?? "",
+  ];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of raw) {
+    const key = String(value ?? "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+    if (out.length >= MAX_CLEAR_KEYS) break;
+  }
+  return out;
+}
+
+export function isClearedHistory(
+  row: Pick<CaseEventRow, "status" | "dismissed_note" | "dismissed_at">,
+): boolean {
+  if (row.status === STATUS_CASE_SUBMITTED) return true;
+  if (row.status !== STATUS_FOUND_OFFSET) return false;
+  const note = String(row.dismissed_note ?? "").trim().toLowerCase();
+  return note === "reconciled" || Boolean(row.dismissed_at);
+}
+
+export function clearReasonLabel(
+  row: Pick<CaseEventRow, "status" | "dismissed_note">,
+): string {
+  const note = String(row.dismissed_note ?? "").trim();
+  if (note === "filed" || note === "reconciled" || note === "not_pursuing") {
+    return CLEAR_REASON_LABELS[note];
+  }
+  if (row.status === STATUS_FOUND_OFFSET) return CLEAR_REASON_LABELS.reconciled;
+  if (note) return note;
+  return CLEAR_REASON_LABELS.filed;
+}
+
 export function isInboundSource(source: string | null | undefined): boolean {
   return source === "inbound_discrepancy" || source === "sellerboard_inbound";
 }
@@ -285,7 +381,7 @@ export function filterInboundAlerts(rows: CaseEventRow[]): CaseEventRow[] {
 }
 
 export function filterSubmittedCases(rows: CaseEventRow[]): CaseEventRow[] {
-  return rows.filter(isCaseSubmitted);
+  return rows.filter(isClearedHistory);
 }
 
 export function isEligibleNeedsCase(row: CaseEventRow): boolean {
@@ -296,7 +392,9 @@ export function normalizeCaseRow(row: CaseEventRow): CaseEventRow {
   const group = reasonGroup(row.reason, row.disposition);
   const shipment = fbaShipmentId(row.shipment_id);
   const kind = shipment ? "inbound_shipment" : "idr_instructions";
-  const url = shipment ? `${SC_INBOUND_SHIPMENT}${shipment}` : null;
+  const url = shipment
+    ? `${SC_INBOUND_SHIPMENT}${shipment}/shipmentEvents`
+    : SC_ELIGIBLE_FOR_CLAIM;
   return {
     ...row,
     reason_group: group,
@@ -375,6 +473,29 @@ export function sortCaseRows(
   });
 }
 
+export function caseKpi(summary: {
+  events: number;
+  units: number;
+  estimated: number;
+  estimatedKnown: boolean;
+}): {
+  primary: number;
+  primaryLabel: typeof KPI_EVENTS_LABEL;
+  units: number;
+  unitsLabel: typeof KPI_UNITS_LABEL;
+  estimated: number;
+  estimatedKnown: boolean;
+} {
+  return {
+    primary: summary.events,
+    primaryLabel: KPI_EVENTS_LABEL,
+    units: summary.units,
+    unitsLabel: KPI_UNITS_LABEL,
+    estimated: summary.estimated,
+    estimatedKnown: summary.estimatedKnown,
+  };
+}
+
 export function summarizeCases(rows: CaseEventRow[]): {
   events: number;
   units: number;
@@ -433,8 +554,8 @@ export function eventQueryBounds(start: string, end: string): { gte: string; lte
 
 export function sellerCentralHref(row: Pick<CaseEventRow, "seller_central_url" | "shipment_id" | "reference_id">): string | null {
   const sid = fbaShipmentId(row.shipment_id);
-  if (sid) return `${SC_INBOUND_SHIPMENT}${sid}`;
-  return null;
+  if (sid) return `${SC_INBOUND_SHIPMENT}${sid}/shipmentEvents`;
+  return SC_ELIGIBLE_FOR_CLAIM;
 }
 
 export function isInboundTrackerLink(row: Pick<CaseEventRow, "shipment_id">): boolean {
@@ -442,7 +563,7 @@ export function isInboundTrackerLink(row: Pick<CaseEventRow, "shipment_id">): bo
 }
 
 export function linkKindLabel(kind: string | null | undefined): string {
-  if (kind === "inbound_shipment") return "Shipment tracker";
+  if (kind === "inbound_shipment") return "Shipment events";
   return IDR_INSTRUCTION;
 }
 

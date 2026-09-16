@@ -5,13 +5,14 @@ import {
   CASE_QUEUE_DEFAULT_DAYS,
   HOW_TO_FILE_INBOUND,
   NEEDS_CASE_HREF,
-  STATUS_CASE_SUBMITTED,
   defaultCaseRange,
   eventQueryBounds,
   filterInboundAlerts,
   inCaseRange,
   isFbaShipmentId,
   normalizeCaseRow,
+  normalizeClearKeys,
+  resolveClearAction,
   type CaseEventRow,
 } from "@/lib/reimbursements-eligible";
 
@@ -100,25 +101,31 @@ export async function GET() {
 /**
  * POST /api/reimbursements/inbound-alerts
  *
- * Dave dismisses an Overview inbound alert after filing. Marks the
- * Needs-case row case_submitted (evidence kept). Never writes to Amazon.
- * Body: { event_key: string, note?: string }
+ * Dave clears a Needs-case row (Overview dismiss or Eligible desk).
+ * Evidence stays. Never writes to Amazon.
+ * Body: { event_key?: string, event_keys?: string[], reason?: string, note?: string }
+ * Reasons: filed → case_submitted, reconciled → found_offset, not_pursuing → case_submitted.
+ * Overview still POSTs { event_key, note: "filed" }.
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json() as { event_key?: string; note?: string };
-    const key = String(body.event_key ?? "").trim();
-    if (!key) {
+    const body = await request.json() as {
+      event_key?: string;
+      event_keys?: string[];
+      reason?: string;
+      note?: string;
+    };
+    const keys = normalizeClearKeys(body);
+    if (!keys.length) {
       return Response.json({ ok: false, error: "event_key required" }, { status: 400 });
     }
-    const note = typeof body.note === "string" ? body.note.trim().slice(0, 400) : "";
+    const action = resolveClearAction({ reason: body.reason, note: body.note });
     const now = new Date().toISOString();
     const sb = getServerSupabase();
-    const { data: existing, error: readError } = await sb
+    const { data: existingRows, error: readError } = await sb
       .from("fba_case_events")
       .select("event_key,status,shipment_id,sku,reason,source")
-      .eq("event_key", key)
-      .maybeSingle();
+      .in("event_key", keys);
     if (readError) {
       if (readError.code === "PGRST205") {
         return Response.json({
@@ -128,45 +135,56 @@ export async function POST(request: NextRequest) {
       }
       throw readError;
     }
-    if (!existing) {
+    const found = new Map(
+      ((existingRows ?? []) as Array<{ event_key: string; status: string; shipment_id: string | null }>)
+        .map((row) => [row.event_key, row]),
+    );
+    const missing = keys.filter((key) => !found.has(key));
+    if (missing.length && keys.length === 1) {
       return Response.json({ ok: false, error: "event not found" }, { status: 404 });
     }
-    const status = String(existing.status ?? "");
-    if (status === "already_reimbursed" || status === "found_offset") {
-      return Response.json({
-        ok: true,
-        persisted: true,
-        event_key: key,
-        status,
-        amazonWrite: false,
-      });
-    }
-    const patch: Record<string, unknown> = {
-      status: STATUS_CASE_SUBMITTED,
-      dismissed_at: now,
-    };
-    if (note) patch.dismissed_note = note;
-    const { error } = await sb
-      .from("fba_case_events")
-      .update(patch)
-      .eq("event_key", key);
-    if (error) {
-      if ((error.message || "").includes("dismissed_at") || error.code === "PGRST204") {
-        const fallback = await sb
-          .from("fba_case_events")
-          .update({ status: STATUS_CASE_SUBMITTED })
-          .eq("event_key", key);
-        if (fallback.error) throw fallback.error;
-      } else {
-        throw error;
+    const cleared: string[] = [];
+    let lastShipment: string | null = null;
+    for (const key of keys) {
+      const existing = found.get(key);
+      if (!existing) continue;
+      const status = String(existing.status ?? "");
+      if (status === "already_reimbursed" || status === "found_offset") {
+        cleared.push(key);
+        continue;
       }
+      const patch: Record<string, unknown> = {
+        status: action.status,
+        dismissed_at: now,
+        dismissed_note: action.note,
+      };
+      const { error } = await sb
+        .from("fba_case_events")
+        .update(patch)
+        .eq("event_key", key);
+      if (error) {
+        if ((error.message || "").includes("dismissed_at") || error.code === "PGRST204") {
+          const fallback = await sb
+            .from("fba_case_events")
+            .update({ status: action.status })
+            .eq("event_key", key);
+          if (fallback.error) throw fallback.error;
+        } else {
+          throw error;
+        }
+      }
+      cleared.push(key);
+      if (isFbaShipmentId(existing.shipment_id)) lastShipment = existing.shipment_id;
     }
     return Response.json({
       ok: true,
       persisted: true,
-      event_key: key,
-      status: STATUS_CASE_SUBMITTED,
-      shipment_id: isFbaShipmentId(existing.shipment_id) ? existing.shipment_id : null,
+      event_key: keys[0],
+      event_keys: keys,
+      cleared: cleared.length,
+      reason: action.reason,
+      status: action.status,
+      shipment_id: lastShipment,
       amazonWrite: false,
     });
   } catch (e) {

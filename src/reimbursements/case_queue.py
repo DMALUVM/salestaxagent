@@ -49,8 +49,11 @@ FBA_SHIPMENT_RE = re.compile(r"^FBA[A-Z0-9]+$", re.IGNORECASE)
 
 SC_SUPPORT_HUB = "https://sellercentral.amazon.com/help/hub/contact-us"
 SC_INBOUND_SHIPMENT = (
-    "https://sellercentral.amazon.com/gp/fba/inbound-shipment-workflow/index.html"
-    "?shipmentId={shipment_id}"
+    "https://sellercentral.amazon.com/fba/inbound-shipment/summary/"
+    "{shipment_id}/shipmentEvents"
+)
+SC_ELIGIBLE_FOR_CLAIM = (
+    "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
 )
 SC_LEDGER_HUB = "https://sellercentral.amazon.com/reportcentral/INVENTORY_LEDGER/1"
 
@@ -66,8 +69,9 @@ SELLER_CENTRAL_LINK_LIMIT = (
     "Only real FBA* shipment IDs link to the inbound shipment tracker. "
     "Ledger reference / transaction IDs (digit strings) are not shipment IDs. "
     "Warehouse damage is filed in IDR (Inventory → Inventory Defect and "
-    "Reimbursement), not via a generic Support hub button. That hub is NOT a "
-    "pre-filled lost-inbound or warehouse case. Dave submits; this desk never auto-files."
+    "Reimbursement) at the Eligible for claim page, not via a generic Support "
+    "hub button. That hub is NOT a pre-filled lost-inbound or warehouse case. "
+    "Dave submits; this desk never auto-files."
 )
 
 IDR_INSTRUCTION = "Open IDR (Inventory → Inventory Defect and Reimbursement)"
@@ -96,7 +100,8 @@ HOW_TO_FILE_STEPS = (
     ),
     (
         "Preferred: Inventory Defect and Reimbursement (IDR)",
-        "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR).",
+        "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR), "
+        "or https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     ),
     (
         "Classic path",
@@ -137,6 +142,10 @@ STATUS_NEEDS_CASE = "needs_case"
 STATUS_ALREADY_REIMBURSED = "already_reimbursed"
 STATUS_FOUND_OFFSET = "found_offset"
 STATUS_CASE_SUBMITTED = "case_submitted"
+
+CLEAR_NOTE_FILED = "filed"
+CLEAR_NOTE_RECONCILED = "reconciled"
+CLEAR_NOTE_NOT_PURSUING = "not_pursuing"
 
 SOURCE_LEDGER = "ledger_adjustment"
 SOURCE_INBOUND = "inbound_discrepancy"
@@ -214,7 +223,7 @@ def seller_central_link(shipment_id: str | None, reference_id: str | None) -> tu
     sid = fba_shipment_id(shipment_id, reference_id)
     if sid:
         return SC_INBOUND_SHIPMENT.format(shipment_id=sid), LINK_KIND_INBOUND
-    return None, LINK_KIND_IDR
+    return SC_ELIGIBLE_FOR_CLAIM, LINK_KIND_IDR
 
 
 def inbound_age_day(ship: dict) -> date | None:
@@ -399,6 +408,367 @@ def inbound_source_key(row: dict) -> tuple[str, str] | None:
     return sid, sku
 
 
+def inbound_match_key(shipment_id: object, sku: object) -> tuple[str, str] | None:
+    """Case-insensitive (FBA shipment, SKU) key. Sellerboard SKUs are mixed case."""
+    sid = fba_shipment_id(str(shipment_id) if shipment_id is not None else None)
+    sku_n = normalize_sku(None if sku is None else str(sku))
+    if not sid or sku_n == "UNKNOWN":
+        return None
+    return sid, sku_n
+
+
+def inbound_live_short(
+    shipped: int | None,
+    received: int | None,
+    quantity_short: int | None = None,
+) -> int | None:
+    """Live short qty. Prefer shipped−received when both exist; else Sellerboard short.
+
+    Missing ship/recv is not a balance. Never invent a short from case ``quantity``.
+    """
+    if shipped is not None and received is not None:
+        return shipped - received
+    return quantity_short
+
+
+def is_inbound_balanced(
+    shipped: int | None,
+    received: int | None,
+    quantity_short: int | None = None,
+) -> bool:
+    short = inbound_live_short(shipped, received, quantity_short)
+    return short is not None and short <= 0
+
+
+def _is_inbound_event(row: dict) -> bool:
+    if row.get("source") in INBOUND_SOURCES:
+        return True
+    return reason_group(row.get("reason"), row.get("disposition")) == "lost_inbound"
+
+
+AMAZON_RECONCILE_BATCH = 5  # large ShipmentIdList batches drop CLOSED headers
+
+
+def _ingest_live_qty_row(out: dict[tuple[str, str], dict], raw: dict) -> None:
+    key = inbound_match_key(raw.get("shipment_id"), raw.get("sku"))
+    if not key:
+        return
+    shipped = _int_or_none(raw.get("quantity_shipped"))
+    received = _int_or_none(raw.get("quantity_received"))
+    short = inbound_live_short(shipped, received, _int_or_none(raw.get("quantity_short")))
+    if shipped is None and received is None and short is None:
+        return
+    out[key] = {
+        "quantity_shipped": shipped,
+        "quantity_received": received,
+        "quantity_short": short,
+    }
+
+
+def collect_live_inbound_qty(
+    sellerboard_rows: Iterable[dict],
+    shipment_items: Iterable[dict],
+    amazon_rows: Iterable[dict] | None = None,
+) -> dict[tuple[str, str], dict]:
+    """Latest shipped/received/short by (FBA id, normalized SKU).
+
+    Priority (last write wins): warehouse SP-API items → Sellerboard →
+    live Amazon inbound v0. Includes balanced rows (short ≤ 0) so a rebuild
+    can mark ``found_offset``. Does not invent qty from case ``quantity``.
+    """
+    out: dict[tuple[str, str], dict] = {}
+    for it in shipment_items:
+        _ingest_live_qty_row(out, it)
+    for raw in sellerboard_rows:
+        _ingest_live_qty_row(out, raw)
+    for raw in amazon_rows or []:
+        _ingest_live_qty_row(out, raw)
+    return out
+
+
+def collect_reconcile_shipment_ids(*row_groups: Iterable[dict]) -> list[str]:
+    """Unique FBA* ids from open inbound Needs-case / Sellerboard rows."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    for rows in row_groups:
+        for row in rows:
+            sid = fba_shipment_id(row.get("shipment_id"))
+            if not sid or sid in seen:
+                continue
+            if not _is_inbound_event(row) and row.get("source") not in INBOUND_SOURCES:
+                continue
+            seen.add(sid)
+            ids.append(sid)
+    return ids
+
+
+def amazon_qty_from_spapi_payloads(
+    shipments: Iterable[dict],
+    items_by_sid: dict[str, list[dict]],
+) -> tuple[list[dict], dict[str, dict]]:
+    """Parse inbound v0 payloads into item rows + shipment-level totals.
+
+    Item SKUs are case-insensitive. Shipment-level totals are used only
+    when Amazon returns ≤1 SKU (or header-only) so we do not invent
+    per-SKU balance on multi-SKU shipments.
+    """
+    rows: list[dict] = []
+    totals: dict[str, dict] = {}
+    for sh in shipments:
+        sid = fba_shipment_id(
+            sh.get("ShipmentId") or sh.get("shipmentId") or sh.get("shipment_id"),
+        )
+        if not sid:
+            continue
+        header_shipped = _int_or_none(
+            sh.get("QuantityShipped") or sh.get("quantityShipped") or sh.get("quantity_shipped"),
+        )
+        header_received = _int_or_none(
+            sh.get("QuantityReceived") or sh.get("quantityReceived") or sh.get("quantity_received"),
+        )
+        items = items_by_sid.get(sid) or []
+        sku_count = 0
+        for it in items:
+            sku = (
+                it.get("SellerSKU")
+                or it.get("sellerSKU")
+                or it.get("sku")
+                or it.get("FulfillmentNetworkSKU")
+            )
+            shipped = _int_or_none(
+                it.get("QuantityShipped") or it.get("quantityShipped") or it.get("quantity_shipped"),
+            )
+            received = _int_or_none(
+                it.get("QuantityReceived") or it.get("quantityReceived") or it.get("quantity_received"),
+            )
+            key = inbound_match_key(sid, sku)
+            if not key or (shipped is None and received is None):
+                continue
+            sku_count += 1
+            rows.append({
+                "shipment_id": sid,
+                "sku": key[1],
+                "quantity_shipped": shipped,
+                "quantity_received": received,
+                "quantity_short": inbound_live_short(shipped, received),
+            })
+        totals[sid] = {
+            "quantity_shipped": header_shipped,
+            "quantity_received": header_received,
+            "quantity_short": inbound_live_short(header_shipped, header_received),
+            "sku_count": sku_count,
+        }
+    return rows, totals
+
+
+def fetch_amazon_inbound_qty(
+    shipment_ids: Iterable[str],
+    *,
+    get_shipments=None,
+    get_items=None,
+    batch_size: int = AMAZON_RECONCILE_BATCH,
+) -> tuple[list[dict], dict[str, dict]]:
+    """Live FBA inbound v0 getShipments(SHIPMENT) + getShipmentItems.
+
+    Batches of 1–5. Large 50-id lists silently return only a few CLOSED
+    headers. No I/O when callables are injected (unit tests).
+    """
+    ids = []
+    seen: set[str] = set()
+    for raw in shipment_ids:
+        sid = fba_shipment_id(raw)
+        if sid and sid not in seen:
+            seen.add(sid)
+            ids.append(sid)
+    if not ids:
+        return [], {}
+    size = max(1, min(int(batch_size or AMAZON_RECONCILE_BATCH), AMAZON_RECONCILE_BATCH))
+    if get_shipments is None or get_items is None:
+        from src.inventory.inbound_shipments import (
+            _get_shipment_items,
+            _get_shipments_by_ids,
+        )
+        if get_shipments is None:
+            get_shipments = _get_shipments_by_ids
+        if get_items is None:
+            get_items = _get_shipment_items
+    shipments: list[dict] = []
+    for i in range(0, len(ids), size):
+        batch = ids[i : i + size]
+        try:
+            shipments.extend(get_shipments(batch) or [])
+        except Exception as e:
+            log.warning("Amazon getShipments batch failed (%s): %s", batch, e)
+    items_by_sid: dict[str, list[dict]] = {}
+    for sh in shipments:
+        sid = fba_shipment_id(
+            sh.get("ShipmentId") or sh.get("shipmentId") or sh.get("shipment_id"),
+        )
+        if not sid or sid in items_by_sid:
+            continue
+        try:
+            items_by_sid[sid] = list(get_items(sid) or [])
+        except Exception as e:
+            log.warning("Amazon getShipmentItems failed for %s: %s", sid, e)
+            items_by_sid[sid] = []
+    return amazon_qty_from_spapi_payloads(shipments, items_by_sid)
+
+
+def _mark_inbound_found_offset(row: dict, info: dict | None = None) -> dict:
+    out = dict(row)
+    if info:
+        if info.get("quantity_shipped") is not None:
+            out["quantity_shipped"] = info["quantity_shipped"]
+        if info.get("quantity_received") is not None:
+            out["quantity_received"] = info["quantity_received"]
+    out["quantity"] = 0
+    if out.get("status") != STATUS_ALREADY_REIMBURSED:
+        out["status"] = STATUS_FOUND_OFFSET
+    if not out.get("dismissed_note"):
+        out["dismissed_note"] = CLEAR_NOTE_RECONCILED
+    return out
+
+
+def apply_inbound_balance(
+    events: list[dict],
+    live: dict[tuple[str, str], dict],
+    existing: Iterable[dict] | None = None,
+    shipment_totals: dict[str, dict] | None = None,
+) -> list[dict]:
+    """Refresh inbound ship/recv and clear Needs case when live short ≤ 0.
+
+    Evidence stays (status ``found_offset``). Does not invent balanced
+    shipments — only clears when Amazon/Sellerboard or stored ship/recv
+    show shipped ≤ received or ``quantity_short <= 0``. Case-insensitive SKU.
+    Amazon shipment-level totals apply only for single-SKU shipments.
+    Auto-reconcile does not set ``dismissed_at`` so a later short can reopen.
+    """
+    existing_list = list(existing or [])
+    totals = shipment_totals or {}
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def _skus_for_sid(sid: str) -> set[str]:
+        skus: set[str] = set()
+        for row in list(events) + existing_list:
+            key = inbound_match_key(row.get("shipment_id"), row.get("sku"))
+            if key and key[0] == sid:
+                skus.add(key[1])
+        return skus
+
+    def _shipment_fallback(sid: str) -> dict | None:
+        tot = totals.get(sid)
+        if not tot:
+            return None
+        sku_count = tot.get("sku_count")
+        try:
+            n = int(sku_count) if sku_count is not None else 0
+        except (TypeError, ValueError):
+            n = 0
+        if n > 1:
+            return None
+        if n == 0 and len(_skus_for_sid(sid)) != 1:
+            return None
+        shipped = _int_or_none(tot.get("quantity_shipped"))
+        received = _int_or_none(tot.get("quantity_received"))
+        short = inbound_live_short(shipped, received, _int_or_none(tot.get("quantity_short")))
+        if shipped is None and received is None and short is None:
+            return None
+        return {
+            "quantity_shipped": shipped,
+            "quantity_received": received,
+            "quantity_short": short,
+        }
+
+    def _refresh(row: dict) -> dict:
+        rec = dict(row)
+        key = inbound_match_key(rec.get("shipment_id"), rec.get("sku"))
+        info = live.get(key) if key else None
+        if not info and key:
+            info = _shipment_fallback(key[0])
+        if info:
+            if info.get("quantity_shipped") is not None:
+                rec["quantity_shipped"] = info["quantity_shipped"]
+            if info.get("quantity_received") is not None:
+                rec["quantity_received"] = info["quantity_received"]
+        if not _is_inbound_event(rec):
+            return rec
+        shipped = _int_or_none(rec.get("quantity_shipped"))
+        received = _int_or_none(rec.get("quantity_received"))
+        live_short = info.get("quantity_short") if info else None
+        short = inbound_live_short(shipped, received, live_short)
+        if short is not None and short <= 0:
+            return _mark_inbound_found_offset(rec, info)
+        if short is not None and rec.get("status") != STATUS_FOUND_OFFSET:
+            rec["quantity"] = short
+        return rec
+
+    for ev in events:
+        row = _refresh(ev)
+        out.append(row)
+        key = str(row.get("event_key") or "").strip()
+        if key:
+            seen.add(key)
+
+    for prior in existing_list:
+        if prior.get("status") not in (
+            STATUS_NEEDS_CASE, STATUS_CASE_SUBMITTED, STATUS_FOUND_OFFSET,
+        ):
+            continue
+        if not _is_inbound_event(prior):
+            continue
+        match = inbound_match_key(prior.get("shipment_id"), prior.get("sku"))
+        ek = str(prior.get("event_key") or "").strip()
+        if match:
+            ek = ek or inbound_event_key(match[0], match[1])
+        if not ek or ek in seen:
+            continue
+        info = live.get(match) if match else None
+        if not info and match:
+            info = _shipment_fallback(match[0])
+        shipped = (info or {}).get("quantity_shipped")
+        if shipped is None:
+            shipped = _int_or_none(prior.get("quantity_shipped"))
+        received = (info or {}).get("quantity_received")
+        if received is None:
+            received = _int_or_none(prior.get("quantity_received"))
+        short = inbound_live_short(
+            shipped,
+            received,
+            (info or {}).get("quantity_short"),
+        )
+        row = dict(prior)
+        row["event_key"] = ek
+        if match:
+            row["shipment_id"] = match[0]
+            row["sku"] = match[1]
+        row["reason"] = row.get("reason") or "Lost_Inbound"
+        row["reason_group"] = "lost_inbound"
+        if short is not None and short <= 0:
+            out.append(_mark_inbound_found_offset(row, {
+                "quantity_shipped": shipped,
+                "quantity_received": received,
+                "quantity_short": short,
+            }))
+            seen.add(ek)
+            continue
+        if (
+            prior.get("status") == STATUS_FOUND_OFFSET
+            and short is not None
+            and short > 0
+            and not prior.get("dismissed_at")
+        ):
+            row["quantity"] = short
+            row["status"] = STATUS_NEEDS_CASE
+            if shipped is not None:
+                row["quantity_shipped"] = shipped
+            if received is not None:
+                row["quantity_received"] = received
+            out.append(row)
+            seen.add(ek)
+    return out
+
+
 def merge_inbound_sources(
     spapi: Iterable[dict],
     sellerboard: Iterable[dict],
@@ -444,14 +814,21 @@ def preserve_submitted_status(
     events: list[dict],
     existing: Iterable[dict],
 ) -> list[dict]:
-    """Keep Dave's case_submitted dismiss across Mini rebuilds.
+    """Keep Dave's case_submitted / manual reconciled dismiss across Mini rebuilds.
 
-    Paid / found-offset wins. New event_keys (new shipment) stay Needs case.
+    Paid / live found-offset wins. Auto-reconcile (found_offset without
+    dismissed_at) is recomputed each sync so a later short can reopen.
+    New event_keys (new shipment) stay Needs case.
     """
     prior: dict[str, dict] = {}
     for row in existing:
         key = str(row.get("event_key") or "").strip()
-        if key and row.get("status") == STATUS_CASE_SUBMITTED:
+        if not key:
+            continue
+        status = row.get("status")
+        if status == STATUS_CASE_SUBMITTED:
+            prior[key] = row
+        elif status == STATUS_FOUND_OFFSET and row.get("dismissed_at"):
             prior[key] = row
     out: list[dict] = []
     for ev in events:
@@ -459,9 +836,62 @@ def preserve_submitted_status(
         key = str(row.get("event_key") or "").strip()
         saved = prior.get(key)
         if saved and row.get("status") == STATUS_NEEDS_CASE:
-            row["status"] = STATUS_CASE_SUBMITTED
+            row["status"] = saved.get("status") or STATUS_CASE_SUBMITTED
             row["dismissed_at"] = saved.get("dismissed_at")
             row["dismissed_note"] = saved.get("dismissed_note")
+        out.append(row)
+    return out
+
+
+def preserve_found_offset_unless_amazon_short(
+    events: list[dict],
+    existing: Iterable[dict],
+    amazon_live: dict[tuple[str, str], dict] | None = None,
+    amazon_totals: dict[str, dict] | None = None,
+) -> list[dict]:
+    """Keep Amazon-cleared found_offset rows across Sellerboard upserts.
+
+    Reopen only when live Amazon short > 0. Missing Amazon data must not
+    let a stale Sellerboard short revive last night's 24 balanced IDs.
+    Manual dismiss (dismissed_at) still wins via preserve_submitted_status.
+    """
+    prior: dict[str, dict] = {}
+    for row in existing:
+        key = str(row.get("event_key") or "").strip()
+        if key and row.get("status") == STATUS_FOUND_OFFSET:
+            prior[key] = row
+    if not prior:
+        return events
+    live = amazon_live or {}
+    totals = amazon_totals or {}
+    out: list[dict] = []
+    for ev in events:
+        row = dict(ev)
+        saved = prior.get(str(row.get("event_key") or "").strip())
+        if saved and row.get("status") not in (
+            STATUS_ALREADY_REIMBURSED, STATUS_CASE_SUBMITTED, STATUS_FOUND_OFFSET,
+        ):
+            match = inbound_match_key(row.get("shipment_id"), row.get("sku"))
+            info = live.get(match) if match else None
+            if not info and match:
+                tot = totals.get(match[0]) or {}
+                try:
+                    sku_count = int(tot.get("sku_count") or 0)
+                except (TypeError, ValueError):
+                    sku_count = 0
+                if sku_count <= 1:
+                    info = tot or None
+            short = None
+            if info:
+                short = inbound_live_short(
+                    _int_or_none(info.get("quantity_shipped")),
+                    _int_or_none(info.get("quantity_received")),
+                    _int_or_none(info.get("quantity_short")),
+                )
+            if short is None or short <= 0:
+                row = _mark_inbound_found_offset(row, info)
+                if saved.get("dismissed_note"):
+                    row["dismissed_note"] = saved.get("dismissed_note")
         out.append(row)
     return out
 
@@ -740,15 +1170,21 @@ def build_case_events(
     as_of: date | None = None,
     sellerboard_rows: Iterable[dict] | None = None,
     existing_events: Iterable[dict] | None = None,
+    amazon_inbound_rows: Iterable[dict] | None = None,
+    amazon_shipment_totals: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Pure builder — no I/O. Returns rows ready for fba_case_events."""
     as_of = as_of or end
     adj_list = list(adjustments)
     paid_list = list(reimbursements)
     existing_list = list(existing_events or [])
+    items_list = list(shipment_items)
+    sb_live = list(sellerboard_rows or [])
+    amazon_rows = list(amazon_inbound_rows or [])
+    live_qty = collect_live_inbound_qty(sb_live, items_list, amazon_rows)
     ledger = adjustment_candidates(adj_list, start, end)
-    spapi_inbound = inbound_discrepancies(shipments, shipment_items, as_of, start, end)
-    sb_raw = list(sellerboard_rows or []) + existing_sellerboard_rows(existing_list)
+    spapi_inbound = inbound_discrepancies(shipments, items_list, as_of, start, end)
+    sb_raw = sb_live + existing_sellerboard_rows(existing_list)
     sb_inbound = sellerboard_inbound_discrepancies(sb_raw, as_of, start, end)
     inbound = merge_inbound_sources(spapi_inbound, sb_inbound)
     # Prefer inbound row when the same FBA id + SKU also appears as Lost_Inbound
@@ -761,6 +1197,13 @@ def build_case_events(
             continue
         ledger_kept.append(ev)
     merged = apply_found_offsets(ledger_kept + inbound, found_offsets(adj_list))
+    merged = apply_inbound_balance(
+        merged, live_qty, existing_list, amazon_shipment_totals,
+    )
+    amazon_only = collect_live_inbound_qty([], [], amazon_rows)
+    merged = preserve_found_offset_unless_amazon_short(
+        merged, existing_list, amazon_only, amazon_shipment_totals,
+    )
     merged = _enrich_asin(merged, adj_list, paid_list)
     out = apply_paid_dedupe(merged, paid_list)
     out = preserve_submitted_status(out, existing_list)
@@ -936,6 +1379,15 @@ def sync_case_queue(
         log.warning("fba_reimbursements unavailable: %s", e)
         paid = []
 
+    amazon_rows: list[dict] = []
+    amazon_totals: dict[str, dict] = {}
+    amazon_ids = collect_reconcile_shipment_ids(existing_events, sellerboard)
+    if amazon_ids:
+        try:
+            amazon_rows, amazon_totals = fetch_amazon_inbound_qty(amazon_ids)
+        except Exception as e:
+            log.warning("Amazon inbound reconcile fetch failed: %s", e)
+
     events = build_case_events(
         adjustments=adjustments,
         shipments=shipments,
@@ -946,6 +1398,8 @@ def sync_case_queue(
         as_of=end,
         sellerboard_rows=sellerboard,
         existing_events=existing_events,
+        amazon_inbound_rows=amazon_rows,
+        amazon_shipment_totals=amazon_totals,
     )
     negatives = negative_adjustments_in_window(adjustments, start, end)
     qa = evaluate_queue_qa(
@@ -974,6 +1428,8 @@ def sync_case_queue(
         "qa": qa,
         "mini_resync": MINI_RESYNC_HINT,
         "orphans_purged": 0,
+        "amazon_reconcile_ids": len(amazon_ids),
+        "amazon_reconcile_rows": len(amazon_rows),
     }
     if dry_run:
         summary["events"] = stamped

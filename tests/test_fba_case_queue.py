@@ -29,11 +29,20 @@ from src.reimbursements.case_queue import (
     STATUS_CASE_SUBMITTED,
     STATUS_FOUND_OFFSET,
     STATUS_NEEDS_CASE,
+    AMAZON_RECONCILE_BATCH,
+    amazon_qty_from_spapi_payloads,
+    apply_inbound_balance,
     apply_paid_dedupe,
     build_case_events,
+    collect_live_inbound_qty,
+    collect_reconcile_shipment_ids,
+    fetch_amazon_inbound_qty,
     inbound_discrepancies,
+    inbound_live_short,
+    inbound_match_key,
     inbound_ready,
     is_active_inbound_alert,
+    is_inbound_balanced,
     merge_inbound_sources,
     preserve_submitted_status,
     reason_group,
@@ -293,13 +302,13 @@ def test_inbound_and_ledger_lost_inbound_dedupe_to_one_row():
 
 def test_seller_central_links_are_honest():
     url, kind = seller_central_link("FBA16ABCDE", None)
-    assert url is not None and "inbound-shipment-workflow" in url
+    assert url is not None and "fba/inbound-shipment/summary/FBA16ABCDE/shipmentEvents" in url
     assert kind == "inbound_shipment"
     url, kind = seller_central_link(None, "not-an-fba")
-    assert url is None
+    assert url == "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
     assert kind == LINK_KIND_IDR
     url, kind = seller_central_link(None, "20080126439780")
-    assert url is None
+    assert url == "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
     assert kind == LINK_KIND_IDR
 
 
@@ -338,7 +347,7 @@ def test_reese_package_contract():
         "shipment_id": "FBA16BBB",
         "status": STATUS_NEEDS_CASE,
         "estimated_amount": 18.0,
-        "seller_central_url": "https://sellercentral.amazon.com/gp/fba/inbound-shipment-workflow/index.html?shipmentId=FBA16BBB",
+        "seller_central_url": "https://sellercentral.amazon.com/fba/inbound-shipment/summary/FBA16BBB/shipmentEvents",
         "seller_central_link_kind": "inbound_shipment",
     }]
     pkg = build_case_package(
@@ -382,6 +391,8 @@ def test_window_and_worker_wiring():
     queue_src = Path(__file__).resolve().parent.parent.joinpath("src/reimbursements/case_queue.py").read_text()
     assert "sellerboard_inbound_discrepancies" in queue_src
     assert "SOURCE_SELLERBOARD" in queue_src
+    assert "fetch_amazon_inbound_qty" in queue_src
+    assert "AMAZON_RECONCILE_BATCH" in queue_src
 
 
 def test_sellerboard_closed_short_becomes_lost_inbound():
@@ -626,6 +637,505 @@ def test_inbound_howto_mentions_sellerboard_closed():
     assert "Sellerboard CLOSED" in HOW_TO_FILE_INBOUND
     assert "shipment tracker" in HOW_TO_FILE_INBOUND.lower() or "FBA*" in HOW_TO_FILE_INBOUND
     assert "Reference ID" in HOW_TO_FILE_INBOUND
+
+
+def test_inbound_match_key_is_case_insensitive():
+    assert inbound_match_key("FBA19K98F8VN", "DDPE0001Shop") == (
+        "FBA19K98F8VN",
+        "DDPE0001SHOP",
+    )
+    assert inbound_match_key("fba19k98f8vn", "ddpe0001shop") == inbound_match_key(
+        "FBA19K98F8VN", "DDPE0001SHOP",
+    )
+    assert inbound_live_short(540, 540, 2) == 0
+    assert inbound_live_short(None, None, 0) == 0
+    assert inbound_live_short(None, None, None) is None
+    assert is_inbound_balanced(540, 540) is True
+    assert is_inbound_balanced(540, 538) is False
+    assert is_inbound_balanced(None, None, None) is False
+
+
+def test_balanced_sellerboard_reconciles_needs_case_casefold_sku():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19BALANCED",
+            "sku": "DDPE0001Shop",
+            "asin": "B0CLFSGG49",
+            "fulfillment_center": "HGR6",
+            "quantity_shipped": 540,
+            "quantity_received": 540,
+            "quantity_short": 0,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+        }],
+        existing_events=[{
+            "event_key": "inbound|FBA19BALANCED|DDPE0001SHOP",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "DDPE0001SHOP",
+            "asin": "B0CLFSGG49",
+            "quantity": 2,
+            "quantity_shipped": 540,
+            "quantity_received": 538,
+            "reason": "Lost_Inbound",
+            "reason_group": "lost_inbound",
+            "fulfillment_center": "HGR6",
+            "shipment_id": "FBA19BALANCED",
+            "status": STATUS_NEEDS_CASE,
+        }],
+    )
+    row = next(e for e in events if e["event_key"] == "inbound|FBA19BALANCED|DDPE0001SHOP")
+    assert row["status"] == STATUS_FOUND_OFFSET
+    assert row["quantity"] == 0
+    assert row["quantity_shipped"] == 540
+    assert row["quantity_received"] == 540
+    assert row["dismissed_note"] == "reconciled"
+    assert row.get("dismissed_at") in (None, "")
+    assert is_active_inbound_alert(row) is False
+
+
+def test_still_short_stays_needs_case_and_refreshes_qty():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19SHORT",
+            "sku": "DDPE0001Shop",
+            "fulfillment_center": "LBE1",
+            "quantity_shipped": 540,
+            "quantity_received": 538,
+            "quantity_short": 2,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+        }],
+        existing_events=[{
+            "event_key": "inbound|FBA19SHORT|DDPE0001SHOP",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "DDPE0001SHOP",
+            "quantity": 77,
+            "quantity_shipped": 540,
+            "quantity_received": 463,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19SHORT",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "LBE1",
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19SHORT")
+    assert row["status"] == STATUS_NEEDS_CASE
+    assert row["quantity"] == 2
+    assert row["quantity_received"] == 538
+
+
+def test_does_not_invent_balance_without_ship_recv_or_live_short():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        existing_events=[{
+            "event_key": "inbound|FBA19OPEN|SKU-C",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "SKU-C",
+            "quantity": 3,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19OPEN",
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "SMF3",
+        }],
+    )
+    needs = [e for e in events if e["status"] == STATUS_NEEDS_CASE]
+    assert len(needs) == 1
+    assert needs[0]["quantity"] == 3
+
+
+def test_stored_540_540_reconciles_without_sellerboard_row():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        existing_events=[{
+            "event_key": "inbound|FBA19EVEN|SKU-C",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "SKU-C",
+            "quantity": 2,
+            "quantity_shipped": 540,
+            "quantity_received": 540,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19EVEN",
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "SMF3",
+        }],
+    )
+    row = next(e for e in events if e["event_key"] == "inbound|FBA19EVEN|SKU-C")
+    assert row["status"] == STATUS_FOUND_OFFSET
+    assert row["quantity"] == 0
+    assert is_active_inbound_alert(row) is False
+
+
+def test_apply_inbound_balance_does_not_touch_warehouse_damage():
+    live = collect_live_inbound_qty([], [])
+    out = apply_inbound_balance(
+        [{
+            "event_key": "adj|e",
+            "source": "ledger_adjustment",
+            "sku": "SKU-B",
+            "reason": "E",
+            "quantity": 1,
+            "status": STATUS_NEEDS_CASE,
+        }],
+        live,
+        [],
+    )
+    assert out[0]["status"] == STATUS_NEEDS_CASE
+    assert out[0]["quantity"] == 1
+
+
+def test_manual_reconcile_persists_auto_balance_does_not_block_reopen():
+    out = preserve_submitted_status(
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "status": STATUS_NEEDS_CASE,
+            "quantity": 2,
+        }],
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "status": STATUS_FOUND_OFFSET,
+            "dismissed_at": "2026-09-15T12:00:00Z",
+            "dismissed_note": "reconciled",
+        }],
+    )
+    assert out[0]["status"] == STATUS_FOUND_OFFSET
+    auto = preserve_submitted_status(
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "status": STATUS_NEEDS_CASE,
+            "quantity": 2,
+        }],
+        [{
+            "event_key": "inbound|FBA1|SKU-A",
+            "status": STATUS_FOUND_OFFSET,
+            "dismissed_note": "reconciled",
+        }],
+    )
+    assert auto[0]["status"] == STATUS_NEEDS_CASE
+
+
+def test_amazon_live_wins_over_sellerboard_short():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19CT9WXRX",
+            "sku": "DDPE0001Shop",
+            "quantity_shipped": 540,
+            "quantity_received": 538,
+            "quantity_short": 2,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+            "fulfillment_center": "HGR6",
+        }],
+        existing_events=[{
+            "event_key": "inbound|FBA19CT9WXRX|DDPE0001SHOP",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "DDPE0001SHOP",
+            "quantity": 2,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19CT9WXRX",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "HGR6",
+        }],
+        amazon_inbound_rows=[{
+            "shipment_id": "FBA19CT9WXRX",
+            "sku": "DDPE0001Shop",
+            "quantity_shipped": 540,
+            "quantity_received": 540,
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19CT9WXRX")
+    assert row["status"] == STATUS_FOUND_OFFSET
+    assert row["quantity"] == 0
+    assert row["quantity_received"] == 540
+
+
+def test_amazon_over_receive_is_balanced():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        existing_events=[{
+            "event_key": "inbound|FBA19CT7HCZQ|DDPE0001SHOP",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "DDPE0001SHOP",
+            "quantity": 2,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19CT7HCZQ",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "SMF3",
+        }],
+        amazon_inbound_rows=[{
+            "shipment_id": "FBA19CT7HCZQ",
+            "sku": "DDPE0001SHOP",
+            "quantity_shipped": 540,
+            "quantity_received": 541,
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19CT7HCZQ")
+    assert row["status"] == STATUS_FOUND_OFFSET
+    assert row["quantity"] == 0
+
+
+def test_amazon_still_short_keeps_needs_case():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19L1VXQVZ",
+            "sku": "DDPE0001SHOP",
+            "quantity_shipped": 540,
+            "quantity_received": 540,
+            "quantity_short": 0,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+        }],
+        existing_events=[{
+            "event_key": "inbound|FBA19L1VXQVZ|DDPE0001SHOP",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "DDPE0001SHOP",
+            "quantity": 2,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19L1VXQVZ",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "LBE1",
+        }],
+        amazon_inbound_rows=[{
+            "shipment_id": "FBA19L1VXQVZ",
+            "sku": "ddpe0001shop",
+            "quantity_shipped": 540,
+            "quantity_received": 538,
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19L1VXQVZ")
+    assert row["status"] == STATUS_NEEDS_CASE
+    assert row["quantity"] == 2
+    assert row["quantity_received"] == 538
+
+
+def test_shipment_level_single_sku_header_clears():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        existing_events=[{
+            "event_key": "inbound|FBA19CP0DTJV|SKU-A",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "SKU-A",
+            "quantity": 3,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19CP0DTJV",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "ONT8",
+        }],
+        amazon_shipment_totals={
+            "FBA19CP0DTJV": {
+                "quantity_shipped": 45,
+                "quantity_received": 45,
+                "quantity_short": 0,
+                "sku_count": 0,
+            },
+        },
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19CP0DTJV")
+    assert row["status"] == STATUS_FOUND_OFFSET
+    assert row["quantity_shipped"] == 45
+
+
+def test_shipment_level_does_not_invent_on_multi_sku():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        existing_events=[{
+            "event_key": "inbound|FBA19MULTI|SKU-A",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "SKU-A",
+            "quantity": 2,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19MULTI",
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "ONT8",
+        }, {
+            "event_key": "inbound|FBA19MULTI|SKU-B",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "SKU-B",
+            "quantity": 2,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19MULTI",
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "ONT8",
+        }],
+        amazon_shipment_totals={
+            "FBA19MULTI": {
+                "quantity_shipped": 10,
+                "quantity_received": 10,
+                "quantity_short": 0,
+                "sku_count": 0,
+            },
+        },
+    )
+    needs = [e for e in events if e["status"] == STATUS_NEEDS_CASE]
+    assert len(needs) == 2
+
+
+def test_amazon_payload_parse_and_fetch_batches():
+    assert 1 <= AMAZON_RECONCILE_BATCH <= 5
+    rows, totals = amazon_qty_from_spapi_payloads(
+        [{"ShipmentId": "FBA19DGCW81X", "QuantityShipped": 540, "QuantityReceived": 540}],
+        {"FBA19DGCW81X": [{
+            "SellerSKU": "DDPE0001Shop",
+            "QuantityShipped": 540,
+            "QuantityReceived": 540,
+        }]},
+    )
+    assert rows[0]["sku"] == "DDPE0001SHOP"
+    assert rows[0]["quantity_short"] == 0
+    assert totals["FBA19DGCW81X"]["sku_count"] == 1
+    batches: list[list[str]] = []
+
+    def get_ships(batch):
+        batches.append(list(batch))
+        return [{"ShipmentId": batch[0], "QuantityShipped": 45, "QuantityReceived": 45}]
+
+    def get_items(sid):
+        return [{"SellerSKU": "SKU-A", "QuantityShipped": 45, "QuantityReceived": 45}]
+
+    ids = [f"FBA19BAT{i:02d}XXXX" for i in range(12)]
+    fetch_amazon_inbound_qty(ids, get_shipments=get_ships, get_items=get_items)
+    assert batches
+    assert all(1 <= len(b) <= 5 for b in batches)
+    assert collect_reconcile_shipment_ids([{
+        "shipment_id": "FBA19CP0DTJV",
+        "sku": "SKU-A",
+        "source": SOURCE_SELLERBOARD,
+        "reason": "Lost_Inbound",
+        "status": STATUS_NEEDS_CASE,
+    }]) == ["FBA19CP0DTJV"]
+
+
+def test_sellerboard_short_does_not_reopen_amazon_found_offset():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19CT9WXRX",
+            "sku": "DDPE0001SHOP",
+            "quantity_shipped": 540,
+            "quantity_received": 538,
+            "quantity_short": 2,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+        }],
+        existing_events=[{
+            "event_key": "inbound|FBA19CT9WXRX|DDPE0001SHOP",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "DDPE0001SHOP",
+            "quantity": 0,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19CT9WXRX",
+            "status": STATUS_FOUND_OFFSET,
+            "dismissed_note": "reconciled",
+            "fulfillment_center": "HGR6",
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19CT9WXRX")
+    assert row["status"] == STATUS_FOUND_OFFSET
+    assert row["quantity"] == 0
+
+
+def test_amazon_short_reopens_auto_found_offset():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+        existing_events=[{
+            "event_key": "inbound|FBA19L1VXQVZ|DDPE0001SHOP",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": "DDPE0001SHOP",
+            "quantity": 0,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19L1VXQVZ",
+            "status": STATUS_FOUND_OFFSET,
+            "dismissed_note": "reconciled",
+            "fulfillment_center": "LBE1",
+        }],
+        amazon_inbound_rows=[{
+            "shipment_id": "FBA19L1VXQVZ",
+            "sku": "DDPE0001SHOP",
+            "quantity_shipped": 540,
+            "quantity_received": 538,
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19L1VXQVZ")
+    assert row["status"] == STATUS_NEEDS_CASE
+    assert row["quantity"] == 2
 
 
 def test_deprecated_adjustments_report_is_not_the_source():

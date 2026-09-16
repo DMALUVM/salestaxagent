@@ -10,6 +10,7 @@ import {
   CASE_QUEUE_SOURCE_NOTE,
   CASE_QUEUE_SOURCES,
   CLASSIFICATION_VERSION,
+  CLEAR_REASON_LABELS,
   HOW_TO_FILE_INBOUND,
   HOW_TO_FILE_INBOUND_STEPS,
   HOW_TO_FILE_INTRO,
@@ -17,6 +18,8 @@ import {
   HOW_TO_FILE_STEPS,
   HOW_TO_FILE_TITLE,
   IDR_INSTRUCTION,
+  KPI_EVENTS_LABEL,
+  KPI_UNITS_LABEL,
   NEEDS_CASE_HREF,
   NO_INBOUND_DISCREPANCIES,
   NOTIFY_BLOCK_COPY,
@@ -25,8 +28,12 @@ import {
   REESE_PACKAGE_CONTRACT,
   SELLER_CENTRAL_LINK_LIMIT,
   STATUS_CASE_SUBMITTED,
+  STATUS_FOUND_OFFSET,
   apiUrl,
   buildReesePackage,
+  caseKpi,
+  clearReasonLabel,
+  clearResultMessage,
   defaultCaseRange,
   evaluateCaseQa,
   fbaShipmentId,
@@ -37,13 +44,17 @@ import {
   inCaseRange,
   inboundEmptyCopy,
   isActiveInboundAlert,
+  isClearedHistory,
   isFbaShipmentId,
   isNeedsCase,
   normalizeCaseRow,
+  normalizeClearKeys,
   notifyGateErrors,
+  parseClearReason,
   reasonGroup,
   reasonLabel,
   recentNeedsCase,
+  resolveClearAction,
   searchCaseRows,
   sellerCentralHref,
   sortCaseRows,
@@ -116,6 +127,12 @@ describe("needs-case vs paid", () => {
     assert.equal(s.groups.lost_inbound.units, 3);
     assert.equal(s.groups.warehouse_damage.units, 1);
     assert.equal(s.estimatedKnown, true);
+    const kpi = caseKpi(s);
+    assert.equal(kpi.primary, 2);
+    assert.equal(kpi.primaryLabel, KPI_EVENTS_LABEL);
+    assert.equal(kpi.units, 4);
+    assert.equal(kpi.unitsLabel, KPI_UNITS_LABEL);
+    assert.notEqual(kpi.primary, kpi.units);
   });
 
   test("default window is 90 closed LA days", () => {
@@ -153,15 +170,15 @@ describe("needs-case vs paid", () => {
   test("Seller Central href is FBA tracker only — digit refs are not shipments", () => {
     assert.equal(
       sellerCentralHref({ seller_central_url: "https://sellercentral.amazon.com/help/hub/contact-us" }),
-      null,
+      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     );
     assert.match(
       sellerCentralHref({ seller_central_url: null, shipment_id: "FBA16ABCDE" }) ?? "",
-      /inbound-shipment-workflow.*FBA16ABCDE/,
+      /fba\/inbound-shipment\/summary\/FBA16ABCDE\/shipmentEvents/,
     );
     assert.equal(
       sellerCentralHref({ seller_central_url: null, shipment_id: null, reference_id: "20080126439780" }),
-      null,
+      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     );
     assert.equal(isFbaShipmentId("20080126439780"), false);
     assert.equal(fbaShipmentId(null, "20080126439780"), null);
@@ -211,7 +228,10 @@ describe("needs-case vs paid", () => {
     assert.equal(stale.reason_group, "lost_warehouse");
     assert.equal(stale.shipment_id, null);
     assert.equal(stale.seller_central_link_kind, "idr_instructions");
-    assert.equal(stale.seller_central_url, null);
+    assert.equal(
+      stale.seller_central_url,
+      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+    );
   });
 
   test("notify gate refuses unknown / missing FC / outdated classification", () => {
@@ -261,7 +281,7 @@ describe("Reese package + page contract", () => {
           reason: "Lost_Inbound",
           reason_group: "lost_inbound",
           shipment_id: "FBA1",
-          seller_central_url: "https://sellercentral.amazon.com/gp/fba/inbound-shipment-workflow/index.html?shipmentId=FBA1",
+          seller_central_url: "https://sellercentral.amazon.com/fba/inbound-shipment/summary/FBA1/shipmentEvents",
           estimated_amount: 20,
         }),
         row({
@@ -318,6 +338,9 @@ describe("Reese package + page contract", () => {
     assert.match(ui, /HOW_TO_FILE_TITLE/);
     assert.doesNotMatch(ui, /Support \(manual\)/);
     assert.doesNotMatch(ui, /help\/hub\/contact-us/);
+    assert.doesNotMatch(ui, /inbound-shipment-workflow/);
+    assert.match(ui, /Eligible for claim/);
+    assert.match(ui, /shipmentEvents|SC_ELIGIBLE_FOR_CLAIM/);
     assert.doesNotMatch(ui, /FC \/ Shipment/);
     assert.doesNotMatch(ui, /shipment_id \|\| r\.reference_id/);
     assert.match(notify, /status:\s*422/);
@@ -376,12 +399,20 @@ describe("Reese package + page contract", () => {
     assert.match(ui, /HOW_TO_FILE_INBOUND/);
     assert.match(ui, /Shipped/);
     assert.match(ui, /Received/);
+    assert.match(ui, /Clear \/ Mark submitted/);
+    assert.match(ui, /Clear selected/);
+    assert.match(ui, /KPI_UNITS_LABEL/);
+    assert.match(ui, /caseKpi/);
+    assert.doesNotMatch(ui, /fmt\(summary\.units\)/);
     assert.match(ui, /HOW_TO_FILE_INBOUND/);
     assert.match(page, /does not auto-file/);
     const alertsApi = readFileSync(path.join(here, "../app/api/reimbursements/inbound-alerts/route.ts"), "utf8");
     assert.doesNotMatch(alertsApi, /sellerboard\.(com|io)|oauth/i);
     assert.match(alertsApi, /fba_case_events/);
     assert.match(alertsApi, /case_submitted/);
+    assert.match(alertsApi, /found_offset/);
+    assert.match(alertsApi, /event_keys/);
+    assert.match(alertsApi, /resolveClearAction/);
     assert.match(alertsApi, /amazonWrite:\s*false/);
     const overview = readFileSync(path.join(here, "../app/page.tsx"), "utf8");
     assert.match(overview, /InboundDiscrepancyAlerts/);
@@ -468,5 +499,43 @@ describe("inbound alerts + dismiss", () => {
     const open = filterInboundAlerts([dismissed, fresh]);
     assert.deepEqual(open.map((r) => r.shipment_id), ["FBA19NEW"]);
     assert.equal(NEEDS_CASE_HREF, "/reimbursements?tab=eligible");
+  });
+
+  test("clear reasons map to existing statuses; Overview note=filed stays compatible", () => {
+    assert.equal(parseClearReason("filed"), "filed");
+    assert.deepEqual(resolveClearAction({ note: "filed" }), {
+      reason: "filed",
+      status: STATUS_CASE_SUBMITTED,
+      note: "filed",
+    });
+    assert.deepEqual(resolveClearAction({ reason: "reconciled" }), {
+      reason: "reconciled",
+      status: STATUS_FOUND_OFFSET,
+      note: "reconciled",
+    });
+    assert.deepEqual(resolveClearAction({ reason: "not_pursuing" }), {
+      reason: "not_pursuing",
+      status: STATUS_CASE_SUBMITTED,
+      note: "not_pursuing",
+    });
+    assert.deepEqual(normalizeClearKeys({ event_key: "a", event_keys: ["b", "a"] }), ["b", "a"]);
+    assert.equal(clearResultMessage("filed"), "Marked submitted — row kept in history. No Amazon write.");
+    const reconciled = row({
+      event_key: "in|FBA1|SKU",
+      event_date: "2026-08-01",
+      status: STATUS_FOUND_OFFSET,
+      dismissed_note: "reconciled",
+      quantity: 0,
+    });
+    const ledgerFound = row({
+      event_key: "adj|found",
+      event_date: "2026-08-01",
+      status: STATUS_FOUND_OFFSET,
+      quantity: 0,
+    });
+    assert.equal(isClearedHistory(reconciled), true);
+    assert.equal(isClearedHistory(ledgerFound), false);
+    assert.equal(filterSubmittedCases([reconciled, ledgerFound])[0].event_key, reconciled.event_key);
+    assert.equal(clearReasonLabel(reconciled), CLEAR_REASON_LABELS.reconciled);
   });
 });
