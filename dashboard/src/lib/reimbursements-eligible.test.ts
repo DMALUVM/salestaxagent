@@ -468,6 +468,18 @@ describe("Reese package + page contract", () => {
     assert.match(alertsApi, /amazonWrite:\s*false/);
     const overview = readFileSync(path.join(here, "../app/page.tsx"), "utf8");
     assert.match(overview, /InboundDiscrepancyAlerts/);
+    const salesPulseIdx = overview.indexOf("Sales pulse:");
+    const alertsJsxIdx = overview.lastIndexOf("<InboundDiscrepancyAlerts");
+    const trustIdx = overview.indexOf("P0-5: Trust surface");
+    assert.ok(salesPulseIdx >= 0 && alertsJsxIdx >= 0, "Overview must render Sales pulse and inbound alerts");
+    assert.ok(
+      alertsJsxIdx > salesPulseIdx,
+      "Inbound alerts must render after Sales pulse, not above it",
+    );
+    assert.ok(
+      trustIdx < 0 || alertsJsxIdx < trustIdx,
+      "Inbound alerts stay above the legal disclaimer",
+    );
     const alertUi = readFileSync(path.join(here, "../components/inbound-discrepancy-alerts.tsx"), "utf8");
     assert.match(alertUi, /NEEDS_CASE_HREF|\/reimbursements\?tab=eligible/);
     assert.match(alertUi, /Dismiss/);
