@@ -623,7 +623,7 @@ export function ReimbursementsEligiblePanel() {
                     <TableHead>FC</TableHead>
                     <TableHead>Shipment</TableHead>
                     <TableHead>Reference ID</TableHead>
-                    <TableHead>File</TableHead>
+                    <TableHead className="min-w-[11rem]">File</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -682,27 +682,25 @@ export function ReimbursementsEligiblePanel() {
                         <TableCell className="text-xs font-mono text-muted-foreground">
                           {refId || "—"}
                         </TableCell>
-                        <TableCell className="text-xs">
+                        <TableCell className="min-w-[11rem] align-top text-xs">
                           {tracker && href ? (
                             <a
                               href={href}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-primary hover:underline"
+                              className="inline-flex items-center gap-1 whitespace-nowrap text-primary hover:underline"
                             >
                               Shipment events
                               <ExternalLink className="h-3 w-3" />
                             </a>
                           ) : (
-                            <div className="space-y-1">
-                              <p className="text-[11px] leading-snug text-muted-foreground">
-                                {IDR_INSTRUCTION}
-                              </p>
+                            <div className="flex min-w-[11rem] flex-col items-start gap-1.5">
                               <a
                                 href={href || SC_ELIGIBLE_FOR_CLAIM}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-primary hover:underline"
+                                title={IDR_INSTRUCTION}
+                                className="inline-flex items-center gap-1 whitespace-nowrap text-primary hover:underline"
                               >
                                 Eligible for claim
                                 <ExternalLink className="h-3 w-3" />
@@ -711,7 +709,7 @@ export function ReimbursementsEligiblePanel() {
                                 type="button"
                                 variant="outline"
                                 size="sm"
-                                className="h-7 px-2 text-[11px]"
+                                className="h-7 shrink-0 px-2 text-[11px]"
                                 onClick={() => copyPacket(r)}
                               >
                                 <ClipboardCopy className="mr-1 h-3 w-3" />
