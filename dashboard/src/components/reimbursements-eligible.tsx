@@ -46,7 +46,7 @@ import {
   defaultCaseRange,
   fbaShipmentId,
   filterCaseGroup,
-  filterSubmittedByShipment,
+  filterSubmittedArchive,
   formatCasePacket,
   inboundDiscrepancyCount,
   inboundReceived,
@@ -717,10 +717,10 @@ export function ReimbursementsEligiblePanel() {
 
 function SubmittedClearedArchive({ rows }: { rows: CaseEventRow[] }) {
   const [open, setOpen] = useState(false);
-  const [shipmentQuery, setShipmentQuery] = useState("");
+  const [archiveQuery, setArchiveQuery] = useState("");
   const visible = useMemo(
-    () => filterSubmittedByShipment(rows, shipmentQuery),
-    [rows, shipmentQuery],
+    () => filterSubmittedArchive(rows, archiveQuery),
+    [rows, archiveQuery],
   );
 
   if (!rows.length) return null;
@@ -755,13 +755,13 @@ function SubmittedClearedArchive({ rows }: { rows: CaseEventRow[] }) {
               New CLOSED shorts (new FBA shipment / event_key) still alert.
             </p>
             <Input
-              value={shipmentQuery}
-              onChange={(e) => setShipmentQuery(e.target.value)}
-              placeholder="Search shipment ID (FBA…)"
-              aria-label="Search submitted archive by shipment ID"
+              value={archiveQuery}
+              onChange={(e) => setArchiveQuery(e.target.value)}
+              placeholder="Search shipment or Reference ID"
+              aria-label="Search submitted archive by shipment or Reference ID"
               className="max-w-sm"
             />
-            {shipmentQuery.trim() ? (
+            {archiveQuery.trim() ? (
               <p className="text-xs text-muted-foreground">
                 {fmt(visible.length)} of {fmt(rows.length)} matching
               </p>
@@ -787,7 +787,7 @@ function SubmittedClearedArchive({ rows }: { rows: CaseEventRow[] }) {
               {visible.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="py-8 text-center text-xs text-muted-foreground">
-                    No shipments match that ID.
+                    No rows match that shipment or Reference ID.
                   </TableCell>
                 </TableRow>
               ) : (

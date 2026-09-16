@@ -40,7 +40,7 @@ import {
   fbaShipmentId,
   filterInboundAlerts,
   filterNeedsCase,
-  filterSubmittedByShipment,
+  filterSubmittedArchive,
   filterSubmittedCases,
   formatCasePacket,
   inCaseRange,
@@ -496,8 +496,8 @@ describe("Reese package + page contract", () => {
     assert.match(alertsApi, /amazonWrite:\s*false/);
     assert.match(ui, /SubmittedClearedArchive/);
     assert.match(ui, /View more/);
-    assert.match(ui, /filterSubmittedByShipment/);
-    assert.match(ui, /Search shipment ID \(FBA/);
+    assert.match(ui, /filterSubmittedArchive/);
+    assert.match(ui, /Search shipment or Reference ID/);
     assert.match(ui, /aria-expanded=\{open\}/);
     const overview = readFileSync(path.join(here, "../app/page.tsx"), "utf8");
     assert.match(overview, /InboundDiscrepancyAlerts/);
@@ -636,7 +636,7 @@ describe("inbound alerts + dismiss", () => {
     assert.equal(clearReasonLabel(reconciled), CLEAR_REASON_LABELS.reconciled);
   });
 
-  test("submitted archive shipment filter is case-insensitive substring on FBA ids", () => {
+  test("submitted archive filter matches FBA shipment and Reference ID", () => {
     const rows = [
       row({
         event_key: "a",
@@ -656,12 +656,20 @@ describe("inbound alerts + dismiss", () => {
         shipment_id: "20080126439780",
         status: STATUS_CASE_SUBMITTED,
       }),
+      row({
+        event_key: "d",
+        event_date: "2026-08-01",
+        shipment_id: null,
+        reference_id: "20080126439780",
+        status: STATUS_CASE_SUBMITTED,
+      }),
     ];
-    assert.deepEqual(filterSubmittedByShipment(rows, "fba19k").map((r) => r.event_key), ["a"]);
-    assert.deepEqual(filterSubmittedByShipment(rows, "FBA16").map((r) => r.event_key), ["b"]);
-    assert.deepEqual(filterSubmittedByShipment(rows, "  ").map((r) => r.event_key), ["a", "b", "c"]);
-    assert.deepEqual(filterSubmittedByShipment(rows, "").map((r) => r.event_key), ["a", "b", "c"]);
-    assert.deepEqual(filterSubmittedByShipment(rows, "200801").map((r) => r.event_key), []);
-    assert.deepEqual(filterSubmittedByShipment(rows, "nomatch").map((r) => r.event_key), []);
+    assert.deepEqual(filterSubmittedArchive(rows, "fba19k").map((r) => r.event_key), ["a"]);
+    assert.deepEqual(filterSubmittedArchive(rows, "FBA16").map((r) => r.event_key), ["b"]);
+    assert.deepEqual(filterSubmittedArchive(rows, "  ").map((r) => r.event_key), ["a", "b", "c", "d"]);
+    assert.deepEqual(filterSubmittedArchive(rows, "").map((r) => r.event_key), ["a", "b", "c", "d"]);
+    assert.deepEqual(filterSubmittedArchive(rows, "200801").map((r) => r.event_key), ["c", "d"]);
+    assert.deepEqual(filterSubmittedArchive(rows, "26439780").map((r) => r.event_key), ["c", "d"]);
+    assert.deepEqual(filterSubmittedArchive(rows, "nomatch").map((r) => r.event_key), []);
   });
 });
