@@ -453,7 +453,8 @@ def fetch_campaigns_daily(start: date, end: date,
                           ad_products: tuple[str, ...] | None = None,
                           chunk_days: int | None = None,
                           sb_sd_days: int | None = None,
-                          on_progress=None) -> dict:
+                          on_progress=None,
+                          sb_sd_independent: bool = False) -> dict:
     """Fetch campaign daily metrics for each ad product, chunked to ≤30 days.
 
     Sponsored Products, Brands and Display are fetched independently and every
@@ -464,6 +465,9 @@ def fetch_campaigns_daily(start: date, end: date,
     the ones that rate-limit — SP rows are still written and the nightly job
     still reports success for the data it did get. `by_type` carries the
     per-product outcome so callers can alert on a partial sync.
+
+    `sb_sd_independent`: a hung SB chunk does not skip SD. Used by the
+    prior-day fast path so Morning Brief can still land Display.
     """
     products = tuple(ad_products or DEFAULT_AD_PRODUCTS)
     # Default is ADS_CAMPAIGN_CHUNK_DAYS (7), not 30. A single 30-day SB/SD
@@ -478,7 +482,8 @@ def fetch_campaigns_daily(start: date, end: date,
     by_type: dict[str, dict] = {}
     inserted = 0
     # After a SB/SD timeout/425, skip remaining Brands/Display so the
-    # nightly lock is released and ST/placements can run.
+    # nightly lock is released and ST/placements can run. The prior-day
+    # fast path sets sb_sd_independent so a hung SB day still tries SD.
     sb_sd_stop = False
 
     for product in products:
@@ -524,6 +529,12 @@ def fetch_campaigns_daily(start: date, end: date,
                 product_errors.append(msg)
                 say(f"    {product} chunk {i}/{len(product_chunks)} {cs}→{ce}: FAILED — {str(e)[:80]}")
                 if product in ("SB", "SD") and _sb_sd_should_release_lock(e):
+                    if sb_sd_independent:
+                        log.warning(
+                            "STOP remaining %s chunks after %s — still try "
+                            "other products (independent prior-day path)",
+                            product, _transient_label(e))
+                        break
                     log.warning(
                         "STOP remaining %s days after %s — release ads lock "
                         "so search terms and placements can run",
@@ -611,6 +622,20 @@ def fetch_campaigns_daily(start: date, end: date,
         # this to alert without treating a lost SB report as a lost sync.
         "partial": bool(ok_products and failed_products),
     }
+
+
+def fetch_prior_day_campaigns(as_of: date | None = None,
+                              ad_products: tuple[str, ...] | None = None,
+                              on_progress=None) -> dict:
+    """SP+SB+SD for one closed Amazon day, committed before the 7d lookback.
+
+    SB timeout does not skip SD — Morning Brief needs yesterday's Display.
+    Lookback ``sb_sd_stop`` is unchanged (caller runs that separately).
+    """
+    day = as_of or amazon_as_of()
+    return fetch_campaigns_daily(
+        day, day, ad_products=ad_products, chunk_days=1, sb_sd_days=1,
+        sb_sd_independent=True, on_progress=on_progress)
 
 
 def _search_term_chunk_present(end: date, start: date | None = None) -> bool:
@@ -1006,6 +1031,7 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
              sb_sd_days: int | None = None,
              skip_existing_search_term_weeks: bool = False,
              newest_first_search_terms: bool = False,
+             prior_day_first: bool = False,
              on_progress=None) -> dict:
     """Ads sync: campaigns and/or search terms, auto-chunked.
 
@@ -1030,6 +1056,10 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
     `ad_products` to narrow it (e.g. a backfill of just the two new products).
     Search terms and placements stay SP-only — the SB/SD reports have no
     search-term grain to feed the negate/harvest loop.
+
+    `prior_day_first` (nightly campaigns): pull SP+SB+SD for `amazon_as_of`
+    (1 day each, SB timeout does not skip SD), commit, then the existing
+    lookback. Same lease. Lookback keeps sb_sd_stop.
     """
     only_flags = [campaigns_only, search_terms_only, placements_only]
     if sum(bool(f) for f in only_flags) > 1:
@@ -1091,6 +1121,7 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
                 sb_sd_days=sb_sd_days,
                 skip_existing_search_term_weeks=skip_existing_search_term_weeks,
                 newest_first_search_terms=newest_first_search_terms,
+                prior_day_first=prior_day_first,
                 on_progress=_progress,
                 do_campaigns=campaigns_only or not any(only_flags),
                 do_search_terms=search_terms_only or not any(only_flags),
@@ -1102,6 +1133,15 @@ def sync_ads(days: int = 14, campaigns_only: bool = False,
         _SYNC_LOCK.release()
 
 
+def _refresh_prior_day_completeness(as_of: date, reason_prefix: str) -> None:
+    """Best-effort warehouse CLEAR/HOLD after a prior-day or lookback pull."""
+    try:
+        from src.amazon_ads.completeness import refresh_day_completeness
+        refresh_day_completeness(as_of, reason_prefix=reason_prefix)
+    except Exception as e:
+        log.warning("prior-day completeness persist skipped: %s", e)
+
+
 def _sync_ads_body(*, days: int,
                    search_term_chunk_days: int | None,
                    ad_products: tuple[str, ...] | None,
@@ -1109,6 +1149,7 @@ def _sync_ads_body(*, days: int,
                    sb_sd_days: int | None,
                    skip_existing_search_term_weeks: bool,
                    newest_first_search_terms: bool,
+                   prior_day_first: bool,
                    on_progress, do_campaigns: bool, do_search_terms: bool,
                    do_placements: bool) -> dict:
     end = amazon_as_of()
@@ -1124,6 +1165,18 @@ def _sync_ads_body(*, days: int,
     log.info("Ads sync: %s → %s (%d days) — %s", start, end, days,
              ", ".join(results["ran"]))
 
+    if do_campaigns and prior_day_first:
+        # Brief SLA: commit yesterday SP+SB+SD before the 7d lookback so
+        # a hung SB week cannot starve prior-day Display.
+        try:
+            log.info("Ads sync: prior-day fast path %s (SP+SB+SD, 1d)", end)
+            results["prior_day"] = fetch_prior_day_campaigns(
+                end, ad_products=ad_products, on_progress=on_progress)
+            _refresh_prior_day_completeness(end, "prior-day fast path")
+        except Exception as e:
+            log.exception("Prior-day campaign sync failed")
+            results["prior_day"] = {"error": str(e)[:200]}
+
     if do_campaigns:
         try:
             results["campaigns"] = fetch_campaigns_daily(
@@ -1133,6 +1186,8 @@ def _sync_ads_body(*, days: int,
         except Exception as e:
             log.exception("Campaign sync failed")
             results["campaigns"] = {"error": str(e)[:200]}
+        if prior_day_first:
+            _refresh_prior_day_completeness(end, "campaigns lookback")
 
     if do_search_terms:
         try:

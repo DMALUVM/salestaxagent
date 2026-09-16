@@ -1006,6 +1006,7 @@ class TestAdsPollResilience:
         assert "_run_ads_placements_sync" in src
         assert "_run_ads_search_terms_sync" in src
         assert 'status in ("skipped", "deferred")' in src
+        assert "prior_day_first=True" in src
 
     def test_partial_sb_sd_failure_schedules_heal(self):
         import inspect
@@ -1021,6 +1022,20 @@ class TestAdsPollResilience:
         src = inspect.getsource(main_mod)
         assert 'id="ads_sb_sd_heal"' in src
         assert "_run_ads_sb_sd_heal" in src
+
+    def test_prior_day_gate_job_exists(self):
+        import inspect
+        from src import main as main_mod
+        assert callable(main_mod._run_ads_prior_day_gate)
+        src = inspect.getsource(main_mod)
+        assert 'id="ads_prior_day_gate"' in src
+        assert "hour=6" in src
+        assert "minute=20" in src
+        assert "_run_ads_prior_day_gate" in src
+        # Gate must not wait on the lease — HOLD and exit.
+        gate = inspect.getsource(main_mod._run_ads_prior_day_gate)
+        assert "_defer_ads_job" not in gate
+        assert "_wait_ads_lease_then" not in gate
 
     def test_sunday_backfill_caps_sb_sd(self):
         import inspect
