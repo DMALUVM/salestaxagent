@@ -23,7 +23,6 @@ def test_allowlist_covers_locked_keep_topics():
         "inventory_checked_in",
         "health_faults",
         "job_fail",
-        "paid_ads_freshness",
     ):
         assert topic in TELEGRAM_ALLOW, topic
         assert telegram_allowed(topic) is True, topic
@@ -36,6 +35,7 @@ def test_denylist_covers_locked_drop_topics():
         "playbook_p0",
         "gno_export_due",
         "source_monitor",
+        "paid_ads_freshness",
     ):
         assert topic in TELEGRAM_DENY, topic
         allowed, reason = telegram_decision(topic)
@@ -49,8 +49,8 @@ def test_allow_and_deny_do_not_overlap():
 
 def test_deny_wins_even_if_also_listed_on_allow():
     """A topic on both lists must not send. Deny is the lock."""
-    # paid_ads_freshness is allowed; pretend a future edit also denies it
-    # by exercising the deny-first branch with a real deny topic.
+    assert telegram_allowed("paid_ads_freshness") is False
+    assert "paid_ads_freshness" not in TELEGRAM_ALLOW
     assert telegram_allowed("gno_export_due") is False
     assert "gno_export_due" not in TELEGRAM_ALLOW
 
@@ -80,3 +80,8 @@ def test_send_telegram_refuses_denied_without_network(monkeypatch):
     assert r["sent"] is False
     assert r.get("suppressed") is True
     assert "denied:gno_export_due" in (r.get("error") or "")
+
+    stale = send_telegram("Paid Ads data is stale", topic="paid_ads_freshness")
+    assert stale["sent"] is False
+    assert stale.get("suppressed") is True
+    assert "denied:paid_ads_freshness" in (stale.get("error") or "")

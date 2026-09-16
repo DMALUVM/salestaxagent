@@ -69,7 +69,6 @@
       "inventory_checked_in",
       "health_faults",
       "job_fail",
-      "paid_ads_freshness",
       "test"
     ],
     "deny": [
@@ -77,7 +76,8 @@
       "ads_scoreboard",
       "playbook_p0",
       "gno_export_due",
-      "source_monitor"
+      "source_monitor",
+      "paid_ads_freshness"
     ]
   },
   "pnl": {
