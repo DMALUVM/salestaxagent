@@ -99,8 +99,10 @@ describe("pallet planner ship view", () => {
     assert.match(ship, /First-wave AWD/);
     assert.match(ship + "\n" + model, /43_875|43875|43,875/);
     assert.match(ship, /already created/);
-    assert.match(ship, /16,200|16200|16_200/);
-    assert.match(ship, /18,900|18900|18_900/);
+    assert.match(ship, /LOCKED_ORANGE_MARPAC_AWD_UNITS/);
+    assert.match(ship, /LOCKED_ORANGE_AWD_INBOUND_CONTEXT/);
+    assert.match(model, /16_200/);
+    assert.match(model, /18_900|LOCKED_ORANGE_AWD_INBOUND_CONTEXT/);
     assert.match(ship, /Early Oct: Unscented/);
     assert.match(ship, /Mid Oct: Assorted/);
     assert.doesNotMatch(ship, /Late Sept: Assorted/);

@@ -374,11 +374,10 @@ def test_month_view_sept_not_empty_and_not_fba_only():
     assert "3pl_fba" in dests
     assert SEPTEMBER_AWD_HOP_DESTINATION in dests
     assert all(e["units"] != 12_960 or e["destination"] != "3pl_fba" for e in sept)
-    assert "awd" in dests
+    assert "awd" not in dests
     assert dests != {"3pl_fba"}
     awd = [e for e in sept if e["destination"] == "awd" and e["units"] > 0]
-    assert awd
-    assert all(e["single_sku"] for e in awd)
+    assert awd == []
 
 
 def test_month_view_august_has_3pl_fba_12960_and_marpac_lock():
