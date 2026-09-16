@@ -430,13 +430,29 @@ describe("Reese package + page contract", () => {
     assert.match(ui, /HOW_TO_FILE_TITLE/);
     assert.match(ui, /HOW_TO_FILE_STEPS/);
     assert.match(ui, /Copy case packet/);
-    assert.match(ui, /IDR_INSTRUCTION/);
+    assert.match(ui, /title=\{IDR_INSTRUCTION\}/);
     assert.match(ui, /NO_INBOUND_DISCREPANCIES/);
     assert.match(ui, /CASE_QUEUE_SOURCE_NOTE/);
     assert.match(pyQueue, /How to file/);
     assert.match(pyQueue, /Inventory Defect and Reimbursement/);
     assert.match(pyPkg, /HOW_TO_FILE_TITLE/);
     assert.doesNotMatch(pyPkg, /Get Support: https:\/\/sellercentral/);
+  });
+
+  test("File column stacks claim link and packet without the long IDR path line", () => {
+    const fileCell = ui.slice(ui.indexOf("<TableHead className=\"min-w-[11rem]\">File</TableHead>"));
+    assert.match(fileCell, /Eligible for claim/);
+    assert.match(fileCell, /Copy case packet/);
+    assert.match(fileCell, /Shipment events/);
+    assert.match(fileCell, /flex min-w-\[11rem\] flex-col items-start gap-1\.5/);
+    assert.match(fileCell, /title=\{IDR_INSTRUCTION\}/);
+    assert.doesNotMatch(
+      fileCell,
+      /<p className="text-\[11px\] leading-snug text-muted-foreground">\s*\{IDR_INSTRUCTION\}/,
+    );
+    assert.doesNotMatch(fileCell, /space-y-1/);
+    assert.match(ui, /href=\{href \|\| SC_ELIGIBLE_FOR_CLAIM\}/);
+    assert.match(ui, /isInboundTrackerLink/);
   });
 
   test("queue is not built from paid-only reimbursements", () => {
