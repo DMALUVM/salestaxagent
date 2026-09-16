@@ -169,7 +169,14 @@ describe("needs-case vs paid", () => {
 
   test("Seller Central href is FBA tracker only — digit refs are not shipments", () => {
     assert.equal(
-      sellerCentralHref({ seller_central_url: "https://sellercentral.amazon.com/help/hub/contact-us" }),
+      sellerCentralHref({
+        seller_central_url: "https://sellercentral.amazon.com/help/hub/contact-us",
+        shipment_id: null,
+        reference_id: null,
+        reason: "7",
+        reason_group: "warehouse_damage",
+        disposition: null,
+      }),
       "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     );
     assert.match(
@@ -200,7 +207,14 @@ describe("needs-case vs paid", () => {
       "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     );
     assert.equal(
-      sellerCentralHref({ seller_central_url: null, shipment_id: null, reference_id: "20080126439780" }),
+      sellerCentralHref({
+        seller_central_url: null,
+        shipment_id: null,
+        reference_id: "20080126439780",
+        reason: "7",
+        reason_group: "warehouse_damage",
+        disposition: null,
+      }),
       "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     );
     assert.equal(isFbaShipmentId("20080126439780"), false);
