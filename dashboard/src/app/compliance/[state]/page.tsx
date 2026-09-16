@@ -10,7 +10,6 @@ import { SeverityBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getSupabase } from "@/lib/supabase";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -218,32 +217,16 @@ export default function StateGuidePage() {
 
   async function handleAction(action: "resolve" | "hide") {
     setActionMsg(null);
-    try {
-      const sb = getSupabase();
-      const updates: Record<string, unknown> = {};
-      if (action === "resolve") {
-        updates.compliance_resolved = true;
-        updates.compliance_resolved_at = new Date().toISOString();
-      } else {
-        updates.compliance_hidden = true;
-      }
-      await sb
-        .from("nexus_status")
-        .update(updates)
-        .eq("state_code", stateCode);
-      setActionMsg(
-        action === "resolve"
-          ? "Marked as resolved. Will not appear in Open list."
-          : "Hidden from default view. Recoverable under Hidden tab.",
-      );
-    } catch {
-      await fetch("/api/compliance/resolve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state_code: stateCode, action }),
-      });
-      setActionMsg("Updated.");
-    }
+    await fetch("/api/compliance/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ state_code: stateCode, action }),
+    });
+    setActionMsg(
+      action === "resolve"
+        ? "Marked as resolved. Will not appear in Open list."
+        : "Hidden from default view. Recoverable under Hidden tab.",
+    );
   }
 
   if (loading) return <LoadingState />;

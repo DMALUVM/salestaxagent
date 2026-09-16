@@ -150,3 +150,51 @@ export async function GET() {
     });
   }
 }
+
+const SETTLE_STATUSES = new Set(["filed", "not_required", "dismissed"]);
+
+/**
+ * PATCH /api/entity-obligations — mark an entity obligation filed / not
+ * required / dismissed. Service role only; the browser never writes
+ * compliance_obligations with the anon key.
+ */
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json().catch(() => ({}));
+    const id = body.id;
+    const status = String(body.status ?? "");
+    if (id == null || id === "") {
+      return Response.json({ error: "id required" }, { status: 400 });
+    }
+    if (!SETTLE_STATUSES.has(status)) {
+      return Response.json(
+        { error: `Invalid status: ${status}` },
+        { status: 400 },
+      );
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const updates: Record<string, unknown> = {
+      status,
+      user_notes: body.user_notes ? String(body.user_notes).trim() || null : null,
+    };
+    if (status === "filed") {
+      updates.filed_date = body.filed_date ? String(body.filed_date) : today;
+    }
+
+    const sb = getServerSupabase();
+    const { error } = await sb
+      .from("compliance_obligations")
+      .update(updates)
+      .eq("id", id);
+    if (error) {
+      return Response.json({ error: error.message }, { status: 500 });
+    }
+    return Response.json({ ok: true, id, status });
+  } catch (e) {
+    return Response.json(
+      { error: e instanceof Error ? e.message : "unknown error" },
+      { status: 500 },
+    );
+  }
+}

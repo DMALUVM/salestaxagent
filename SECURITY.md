@@ -17,11 +17,23 @@ See also `dashboard/ENV.md`.
 
 ## Applying the RLS lockdown
 
-1. Review `supabase/migration_rls_lockdown.sql`.
-2. Run it in the Supabase SQL editor (production) when ready — do **not**
+1. Review `supabase/migration_rls_lockdown.sql` (ops tables) and
+   `supabase/migration_rls_sku_costs_obligations.sql` (the two remaining
+   tables: `sku_costs`, `compliance_obligations`).
+2. Run the remaining-tables file in the Supabase SQL editor after the
+   Tax / Overview / Calendar / Compliance / Registrations pages (and
+   entity / SKU cost writers) use service-role API routes. Do **not**
    flip RLS from an automated agent without a human check.
 3. Confirm dashboard server routes still use `SUPABASE_SERVICE_KEY`.
-4. Smoke-test: anon client should see no rows; service role still works.
+4. Smoke-test: anon client should see no rows on those two tables;
+   service role still works.
+
+Rollback for the remaining two tables only:
+
+```sql
+ALTER TABLE public.sku_costs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.compliance_obligations DISABLE ROW LEVEL SECURITY;
+```
 
 ## Generated exports
 

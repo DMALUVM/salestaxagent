@@ -80,6 +80,36 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (body.typical_due_day !== undefined || body.notes !== undefined) {
+    const ruleUpdates: Record<string, unknown> = {};
+    if (body.typical_due_day !== undefined) {
+      const raw = body.typical_due_day;
+      const dueDay =
+        raw === null || raw === ""
+          ? null
+          : Number(raw);
+      if (dueDay !== null && (!Number.isFinite(dueDay) || dueDay < 1 || dueDay > 31)) {
+        return Response.json(
+          { error: "Due day must be between 1 and 31" },
+          { status: 400 },
+        );
+      }
+      ruleUpdates.typical_due_day = dueDay;
+    }
+    if (body.notes !== undefined) {
+      ruleUpdates.notes = body.notes || null;
+    }
+    if (Object.keys(ruleUpdates).length) {
+      const rules = await sb
+        .from("state_rules")
+        .update(ruleUpdates)
+        .eq("state_code", state_code);
+      if (rules.error) {
+        return Response.json({ error: rules.error.message }, { status: 500 });
+      }
+    }
+  }
+
   return Response.json({
     ok: true,
     state_code,
