@@ -304,12 +304,49 @@ def test_seller_central_links_are_honest():
     url, kind = seller_central_link("FBA16ABCDE", None)
     assert url is not None and "fba/inbound-shipment/summary/FBA16ABCDE/shipmentEvents" in url
     assert kind == "inbound_shipment"
+    url, kind = seller_central_link("FBA16ABCDE", None, "lost_inbound")
+    assert "shipmentEvents" in url
+    assert kind == "inbound_shipment"
+    url, kind = seller_central_link("FBA16ABCDE", None, "warehouse_damage")
+    assert url == "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
+    assert kind == LINK_KIND_IDR
+    url, kind = seller_central_link("FBA16ABCDE", None, "lost_warehouse")
+    assert url == "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
     url, kind = seller_central_link(None, "not-an-fba")
     assert url == "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
     assert kind == LINK_KIND_IDR
     url, kind = seller_central_link(None, "20080126439780")
     assert url == "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
     assert kind == LINK_KIND_IDR
+    assert "inbound-shipment-workflow" not in url
+    assert "help/hub/contact-us" not in url
+
+
+def test_warehouse_damage_uses_eligible_for_claim_even_with_fba_id():
+    events = build_case_events(
+        adjustments=[{
+            "event_key": "adj|7",
+            "event_date": "2026-08-10",
+            "sku": "SKU-B",
+            "quantity": -1,
+            "reason": "7",
+            "fulfillment_center": "PHX6",
+            "shipment_id": "FBA16DAMAGE",
+            "reference_id": "20080126439780",
+        }],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 17),
+        end=date(2026, 9, 14),
+    )
+    ev = events[0]
+    assert ev["reason_group"] == "warehouse_damage"
+    assert ev["shipment_id"] == "FBA16DAMAGE"
+    assert ev["seller_central_link_kind"] == LINK_KIND_IDR
+    assert ev["seller_central_url"] == (
+        "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
+    )
 
 
 def test_how_to_file_copy_matches_amazon_warehouse_damage_process():
@@ -327,6 +364,10 @@ def test_how_to_file_copy_matches_amazon_warehouse_damage_process():
     assert "no stable deep link" in HOW_TO_FILE_NO_DEEP_LINK
     assert "Support hub" in HOW_TO_FILE_NO_DEEP_LINK
     assert IDR_INSTRUCTION == "Open IDR (Inventory → Inventory Defect and Reimbursement)"
+    assert "eligible-for-claim" in bodies
+    assert "shipmentEvents" in HOW_TO_FILE_INBOUND
+    assert "inbound-shipment-workflow" not in HOW_TO_FILE_INBOUND
+    assert "help/hub/contact-us" not in bodies
     assert "ledger adjustments with eligible codes" in CASE_QUEUE_SOURCE_NOTE
     assert NO_INBOUND_DISCREPANCIES == (
         "No CLOSED inbound discrepancies in warehouse right now"
@@ -635,7 +676,7 @@ def test_preserve_submitted_does_not_revive_paid():
 
 def test_inbound_howto_mentions_sellerboard_closed():
     assert "Sellerboard CLOSED" in HOW_TO_FILE_INBOUND
-    assert "shipment tracker" in HOW_TO_FILE_INBOUND.lower() or "FBA*" in HOW_TO_FILE_INBOUND
+    assert "shipmentEvents" in HOW_TO_FILE_INBOUND
     assert "Reference ID" in HOW_TO_FILE_INBOUND
 
 
