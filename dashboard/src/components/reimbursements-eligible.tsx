@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, ClipboardCopy, ExternalLink, RefreshCw, Send } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, ClipboardCopy, ExternalLink, RefreshCw, Send } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,7 @@ import {
   defaultCaseRange,
   fbaShipmentId,
   filterCaseGroup,
+  filterSubmittedByShipment,
   formatCasePacket,
   inboundDiscrepancyCount,
   inboundReceived,
@@ -442,44 +443,7 @@ export function ReimbursementsEligiblePanel() {
               </p>
             </CardContent>
           </Card>
-          {submittedRows.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Submitted / cleared ({fmt(submittedRows.length)})
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="overflow-x-auto p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>SKU / ASIN</TableHead>
-                      <TableHead className="text-right">Short</TableHead>
-                      <TableHead>Shipment</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Reason</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {submittedRows.map((r) => (
-                      <TableRow key={r.event_key}>
-                        <TableCell className="text-xs tabular-nums">{caseDay(r)}</TableCell>
-                        <TableCell>
-                          <div className="text-xs font-medium">{r.sku || "—"}</div>
-                          <div className="text-[10px] text-muted-foreground">{r.asin || "—"}</div>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{fmt(caseQty(r))}</TableCell>
-                        <TableCell className="text-xs font-mono">{fbaShipmentId(r.shipment_id) || "—"}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{sourceLabel(r.source)}</TableCell>
-                        <TableCell className="text-xs">{clearReasonLabel(r)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          )}
+          <SubmittedClearedArchive rows={submittedRows} />
         </>
       ) : (
         <>
@@ -744,53 +708,109 @@ export function ReimbursementsEligiblePanel() {
             </CardContent>
           </Card>
 
-          {submittedRows.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Submitted / cleared ({fmt(submittedRows.length)})
-                </CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Evidence kept after Clear / Overview dismiss (filed, reconciled, not pursuing).
-                  New CLOSED shorts (new FBA shipment / event_key) still alert.
-                </p>
-              </CardHeader>
-              <CardContent className="overflow-x-auto p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>SKU / ASIN</TableHead>
-                      <TableHead className="text-right">Short</TableHead>
-                      <TableHead>FC</TableHead>
-                      <TableHead>Shipment</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Reason</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {submittedRows.map((r) => (
-                      <TableRow key={r.event_key}>
-                        <TableCell className="text-xs tabular-nums">{caseDay(r)}</TableCell>
-                        <TableCell>
-                          <div className="text-xs font-medium">{r.sku || "—"}</div>
-                          <div className="text-[10px] text-muted-foreground">{r.asin || "—"}</div>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{fmt(caseQty(r))}</TableCell>
-                        <TableCell className="text-xs">{r.fulfillment_center || "—"}</TableCell>
-                        <TableCell className="text-xs font-mono">{fbaShipmentId(r.shipment_id) || "—"}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{sourceLabel(r.source)}</TableCell>
-                        <TableCell className="text-xs">{clearReasonLabel(r)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          )}
+          <SubmittedClearedArchive rows={submittedRows} />
         </>
       )}
     </div>
+  );
+}
+
+function SubmittedClearedArchive({ rows }: { rows: CaseEventRow[] }) {
+  const [open, setOpen] = useState(false);
+  const [shipmentQuery, setShipmentQuery] = useState("");
+  const visible = useMemo(
+    () => filterSubmittedByShipment(rows, shipmentQuery),
+    [rows, shipmentQuery],
+  );
+
+  if (!rows.length) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-sm font-medium">
+            Submitted / cleared ({fmt(rows.length)})
+          </CardTitle>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-expanded={open}
+            aria-controls="submitted-cleared-archive"
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? (
+              <ChevronUp className="mr-1 h-3.5 w-3.5" />
+            ) : (
+              <ChevronDown className="mr-1 h-3.5 w-3.5" />
+            )}
+            {open ? "Hide" : "View more"}
+          </Button>
+        </div>
+        {open && (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Evidence kept after Clear / Overview dismiss (filed, reconciled, not pursuing).
+              New CLOSED shorts (new FBA shipment / event_key) still alert.
+            </p>
+            <Input
+              value={shipmentQuery}
+              onChange={(e) => setShipmentQuery(e.target.value)}
+              placeholder="Search shipment ID (FBA…)"
+              aria-label="Search submitted archive by shipment ID"
+              className="max-w-sm"
+            />
+            {shipmentQuery.trim() ? (
+              <p className="text-xs text-muted-foreground">
+                {fmt(visible.length)} of {fmt(rows.length)} matching
+              </p>
+            ) : null}
+          </>
+        )}
+      </CardHeader>
+      {open && (
+        <CardContent id="submitted-cleared-archive" className="overflow-x-auto p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Date</TableHead>
+                <TableHead>SKU / ASIN</TableHead>
+                <TableHead className="text-right">Short</TableHead>
+                <TableHead>FC</TableHead>
+                <TableHead>Shipment</TableHead>
+                <TableHead>Source</TableHead>
+                <TableHead>Reason</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-8 text-center text-xs text-muted-foreground">
+                    No shipments match that ID.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                visible.map((r) => (
+                  <TableRow key={r.event_key}>
+                    <TableCell className="text-xs tabular-nums">{caseDay(r)}</TableCell>
+                    <TableCell>
+                      <div className="text-xs font-medium">{r.sku || "—"}</div>
+                      <div className="text-[10px] text-muted-foreground">{r.asin || "—"}</div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{fmt(caseQty(r))}</TableCell>
+                    <TableCell className="text-xs">{r.fulfillment_center || "—"}</TableCell>
+                    <TableCell className="text-xs font-mono">{fbaShipmentId(r.shipment_id) || "—"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{sourceLabel(r.source)}</TableCell>
+                    <TableCell className="text-xs">{clearReasonLabel(r)}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
