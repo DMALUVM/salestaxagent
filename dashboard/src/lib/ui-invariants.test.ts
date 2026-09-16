@@ -7,6 +7,23 @@ function src(rel: string): string {
   return readFileSync(path.join(process.cwd(), rel), "utf8");
 }
 
+describe("content column width", () => {
+  test("ops pages use the full main pane; compliance keeps a reading measure", () => {
+    const layout = src("src/app/layout.tsx");
+    const ppc = src("src/app/ppc/layout.tsx");
+    const strip = src("src/components/data-freshness-strip.tsx");
+    const hub = src("src/app/compliance/ComplianceHub.tsx");
+    const state = src("src/app/compliance/[state]/page.tsx");
+    assert.match(layout, /w-full/);
+    assert.match(layout, /px-4 py-6 sm:px-6 lg:px-8/);
+    assert.doesNotMatch(layout, /max-w-6xl|max-w-7xl|max-w-5xl/);
+    assert.match(ppc, /data-full-width/);
+    assert.doesNotMatch(strip, /max-w-6xl/);
+    assert.match(hub, /max-w-5xl/);
+    assert.match(state, /max-w-4xl/);
+  });
+});
+
 describe("calendar action labels", () => {
   test("the two mark-complete controls are not both labeled Filed", () => {
     const page = src("src/app/calendar/page.tsx");

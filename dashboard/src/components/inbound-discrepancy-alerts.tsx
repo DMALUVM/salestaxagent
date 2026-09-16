@@ -123,7 +123,7 @@ export function InboundDiscrepancyAlerts() {
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
                   >
-                    Shipment tracker
+                    Shipment events
                     <ExternalLink className="h-3 w-3" />
                   </a>
                 )}

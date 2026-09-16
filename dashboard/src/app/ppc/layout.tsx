@@ -1,6 +1,6 @@
 /**
- * Org-rank heatmap (and the rest of /ppc) needs the full content column.
- * Root layout stays max-w-6xl unless a descendant sets data-full-width.
+ * Keep /ppc marked full-width so Org rank stays opted out if a site-wide
+ * max-w-* is ever reintroduced on the root content column.
  */
 export default function PpcLayout({ children }: { children: React.ReactNode }) {
   return (

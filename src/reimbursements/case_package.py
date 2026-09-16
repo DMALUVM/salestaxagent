@@ -98,7 +98,7 @@ def build_case_package(
             "seller_central_url": (
                 r.get("seller_central_url")
                 if fba_shipment_id(r.get("shipment_id"))
-                else None
+                else "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
             ),
             "seller_central_link_kind": (
                 r.get("seller_central_link_kind")

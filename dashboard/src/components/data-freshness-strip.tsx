@@ -35,7 +35,7 @@ export function DataFreshnessStrip() {
 
   return (
     <div className="border-b bg-card/70 px-4 py-1.5 text-[11px] text-muted-foreground sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1">
+      <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1">
         <span>
           Data as of{" "}
           <span className="font-medium text-foreground">{fmtDay(info.asOf)}</span>

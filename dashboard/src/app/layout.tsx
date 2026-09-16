@@ -44,7 +44,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <MobileHeader />
             <main className="flex-1 overflow-y-auto">
               <DataFreshnessStrip />
-              <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 has-[[data-full-width]]:max-w-none">
+              <div className="mx-auto w-full px-4 py-6 sm:px-6 lg:px-8">
                 {children}
               </div>
             </main>
