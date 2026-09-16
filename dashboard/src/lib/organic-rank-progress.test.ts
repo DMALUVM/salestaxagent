@@ -796,11 +796,16 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.deepEqual(heatmapDayChips(row, "2026-09-15", progress.weeks), []);
   });
 
-  test("PPC layout opts the heatmap out of the max-w-6xl gutter", () => {
+  test("dashboard content column is full-width; /ppc stays opted out of any max-w gutter", () => {
     const root = process.cwd();
     const layout = readFileSync(path.join(root, "src/app/layout.tsx"), "utf8");
     const ppc = readFileSync(path.join(root, "src/app/ppc/layout.tsx"), "utf8");
-    assert.match(layout, /has-\[\[data-full-width\]\]:max-w-none/);
+    const strip = readFileSync(path.join(root, "src/components/data-freshness-strip.tsx"), "utf8");
+    assert.match(layout, /w-full/);
+    assert.match(layout, /px-4 py-6 sm:px-6 lg:px-8/);
+    assert.doesNotMatch(layout, /max-w-6xl/);
+    assert.doesNotMatch(layout, /max-w-7xl/);
     assert.match(ppc, /data-full-width/);
+    assert.doesNotMatch(strip, /max-w-6xl/);
   });
 });
