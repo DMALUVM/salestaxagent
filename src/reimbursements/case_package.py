@@ -16,10 +16,12 @@ from src.reimbursements.case_queue import (
     HOW_TO_FILE_STEPS,
     HOW_TO_FILE_TITLE,
     IDR_INSTRUCTION,
+    SC_ELIGIBLE_FOR_CLAIM,
     SC_LEDGER_HUB,
     SELLER_CENTRAL_LINK_LIMIT,
     STATUS_NEEDS_CASE,
     fba_shipment_id,
+    seller_central_link,
 )
 from src.reimbursements.reason_legend import (
     CLASSIFICATION_VERSION,
@@ -77,6 +79,9 @@ def build_case_package(
 
     payload_events = []
     for r in rows:
+        url, kind = seller_central_link(
+            r.get("shipment_id"), None, r.get("reason_group"),
+        )
         payload_events.append({
             "event_key": r.get("event_key"),
             "source": r.get("source"),
@@ -95,16 +100,8 @@ def build_case_package(
             "reference_id": r.get("reference_id"),
             "estimated_amount": r.get("estimated_amount"),
             "amount_basis": r.get("amount_basis"),
-            "seller_central_url": (
-                r.get("seller_central_url")
-                if fba_shipment_id(r.get("shipment_id"))
-                else "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
-            ),
-            "seller_central_link_kind": (
-                r.get("seller_central_link_kind")
-                if fba_shipment_id(r.get("shipment_id"))
-                else "idr_instructions"
-            ),
+            "seller_central_url": url,
+            "seller_central_link_kind": kind,
             "classification_version": r.get("classification_version") or CLASSIFICATION_VERSION,
             "reason_label": reason_label(r.get("reason"), r.get("disposition")),
             "status": "needs_case",
@@ -211,7 +208,7 @@ def render_package_markdown(package: dict) -> str:
             ref = r.get("reference_id") or "—"
             if shipment != "—" and ref == shipment:
                 ref = "—"
-            url = r.get("seller_central_url") or IDR_INSTRUCTION
+            url = r.get("seller_central_url") or SC_ELIGIBLE_FOR_CLAIM
             shipped = r.get("quantity_shipped")
             received = r.get("quantity_received")
             lines.append(

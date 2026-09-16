@@ -336,7 +336,18 @@ export function ReimbursementsEligiblePanel() {
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">{HOW_TO_FILE_TITLE}</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-sm font-medium">{HOW_TO_FILE_TITLE}</CardTitle>
+            <a
+              href={SC_ELIGIBLE_FOR_CLAIM}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              Eligible for claim
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
           <p className="text-xs text-muted-foreground">{HOW_TO_FILE_INTRO}</p>
         </CardHeader>
         <CardContent className="space-y-3 pb-4">

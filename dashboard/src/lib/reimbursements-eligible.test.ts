@@ -173,8 +173,31 @@ describe("needs-case vs paid", () => {
       "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     );
     assert.match(
-      sellerCentralHref({ seller_central_url: null, shipment_id: "FBA16ABCDE" }) ?? "",
+      sellerCentralHref({
+        seller_central_url: null,
+        shipment_id: "FBA16ABCDE",
+        reason: "Lost_Inbound",
+        reason_group: "lost_inbound",
+      }) ?? "",
       /fba\/inbound-shipment\/summary\/FBA16ABCDE\/shipmentEvents/,
+    );
+    assert.equal(
+      sellerCentralHref({
+        seller_central_url: null,
+        shipment_id: "FBA16DAMAGE",
+        reason: "7",
+        reason_group: "warehouse_damage",
+      }),
+      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+    );
+    assert.equal(
+      sellerCentralHref({
+        seller_central_url: null,
+        shipment_id: "FBA16LOST",
+        reason: "M",
+        reason_group: "lost_warehouse",
+      }),
+      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     );
     assert.equal(
       sellerCentralHref({ seller_central_url: null, shipment_id: null, reference_id: "20080126439780" }),
@@ -200,7 +223,9 @@ describe("needs-case vs paid", () => {
     assert.match(packet, /PHX6/);
     assert.match(packet, /not a shipment ID/);
     assert.match(packet, /Inventory Defect and Reimbursement/);
+    assert.match(packet, /eligible-for-claim/);
     assert.doesNotMatch(packet, /help\/hub\/contact-us/);
+    assert.doesNotMatch(packet, /inbound-shipment-workflow/);
     assert.equal(inboundEmptyCopy([]), NO_INBOUND_DISCREPANCIES);
     assert.equal(
       inboundEmptyCopy([row({ event_key: "in", event_date: "2026-08-01", source: "inbound_discrepancy" })]),
@@ -230,6 +255,19 @@ describe("needs-case vs paid", () => {
     assert.equal(stale.seller_central_link_kind, "idr_instructions");
     assert.equal(
       stale.seller_central_url,
+      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+    );
+    const damage = normalizeCaseRow(row({
+      event_key: "dmg-fba",
+      event_date: "2026-08-10",
+      reason: "7",
+      shipment_id: "FBA16DAMAGE",
+    }));
+    assert.equal(damage.reason_group, "warehouse_damage");
+    assert.equal(damage.shipment_id, "FBA16DAMAGE");
+    assert.equal(damage.seller_central_link_kind, "idr_instructions");
+    assert.equal(
+      damage.seller_central_url,
       "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     );
   });
@@ -391,7 +429,7 @@ describe("Reese package + page contract", () => {
   test("Sellerboard CLOSED is a warehouse source — dashboard never calls Sellerboard", () => {
     assert.ok(CASE_QUEUE_SOURCES.some((s) => /Sellerboard CLOSED/.test(s)));
     assert.match(HOW_TO_FILE_INBOUND, /Sellerboard CLOSED/);
-    assert.match(HOW_TO_FILE_INBOUND, /shipment tracker/);
+    assert.match(HOW_TO_FILE_INBOUND, /shipmentEvents/);
     assert.match(HOW_TO_FILE_INBOUND, /Reference ID/);
     assert.ok(HOW_TO_FILE_INBOUND_STEPS.some((s) => /Sellerboard CLOSED/.test(s.title + s.body)));
     assert.doesNotMatch(ui, /sellerboard\.(com|io)/i);
