@@ -34,6 +34,7 @@ import {
   NOTIFY_BLOCK_COPY,
   REASON_GROUP_LABELS,
   REESE_AGENT_NAME,
+  SC_ELIGIBLE_FOR_CLAIM,
   SELLER_CENTRAL_LINK_LIMIT,
   apiUrl,
   caseAmount,
@@ -678,7 +679,7 @@ export function ReimbursementsEligiblePanel() {
                               rel="noreferrer"
                               className="inline-flex items-center gap-1 text-primary hover:underline"
                             >
-                              Shipment tracker
+                              Shipment events
                               <ExternalLink className="h-3 w-3" />
                             </a>
                           ) : (
@@ -686,6 +687,15 @@ export function ReimbursementsEligiblePanel() {
                               <p className="text-[11px] leading-snug text-muted-foreground">
                                 {IDR_INSTRUCTION}
                               </p>
+                              <a
+                                href={href || SC_ELIGIBLE_FOR_CLAIM}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-primary hover:underline"
+                              >
+                                Eligible for claim
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
                               <Button
                                 type="button"
                                 variant="outline"

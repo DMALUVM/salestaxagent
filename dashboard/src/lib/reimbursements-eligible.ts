@@ -38,15 +38,17 @@ export const CASE_QUEUE_ALERT_DAYS = REIMBURSEMENTS_ALERT_DAYS;
 export const SC_SUPPORT_HUB = "https://sellercentral.amazon.com/help/hub/contact-us";
 export const SC_LEDGER_HUB = "https://sellercentral.amazon.com/reportcentral/INVENTORY_LEDGER/1";
 export const SC_INBOUND_SHIPMENT =
-  "https://sellercentral.amazon.com/gp/fba/inbound-shipment-workflow/index.html?shipmentId=";
+  "https://sellercentral.amazon.com/fba/inbound-shipment/summary/";
+export const SC_ELIGIBLE_FOR_CLAIM =
+  "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim";
 
 export const SELLER_CENTRAL_LINK_LIMIT =
   "No stable Seller Central deep link opens a pre-filled FBA case. " +
   "Only real FBA* shipment IDs link to the inbound shipment tracker. " +
   "Ledger reference / transaction IDs (digit strings) are not shipment IDs. " +
-  "Warehouse damage is filed in IDR (Inventory → Inventory Defect and Reimbursement), " +
-  "not via a generic Support hub button. That hub is NOT a pre-filled lost-inbound or warehouse case. " +
-  "Dave submits; this desk never auto-files.";
+  "Warehouse damage is filed in IDR (Inventory → Inventory Defect and Reimbursement) " +
+  "at Eligible for claim, not via a generic Support hub button. That hub is NOT a " +
+  "pre-filled lost-inbound or warehouse case. Dave submits; this desk never auto-files.";
 
 export const IDR_INSTRUCTION =
   "Open IDR (Inventory → Inventory Defect and Reimbursement)";
@@ -74,7 +76,9 @@ export const HOW_TO_FILE_STEPS = [
   },
   {
     title: "Preferred: Inventory Defect and Reimbursement (IDR)",
-    body: "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR).",
+    body:
+      "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR), " +
+      "or https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
   },
   {
     title: "Classic path",
@@ -388,7 +392,9 @@ export function normalizeCaseRow(row: CaseEventRow): CaseEventRow {
   const group = reasonGroup(row.reason, row.disposition);
   const shipment = fbaShipmentId(row.shipment_id);
   const kind = shipment ? "inbound_shipment" : "idr_instructions";
-  const url = shipment ? `${SC_INBOUND_SHIPMENT}${shipment}` : null;
+  const url = shipment
+    ? `${SC_INBOUND_SHIPMENT}${shipment}/shipmentEvents`
+    : SC_ELIGIBLE_FOR_CLAIM;
   return {
     ...row,
     reason_group: group,
@@ -548,8 +554,8 @@ export function eventQueryBounds(start: string, end: string): { gte: string; lte
 
 export function sellerCentralHref(row: Pick<CaseEventRow, "seller_central_url" | "shipment_id" | "reference_id">): string | null {
   const sid = fbaShipmentId(row.shipment_id);
-  if (sid) return `${SC_INBOUND_SHIPMENT}${sid}`;
-  return null;
+  if (sid) return `${SC_INBOUND_SHIPMENT}${sid}/shipmentEvents`;
+  return SC_ELIGIBLE_FOR_CLAIM;
 }
 
 export function isInboundTrackerLink(row: Pick<CaseEventRow, "shipment_id">): boolean {
@@ -557,7 +563,7 @@ export function isInboundTrackerLink(row: Pick<CaseEventRow, "shipment_id">): bo
 }
 
 export function linkKindLabel(kind: string | null | undefined): string {
-  if (kind === "inbound_shipment") return "Shipment tracker";
+  if (kind === "inbound_shipment") return "Shipment events";
   return IDR_INSTRUCTION;
 }
 

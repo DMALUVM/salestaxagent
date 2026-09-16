@@ -170,15 +170,15 @@ describe("needs-case vs paid", () => {
   test("Seller Central href is FBA tracker only — digit refs are not shipments", () => {
     assert.equal(
       sellerCentralHref({ seller_central_url: "https://sellercentral.amazon.com/help/hub/contact-us" }),
-      null,
+      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     );
     assert.match(
       sellerCentralHref({ seller_central_url: null, shipment_id: "FBA16ABCDE" }) ?? "",
-      /inbound-shipment-workflow.*FBA16ABCDE/,
+      /fba\/inbound-shipment\/summary\/FBA16ABCDE\/shipmentEvents/,
     );
     assert.equal(
       sellerCentralHref({ seller_central_url: null, shipment_id: null, reference_id: "20080126439780" }),
-      null,
+      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     );
     assert.equal(isFbaShipmentId("20080126439780"), false);
     assert.equal(fbaShipmentId(null, "20080126439780"), null);
@@ -228,7 +228,10 @@ describe("needs-case vs paid", () => {
     assert.equal(stale.reason_group, "lost_warehouse");
     assert.equal(stale.shipment_id, null);
     assert.equal(stale.seller_central_link_kind, "idr_instructions");
-    assert.equal(stale.seller_central_url, null);
+    assert.equal(
+      stale.seller_central_url,
+      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+    );
   });
 
   test("notify gate refuses unknown / missing FC / outdated classification", () => {
@@ -278,7 +281,7 @@ describe("Reese package + page contract", () => {
           reason: "Lost_Inbound",
           reason_group: "lost_inbound",
           shipment_id: "FBA1",
-          seller_central_url: "https://sellercentral.amazon.com/gp/fba/inbound-shipment-workflow/index.html?shipmentId=FBA1",
+          seller_central_url: "https://sellercentral.amazon.com/fba/inbound-shipment/summary/FBA1/shipmentEvents",
           estimated_amount: 20,
         }),
         row({
@@ -335,6 +338,9 @@ describe("Reese package + page contract", () => {
     assert.match(ui, /HOW_TO_FILE_TITLE/);
     assert.doesNotMatch(ui, /Support \(manual\)/);
     assert.doesNotMatch(ui, /help\/hub\/contact-us/);
+    assert.doesNotMatch(ui, /inbound-shipment-workflow/);
+    assert.match(ui, /Eligible for claim/);
+    assert.match(ui, /shipmentEvents|SC_ELIGIBLE_FOR_CLAIM/);
     assert.doesNotMatch(ui, /FC \/ Shipment/);
     assert.doesNotMatch(ui, /shipment_id \|\| r\.reference_id/);
     assert.match(notify, /status:\s*422/);

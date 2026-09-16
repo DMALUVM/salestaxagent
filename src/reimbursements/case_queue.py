@@ -49,8 +49,11 @@ FBA_SHIPMENT_RE = re.compile(r"^FBA[A-Z0-9]+$", re.IGNORECASE)
 
 SC_SUPPORT_HUB = "https://sellercentral.amazon.com/help/hub/contact-us"
 SC_INBOUND_SHIPMENT = (
-    "https://sellercentral.amazon.com/gp/fba/inbound-shipment-workflow/index.html"
-    "?shipmentId={shipment_id}"
+    "https://sellercentral.amazon.com/fba/inbound-shipment/summary/"
+    "{shipment_id}/shipmentEvents"
+)
+SC_ELIGIBLE_FOR_CLAIM = (
+    "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
 )
 SC_LEDGER_HUB = "https://sellercentral.amazon.com/reportcentral/INVENTORY_LEDGER/1"
 
@@ -66,8 +69,9 @@ SELLER_CENTRAL_LINK_LIMIT = (
     "Only real FBA* shipment IDs link to the inbound shipment tracker. "
     "Ledger reference / transaction IDs (digit strings) are not shipment IDs. "
     "Warehouse damage is filed in IDR (Inventory → Inventory Defect and "
-    "Reimbursement), not via a generic Support hub button. That hub is NOT a "
-    "pre-filled lost-inbound or warehouse case. Dave submits; this desk never auto-files."
+    "Reimbursement) at the Eligible for claim page, not via a generic Support "
+    "hub button. That hub is NOT a pre-filled lost-inbound or warehouse case. "
+    "Dave submits; this desk never auto-files."
 )
 
 IDR_INSTRUCTION = "Open IDR (Inventory → Inventory Defect and Reimbursement)"
@@ -96,7 +100,8 @@ HOW_TO_FILE_STEPS = (
     ),
     (
         "Preferred: Inventory Defect and Reimbursement (IDR)",
-        "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR).",
+        "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR), "
+        "or https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
     ),
     (
         "Classic path",
@@ -218,7 +223,7 @@ def seller_central_link(shipment_id: str | None, reference_id: str | None) -> tu
     sid = fba_shipment_id(shipment_id, reference_id)
     if sid:
         return SC_INBOUND_SHIPMENT.format(shipment_id=sid), LINK_KIND_INBOUND
-    return None, LINK_KIND_IDR
+    return SC_ELIGIBLE_FOR_CLAIM, LINK_KIND_IDR
 
 
 def inbound_age_day(ship: dict) -> date | None:
@@ -706,7 +711,9 @@ def apply_inbound_balance(
             seen.add(key)
 
     for prior in existing_list:
-        if prior.get("status") not in (STATUS_NEEDS_CASE, STATUS_CASE_SUBMITTED):
+        if prior.get("status") not in (
+            STATUS_NEEDS_CASE, STATUS_CASE_SUBMITTED, STATUS_FOUND_OFFSET,
+        ):
             continue
         if not _is_inbound_event(prior):
             continue
@@ -730,8 +737,6 @@ def apply_inbound_balance(
             received,
             (info or {}).get("quantity_short"),
         )
-        if short is None or short > 0:
-            continue
         row = dict(prior)
         row["event_key"] = ek
         if match:
@@ -739,12 +744,28 @@ def apply_inbound_balance(
             row["sku"] = match[1]
         row["reason"] = row.get("reason") or "Lost_Inbound"
         row["reason_group"] = "lost_inbound"
-        out.append(_mark_inbound_found_offset(row, {
-            "quantity_shipped": shipped,
-            "quantity_received": received,
-            "quantity_short": short,
-        }))
-        seen.add(ek)
+        if short is not None and short <= 0:
+            out.append(_mark_inbound_found_offset(row, {
+                "quantity_shipped": shipped,
+                "quantity_received": received,
+                "quantity_short": short,
+            }))
+            seen.add(ek)
+            continue
+        if (
+            prior.get("status") == STATUS_FOUND_OFFSET
+            and short is not None
+            and short > 0
+            and not prior.get("dismissed_at")
+        ):
+            row["quantity"] = short
+            row["status"] = STATUS_NEEDS_CASE
+            if shipped is not None:
+                row["quantity_shipped"] = shipped
+            if received is not None:
+                row["quantity_received"] = received
+            out.append(row)
+            seen.add(ek)
     return out
 
 
@@ -818,6 +839,59 @@ def preserve_submitted_status(
             row["status"] = saved.get("status") or STATUS_CASE_SUBMITTED
             row["dismissed_at"] = saved.get("dismissed_at")
             row["dismissed_note"] = saved.get("dismissed_note")
+        out.append(row)
+    return out
+
+
+def preserve_found_offset_unless_amazon_short(
+    events: list[dict],
+    existing: Iterable[dict],
+    amazon_live: dict[tuple[str, str], dict] | None = None,
+    amazon_totals: dict[str, dict] | None = None,
+) -> list[dict]:
+    """Keep Amazon-cleared found_offset rows across Sellerboard upserts.
+
+    Reopen only when live Amazon short > 0. Missing Amazon data must not
+    let a stale Sellerboard short revive last night's 24 balanced IDs.
+    Manual dismiss (dismissed_at) still wins via preserve_submitted_status.
+    """
+    prior: dict[str, dict] = {}
+    for row in existing:
+        key = str(row.get("event_key") or "").strip()
+        if key and row.get("status") == STATUS_FOUND_OFFSET:
+            prior[key] = row
+    if not prior:
+        return events
+    live = amazon_live or {}
+    totals = amazon_totals or {}
+    out: list[dict] = []
+    for ev in events:
+        row = dict(ev)
+        saved = prior.get(str(row.get("event_key") or "").strip())
+        if saved and row.get("status") not in (
+            STATUS_ALREADY_REIMBURSED, STATUS_CASE_SUBMITTED, STATUS_FOUND_OFFSET,
+        ):
+            match = inbound_match_key(row.get("shipment_id"), row.get("sku"))
+            info = live.get(match) if match else None
+            if not info and match:
+                tot = totals.get(match[0]) or {}
+                try:
+                    sku_count = int(tot.get("sku_count") or 0)
+                except (TypeError, ValueError):
+                    sku_count = 0
+                if sku_count <= 1:
+                    info = tot or None
+            short = None
+            if info:
+                short = inbound_live_short(
+                    _int_or_none(info.get("quantity_shipped")),
+                    _int_or_none(info.get("quantity_received")),
+                    _int_or_none(info.get("quantity_short")),
+                )
+            if short is None or short <= 0:
+                row = _mark_inbound_found_offset(row, info)
+                if saved.get("dismissed_note"):
+                    row["dismissed_note"] = saved.get("dismissed_note")
         out.append(row)
     return out
 
@@ -1125,6 +1199,10 @@ def build_case_events(
     merged = apply_found_offsets(ledger_kept + inbound, found_offsets(adj_list))
     merged = apply_inbound_balance(
         merged, live_qty, existing_list, amazon_shipment_totals,
+    )
+    amazon_only = collect_live_inbound_qty([], [], amazon_rows)
+    merged = preserve_found_offset_unless_amazon_short(
+        merged, existing_list, amazon_only, amazon_shipment_totals,
     )
     merged = _enrich_asin(merged, adj_list, paid_list)
     out = apply_paid_dedupe(merged, paid_list)
