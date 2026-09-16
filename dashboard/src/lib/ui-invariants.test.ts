@@ -312,9 +312,12 @@ describe("dashboard control labels match handlers", () => {
     assert.doesNotMatch(page, />\s*Sync queue\s*</);
   });
 
-  test("orphan /filings redirects to calendar", () => {
+  test("/filings is next-due by assigned frequency, not a second calendar table", () => {
     const page = src("src/app/filings/page.tsx");
-    assert.match(page, /redirect\(\"\/calendar\"\)/);
+    assert.match(page, /computeNextDue/);
+    assert.match(page, /last_filed_through/);
+    assert.match(page, /\/api\/registrations/);
+    assert.doesNotMatch(page, /from\(\"filing_calendar\"\)/);
   });
 
   test("costs Last Updated uses max updated_at and CSV-only upload", () => {

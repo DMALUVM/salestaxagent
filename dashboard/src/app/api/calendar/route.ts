@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { isImpliedFilingId } from "@/lib/next-due";
 
 type FilingPatch = {
   status: string;
@@ -8,10 +9,14 @@ type FilingPatch = {
   filed_date?: string | null;
 };
 
-/** Recompute nexus_status.last_filed_through from remaining filed rows. */
+/**
+ * Recompute nexus_status.last_filed_through from remaining filed rows.
+ * extraPeriodEnd covers implied next-due marks that have no calendar row yet.
+ */
 async function syncLastFiledThrough(
   sb: ReturnType<typeof getServerSupabase>,
   stateCode: string,
+  extraPeriodEnd?: string | null,
 ) {
   if (!stateCode) return;
   const { data, error } = await sb
@@ -20,12 +25,11 @@ async function syncLastFiledThrough(
     .eq("state_code", stateCode)
     .eq("status", "filed");
   if (error) throw new Error(error.message);
-  const maxEnd =
-    (data ?? [])
-      .map((r) => r.period_end as string | null)
-      .filter((d): d is string => !!d)
-      .sort()
-      .at(-1) ?? null;
+  const ends = (data ?? [])
+    .map((r) => r.period_end as string | null)
+    .filter((d): d is string => !!d);
+  if (extraPeriodEnd) ends.push(extraPeriodEnd);
+  const maxEnd = ends.sort().at(-1) ?? null;
   const { error: upErr } = await sb
     .from("nexus_status")
     .update({ last_filed_through: maxEnd })
@@ -71,9 +75,15 @@ export async function POST(request: NextRequest) {
       if (patch.filed_amount !== null && !Number.isFinite(patch.filed_amount)) {
         return Response.json({ error: "Invalid amount" }, { status: 400 });
       }
-      const { error } = await sb.from("filing_calendar").update(patch).eq("id", id);
-      if (error) return Response.json({ error: error.message }, { status: 500 });
-      await syncLastFiledThrough(sb, String(body.state_code ?? ""));
+      if (!isImpliedFilingId(String(id))) {
+        const { error } = await sb.from("filing_calendar").update(patch).eq("id", id);
+        if (error) return Response.json({ error: error.message }, { status: 500 });
+      }
+      await syncLastFiledThrough(
+        sb,
+        String(body.state_code ?? ""),
+        body.period_end ? String(body.period_end) : null,
+      );
       return Response.json({ ok: true, action, id });
     }
 
@@ -128,20 +138,21 @@ export async function POST(request: NextRequest) {
       const items = Array.isArray(body.items) ? body.items : [];
       const ids = items
         .map((item) => (item as { id?: unknown }).id)
-        .filter((id) => id != null && id !== "");
-      if (!ids.length) {
+        .filter((id) => id != null && id !== "" && !isImpliedFilingId(String(id)));
+      if (ids.length) {
+        const { error } = await sb
+          .from("filing_calendar")
+          .update({
+            status: "filed",
+            filed_amount: null,
+            filed_notes: "Bulk-marked as filed",
+            filed_date: today,
+          })
+          .in("id", ids);
+        if (error) return Response.json({ error: error.message }, { status: 500 });
+      } else if (!items.length) {
         return Response.json({ error: "items required" }, { status: 400 });
       }
-      const { error } = await sb
-        .from("filing_calendar")
-        .update({
-          status: "filed",
-          filed_amount: null,
-          filed_notes: "Bulk-marked as filed",
-          filed_date: today,
-        })
-        .in("id", ids);
-      if (error) return Response.json({ error: error.message }, { status: 500 });
 
       const byState: Record<string, string> = {};
       for (const raw of items) {
@@ -151,8 +162,8 @@ export async function POST(request: NextRequest) {
           byState[item.state_code] = item.period_end;
         }
       }
-      for (const stateCode of Object.keys(byState)) {
-        await syncLastFiledThrough(sb, stateCode);
+      for (const [stateCode, periodEnd] of Object.entries(byState)) {
+        await syncLastFiledThrough(sb, stateCode, periodEnd);
       }
       return Response.json({ ok: true, action, count: ids.length });
     }

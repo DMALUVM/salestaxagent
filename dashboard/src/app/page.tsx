@@ -17,6 +17,7 @@ import type {
 import { normalizeChannel, SHOPIFY, AMAZON } from "@/lib/channels";
 import { buildLast30Series } from "@/lib/overview-series";
 import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
+import { dueDayByState, mergeImpliedObligations } from "@/lib/next-due";
 import { agentToday, amazonAsOf, monthNameFromIso, monthStart, shiftDays, windowStart } from "@/lib/as-of";
 import { InventoryLogisticsPanel } from "@/components/inventory/InventoryLogisticsPanel";
 import { InboundDiscrepancyAlerts } from "@/components/inbound-discrepancy-alerts";
@@ -244,7 +245,11 @@ export default function Pulse() {
     // which is how NV showed OVERDUE for 2026-Q1/Q2 that were already covered
     // by last_filed_through 2026-06-30 and duplicated by a filed 2026-H1.
     const cls = classifyFilings<FilingEntry & FilingRow>(
-      (filings ?? []) as Array<FilingEntry & FilingRow>,
+      mergeImpliedObligations(
+        (filings ?? []) as Array<FilingEntry & FilingRow>,
+        (nexus ?? []) as unknown as NexusRow[],
+        dueDayByState(stateRules ?? []),
+      ),
       (nexus ?? []) as unknown as NexusRow[],
       filingToday,
     );
@@ -273,7 +278,7 @@ export default function Pulse() {
       items.push({ label: `${r.state_code} — review with CPA`, href: "/registrations" });
 
     return { overdue: od, upcomingOpen: up, actionCount: ac + entityOverdue, nextFiling: nf, nextFilingDays: nfDays, criticalItems: items };
-  }, [filings, nexus, recs, filingToday, entityOverdue]);
+  }, [filings, nexus, recs, filingToday, entityOverdue, stateRules]);
 
   if (!configured) return <SetupPrompt />;
   if (l1 || l2 || l3) return <LoadingState />;

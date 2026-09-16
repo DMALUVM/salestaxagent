@@ -97,29 +97,40 @@ def obligation_status(filing: dict, nexus: dict | None) -> Ineligible | None:
 
     # ── Superseded cadence ──────────────────────────────────────
     # The calendar upserts on (state, period_type, period_label), so changing a
-    # state's frequency leaves the old cadence's rows behind forever. The state
-    # then carries two overlapping sets covering the same months, and filing
-    # one leaves the other looking unfiled. Only the current cadence is live.
-    #
-    # This applies ONLY between two periodic cadences. An `annual` row
-    # alongside a periodic cadence is NOT a leftover — several states require a
-    # yearly reconciliation on top of periodic returns (Hawaii's G-49 annual
-    # GET return sits on top of the G-45 periodics exactly this way). Excluding
-    # a real annual return is a worse failure than showing one extra row, so
-    # annual is never treated as superseded.
+    # state's frequency leaves the old cadence's rows behind forever. Only the
+    # current cadence is live — see is_superseded_frequency.
     freq = nexus.get("assigned_frequency")
     period_type = filing.get("period_type")
-    if (freq and period_type and period_type != freq
-            and period_type in PERIODIC_TYPES and freq in PERIODIC_TYPES):
+    if is_superseded_frequency(period_type, freq):
         return Ineligible("superseded_frequency",
                           f"period_type={period_type}, state files {freq}")
-    # Casual has no periodic calendar. Leftover monthly/quarterly/semi_annual
-    # rows after a frequency change are not live obligations.
-    if freq == "casual" and period_type in PERIODIC_TYPES:
-        return Ineligible("superseded_frequency",
-                          f"period_type={period_type}, state files casual")
 
     return None
+
+
+def is_superseded_frequency(period_type, assigned_frequency) -> bool:
+    """True when a calendar row's period_type is a leftover from a previous cadence.
+
+    Periodic vs periodic mismatches are leftovers. Assigned `annual` or
+    `casual` also retires leftover periodics (Wyoming files annually; leftover
+    monthly rows are not live dues).
+
+    An `annual` row alongside a *periodic* assigned cadence is NOT a leftover.
+    Several states require a yearly reconciliation on top of periodics
+    (Hawaii G-49 on top of G-45). Annual is never treated as superseded by a
+    periodic cadence.
+    """
+    if not assigned_frequency or not period_type:
+        return False
+    if period_type == assigned_frequency:
+        return False
+    if period_type in PERIODIC_TYPES and assigned_frequency in PERIODIC_TYPES:
+        return True
+    if assigned_frequency in ("annual", "casual") and period_type in PERIODIC_TYPES:
+        return True
+    if assigned_frequency == "casual" and period_type == "annual":
+        return True
+    return False
 
 
 def is_open_obligation(filing: dict, nexus: dict | None) -> bool:
