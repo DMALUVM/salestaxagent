@@ -52,8 +52,9 @@ SC_INBOUND_SHIPMENT = (
     "https://sellercentral.amazon.com/fba/inbound-shipment/summary/"
     "{shipment_id}/shipmentEvents"
 )
+# Dave’s confirmed claim window for pasting ledger transaction / Reference IDs.
 SC_ELIGIBLE_FOR_CLAIM = (
-    "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
+    "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb"
 )
 SC_LEDGER_HUB = "https://sellercentral.amazon.com/reportcentral/INVENTORY_LEDGER/1"
 
@@ -68,10 +69,11 @@ SELLER_CENTRAL_LINK_LIMIT = (
     "No stable Seller Central deep link opens a pre-filled FBA case. "
     "Only real FBA* shipment IDs link to the inbound shipment tracker. "
     "Ledger reference / transaction IDs (digit strings) are not shipment IDs. "
-    "Warehouse damage is filed in IDR (Inventory → Inventory Defect and "
-    "Reimbursement) at the Eligible for claim page, not via a generic Support "
-    "hub button. That hub is NOT a pre-filled lost-inbound or warehouse case. "
-    "Dave submits; this desk never auto-files."
+    "Warehouse damage is filed by pasting the transaction ID in the Seller "
+    "Central claim window (help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb), "
+    "not via a generic Support hub button. That hub is NOT a pre-filled "
+    "lost-inbound or warehouse case. The Eligible for claim inventory page "
+    "may still exist. Dave submits; this desk never auto-files."
 )
 
 IDR_INSTRUCTION = "Open IDR (Inventory → Inventory Defect and Reimbursement)"
@@ -100,8 +102,11 @@ HOW_TO_FILE_STEPS = (
     ),
     (
         "Preferred: Inventory Defect and Reimbursement (IDR)",
-        "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR), "
-        "or https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+        "Paste the ledger transaction / Reference ID in the Seller Central claim "
+        "window: https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb. "
+        "Inventory → Inventory Defect and Reimbursement (IDR) / Eligible for claim "
+        "may still exist; this help/claim-window link is the confirmed entry point. "
+        "Not a pre-filled case.",
     ),
     (
         "Classic path",
@@ -223,10 +228,10 @@ def seller_central_link(
     """Best available SC URL and a documented kind.
 
     lost_inbound + real FBA* id → shipment events. Every other Needs-case
-    reason (warehouse damage, lost warehouse, damaged & lost) uses Eligible
-    for claim — even if a row has an FBA-looking id. Digit ledger
-    transaction IDs are not shipment IDs. There is no stable pre-filled
-    case deep link and no Support hub fallback.
+    reason (warehouse damage, lost warehouse, damaged & lost) uses the
+    claim-window help article — even if a row has an FBA-looking id. Digit
+    ledger transaction IDs are not shipment IDs. There is no stable
+    pre-filled case deep link and no Support hub fallback.
     """
     sid = fba_shipment_id(shipment_id, reference_id)
     inbound = bool(sid) and (reason_group is None or reason_group == "lost_inbound")

@@ -26,6 +26,7 @@ import {
   REESE_AGENT_ID,
   REESE_AGENT_NAME,
   REESE_PACKAGE_CONTRACT,
+  SC_ELIGIBLE_FOR_CLAIM,
   SELLER_CENTRAL_LINK_LIMIT,
   STATUS_CASE_SUBMITTED,
   STATUS_FOUND_OFFSET,
@@ -39,6 +40,7 @@ import {
   fbaShipmentId,
   filterInboundAlerts,
   filterNeedsCase,
+  filterSubmittedByShipment,
   filterSubmittedCases,
   formatCasePacket,
   inCaseRange,
@@ -177,7 +179,7 @@ describe("needs-case vs paid", () => {
         reason_group: "warehouse_damage",
         disposition: null,
       }),
-      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+      "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb",
     );
     assert.match(
       sellerCentralHref({
@@ -195,7 +197,7 @@ describe("needs-case vs paid", () => {
         reason: "7",
         reason_group: "warehouse_damage",
       }),
-      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+      "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb",
     );
     assert.equal(
       sellerCentralHref({
@@ -204,7 +206,7 @@ describe("needs-case vs paid", () => {
         reason: "M",
         reason_group: "lost_warehouse",
       }),
-      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+      "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb",
     );
     assert.equal(
       sellerCentralHref({
@@ -215,7 +217,7 @@ describe("needs-case vs paid", () => {
         reason_group: "warehouse_damage",
         disposition: null,
       }),
-      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+      "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb",
     );
     assert.equal(isFbaShipmentId("20080126439780"), false);
     assert.equal(fbaShipmentId(null, "20080126439780"), null);
@@ -237,7 +239,7 @@ describe("needs-case vs paid", () => {
     assert.match(packet, /PHX6/);
     assert.match(packet, /not a shipment ID/);
     assert.match(packet, /Inventory Defect and Reimbursement/);
-    assert.match(packet, /eligible-for-claim/);
+    assert.match(packet, /GEV4254LJJ9BAEG#mnd_2jc_jcb/);
     assert.doesNotMatch(packet, /help\/hub\/contact-us/);
     assert.doesNotMatch(packet, /inbound-shipment-workflow/);
     assert.equal(inboundEmptyCopy([]), NO_INBOUND_DISCREPANCIES);
@@ -269,7 +271,7 @@ describe("needs-case vs paid", () => {
     assert.equal(stale.seller_central_link_kind, "idr_instructions");
     assert.equal(
       stale.seller_central_url,
-      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+      "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb",
     );
     const damage = normalizeCaseRow(row({
       event_key: "dmg-fba",
@@ -282,7 +284,7 @@ describe("needs-case vs paid", () => {
     assert.equal(damage.seller_central_link_kind, "idr_instructions");
     assert.equal(
       damage.seller_central_url,
-      "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+      "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb",
     );
   });
 
@@ -419,6 +421,11 @@ describe("Reese package + page contract", () => {
     assert.match(bodies, /already paid within ~60 days/);
     assert.match(bodies, /ledger transaction ID/);
     assert.match(bodies, /Inventory Defect and Reimbursement/);
+    assert.match(bodies, /GEV4254LJJ9BAEG#mnd_2jc_jcb/);
+    assert.equal(
+      SC_ELIGIBLE_FOR_CLAIM,
+      "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb",
+    );
     assert.match(bodies, /Inventory Adjustments \/ Ledger Adjustments/);
     assert.match(bodies, /One case per event|Do not batch/);
     assert.match(HOW_TO_FILE_NO_DEEP_LINK, /no stable deep link/);
@@ -487,6 +494,11 @@ describe("Reese package + page contract", () => {
     assert.match(alertsApi, /event_keys/);
     assert.match(alertsApi, /resolveClearAction/);
     assert.match(alertsApi, /amazonWrite:\s*false/);
+    assert.match(ui, /SubmittedClearedArchive/);
+    assert.match(ui, /View more/);
+    assert.match(ui, /filterSubmittedByShipment/);
+    assert.match(ui, /Search shipment ID \(FBA/);
+    assert.match(ui, /aria-expanded=\{open\}/);
     const overview = readFileSync(path.join(here, "../app/page.tsx"), "utf8");
     assert.match(overview, /InboundDiscrepancyAlerts/);
     const salesPulseIdx = overview.indexOf("Sales pulse:");
@@ -622,5 +634,34 @@ describe("inbound alerts + dismiss", () => {
     assert.equal(isClearedHistory(ledgerFound), false);
     assert.equal(filterSubmittedCases([reconciled, ledgerFound])[0].event_key, reconciled.event_key);
     assert.equal(clearReasonLabel(reconciled), CLEAR_REASON_LABELS.reconciled);
+  });
+
+  test("submitted archive shipment filter is case-insensitive substring on FBA ids", () => {
+    const rows = [
+      row({
+        event_key: "a",
+        event_date: "2026-08-01",
+        shipment_id: "FBA19K98F8VN",
+        status: STATUS_CASE_SUBMITTED,
+      }),
+      row({
+        event_key: "b",
+        event_date: "2026-08-01",
+        shipment_id: "FBA16ABCDE",
+        status: STATUS_CASE_SUBMITTED,
+      }),
+      row({
+        event_key: "c",
+        event_date: "2026-08-01",
+        shipment_id: "20080126439780",
+        status: STATUS_CASE_SUBMITTED,
+      }),
+    ];
+    assert.deepEqual(filterSubmittedByShipment(rows, "fba19k").map((r) => r.event_key), ["a"]);
+    assert.deepEqual(filterSubmittedByShipment(rows, "FBA16").map((r) => r.event_key), ["b"]);
+    assert.deepEqual(filterSubmittedByShipment(rows, "  ").map((r) => r.event_key), ["a", "b", "c"]);
+    assert.deepEqual(filterSubmittedByShipment(rows, "").map((r) => r.event_key), ["a", "b", "c"]);
+    assert.deepEqual(filterSubmittedByShipment(rows, "200801").map((r) => r.event_key), []);
+    assert.deepEqual(filterSubmittedByShipment(rows, "nomatch").map((r) => r.event_key), []);
   });
 });
