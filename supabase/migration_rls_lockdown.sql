@@ -15,6 +15,14 @@
 -- Apply manually in the Supabase SQL editor after confirming service-role
 -- credentials are set on Vercel + the Mac Mini worker. Do not run from CI
 -- without a human gate.
+--
+-- NOTE (2026-09-16): Production already ENABLE ROW LEVEL SECURITY on the
+-- ~56 ops tables. The two tables that stayed open — sku_costs and
+-- compliance_obligations — are applied by
+-- supabase/migration_rls_sku_costs_obligations.sql AFTER the Tax / Overview /
+-- Calendar / Compliance / Registrations (and related) pages moved onto
+-- service-role API routes. The ALTER TABLE lines below remain idempotent.
+-- Do not DISABLE RLS on the tables already locked.
 -- ============================================================
 
 DO $$

@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/loading";
 import { StateMatrix } from "@/components/state-matrix";
-import { getSupabase } from "@/lib/supabase";
 import {
   filterObligations, HORIZON_LABELS, SCOPE_DESCRIPTIONS, SCOPE_LABELS,
   scopeStates, type HorizonKey, type ScopeKey,
@@ -95,16 +94,18 @@ function ObligationCard({
     if (reason === null) return;
     setBusy(true);
     try {
-      const sb = getSupabase();
-      const { error } = await sb
-        .from("compliance_obligations")
-        .update({
+      const r = await fetch("/api/entity-obligations", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: row.id,
           status,
           user_notes: reason.trim() || null,
           ...(status === "filed" ? { filed_date: today } : {}),
-        })
-        .eq("id", row.id);
-      if (error) throw new Error(error.message);
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((j as { error?: string }).error || `HTTP ${r.status}`);
       onChanged();
     } catch (e) {
       window.alert(e instanceof Error ? e.message : String(e));

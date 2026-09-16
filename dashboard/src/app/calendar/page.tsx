@@ -34,7 +34,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getSupabase } from "@/lib/supabase";
 import {
   Calendar,
   Check,
@@ -44,30 +43,21 @@ import {
   Undo2,
 } from "lucide-react";
 
-function throwIfSbError(error: { message: string } | null) {
-  if (error) throw new Error(error.message);
+async function postCalendar(body: Record<string, unknown>) {
+  const res = await fetch("/api/calendar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error((j as { error?: string }).error ?? `HTTP ${res.status}`);
+  }
 }
 
 /** Recompute nexus_status.last_filed_through from remaining filed rows. */
 async function syncLastFiledThrough(stateCode: string) {
-  const sb = getSupabase();
-  const { data, error } = await sb
-    .from("filing_calendar")
-    .select("period_end")
-    .eq("state_code", stateCode)
-    .eq("status", "filed");
-  throwIfSbError(error);
-  const maxEnd =
-    (data ?? [])
-      .map((r) => r.period_end as string | null)
-      .filter((d): d is string => !!d)
-      .sort()
-      .at(-1) ?? null;
-  const { error: upErr } = await sb
-    .from("nexus_status")
-    .update({ last_filed_through: maxEnd })
-    .eq("state_code", stateCode);
-  throwIfSbError(upErr);
+  await postCalendar({ action: "syncLastFiledThrough", state_code: stateCode });
 }
 
 // ---------------------------------------------------------------------------
@@ -91,17 +81,14 @@ function MarkCompleteDialog({
     setSubmitting(true);
     setErr(null);
     try {
-      const sb = getSupabase();
-      const { error } = await sb
-        .from("filing_calendar")
-        .update({
-          status: "filed",
-          filed_amount: amount ? parseFloat(amount) : null,
-          filed_notes: notes || null,
-          filed_date: new Date().toISOString().slice(0, 10),
-        })
-        .eq("id", filing.id);
-      throwIfSbError(error);
+      await postCalendar({
+        action: "file",
+        id: filing.id,
+        amount: amount ? parseFloat(amount) : null,
+        notes: notes || null,
+        state_code: filing.state_code,
+        period_end: filing.period_end,
+      });
       await syncLastFiledThrough(filing.state_code);
       setOpen(false);
       setAmount("");
@@ -188,17 +175,14 @@ function QuickMarkButton({
     setBusy(true);
     setErr(null);
     try {
-      const sb = getSupabase();
-      const { error } = await sb
-        .from("filing_calendar")
-        .update({
-          status: "filed",
-          filed_amount: null,
-          filed_notes: null,
-          filed_date: new Date().toISOString().slice(0, 10),
-        })
-        .eq("id", filing.id);
-      throwIfSbError(error);
+      await postCalendar({
+        action: "file",
+        id: filing.id,
+        amount: null,
+        notes: null,
+        state_code: filing.state_code,
+        period_end: filing.period_end,
+      });
       await syncLastFiledThrough(filing.state_code);
       onDone();
     } catch (e) {
@@ -241,16 +225,11 @@ function UndoButton({
     setBusy(true);
     setErr(null);
     try {
-      const { error } = await getSupabase()
-        .from("filing_calendar")
-        .update({
-          status: "pending",
-          filed_amount: null,
-          filed_notes: null,
-          filed_date: null,
-        })
-        .eq("id", filing.id);
-      throwIfSbError(error);
+      await postCalendar({
+        action: "undo",
+        id: filing.id,
+        state_code: filing.state_code,
+      });
       await syncLastFiledThrough(filing.state_code);
       onDone();
     } catch (e) {
@@ -293,19 +272,14 @@ function BulkMarkOverdueButton({
     setBusy(true);
     setErr(null);
     try {
-      const sb = getSupabase();
-      const today = new Date().toISOString().slice(0, 10);
-      const ids = overdue.map((f) => f.id);
-      const { error } = await sb
-        .from("filing_calendar")
-        .update({
-          status: "filed",
-          filed_amount: null,
-          filed_notes: "Bulk-marked as filed",
-          filed_date: today,
-        })
-        .in("id", ids);
-      throwIfSbError(error);
+      await postCalendar({
+        action: "bulk_file",
+        items: overdue.map((f) => ({
+          id: f.id,
+          state_code: f.state_code,
+          period_end: f.period_end,
+        })),
+      });
       const states = [...new Set(overdue.map((f) => f.state_code))];
       for (const sc of states) {
         await syncLastFiledThrough(sc);
@@ -381,15 +355,11 @@ function NotRequiredButton({
     if (reason === null) return; // cancelled
     setBusy(true);
     try {
-      const sb = getSupabase();
-      const { error } = await sb
-        .from("filing_calendar")
-        .update({
-          status: "not_required",
-          filed_notes: reason.trim() || "marked not required by user",
-        })
-        .eq("id", filing.id);
-      throwIfSbError(error);
+      await postCalendar({
+        action: "not_required",
+        id: filing.id,
+        notes: reason.trim() || "marked not required by user",
+      });
       onDone();
     } catch (e) {
       window.alert(e instanceof Error ? e.message : String(e));
