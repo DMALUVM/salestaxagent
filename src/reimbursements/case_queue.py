@@ -153,8 +153,10 @@ SOURCE_SELLERBOARD = "sellerboard_inbound"
 INBOUND_SOURCES = frozenset({SOURCE_INBOUND, SOURCE_SELLERBOARD})
 
 HOW_TO_FILE_INBOUND = (
-    "Lost inbound / inbound short is filed from the shipment tracker + "
-    "IDR / lost inbound — not the ledger Reference ID damage path. "
+    "Lost inbound / inbound short is filed from shipment events "
+    "(https://sellercentral.amazon.com/fba/inbound-shipment/summary/"
+    "{SHIPMENT_ID}/shipmentEvents) + IDR / lost inbound — not the ledger "
+    "Reference ID damage path and not a generic Support hub. "
     "Use the real FBA* shipment ID, FC, and shipped / received / short qty. "
     "Inbound shorts may come from Sellerboard CLOSED history when the SP-API "
     "warehouse has no CLOSED rows (live WORKING / IN_TRANSIT / RECEIVING only)."
@@ -213,15 +215,22 @@ def _fba_id(value: str | None) -> str | None:
     return None
 
 
-def seller_central_link(shipment_id: str | None, reference_id: str | None) -> tuple[str | None, str]:
+def seller_central_link(
+    shipment_id: str | None,
+    reference_id: str | None = None,
+    reason_group: str | None = None,
+) -> tuple[str | None, str]:
     """Best available SC URL and a documented kind.
 
-    Real FBA* ids → inbound shipment tracker. Digit ledger transaction IDs
-    are not shipment IDs — those get IDR instructions, not a fake Support
-    hub claim URL. There is no stable pre-filled case deep link.
+    lost_inbound + real FBA* id → shipment events. Every other Needs-case
+    reason (warehouse damage, lost warehouse, damaged & lost) uses Eligible
+    for claim — even if a row has an FBA-looking id. Digit ledger
+    transaction IDs are not shipment IDs. There is no stable pre-filled
+    case deep link and no Support hub fallback.
     """
     sid = fba_shipment_id(shipment_id, reference_id)
-    if sid:
+    inbound = bool(sid) and (reason_group is None or reason_group == "lost_inbound")
+    if inbound:
         return SC_INBOUND_SHIPMENT.format(shipment_id=sid), LINK_KIND_INBOUND
     return SC_ELIGIBLE_FOR_CLAIM, LINK_KIND_IDR
 
@@ -963,8 +972,9 @@ def adjustment_candidates(adjustments: Iterable[dict], start: date, end: date) -
             continue
         sku = normalize_sku(row.get("sku"))
         ref = row.get("reference_id")
+        group = reason_group(reason, disposition)
         sid = fba_shipment_id(row.get("shipment_id"), ref)
-        url, kind = seller_central_link(sid, None)
+        url, kind = seller_central_link(sid, None, group)
         out.append({
             "event_key": row.get("event_key") or "",
             "source": SOURCE_LEDGER,
@@ -975,7 +985,7 @@ def adjustment_candidates(adjustments: Iterable[dict], start: date, end: date) -
             "product_name": row.get("product_name"),
             "quantity": abs(qty),
             "reason": reason or "Unknown",
-            "reason_group": reason_group(reason, disposition),
+            "reason_group": group,
             "reason_label": reason_label(reason, disposition),
             "fulfillment_center": row.get("fulfillment_center"),
             "shipment_id": sid,
@@ -1211,9 +1221,10 @@ def build_case_events(
         row["classification_version"] = CLASSIFICATION_VERSION
         row["reason_group"] = reason_group(row.get("reason"), row.get("disposition"))
         row["reason_label"] = reason_label(row.get("reason"), row.get("disposition"))
+        group = row["reason_group"]
         sid = fba_shipment_id(row.get("shipment_id"), None)
         row["shipment_id"] = sid
-        url, kind = seller_central_link(sid, None)
+        url, kind = seller_central_link(sid, None, group)
         row["seller_central_url"] = url
         row["seller_central_link_kind"] = kind
     return out

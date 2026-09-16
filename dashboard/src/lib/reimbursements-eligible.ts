@@ -132,10 +132,12 @@ export const CASE_QUEUE_SOURCES = [
 export const HOW_TO_FILE_INBOUND_TITLE = "How to file inbound shorts";
 
 export const HOW_TO_FILE_INBOUND =
-  "Lost inbound / inbound short is filed from the shipment tracker + IDR / lost inbound — " +
-  "not the ledger Reference ID damage path. Use the real FBA* shipment ID, FC, and " +
-  "shipped / received / short qty. Inbound shorts may come from Sellerboard CLOSED history " +
-  "when the SP-API warehouse has no CLOSED rows (live WORKING / IN_TRANSIT / RECEIVING only).";
+  "Lost inbound / inbound short is filed from shipment events " +
+  "(https://sellercentral.amazon.com/fba/inbound-shipment/summary/{SHIPMENT_ID}/shipmentEvents) " +
+  "+ IDR / lost inbound — not the ledger Reference ID damage path and not a generic Support hub. " +
+  "Use the real FBA* shipment ID, FC, and shipped / received / short qty. Inbound shorts may come " +
+  "from Sellerboard CLOSED history when the SP-API warehouse has no CLOSED rows " +
+  "(live WORKING / IN_TRANSIT / RECEIVING only).";
 
 export const HOW_TO_FILE_INBOUND_STEPS = [
   {
@@ -148,9 +150,9 @@ export const HOW_TO_FILE_INBOUND_STEPS = [
     body: "Skip units already paid for Lost inbound on the same SKU.",
   },
   {
-    title: "File via shipment tracker + IDR / lost inbound",
+    title: "File via shipment events + IDR / lost inbound",
     body:
-      "Open the FBA* shipment tracker. File IDR / lost inbound with shipment ID, SKU/ASIN, FC, shipped, received, and short. Do not paste a ledger Reference ID as if it were a shipment.",
+      "Open https://sellercentral.amazon.com/fba/inbound-shipment/summary/{SHIPMENT_ID}/shipmentEvents. File IDR / lost inbound with shipment ID, SKU/ASIN, FC, shipped, received, and short. Do not paste a ledger Reference ID as if it were a shipment, and do not use a generic Support hub.",
   },
   {
     title: "Sellerboard CLOSED history",
@@ -391,8 +393,9 @@ export function isEligibleNeedsCase(row: CaseEventRow): boolean {
 export function normalizeCaseRow(row: CaseEventRow): CaseEventRow {
   const group = reasonGroup(row.reason, row.disposition);
   const shipment = fbaShipmentId(row.shipment_id);
-  const kind = shipment ? "inbound_shipment" : "idr_instructions";
-  const url = shipment
+  const inbound = group === "lost_inbound" && Boolean(shipment);
+  const kind = inbound ? "inbound_shipment" : "idr_instructions";
+  const url = inbound
     ? `${SC_INBOUND_SHIPMENT}${shipment}/shipmentEvents`
     : SC_ELIGIBLE_FOR_CLAIM;
   return {
@@ -552,14 +555,19 @@ export function eventQueryBounds(start: string, end: string): { gte: string; lte
   };
 }
 
-export function sellerCentralHref(row: Pick<CaseEventRow, "seller_central_url" | "shipment_id" | "reference_id">): string | null {
-  const sid = fbaShipmentId(row.shipment_id);
-  if (sid) return `${SC_INBOUND_SHIPMENT}${sid}/shipmentEvents`;
+export function sellerCentralHref(row: Pick<CaseEventRow, "seller_central_url" | "shipment_id" | "reference_id" | "reason" | "reason_group" | "disposition">): string | null {
+  if (isInboundTrackerLink(row)) {
+    const sid = fbaShipmentId(row.shipment_id);
+    return sid ? `${SC_INBOUND_SHIPMENT}${sid}/shipmentEvents` : SC_ELIGIBLE_FOR_CLAIM;
+  }
   return SC_ELIGIBLE_FOR_CLAIM;
 }
 
-export function isInboundTrackerLink(row: Pick<CaseEventRow, "shipment_id">): boolean {
-  return Boolean(fbaShipmentId(row.shipment_id));
+export function isInboundTrackerLink(row: Pick<CaseEventRow, "shipment_id" | "reason" | "reason_group" | "disposition">): boolean {
+  const group = row.reason
+    ? reasonGroup(row.reason, row.disposition)
+    : (row.reason_group || "");
+  return group === "lost_inbound" && Boolean(fbaShipmentId(row.shipment_id));
 }
 
 export function linkKindLabel(kind: string | null | undefined): string {
@@ -588,7 +596,9 @@ export function formatCasePacket(row: CaseEventRow): string {
     `Qty: ${caseQty(row)}`,
     `FC: ${row.fulfillment_center || "—"}`,
     shipment ? `Shipment: ${shipment}` : null,
-    `Preferred path: ${IDR_INSTRUCTION}`,
+    isInboundTrackerLink(row)
+      ? `Seller Central: ${sellerCentralHref(row)}`
+      : `Preferred path: ${IDR_INSTRUCTION} — ${SC_ELIGIBLE_FOR_CLAIM}`,
     HOW_TO_FILE_NO_DEEP_LINK,
   ];
   return lines.filter((line): line is string => Boolean(line)).join("\n");
