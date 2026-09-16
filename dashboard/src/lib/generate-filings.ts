@@ -1,4 +1,5 @@
 import { generatesPeriodicCalendar } from "./filing-frequencies";
+import { isSupersededFrequency } from "./filing-eligibility";
 
 export interface FilingCalendarEntry {
   state_code: string;
@@ -8,6 +9,28 @@ export interface FilingCalendarEntry {
   period_end: string;
   due_date: string;
   status: "pending";
+}
+
+export const OPEN_FREQUENCY_PURGE_STATUSES = new Set(["pending", "late"]);
+
+export interface ExistingCalendarRow {
+  id?: string;
+  state_code: string;
+  period_type?: string | null;
+  period_label?: string | null;
+  status?: string | null;
+}
+
+/** Open leftover-cadence rows that regenerate must remove. */
+export function staleOpenFrequencyRows<T extends ExistingCalendarRow>(
+  existing: T[],
+  frequencyByState: Record<string, string | null | undefined>,
+): T[] {
+  return existing.filter((row) => {
+    const status = String(row.status ?? "pending");
+    if (!OPEN_FREQUENCY_PURGE_STATUSES.has(status)) return false;
+    return isSupersededFrequency(row.period_type, frequencyByState[row.state_code]);
+  });
 }
 
 /**
@@ -21,6 +44,7 @@ export function generateEntries(
   frequency: string,
   dueDay: number,
   registrationDate: string | null,
+  lastFiledThrough?: string | null,
 ): FilingCalendarEntry[] {
   if (!generatesPeriodicCalendar(frequency)) {
     return [];
@@ -97,10 +121,27 @@ export function generateEntries(
 
   // Skip periods that end entirely before registration date.
   // Only create filing obligations from registration forward.
-  if (registrationDate) {
-    return allEntries.filter((e) => e.period_end >= registrationDate);
+  let entries = registrationDate
+    ? allEntries.filter((e) => e.period_end >= registrationDate)
+    : allEntries;
+
+  // If last_filed_through sits mid-period (VT 2026-08-17), the open period
+  // that contains the next day must exist even when a later registration
+  // date would have filtered it out.
+  if (lastFiledThrough) {
+    const current = allEntries
+      .filter((e) => e.period_end > lastFiledThrough)
+      .sort((a, b) => a.period_end.localeCompare(b.period_end))[0];
+    if (
+      current
+      && !entries.some((e) =>
+        e.period_type === current.period_type && e.period_label === current.period_label)
+    ) {
+      entries = [...entries, current].sort((a, b) =>
+        a.period_end.localeCompare(b.period_end));
+    }
   }
-  return allEntries;
+  return entries;
 }
 
 function isoDate(y: number, m: number, d: number): string {

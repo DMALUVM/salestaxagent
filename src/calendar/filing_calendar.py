@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from src.db import fetch_all, upsert_rows, update_row, log_audit
+from src.db import fetch_all, upsert_rows, update_row, delete_rows, log_audit
 from src.config import settings
 from src.calendar.eligibility import (
     PRESERVED_STATUSES,
     SETTLED_STATUSES,
     _as_iso,
     classify_filings,
+    is_superseded_frequency,
 )
 from src.rules import agent_today
 
@@ -121,6 +122,48 @@ def _safe_date(year: int, month: int, day: int) -> date:
     return date(year, month, min(day, max_day))
 
 
+def stale_open_frequency_rows(existing: list[dict], nexus_rows: list[dict]) -> list[dict]:
+    """Open leftover-cadence rows that regenerate must remove."""
+    by_state = {n.get("state_code"): n for n in nexus_rows}
+    stale = []
+    for row in existing:
+        status = str(row.get("status") or "pending")
+        if status not in ("pending", "late"):
+            continue
+        nexus = by_state.get(row.get("state_code"))
+        if not nexus:
+            continue
+        if is_superseded_frequency(row.get("period_type"), nexus.get("assigned_frequency")):
+            stale.append(row)
+    return stale
+
+
+def purge_superseded_frequency_rows(
+    existing: list[dict],
+    nexus_rows: list[dict],
+    *,
+    dry_run: bool = True,
+) -> list[dict]:
+    """Delete pending/late rows whose period_type is not the current cadence.
+
+    Filed / not_required leftovers stay as history. Hawaii-style annual
+    reconciliations alongside a periodic assigned_frequency are not stale.
+    """
+    stale = stale_open_frequency_rows(existing, nexus_rows)
+    if dry_run or not stale:
+        return stale
+    for row in stale:
+        filters = (
+            {"id": row["id"]}
+            if row.get("id")
+            else {"state_code": row.get("state_code"),
+                  "period_type": row.get("period_type"),
+                  "period_label": row.get("period_label")}
+        )
+        delete_rows("filing_calendar", filters)
+    return stale
+
+
 def populate_calendar_for_registered_states(year: int | None = None) -> dict:
     """Generate filing_calendar rows for all registered states.
 
@@ -150,9 +193,21 @@ def populate_calendar_for_registered_states(year: int | None = None) -> dict:
     # pending the next night — the original bug that left due_date-past
     # rows looking current. Preserved periods are dropped from the write
     # entirely rather than rewritten with their existing status.
+    existing_rows = fetch_all("filing_calendar")
+    stale_removed = purge_superseded_frequency_rows(
+        existing_rows, registered, dry_run=False)
+    if stale_removed:
+        existing_rows = [
+            r for r in existing_rows
+            if (r.get("state_code"), r.get("period_type"), r.get("period_label"))
+            not in {
+                (c["state_code"], c["period_type"], c["period_label"])
+                for c in stale_removed
+            }
+        ]
     settled_keys = {
         (r.get("state_code"), r.get("period_type"), r.get("period_label"))
-        for r in fetch_all("filing_calendar")
+        for r in existing_rows
         if str(r.get("status") or "") in PRESERVED_STATUSES
     }
     preserved = 0
@@ -185,7 +240,8 @@ def populate_calendar_for_registered_states(year: int | None = None) -> dict:
         category="calendar",
         details={"years": years, "states": sorted(states_populated),
                  "entries_created": total_created,
-                 "settled_preserved": preserved},
+                 "settled_preserved": preserved,
+                 "stale_removed": len(stale_removed)},
     )
 
     return {
@@ -193,6 +249,7 @@ def populate_calendar_for_registered_states(year: int | None = None) -> dict:
         "states_populated": sorted(states_populated),
         "entries_created": total_created,
         "settled_preserved": preserved,
+        "stale_removed": len(stale_removed),
     }
 
 
@@ -200,8 +257,16 @@ def generate_filings_for_state(state_code: str, frequency: str, due_day: int = 2
     """Generate filing_calendar rows for a single state (current + next year).
 
     Called when a state is newly registered via the dashboard.
-    Uses upsert so it's safe to call repeatedly.
+    Uses upsert so it's safe to call repeatedly. Leftover open rows from a
+    previous cadence are removed first.
     """
+    existing = [r for r in fetch_all("filing_calendar")
+                if r.get("state_code") == state_code]
+    purge_superseded_frequency_rows(
+        existing,
+        [{"state_code": state_code, "assigned_frequency": frequency}],
+        dry_run=False,
+    )
     current_year = date.today().year
     total = 0
     for yr in [current_year, current_year + 1]:

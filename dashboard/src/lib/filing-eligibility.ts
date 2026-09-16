@@ -102,30 +102,51 @@ export function obligationStatus(
   // state's frequency leaves the old cadence behind forever. The state then
   // carries two overlapping sets covering the same months, and filing one
   // leaves the other looking unfiled. Only the current cadence is live.
-  //
-  // This applies ONLY between two periodic cadences. An `annual` row alongside
-  // a periodic cadence is NOT a leftover — several states require a yearly
-  // reconciliation on top of periodic returns (Hawaii's G-49 sits on top of
-  // the G-45 periodics exactly this way).
   const freq = nexus.assigned_frequency;
   const periodType = filing.period_type;
-  if (freq && periodType && periodType !== freq
-      && PERIODIC_TYPES.has(periodType) && PERIODIC_TYPES.has(freq)) {
+  if (isSupersededFrequency(periodType, freq)) {
     return {
       reason: "superseded_frequency",
       detail: `period_type=${periodType}, state files ${freq}`,
     };
   }
-  // Casual has no periodic calendar. Leftover monthly/quarterly/semi_annual
-  // rows after a frequency change are not live obligations.
-  if (freq === "casual" && PERIODIC_TYPES.has(periodType ?? "")) {
-    return {
-      reason: "superseded_frequency",
-      detail: `period_type=${periodType}, state files casual`,
-    };
-  }
 
   return null;
+}
+
+/**
+ * True when a calendar row's period_type is a leftover from a previous cadence.
+ *
+ * Periodic vs periodic mismatches are leftovers (monthly after a switch to
+ * quarterly). Assigned `annual` or `casual` also retires leftover periodics —
+ * Wyoming files annually; leftover monthly rows are not live dues.
+ *
+ * An `annual` row alongside a *periodic* assigned cadence is NOT a leftover.
+ * Several states require a yearly reconciliation on top of periodics (Hawaii
+ * G-49 on top of G-45). Excluding a real annual return is worse than one
+ * extra row, so annual is never treated as superseded by a periodic cadence.
+ */
+export function isSupersededFrequency(
+  periodType: string | null | undefined,
+  assignedFrequency: string | null | undefined,
+): boolean {
+  if (!assignedFrequency || !periodType) return false;
+  if (periodType === assignedFrequency) return false;
+
+  if (PERIODIC_TYPES.has(periodType) && PERIODIC_TYPES.has(assignedFrequency)) {
+    return true;
+  }
+  if (
+    (assignedFrequency === "annual" || assignedFrequency === "casual")
+    && PERIODIC_TYPES.has(periodType)
+  ) {
+    return true;
+  }
+  // Casual has no calendar at all — leftover annual rows are also stale.
+  if (assignedFrequency === "casual" && periodType === "annual") {
+    return true;
+  }
+  return false;
 }
 
 export function isOpenObligation(filing: FilingRow, nexus: NexusRow | undefined): boolean {
