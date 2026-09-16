@@ -5157,7 +5157,7 @@ def run():
         )
         click.echo(f"[Scheduler] Health check-in daily at {int(_hs['hour']):02d}:"
                    f"{int(_hs['minute']):02d} {_hs['timezone']} "
-                   f"(one message/day; HEALTH_TELEGRAM=0 mutes)")
+                   f"(faults only; HEALTH_TELEGRAM=0 mutes)")
 
         from src.config import settings
 
@@ -5884,7 +5884,10 @@ def _run_daily_analysis():
         print(f"[Daily Analysis] Error: {e}")
         job_finish(run_id, "fail", str(e)[:500])
         try:
-            send_telegram(f"🚨 <b>Daily Analysis Failed</b>\n\n{str(e)[:300]}")
+            send_telegram(
+                f"🚨 <b>Daily Analysis Failed</b>\n\n{str(e)[:300]}",
+                topic="job_fail",
+            )
         except Exception:
             pass
 
@@ -6112,7 +6115,8 @@ def _run_spapi_refresh():
             from src.alerts.telegram import send_telegram
             send_telegram(
                 f"🚨 <b>SP-API Sync Failed</b>\n\n"
-                + "\n".join(errors[:3])
+                + "\n".join(errors[:3]),
+                topic="job_fail",
             )
         except Exception:
             pass
@@ -6230,7 +6234,7 @@ def _run_source_monitoring():
                     f"<b>Source Monitor</b>\n"
                     f"{changes} monitored source(s) changed:\n{urls}\n\n"
                     f"Run <code>python -m src.main research-tasks</code> to review.",
-                    "source_monitor",
+                    topic="source_monitor",
                 )
             except Exception:
                 pass
@@ -6478,7 +6482,7 @@ def _ads_alert(subject: str, detail: str) -> None:
         if not settings.telegram_enabled:
             return
         from src.alerts.telegram import send_telegram
-        send_telegram(f"⚠️ {subject}\n\n{detail[:600]}")
+        send_telegram(f"⚠️ {subject}\n\n{detail[:600]}", topic="job_fail")
     except Exception as e:  # never let alerting break the job
         print(f"[Ads] Telegram alert failed: {e}")
 

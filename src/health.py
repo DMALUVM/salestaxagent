@@ -18,9 +18,9 @@ Three rules shape the whole module:
   database aggregate. A silently missing field reads as a healthy zero, so an
   unavailable figure is printed as "n/a" and the reason lands in the fault list.
 
-The check-in carries a compact ads scoreboard as well as liveness, because
-"the scheduler is running" is not the same as "the account is fine", and the
-operator wants both in the single message they actually read.
+Telegram is faults only. A healthy morning is silence — not a scoreboard,
+not a Playbook P0 count, not "scheduler running". Ads scoreboard math stays
+in ``scoreboard_lines`` for dry-run / CLI, but is not delivered.
 
 Layering: collect() touches the database, everything below it is pure. The
 formatting and debounce logic can therefore be tested without an account.
@@ -489,41 +489,19 @@ def scoreboard_lines(facts: dict) -> list[str]:
 
 
 def format_message(facts: dict, health: Health) -> str:
-    """One message. Healthy or degraded, the scoreboard is always included."""
+    """Telegram body: faults only. Healthy → a one-liner for CLI dry-run."""
     day = str(facts.get("now", ""))[:10]
     L: list[str] = []
 
     if health.healthy:
         L.append(f"✅ Sales Tax Agent OK — {day}")
-    else:
-        mark = "🚨" if health.severity == CRITICAL else "⚠️"
-        L.append(f"{mark} Agent attention — {day}")
-        L.append("")
-        for f in health.faults:
-            L.append(f"- {f.text}")
+        return "\n".join(L)
+
+    mark = "🚨" if health.severity == CRITICAL else "⚠️"
+    L.append(f"{mark} Agent attention — {day}")
     L.append("")
-    L += scoreboard_lines(facts)
-
-    sync = facts.get("ads_sync_age_hours")
-    L.append(f"Last ads sync: {str(facts.get('ads_last_sync') or 'never')[:16]}"
-             + (f" ({sync:.0f}h)" if sync is not None else " (n/a)"))
-
-    wk, wa = facts.get("sqp_last_week_end"), facts.get("sqp_age_days")
-    L.append(f"SQP: newest week {wk or 'n/a'}"
-             + (f" ({wa}d)" if wa is not None else "")
-             + f" · SQP history {facts.get('sqp_span_weeks') if facts.get('sqp_span_weeks') is not None else 'n/a'}w")
-
-    hb = facts.get("heartbeat_age_minutes")
-    p0 = facts.get("open_p0")
-    L.append(f"Playbook: {p0 if p0 is not None else 'n/a'} P0 open · "
-             f"scheduler: {'running' if hb is not None and hb <= CONFIG['heartbeat']['stale_after_minutes'] else 'NOT beating'}"
-             + (f" ({hb:.0f}m)" if hb is not None else ""))
-    mtd = facts.get("mtd")
-    if mtd:
-        parts = " · ".join(f"{k} {_money(v)}" for k, v in sorted(mtd.items()))
-        L.append(f"MTD from {facts.get('mtd_start')}: {parts} · "
-                 f"total {_money(sum(mtd.values()))}")
-    L.append(f"DB: {'ok' if facts.get('db_ok') else 'UNREACHABLE'}")
+    for f in health.faults:
+        L.append(f"- {f.text}")
     return "\n".join(L)
 
 
@@ -550,12 +528,9 @@ def should_send(health: Health, now: datetime, state: dict,
     always be explained after the fact.
     """
     cfg = cfg or CONFIG
-    day = now.date().isoformat()
 
     if health.healthy:
-        if state.get("last_routine_day") == day:
-            return False, "routine check-in already sent today"
-        return True, "daily routine check-in"
+        return False, "healthy — silent"
 
     sig = health.signature()
     last_sig = state.get("last_fault_signature")
@@ -624,7 +599,7 @@ def run_health_ping(send: bool = False, now: datetime | None = None,
 
     try:
         from src.alerts.telegram import send_telegram
-        r = send_telegram(message, parse_mode="")
+        r = send_telegram(message, parse_mode="", topic="health_faults")
         result["sent"] = bool(r.get("sent"))
         result["error"] = r.get("error")
     except Exception as e:
