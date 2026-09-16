@@ -37,11 +37,11 @@ class TestBusinessRulesConfig:
         allow = set(tg["allow"])
         deny = set(tg["deny"])
         assert allow.isdisjoint(deny)
-        for topic in ("health_faults", "job_fail",
+        for topic in ("health_faults", "job_fail", "paid_ads_freshness",
                       "sales_tax_overdue", "inventory_checked_in"):
             assert topic in allow
         for topic in ("health_routine", "ads_scoreboard", "playbook_p0",
-                      "gno_export_due", "source_monitor", "paid_ads_freshness"):
+                      "gno_export_due", "source_monitor"):
             assert topic in deny
 
     def test_amazon_timezone_is_pacific(self):
