@@ -346,8 +346,6 @@ export default function Pulse() {
         </div>
       </div>
 
-      {configured && <InboundDiscrepancyAlerts />}
-
       {/* ── Sales pulse: Yesterday / L7 / L30 / MTD / Last Month ── */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         {/* Yesterday */}
@@ -686,6 +684,8 @@ export default function Pulse() {
           </CardContent>
         </Card>
       )}
+
+      {configured && <InboundDiscrepancyAlerts />}
 
       {/* P0-5: Trust surface */}
       <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
