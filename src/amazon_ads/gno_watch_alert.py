@@ -428,7 +428,7 @@ def maybe_send_gno_export_alert(now: datetime | None = None) -> dict[str, Any]:
     if not settings.telegram_enabled:
         return {"sent": False, "reasons": reasons, "suppressed": "telegram_off", "key": key}
 
-    result = send_telegram(message, parse_mode="")
+    result = send_telegram(message, parse_mode="", topic="gno_export_due")
     return {
         "sent": bool(result.get("sent")),
         "reasons": reasons,

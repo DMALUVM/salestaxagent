@@ -28,8 +28,21 @@ class TestBusinessRulesConfig:
             self.cfg = json.load(f)
 
     def test_config_has_required_sections(self):
-        for key in ("amazon", "shopify", "spapi", "ads", "pnl"):
+        for key in ("amazon", "shopify", "spapi", "ads", "pnl", "telegram"):
             assert key in self.cfg, f"Missing section: {key}"
+
+    def test_telegram_is_important_updates_only(self):
+        tg = self.cfg["telegram"]
+        assert tg["important_updates_only"] is True
+        allow = set(tg["allow"])
+        deny = set(tg["deny"])
+        assert allow.isdisjoint(deny)
+        for topic in ("health_faults", "job_fail", "paid_ads_freshness",
+                      "sales_tax_overdue", "inventory_checked_in"):
+            assert topic in allow
+        for topic in ("health_routine", "ads_scoreboard", "playbook_p0",
+                      "gno_export_due", "source_monitor"):
+            assert topic in deny
 
     def test_amazon_timezone_is_pacific(self):
         assert self.cfg["amazon"]["timezone"] == "America/Los_Angeles"

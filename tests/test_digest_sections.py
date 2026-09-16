@@ -5,7 +5,10 @@ that are genuinely outstanding — not every state with nexus.
 """
 from datetime import date
 
-from src.alerts.digest_sections import build_sections, render_sections
+from src.alerts.digest_sections import (
+    build_sections, has_important_telegram, render_important_telegram,
+    render_sections,
+)
 
 TODAY = date(2026, 8, 20)
 
@@ -106,6 +109,37 @@ class TestFilingsAreRegistrationGated:
                    fc("TX", "2026-Q2b", "2026-09-01")]  # 12d out
         s = build_sections(rows, filings, [], TODAY, upcoming_within_days=45)
         assert [f["period_label"] for f in s.upcoming] == ["2026-Q2b"]
+
+
+class TestImportantTelegram:
+    def test_quiet_day_is_silent_on_telegram(self):
+        s = build_sections([], [], [], TODAY)
+        assert has_important_telegram(s) is False
+        assert render_important_telegram(s, TODAY) == []
+
+    def test_overdue_is_important(self):
+        rows = [nx("TX", is_registered=True, registration_date="2020-01-01",
+                   assigned_frequency="quarterly")]
+        s = build_sections(rows, [fc("TX", "2026-Q1", "2026-04-20")], [], TODAY)
+        assert has_important_telegram(s) is True
+        out = "\n".join(render_important_telegram(s, TODAY))
+        assert "Overdue sales-tax filings" in out
+        assert "No outstanding actions" not in out
+        assert "Registered with nexus" not in out
+
+    def test_standing_nexus_picture_is_not_a_telegram(self):
+        rows = [nx("NV", is_registered=True, has_economic_nexus=True)]
+        s = build_sections(rows, [], [], TODAY)
+        assert has_important_telegram(s) is False
+        assert render_important_telegram(s, TODAY) == []
+
+    def test_upcoming_filing_is_important(self):
+        rows = [nx("TX", is_registered=True, registration_date="2020-01-01",
+                   assigned_frequency="quarterly")]
+        s = build_sections(rows, [fc("TX", "2026-Q2b", "2026-09-01")], [], TODAY,
+                           upcoming_within_days=45)
+        assert has_important_telegram(s) is True
+        assert "filing due" in "\n".join(render_important_telegram(s, TODAY))
 
 
 class TestRender:

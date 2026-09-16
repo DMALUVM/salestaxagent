@@ -376,7 +376,8 @@ def alert_if_needed(result: dict) -> None:
             from src.alerts.telegram import send_telegram
             send_telegram(
                 f"🚨 <b>Git auto-update aborted</b>\n\n"
-                f"{status}: {str(detail)[:300]}"
+                f"{status}: {str(detail)[:300]}",
+                topic="job_fail",
             )
     except Exception:
         pass

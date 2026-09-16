@@ -169,7 +169,7 @@ def run_policy_alerts(
             f"Consult CPA for effective date and filing obligations.\n\n"
             f"<code>key:{key}</code>"
         )
-        result = send_telegram(message)
+        result = send_telegram(message, topic="threshold_crossed")
 
         insert_rows("alerts", [{
             "alert_type": "threshold_crossed",
@@ -219,7 +219,7 @@ def run_policy_alerts(
             f"Due: {due_info['due_date']} ({days_until} days)\n\n"
             f"<code>key:{key}</code>"
         )
-        result = send_telegram(message)
+        result = send_telegram(message, topic="sales_tax_filing_risk")
 
         insert_rows("alerts", [{
             "alert_type": "filing_due",

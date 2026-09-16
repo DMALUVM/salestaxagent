@@ -168,6 +168,47 @@ def _state_list(states: list[str], limit: int = 8) -> str:
     return f"{', '.join(states[:limit])} +{len(states) - limit} more"
 
 
+def has_important_telegram(s: DigestSections, *,
+                           newly_crossed: list[str] | None = None,
+                           new_phys_states: list[str] | None = None) -> bool:
+    """True when the allowlisted sales-tax Telegram ping has something to say.
+
+    Overdue + upcoming filing risk only. Standing nexus counts, 'all good',
+    entity fees and playbook-style lines are not important updates.
+    """
+    if newly_crossed or new_phys_states:
+        return True
+    return bool(s.overdue or s.upcoming)
+
+
+def render_important_telegram(s: DigestSections, today: date) -> list[str]:
+    """Compact allowlisted sales-tax lines. Empty on a quiet day.
+
+    Keep: overdue filings, next-due filing risk.
+    Drop: all-good, registered-nexus standing picture, playbook P0,
+    entity-other filings, action-needed counts.
+    """
+    parts: list[str] = []
+
+    if s.overdue:
+        parts.append("")
+        parts.append("<b>🚨 Overdue sales-tax filings:</b>")
+        for f in s.overdue[:5]:
+            parts.append(f"  {f.get('state_code')} {f.get('period_label')} — "
+                         f"due {f.get('due_date')} ({f.get('days_overdue')}d late)")
+        if len(s.overdue) > 5:
+            parts.append(f"  +{len(s.overdue) - 5} more")
+
+    if s.upcoming:
+        nxt = " · ".join(
+            f"{f.get('state_code')} {f.get('period_label')} ({f.get('days_until_due')}d)"
+            for f in s.upcoming[:3]
+        )
+        parts.append(f"📅 Sales tax filing due: {nxt}")
+
+    return parts
+
+
 def render_sections(s: DigestSections, today: date) -> list[str]:
     """Render the sections as Telegram HTML lines.
 

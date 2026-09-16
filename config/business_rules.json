@@ -58,6 +58,28 @@
   "agent": {
     "timezone": "America/New_York"
   },
+  "telegram": {
+    "_doc": "Sales-tax / Dashboard Telegram = important updates ONLY. Silent when nothing on the allowlist. Deny wins. src/alerts/telegram_gate.py is the only reader.",
+    "important_updates_only": true,
+    "allow": [
+      "sales_tax_overdue",
+      "sales_tax_filing_risk",
+      "threshold_crossed",
+      "inventory_damaged_unfillable",
+      "inventory_checked_in",
+      "health_faults",
+      "job_fail",
+      "paid_ads_freshness",
+      "test"
+    ],
+    "deny": [
+      "health_routine",
+      "ads_scoreboard",
+      "playbook_p0",
+      "gno_export_due",
+      "source_monitor"
+    ]
+  },
   "pnl": {
     "cogs_source": "sku_costs",
     "contribution_formula": "payout - cogs - ad_spend",
