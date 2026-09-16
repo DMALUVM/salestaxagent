@@ -34,7 +34,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getSupabase } from "@/lib/supabase";
 import {
   Calendar,
   Check,
@@ -43,6 +42,18 @@ import {
   AlertTriangle,
   Undo2,
 } from "lucide-react";
+
+async function postCalendar(body: Record<string, unknown>) {
+  const res = await fetch("/api/calendar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error((j as { error?: string }).error ?? `HTTP ${res.status}`);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Mark-complete dialog (single filing)
@@ -62,33 +73,14 @@ function MarkCompleteDialog({
 
   async function handleSubmit() {
     setSubmitting(true);
-    const sb = getSupabase();
-    await sb
-      .from("filing_calendar")
-      .update({
-        status: "filed",
-        filed_amount: amount ? parseFloat(amount) : null,
-        filed_notes: notes || null,
-        filed_date: new Date().toISOString().slice(0, 10),
-      })
-      .eq("id", filing.id);
-
-    // Update last_filed_through on nexus_status if this period is newer
-    const { data: nexus } = await sb
-      .from("nexus_status")
-      .select("last_filed_through")
-      .eq("state_code", filing.state_code)
-      .limit(1);
-
-    if (nexus?.[0] && filing.period_end) {
-      const current = nexus[0].last_filed_through ?? "";
-      if (filing.period_end > current) {
-        await sb
-          .from("nexus_status")
-          .update({ last_filed_through: filing.period_end })
-          .eq("state_code", filing.state_code);
-      }
-    }
+    await postCalendar({
+      action: "file",
+      id: filing.id,
+      amount: amount ? parseFloat(amount) : null,
+      notes: notes || null,
+      state_code: filing.state_code,
+      period_end: filing.period_end,
+    });
 
     setSubmitting(false);
     setOpen(false);
@@ -165,34 +157,14 @@ function QuickMarkButton({
 
   async function mark() {
     setBusy(true);
-    const sb = getSupabase();
-    await sb
-      .from("filing_calendar")
-      .update({
-        status: "filed",
-        filed_amount: null,
-        filed_notes: null,
-        filed_date: new Date().toISOString().slice(0, 10),
-      })
-      .eq("id", filing.id);
-
-    // Update last_filed_through
-    if (filing.period_end) {
-      const { data: nexus } = await sb
-        .from("nexus_status")
-        .select("last_filed_through")
-        .eq("state_code", filing.state_code)
-        .limit(1);
-      if (nexus?.[0]) {
-        const current = nexus[0].last_filed_through ?? "";
-        if (filing.period_end > current) {
-          await sb
-            .from("nexus_status")
-            .update({ last_filed_through: filing.period_end })
-            .eq("state_code", filing.state_code);
-        }
-      }
-    }
+    await postCalendar({
+      action: "file",
+      id: filing.id,
+      amount: null,
+      notes: null,
+      state_code: filing.state_code,
+      period_end: filing.period_end,
+    });
 
     setBusy(false);
     onDone();
@@ -227,15 +199,7 @@ function UndoButton({
 
   async function undo() {
     setBusy(true);
-    await getSupabase()
-      .from("filing_calendar")
-      .update({
-        status: "pending",
-        filed_amount: null,
-        filed_notes: null,
-        filed_date: null,
-      })
-      .eq("id", filing.id);
+    await postCalendar({ action: "undo", id: filing.id });
     setBusy(false);
     onDone();
   }
@@ -269,47 +233,14 @@ function BulkMarkOverdueButton({
 
   async function markAll() {
     setBusy(true);
-    const sb = getSupabase();
-    const today = new Date().toISOString().slice(0, 10);
-
-    // Mark all overdue as filed
-    const ids = overdue.map((f) => f.id);
-    await sb
-      .from("filing_calendar")
-      .update({
-        status: "filed",
-        filed_amount: null,
-        filed_notes: "Bulk-marked as filed",
-        filed_date: today,
-      })
-      .in("id", ids);
-
-    // Update last_filed_through for each affected state
-    const byState: Record<string, string> = {};
-    for (const f of overdue) {
-      if (
-        f.period_end &&
-        (!byState[f.state_code] || f.period_end > byState[f.state_code])
-      ) {
-        byState[f.state_code] = f.period_end;
-      }
-    }
-    for (const [sc, pe] of Object.entries(byState)) {
-      const { data: nexus } = await sb
-        .from("nexus_status")
-        .select("last_filed_through")
-        .eq("state_code", sc)
-        .limit(1);
-      if (nexus?.[0]) {
-        const current = nexus[0].last_filed_through ?? "";
-        if (pe > current) {
-          await sb
-            .from("nexus_status")
-            .update({ last_filed_through: pe })
-            .eq("state_code", sc);
-        }
-      }
-    }
+    await postCalendar({
+      action: "bulk_file",
+      items: overdue.map((f) => ({
+        id: f.id,
+        state_code: f.state_code,
+        period_end: f.period_end,
+      })),
+    });
 
     setBusy(false);
     onDone();
@@ -374,14 +305,11 @@ function NotRequiredButton({
     );
     if (reason === null) return; // cancelled
     setBusy(true);
-    const sb = getSupabase();
-    await sb
-      .from("filing_calendar")
-      .update({
-        status: "not_required",
-        filed_notes: reason.trim() || "marked not required by user",
-      })
-      .eq("id", filing.id);
+    await postCalendar({
+      action: "not_required",
+      id: filing.id,
+      notes: reason.trim() || "marked not required by user",
+    });
     setBusy(false);
     onDone();
   }

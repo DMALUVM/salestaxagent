@@ -21,7 +21,6 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { getSupabase } from "@/lib/supabase";
 import {
   FILING_FREQUENCIES,
   FILING_FREQUENCY_LABELS,
@@ -105,17 +104,12 @@ function EditDialog({
             : null,
           last_filed_through: form.is_registered ? form.last_filed_through || null : null,
           account_number: form.account_number || null,
+          typical_due_day: dueDay,
+          notes: form.notes || null,
         }),
       });
       const regResult = await regResp.json();
       if (!regResp.ok) { setError(regResult.error ?? "Save failed"); setSaving(false); return; }
-
-      const sb = getSupabase();
-      const { error: rulesErr } = await sb
-        .from("state_rules")
-        .update({ typical_due_day: dueDay, notes: form.notes || null })
-        .eq("state_code", rec.state_code);
-      if (rulesErr) { setError(rulesErr.message); setSaving(false); return; }
 
       if (form.is_registered && form.assigned_frequency) {
         const regDate = form.is_registered

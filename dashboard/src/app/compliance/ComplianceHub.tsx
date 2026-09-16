@@ -33,7 +33,6 @@ import {
   Search,
   Shield,
 } from "lucide-react";
-import { getSupabase } from "@/lib/supabase";
 
 // Extended NexusStatus with compliance fields
 interface NexusRow extends NexusStatus {
@@ -174,31 +173,12 @@ export default function ComplianceHub() {
     action: "resolve" | "unresolve" | "hide" | "unhide",
   ) {
     try {
-      const sb = getSupabase();
-      const updates: Record<string, unknown> = {};
-      if (action === "resolve") {
-        updates.compliance_resolved = true;
-        updates.compliance_resolved_at = new Date().toISOString();
-      } else if (action === "unresolve") {
-        updates.compliance_resolved = false;
-        updates.compliance_resolved_at = null;
-      } else if (action === "hide") {
-        updates.compliance_hidden = true;
-      } else if (action === "unhide") {
-        updates.compliance_hidden = false;
-      }
-      await sb
-        .from("nexus_status")
-        .update(updates)
-        .eq("state_code", stateCode);
-      refetch();
-    } catch {
-      // Fall back to API route if direct update fails
       await fetch("/api/compliance/resolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ state_code: stateCode, action }),
       });
+    } finally {
       refetch();
     }
   }

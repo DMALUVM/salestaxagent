@@ -33,6 +33,10 @@ surfaces in the card as a visible failure state, not a blank panel.
 | `/api/data-freshness` | Supabase server creds | Layout strip hidden (fail-soft) |
 | `/api/ppc-export`, `/api/ppc-playbook` | a Python venv **on the same machine** | JSON `{available:false}` — these cannot work on Vercel; `ppc-export` falls back to the stored `ppc_briefs` row |
 | `/api/registration-plan` | Supabase server creds + warehouse tables (`nexus_status`, `sales_by_state`, `inventory_events`, `state_rules`) | JSON `{available:false}` with a warehouse hint — computed in-process, no Python venv |
+| `/api/warehouse` | Supabase server creds + allowlisted table | 400 if table is not on the allowlist; paginated `select *` |
+| `/api/calendar` | Supabase server creds (POST) | 400 on unknown action; writes `filing_calendar` + `last_filed_through` |
+| `/api/registrations` | Supabase server creds (POST) | Updates `nexus_status` + `state_rules` (due day / notes) |
+| `/api/entity-obligations` | Supabase server creds (GET + PATCH) | PATCH settles `compliance_obligations`; GET is unchanged |
 
 ## Verifying a deploy
 
