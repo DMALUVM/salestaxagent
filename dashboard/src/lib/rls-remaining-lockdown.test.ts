@@ -125,26 +125,35 @@ describe("tax surfaces no longer write with the browser anon client", () => {
 describe("remaining RLS migration is targeted", () => {
   test("enables RLS on sku_costs and compliance_obligations only", () => {
     const remaining = repo("supabase/migration_rls_sku_costs_obligations.sql");
+    const executable = remaining
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("--"))
+      .join("\n");
     assert.match(remaining, /ALTER TABLE public\.sku_costs ENABLE ROW LEVEL SECURITY/);
     assert.match(
       remaining,
       /ALTER TABLE public\.compliance_obligations ENABLE ROW LEVEL SECURITY/,
     );
     assert.match(remaining, /No CREATE POLICY/);
-    assert.doesNotMatch(remaining, /DISABLE ROW LEVEL SECURITY/);
-    assert.doesNotMatch(remaining, /CREATE POLICY/);
-    assert.doesNotMatch(remaining, /USING \(true\)/);
+    assert.match(remaining, /Rollback \(these two tables only\)/);
+    assert.doesNotMatch(executable, /DISABLE ROW LEVEL SECURITY/);
+    assert.doesNotMatch(executable, /CREATE POLICY/);
+    assert.doesNotMatch(executable, /USING \(true\)/);
     // Must not rewrite enablement of the already-locked ops tables.
-    assert.doesNotMatch(remaining, /sales_daily/);
-    assert.doesNotMatch(remaining, /ads_campaigns_daily/);
-    assert.doesNotMatch(remaining, /fba_case_events/);
+    assert.doesNotMatch(executable, /sales_daily/);
+    assert.doesNotMatch(executable, /ads_campaigns_daily/);
+    assert.doesNotMatch(executable, /fba_case_events/);
   });
 
   test("full lockdown file stays idempotent and does not disable the 56", () => {
     const full = repo("supabase/migration_rls_lockdown.sql");
+    const executable = full
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("--"))
+      .join("\n");
     assert.match(full, /migration_rls_sku_costs_obligations\.sql/);
     assert.match(full, /Do not DISABLE RLS on the tables already locked/);
-    assert.doesNotMatch(full, /DISABLE ROW LEVEL SECURITY/);
+    assert.doesNotMatch(executable, /DISABLE ROW LEVEL SECURITY/);
     assert.match(full, /ALTER TABLE IF EXISTS public\.sku_costs/);
     assert.match(full, /ALTER TABLE IF EXISTS public\.compliance_obligations/);
   });
