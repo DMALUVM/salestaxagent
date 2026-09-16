@@ -7,6 +7,8 @@ import { FilingStatusBadge, FrequencyBadge } from "@/components/status-badge";
 import { LoadingState } from "@/components/loading";
 import { QueryError } from "@/components/query-error";
 import { classifyFilings, type FilingRow, type NexusRow } from "@/lib/filing-eligibility";
+import { dueDayByState, mergeImpliedObligations } from "@/lib/next-due";
+import type { StateRule } from "@/lib/types";
 import {
   DUE_WINDOW_LABELS,
   filterByDueWindow,
@@ -497,16 +499,18 @@ export default function CalendarPage() {
     ascending: true,
   });
   const { data: nexusData, loading: l2, error: e2, refetch: refetchNexus } = useSupabaseQuery<NexusStatus>("nexus_status");
+  const { data: rules, loading: l3, error: e3, refetch: refetchRules } = useSupabaseQuery<StateRule>("state_rules");
   const [dueWindow, setDueWindow] = useState<DueWindow>("90d");
 
-  if (loading || l2) return <LoadingState />;
-  if (error || e2) {
+  if (loading || l2 || l3) return <LoadingState />;
+  if (error || e2 || e3) {
     return (
       <QueryError
-        message={error || e2}
+        message={error || e2 || e3}
         onRetry={() => {
           refetch();
           refetchNexus();
+          refetchRules();
         }}
       />
     );
@@ -516,12 +520,21 @@ export default function CalendarPage() {
   // src/calendar/eligibility.py, so this page, the Pulse chips, the Telegram
   // digest and the filing-audit CLI agree on what "overdue" means.
   //
-  // This used to filter on status + registration_date only: it never checked
-  // is_registered, never honoured nexus_status.last_filed_through, and never
-  // noticed a state carrying two overlapping period cadences.
+  // Implied current periods (last_filed_through + assigned_frequency) are
+  // merged in when filing_calendar is missing that row — VT August 2026
+  // while the table starts at September.
   const today = agentToday();
-  const cls = classifyFilings<FilingEntry & FilingRow>(
+  const refetchAll = () => {
+    refetch();
+    refetchNexus();
+  };
+  const merged = mergeImpliedObligations(
     filings as Array<FilingEntry & FilingRow>,
+    nexusData as unknown as NexusRow[],
+    dueDayByState(rules),
+  );
+  const cls = classifyFilings<FilingEntry & FilingRow>(
+    merged,
     nexusData as unknown as NexusRow[],
     today,
   );
@@ -652,7 +665,7 @@ export default function CalendarPage() {
           </TabsList>
 
           {overdue.length > 0 && (
-            <BulkMarkOverdueButton overdue={overdue} onDone={refetch} />
+            <BulkMarkOverdueButton overdue={overdue} onDone={refetchAll} />
           )}
         </div>
 
@@ -662,7 +675,7 @@ export default function CalendarPage() {
               <MonthGroupedFilings
                 rows={overdue}
                 mode="overdue"
-                onRefetch={refetch}
+                onRefetch={refetchAll}
               />
             </CardContent>
           </Card>
@@ -674,7 +687,7 @@ export default function CalendarPage() {
               <MonthGroupedFilings
                 rows={upcoming}
                 mode="upcoming"
-                onRefetch={refetch}
+                onRefetch={refetchAll}
               />
             </CardContent>
           </Card>
@@ -730,7 +743,7 @@ export default function CalendarPage() {
               <MonthGroupedFilings
                 rows={completed}
                 mode="completed"
-                onRefetch={refetch}
+                onRefetch={refetchAll}
               />
             </CardContent>
           </Card>
@@ -738,7 +751,7 @@ export default function CalendarPage() {
       </Tabs>
 
       {filings.length === 0 && (
-        <GenerateFilingsCard onDone={refetch} />
+        <GenerateFilingsCard onDone={refetchAll} />
       )}
     </div>
   );

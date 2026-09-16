@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { markCalendarFiledThrough } from "@/lib/mark-calendar-filed";
 
 /**
  * POST /api/filing-events
@@ -45,14 +46,10 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: `Filed event saved, but failed to advance filed_through: ${updateErr.message}` }, { status: 500 });
     }
 
-    // Mark matching filing_calendar entries as filed
+    // Mark matching current-cadence filing_calendar entries as filed.
+    // Do not stamp leftover monthly rows filed when the state files annual.
     try {
-      await sb
-        .from("filing_calendar")
-        .update({ status: "filed", filed_date: new Date().toISOString().slice(0, 10) })
-        .eq("state_code", state_code)
-        .lte("period_end", period_end)
-        .eq("status", "pending");
+      await markCalendarFiledThrough(sb, state_code, period_end);
     } catch { /* best effort */ }
 
     return Response.json({ ok: true, state_code, period_end, filed_through_advanced: period_end });

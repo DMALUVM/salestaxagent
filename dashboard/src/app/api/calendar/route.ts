@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
+import { isImpliedFilingId } from "@/lib/next-due";
 
 type FilingPatch = {
   status: string;
@@ -67,8 +68,10 @@ export async function POST(request: NextRequest) {
       if (patch.filed_amount !== null && !Number.isFinite(patch.filed_amount)) {
         return Response.json({ error: "Invalid amount" }, { status: 400 });
       }
-      const { error } = await sb.from("filing_calendar").update(patch).eq("id", id);
-      if (error) return Response.json({ error: error.message }, { status: 500 });
+      if (!isImpliedFilingId(String(id))) {
+        const { error } = await sb.from("filing_calendar").update(patch).eq("id", id);
+        if (error) return Response.json({ error: error.message }, { status: 500 });
+      }
       await advanceLastFiledThrough(
         sb,
         String(body.state_code ?? ""),
@@ -113,20 +116,21 @@ export async function POST(request: NextRequest) {
       const items = Array.isArray(body.items) ? body.items : [];
       const ids = items
         .map((item) => (item as { id?: unknown }).id)
-        .filter((id) => id != null && id !== "");
-      if (!ids.length) {
+        .filter((id) => id != null && id !== "" && !isImpliedFilingId(String(id)));
+      if (ids.length) {
+        const { error } = await sb
+          .from("filing_calendar")
+          .update({
+            status: "filed",
+            filed_amount: null,
+            filed_notes: "Bulk-marked as filed",
+            filed_date: today,
+          })
+          .in("id", ids);
+        if (error) return Response.json({ error: error.message }, { status: 500 });
+      } else if (!items.length) {
         return Response.json({ error: "items required" }, { status: 400 });
       }
-      const { error } = await sb
-        .from("filing_calendar")
-        .update({
-          status: "filed",
-          filed_amount: null,
-          filed_notes: "Bulk-marked as filed",
-          filed_date: today,
-        })
-        .in("id", ids);
-      if (error) return Response.json({ error: error.message }, { status: 500 });
 
       const byState: Record<string, string> = {};
       for (const raw of items) {
