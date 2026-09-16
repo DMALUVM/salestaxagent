@@ -18,6 +18,8 @@ import {
   LIP_BALM_SKUS,
   FIRST_WAVE_AWD_TARGETS,
   FIRST_WAVE_AWD_TARGET_CAP,
+  LOCKED_ORANGE_AWD_INBOUND_CONTEXT,
+  LOCKED_ORANGE_MARPAC_AWD_UNITS,
   LOCKED_AUGUST_3PL_FBA_TOTAL,
   LOCKED_AUGUST_MARPAC_TULSA_DATE,
   LOCKED_AUGUST_MARPAC_TULSA_TOTAL,
@@ -205,15 +207,19 @@ export function HolidayShipPlan({
       <CardContent className="space-y-1 text-sm">
         <p>Locked after FBA is maxed. New Marpac single-SKU → AWD. Not from Tulsa after tonight.</p>
         <p className="tabular-nums">
-          Late Sept: Assorted {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0004Shop)}
-          {" then "}Orange {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0003Shop)}
+          Orange {fmt(LOCKED_ORANGE_MARPAC_AWD_UNITS)} already created
+          {" · "}{fmt(LOCKED_ORANGE_AWD_INBOUND_CONTEXT)} inbound
+          {" ("}{fmt(LOCKED_ORANGE_MARPAC_AWD_UNITS)}{" + "}{fmt(LOCKED_SEPTEMBER_3PL_AWD_TOTAL)} small-parcel)
         </p>
         <p className="tabular-nums">
-          Mid-Oct: Unscented {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0001Shop)}
+          Early Oct: Unscented {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0001Shop)}
+        </p>
+        <p className="tabular-nums">
+          Mid Oct: Assorted {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0004Shop)}
           {" then "}Peppermint {fmt(FIRST_WAVE_AWD_TARGETS.DDPE0002Shop)}
         </p>
         <p className="text-[11px] text-muted-foreground">
-          One SKU per pallet. Second wave is mid-October, not August.
+          Do not add another Orange pallet. Assorted is mid-October, not late September.
         </p>
       </CardContent>
     </Card>
@@ -268,7 +274,9 @@ export function HolidayShipPlan({
       <div>
         <p className="text-sm font-medium mb-2">Month cards</p>
         <p className="text-[11px] text-muted-foreground mb-3">
-          First wave: assorted + orange late September, then unscented + peppermint mid-October (2 AWD cards/month max).
+          First wave: Orange {fmt(LOCKED_ORANGE_MARPAC_AWD_UNITS)} already created
+          {" ("}{fmt(LOCKED_ORANGE_AWD_INBOUND_CONTEXT)} inbound with prior {fmt(LOCKED_SEPTEMBER_3PL_AWD_TOTAL)}
+          {"). Early Oct unscented, then mid-Oct assorted + peppermint. "}
           Not the {fmt(OPTIMISTIC_AWD_TARGET_CAP)} high water.
           Each full AWD card is {fmt(PALLET_MAX_UNITS)}; partial ≥{fmt(palletPartialMinUnits())}.
           {" "}August: Marpac→Tulsa {fmt(LOCKED_AUGUST_MARPAC_TULSA_TOTAL)} in transit {LOCKED_AUGUST_MARPAC_TULSA_DATE} and 3PL→FBA {fmt(LOCKED_AUGUST_3PL_FBA_TOTAL)}.

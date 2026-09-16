@@ -99,6 +99,14 @@ LOCKED_SEPTEMBER_3PL_AWD_SEND = {
     "DDPE0004Shop": 0,
 }
 LOCKED_SEPTEMBER_3PL_AWD_TOTAL = 2_700
+# Dave lock: Orange 16,200 Marpac→AWD is already created.
+# Inbound context 18,900 = 16,200 + prior 2,700 small-parcel.
+# Do not recommend a second Orange 17,550 pallet.
+LOCKED_ORANGE_MARPAC_AWD_UNITS = 16_200
+LOCKED_ORANGE_AWD_INBOUND_CONTEXT = (
+    LOCKED_ORANGE_MARPAC_AWD_UNITS + LOCKED_SEPTEMBER_3PL_AWD_TOTAL
+)
+ORANGE_SKU = "DDPE0003Shop"
 SEPTEMBER_AWD_HOP_DESTINATION = "3pl_awd"
 # Deprecated alias — Sep 4 3PL→FBA.
 LOCKED_TONIGHT_3PL_FBA_SEND = LOCKED_SEPTEMBER_3PL_FBA_SEND
@@ -137,29 +145,29 @@ OPTIMISTIC_AWD_ON_HAND_TARGETS = {
     "DDPE0004Shop": 24_991,  # assorted
 }
 OPTIMISTIC_AWD_TARGET_CAP = 76_211
-# Locked first-wave AWD buy after FBA is maxed. New Marpac single-SKU → AWD.
-# Not from Tulsa after tonight. Not the 76,211 optimistic high water.
+# Locked first-wave AWD remaining Marpac buy after FBA is maxed.
+# Orange 16,200 is already created — remaining is unscented + assorted
+# + peppermint. Not the 76,211 high water. Not a second Orange 17,550.
 FIRST_WAVE_AWD_TARGETS = {
-    "DDPE0004Shop": 17_550,  # assorted — 1 full pallet
-    "DDPE0003Shop": 17_550,  # orange — 1 full pallet
-    "DDPE0001Shop": 17_550,  # unscented — 1 full pallet
-    "DDPE0002Shop": 8_775,   # peppermint — half pallet at ≥50% / 8,775 floor
+    "DDPE0003Shop": 0,       # orange — already created 16,200; do not add another
+    "DDPE0001Shop": 17_550,  # unscented — early Oct
+    "DDPE0004Shop": 17_550,  # assorted — mid Oct (not late Sept)
+    "DDPE0002Shop": 8_775,   # peppermint — mid Oct half pallet
 }
-FIRST_WAVE_AWD_TARGET_CAP = 61_425
-# Late September: assorted then orange (one SKU per pallet).
-# Mid-October: unscented then peppermint. Not August for the second wave.
-# August hops are Marpac→Tulsa + historical August 3PL→FBA only.
+FIRST_WAVE_AWD_TARGET_CAP = 43_875
+# Remaining first-wave: early Oct unscented, then mid-Oct assorted then
+# peppermint. Orange is already-in (16,200 / 18,900 inbound).
+# No late-Sept Assorted. August hops are Marpac→Tulsa + historical
+# August 3PL→FBA only.
 FIRST_WAVE_AWD_SHIP_ORDER = (
-    "DDPE0004Shop",  # assorted
-    "DDPE0003Shop",  # orange
-    "DDPE0001Shop",  # unscented
-    "DDPE0002Shop",  # peppermint
+    "DDPE0001Shop",  # unscented — early Oct
+    "DDPE0004Shop",  # assorted — mid Oct
+    "DDPE0002Shop",  # peppermint — mid Oct
 )
-# Pin first-wave cards: Sept = assorted+orange, Oct = unscented+peppermint.
+# Pin remaining first-wave cards to October. Orange has no new card.
 FIRST_WAVE_AWD_MONTH_BY_SKU = {
-    "DDPE0004Shop": "2026-09",
-    "DDPE0003Shop": "2026-09",
     "DDPE0001Shop": "2026-10",
+    "DDPE0004Shop": "2026-10",
     "DDPE0002Shop": "2026-10",
 }
 SEPT_FBA_NEED_IN_BY = date(2026, 10, 7)  # early Oct; late-Sept/early-Oct window
@@ -631,7 +639,7 @@ def first_wave_awd_need(
 
 
 def first_wave_ship_skus(skus: list[str] | None = None) -> list[str]:
-    """Assorted + orange first, then unscented + peppermint."""
+    """Early-Oct unscented, then mid-Oct assorted + peppermint."""
     wanted = list(skus or LIP_BALM_SKUS)
     wanted_set = set(wanted)
     ordered = [sku for sku in FIRST_WAVE_AWD_SHIP_ORDER if sku in wanted_set]
@@ -1287,7 +1295,7 @@ def build_september_plan(
     Track 1 — Mixed pallets fill the month FBA cap after SC on-hand +
     inbound + Tulsa + August. That remainder is not the Manufacture column.
     Track 2 — Near-term new Marpac is the locked first-wave single-SKU
-    AWD buy (61,425), not optimistic 76,211. Optimistic high water stays
+    AWD buy (43,875 remaining; Orange 16,200 already created), not optimistic 76,211. Optimistic high water stays
     as context. Tulsa is a hop: after FBA is full, leftover transferable
     3PL goes to AWD only when AWD is already loaded. Never plan 0 AWD
     and 0 Tulsa. August Marpac→Tulsa is a locked Tulsa-only hop
@@ -1371,7 +1379,8 @@ def build_september_plan(
         card["single_sku"] = True
         card["first_wave"] = bool(use_first_wave)
         card["aim_end_of_september"] = bool(
-            use_first_wave and card.get("sku") in FIRST_WAVE_AWD_SHIP_ORDER[:2]
+            use_first_wave
+            and FIRST_WAVE_AWD_MONTH_BY_SKU.get(card.get("sku")) == "2026-09"
         )
     fba_after_send = {
         sku: int(gaps[sku]["fba_plus_inbound"])
@@ -2135,10 +2144,11 @@ def assign_awd_cards_to_months(
 ) -> dict[str, list[dict]]:
     """Up to two legal single-SKU AWD cards per Sep–Dec month.
 
-    Pin first-wave cards: late September = assorted then orange,
-    mid-October = unscented then peppermint. Never August for the
-    second wave. About 2/month is the max. Under-half leftovers
-    are never cards.
+    Pin remaining first-wave cards to October (unscented, then
+    assorted, then peppermint). Pinned cards always land on their
+    month so October can hold all three. Leftover fill still uses
+    the 2/month max. Never August. Under-half leftovers are never
+    cards.
     """
     months = [m for m in AWD_SCHEDULE_MONTHS if m in production_months]
     if not months:
@@ -2156,7 +2166,7 @@ def assign_awd_cards_to_months(
             mix = card.get("mix") or {}
             sku = next(iter(mix), "")
         pinned = FIRST_WAVE_AWD_MONTH_BY_SKU.get(sku)
-        if pinned and pinned in out and len(out[pinned]) < AWD_CARDS_PER_MONTH_MAX:
+        if pinned and pinned in out:
             out[pinned].append(card)
         else:
             leftover.append(card)
@@ -2189,8 +2199,9 @@ def build_month_view_entries(
     August = locked Marpac→Tulsa 12,960 in transit 2026-08-31
     (Tulsa 3PL only) AND historical August 3PL→FBA 12,960.
     September = Sep 4 small-parcel hops (3PL→FBA 8,100 + 3PL→AWD
-    orange 2,700) plus first-wave AWD (assorted + orange).
-    October = unscented then peppermint first-wave AWD (mid-Oct).
+    orange 2,700). Orange 16,200 Marpac→AWD is already created —
+    do not add a second Orange pallet. October = remaining first-wave
+    AWD (early unscented, then mid-Oct assorted then peppermint).
     Not a zero Sept. Keep August on the board after Sep 1 so the
     in-transit hop still shows.
     """
@@ -2442,7 +2453,8 @@ def build_manufacturer_headsup(
     """Build rolling production schedule that can still make the Amazon gate.
 
     Two tracks: mixed Marpac → Tulsa → FBA only to the month cap, then
-    first-wave single-SKU AWD (61,425). Optimistic 76,211 is context,
+    first-wave single-SKU AWD (43,875 remaining; Orange 16,200 already
+    created). Optimistic 76,211 is context,
     not the near-term buy. Manufacture column is the first-wave AWD
     buy, not the FBA hole. Tulsa is a hop. August Marpac→Tulsa is locked.
     """
@@ -2695,8 +2707,9 @@ def build_manufacturer_headsup(
             "stock-to-cover, not the forecast. January uses Jan 2026 × that YoY "
             "(not leftover-holiday 2.1×). Nov–Jan sell-through and late-Sep FBA "
             "targets are separate — do not add peak-60d or Feb onto sales. "
-            "Two piles: FBA at month cap + first-wave AWD 61,425 "
-            "(assorted + orange, then unscented + peppermint). "
+            "Two piles: FBA at month cap + first-wave AWD 43,875 remaining "
+            "(Orange 16,200 already created / 18,900 inbound; early-Oct "
+            "unscented, then mid-Oct assorted then peppermint). "
             "Optimistic 76,211 is context, not the near-term buy. "
             "First action is August 3PL→FBA 12,960 (not a September card, "
             "not a 40k Manufacture). Do not empty Tulsa after this send. "
@@ -2798,7 +2811,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("Holiday pile = FBA-at-cap + AWD. Tulsa is a hop, not the holiday pile.")
     a("FIRST ACTION: August 3PL→FBA 12,960 (inbound already counted).")
     a("Do not empty Tulsa after this send. August Marpac→Tulsa 12,960 is in transit 2026-08-31 (Tulsa 3PL only).")
-    a("First-wave AWD buy is 61,425 (assorted + orange, then unscented + peppermint).")
+    a("First-wave AWD remaining is 43,875 (Orange 16,200 already created / 18,900 inbound; early-Oct unscented, then mid-Oct assorted then peppermint).")
     a("Optimistic 76,211 is context — not the near-term manufacture/buy.")
     a("Manufacture = first-wave AWD, not the FBA hole. Marpac→Tulsa lock is display-only.")
     yoy_by_sku = headsup.get("yoy_by_sku") or {}
@@ -2818,7 +2831,7 @@ def format_manufacturer_sheet(headsup: dict) -> str:
     a("Oct/Nov/Dec new Marpac is single-SKU AWD — not mixed, not a Tulsa holiday pile.")
     a("Early-Jan FBA refill leaves AWD (or Tulsa hop) in December (peak-end − 35d).")
     tpl_note = (
-        "3PL fills FBA first; Manufacture is first-wave AWD 61,425, not 76,211"
+        "3PL fills FBA first; Manufacture is first-wave AWD 43,875 remaining, not 76,211"
     )
     tulsa = headsup.get("tulsa_3pl") or {}
     if tulsa:

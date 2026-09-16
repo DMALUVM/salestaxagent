@@ -59,6 +59,15 @@ export const LOCKED_SEPTEMBER_3PL_AWD_SEND: Record<string, number> = {
 };
 export const LOCKED_SEPTEMBER_3PL_AWD_TOTAL = 2_700;
 export const SEPTEMBER_AWD_HOP_DESTINATION = "3pl_awd";
+/**
+ * Dave lock: Orange 16,200 Marpac→AWD is already created.
+ * Inbound context 18,900 = 16,200 + prior 2,700 small-parcel.
+ * Do not recommend a second Orange 17,550 pallet.
+ */
+export const LOCKED_ORANGE_MARPAC_AWD_UNITS = 16_200;
+export const LOCKED_ORANGE_AWD_INBOUND_CONTEXT =
+  LOCKED_ORANGE_MARPAC_AWD_UNITS + LOCKED_SEPTEMBER_3PL_AWD_TOTAL;
+export const ORANGE_SKU = "DDPE0003Shop";
 /** @deprecated Use LOCKED_SEPTEMBER_3PL_FBA_SEND. Kept as the Sep 4 alias. */
 export const LOCKED_TONIGHT_3PL_FBA_SEND = LOCKED_SEPTEMBER_3PL_FBA_SEND;
 export const LOCKED_TONIGHT_3PL_FBA_TOTAL = LOCKED_SEPTEMBER_3PL_FBA_TOTAL;
@@ -168,30 +177,32 @@ export const OPTIMISTIC_AWD_ON_HAND_TARGETS: Record<string, number> = {
   DDPE0004Shop: 24_991,
 };
 export const OPTIMISTIC_AWD_TARGET_CAP = 76_211;
-/** Locked first-wave AWD buy after FBA is maxed. Not the 76,211 high water. */
-export const FIRST_WAVE_AWD_TARGETS: Record<string, number> = {
-  DDPE0004Shop: 17_550,
-  DDPE0003Shop: 17_550,
-  DDPE0001Shop: 17_550,
-  DDPE0002Shop: 8_775,
-};
-export const FIRST_WAVE_AWD_TARGET_CAP = 61_425;
 /**
- * Late September: assorted then orange (one SKU per pallet).
- * Mid-October: unscented then peppermint. Not August for the second wave.
+ * Locked first-wave AWD remaining Marpac buy after FBA is maxed.
+ * Orange 16,200 is already created — remaining is unscented + assorted + peppermint.
+ * Not the 76,211 high water. Not a second Orange 17,550.
+ */
+export const FIRST_WAVE_AWD_TARGETS: Record<string, number> = {
+  DDPE0003Shop: 0, // orange — already created 16,200; do not add another pallet
+  DDPE0001Shop: 17_550, // unscented — early Oct
+  DDPE0004Shop: 17_550, // assorted — mid Oct (not late Sept)
+  DDPE0002Shop: 8_775, // peppermint — mid Oct half pallet
+};
+export const FIRST_WAVE_AWD_TARGET_CAP = 43_875;
+/**
+ * Remaining first-wave: early Oct unscented, then mid-Oct assorted then peppermint.
+ * Orange is already-in (16,200 / 18,900 inbound). No late-Sept Assorted.
  * August hops are Marpac→Tulsa + historical August 3PL→FBA only.
  */
 export const FIRST_WAVE_AWD_SHIP_ORDER = [
-  "DDPE0004Shop",
-  "DDPE0003Shop",
   "DDPE0001Shop",
+  "DDPE0004Shop",
   "DDPE0002Shop",
 ] as const;
-/** Pin first-wave cards: Sept = assorted+orange, Oct = unscented+peppermint. */
+/** Pin remaining first-wave cards to October. Orange has no new card. */
 export const FIRST_WAVE_AWD_MONTH_BY_SKU: Record<string, string> = {
-  DDPE0004Shop: "2026-09",
-  DDPE0003Shop: "2026-09",
   DDPE0001Shop: "2026-10",
+  DDPE0004Shop: "2026-10",
   DDPE0002Shop: "2026-10",
 };
 export const SEPT_FBA_ON_HAND_TARGETS: Record<string, number> = {
@@ -1322,7 +1333,9 @@ export function assignAwdCardsToMonths<T extends { sku?: string; mix?: Record<st
   for (const card of ordered) {
     const sku = card.sku || Object.keys(card.mix ?? {})[0] || "";
     const pinned = FIRST_WAVE_AWD_MONTH_BY_SKU[sku];
-    if (pinned && months.includes(pinned) && (out[pinned]?.length ?? 0) < AWD_CARDS_PER_MONTH_MAX) {
+    // Pinned first-wave cards always land on their month (Oct can hold
+    // unscented + assorted + peppermint). Leftover fill still uses the 2/month max.
+    if (pinned && months.includes(pinned)) {
       out[pinned].push(card);
     } else {
       leftover.push(card);
