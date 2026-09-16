@@ -39,16 +39,18 @@ export const SC_SUPPORT_HUB = "https://sellercentral.amazon.com/help/hub/contact
 export const SC_LEDGER_HUB = "https://sellercentral.amazon.com/reportcentral/INVENTORY_LEDGER/1";
 export const SC_INBOUND_SHIPMENT =
   "https://sellercentral.amazon.com/fba/inbound-shipment/summary/";
+/** Dave’s confirmed claim window for pasting ledger transaction / Reference IDs. */
 export const SC_ELIGIBLE_FOR_CLAIM =
-  "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim";
+  "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb";
 
 export const SELLER_CENTRAL_LINK_LIMIT =
   "No stable Seller Central deep link opens a pre-filled FBA case. " +
   "Only real FBA* shipment IDs link to the inbound shipment tracker. " +
   "Ledger reference / transaction IDs (digit strings) are not shipment IDs. " +
-  "Warehouse damage is filed in IDR (Inventory → Inventory Defect and Reimbursement) " +
-  "at Eligible for claim, not via a generic Support hub button. That hub is NOT a " +
-  "pre-filled lost-inbound or warehouse case. Dave submits; this desk never auto-files.";
+  "Warehouse damage is filed by pasting the transaction ID in the Seller Central " +
+  "claim window (help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb), not via a generic " +
+  "Support hub button. That hub is NOT a pre-filled lost-inbound or warehouse case. " +
+  "The Eligible for claim inventory page may still exist. Dave submits; this desk never auto-files.";
 
 export const IDR_INSTRUCTION =
   "Open IDR (Inventory → Inventory Defect and Reimbursement)";
@@ -77,8 +79,10 @@ export const HOW_TO_FILE_STEPS = [
   {
     title: "Preferred: Inventory Defect and Reimbursement (IDR)",
     body:
-      "Seller Central → Inventory → Inventory Defect and Reimbursement (IDR), " +
-      "or https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim",
+      "Paste the ledger transaction / Reference ID in the Seller Central claim window: " +
+      "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb. " +
+      "Inventory → Inventory Defect and Reimbursement (IDR) / Eligible for claim may still " +
+      "exist; this help/claim-window link is the confirmed entry point. Not a pre-filled case.",
   },
   {
     title: "Classic path",

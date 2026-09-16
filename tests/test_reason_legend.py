@@ -127,7 +127,7 @@ def test_reference_id_digit_string_is_not_shipment():
     assert fba_shipment_id(None, ref) is None
     assert fba_shipment_id("FBA16ABCDE", ref) == "FBA16ABCDE"
     url, kind = seller_central_link(None, ref)
-    assert url == "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
+    assert url == "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb"
     assert kind == LINK_KIND_IDR
     assert fba_shipment_id(None, ref) is None
 
@@ -160,7 +160,7 @@ def test_build_events_maps_m_and_keeps_reference_out_of_shipment():
     assert ev["reference_id"] == "20080126439780"
     assert ev["seller_central_link_kind"] == LINK_KIND_IDR
     assert ev["seller_central_url"] == (
-        "https://sellercentral.amazon.com/inventory-reimbursement/eligible-for-claim"
+        "https://sellercentral.amazon.com/help/hub/reference/GEV4254LJJ9BAEG#mnd_2jc_jcb"
     )
     assert ev["classification_version"] == CLASSIFICATION_VERSION
 
