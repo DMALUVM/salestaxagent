@@ -460,16 +460,25 @@ export function searchCaseRows(rows: CaseEventRow[], query: string): CaseEventRo
   });
 }
 
-/** Case-insensitive substring on the displayed FBA* Shipment column. Empty query restores the full list. */
-export function filterSubmittedByShipment<T extends Pick<CaseEventRow, "shipment_id">>(
+/**
+ * Case-insensitive substring on displayed FBA* shipment ID, raw shipment_id,
+ * or Reference ID (ledger transaction). Empty query restores the full list.
+ */
+export function filterSubmittedArchive<T extends Pick<CaseEventRow, "shipment_id" | "reference_id">>(
   rows: T[],
   query: string,
 ): T[] {
   const q = query.trim().toLowerCase();
   if (!q) return rows;
   return rows.filter((row) => {
-    const shipment = fbaShipmentId(row.shipment_id);
-    return Boolean(shipment && shipment.toLowerCase().includes(q));
+    const hay = [
+      fbaShipmentId(row.shipment_id),
+      row.shipment_id,
+      row.reference_id,
+    ]
+      .map((v) => String(v ?? "").trim().toLowerCase())
+      .filter(Boolean);
+    return hay.some((value) => value.includes(q));
   });
 }
 
