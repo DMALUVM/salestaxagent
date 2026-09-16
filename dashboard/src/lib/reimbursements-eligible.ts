@@ -456,6 +456,19 @@ export function searchCaseRows(rows: CaseEventRow[], query: string): CaseEventRo
   });
 }
 
+/** Case-insensitive substring on the displayed FBA* Shipment column. Empty query restores the full list. */
+export function filterSubmittedByShipment<T extends Pick<CaseEventRow, "shipment_id">>(
+  rows: T[],
+  query: string,
+): T[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return rows;
+  return rows.filter((row) => {
+    const shipment = fbaShipmentId(row.shipment_id);
+    return Boolean(shipment && shipment.toLowerCase().includes(q));
+  });
+}
+
 export function sortCaseRows(
   rows: CaseEventRow[],
   key: CaseSortKey,
