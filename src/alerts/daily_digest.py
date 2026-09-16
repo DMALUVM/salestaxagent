@@ -157,26 +157,73 @@ def build_digest_message(ref_date: date | None = None) -> str | None:
     return "\n".join(parts)
 
 
-def send_digest(dry_run: bool = False) -> dict:
-    """Build and send the daily digest via Telegram.
+def build_important_digest_message(ref_date: date | None = None) -> str | None:
+    """Allowlisted compact ping: overdue / filing risk + inventory events.
 
-    Args:
-        dry_run: If True, build the message but do not send it.
-
-    Returns:
-        dict with keys: sent (bool), message (str|None), error (str|None)
+    Returns None when nothing on the allowlist matters — silent day.
     """
-    message = build_digest_message()
+    from src.alerts.digest_sections import (
+        build_sections, render_important_telegram,
+    )
+    from src.inventory.telegram_events import build_inventory_alert_lines
+
+    ref = ref_date or date.today()
+    try:
+        entity_view = None
+        try:
+            from src.compliance.entity_obligations import current_view
+            entity_view = current_view(ref)
+        except Exception:
+            entity_view = None
+        sections = build_sections(
+            fetch_all("nexus_status"),
+            fetch_all("filing_calendar"),
+            fetch_all("franchise_tax_flags"),
+            ref,
+            entity_view=entity_view,
+        )
+        parts = render_important_telegram(sections, ref)
+    except Exception:
+        parts = []
+
+    try:
+        parts.extend(build_inventory_alert_lines(
+            fetch_all("inventory_snapshots"),
+            fetch_all("inventory_inbound_shipments"),
+            ref,
+        ))
+    except Exception:
+        pass
+
+    body = [p for p in parts if p is not None]
+    if not any(line.strip() for line in body):
+        return None
+
+    out = ["<b>Sales Tax Agent</b>"]
+    out.extend(body)
+    out.append("")
+    out.append(f"<i>{ref.isoformat()} — monitoring aid, not tax advice.</i>")
+    return "\n".join(out)
+
+
+def send_digest(dry_run: bool = False) -> dict:
+    """Send the important-only compact ping, or stay silent.
+
+    The fat MTD / 'all good' digest is no longer delivered.
+    """
+    message = build_important_digest_message()
 
     if message is None:
-        return {"sent": False, "message": None, "error": "No data for digest"}
+        return {"sent": False, "message": None, "error": None,
+                "reason": "nothing important"}
 
     if dry_run:
         return {"sent": False, "message": message, "error": None}
 
-    result = send_telegram(message)
+    result = send_telegram(message, topic="sales_tax_filing_risk")
     return {
         "sent": result.get("sent", False),
         "message": message,
         "error": result.get("error"),
+        "reason": result.get("error"),
     }

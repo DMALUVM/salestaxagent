@@ -114,6 +114,12 @@ GNO_NEXT_REVIEW_AT: str = str(_GNO.get("next_human_review_at") or "")
 GNO_LAUNCHED_AT: str = str(_GNO.get("launched_at") or "")
 GNO_EXPORT_REVIEW_LEAD_HOURS: int = int(_GNO.get("export_review_lead_hours", 6))
 
+# ── Telegram (important updates ONLY) ─────────────────────
+_TG = _RULES.get("telegram") or {}
+TELEGRAM_IMPORTANT_ONLY: bool = bool(_TG.get("important_updates_only", True))
+TELEGRAM_ALLOW: frozenset[str] = frozenset(_TG.get("allow") or ())
+TELEGRAM_DENY: frozenset[str] = frozenset(_TG.get("deny") or ())
+
 # ── Agent scheduler ───────────────────────────────────────
 # Every cron job in `python -m src.main run` fires on this zone, regardless of
 # the machine's own timezone. Amazon *day boundaries* stay on AMAZON_TZ — this

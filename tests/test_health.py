@@ -49,26 +49,26 @@ def test_healthy_produces_exactly_one_short_message():
     msg = health.format_message(facts, h)
 
     assert msg.startswith("✅ Sales Tax Agent OK — 2026-08-21")
-    # Short enough to read on a lock screen without expanding.
-    assert len(msg.splitlines()) <= 12, msg
-    assert len(msg) < 700, f"{len(msg)} chars is not a glanceable check-in"
+    assert len(msg.splitlines()) == 1, msg
+    assert "ACOS" not in msg and "Playbook" not in msg
 
 
-def test_healthy_message_carries_the_full_ads_scoreboard():
+def test_healthy_telegram_message_has_no_ads_scoreboard():
     facts = healthy_facts()
     msg = health.format_message(facts, health.evaluate(facts))
-    for token in ("$3,010", "$7,521", "ACOS 40.0%", "ROAS 2.50x", "TACoS 13.7%"):
-        assert token in msg, f"scoreboard missing {token}"
+    for token in ("$3,010", "ACOS", "ROAS", "TACoS", "vs prior 7d"):
+        assert token not in msg, f"scoreboard leaked into Telegram body: {token}"
 
 
 def test_scoreboard_documents_its_window_and_timezone():
-    msg = health.format_message(healthy_facts(), Health())
+    lines = health.scoreboard_lines(healthy_facts())
+    msg = "\n".join(lines)
     assert "7d to 2026-08-20" in msg
     assert "LA closed days" in msg, "the day boundary must be stated, not assumed"
 
 
 def test_scoreboard_shows_movement_against_the_prior_window():
-    msg = health.format_message(healthy_facts(), Health())
+    msg = "\n".join(health.scoreboard_lines(healthy_facts()))
     assert "vs prior 7d" in msg
     assert "spend +7%" in msg
     assert "37.3% → 40.0%" in msg, "prior and current ACOS must both be visible"
@@ -77,9 +77,8 @@ def test_scoreboard_shows_movement_against_the_prior_window():
 def test_no_playbook_body_or_brief_in_the_daily_ping():
     msg = health.format_message(healthy_facts(), Health())
     for leak in ("Break-even", "Action plan", "Risk if ignored", "Hard rules",
-                 "Campaign Manager"):
+                 "Campaign Manager", "P0 open", "Playbook"):
         assert leak not in msg, f"daily ping is leaking brief content: {leak}"
-    assert "P0 open" in msg, "the P0 COUNT is wanted; the list is not"
 
 
 # ── never fabricate ──────────────────────────────────────────────────────
@@ -87,23 +86,24 @@ def test_no_playbook_body_or_brief_in_the_daily_ping():
 def test_missing_sales_says_n_a_rather_than_vanishing():
     """A silently dropped field reads as a healthy zero."""
     facts = healthy_facts(amazon_sales=None)
-    msg = health.format_message(facts, health.evaluate(facts))
-    assert "TACoS n/a" in msg, "TACoS must be present-and-n/a, never omitted"
-    assert "sales" in msg.lower()
+    board = "\n".join(health.scoreboard_lines(facts))
+    assert "TACoS n/a" in board, "TACoS must be present-and-n/a, never omitted"
     faults = [f.key for f in health.evaluate(facts).faults]
     assert "sales" in faults, "an n/a figure must also be reported as a fault"
+    msg = health.format_message(facts, health.evaluate(facts))
+    assert "sales" in msg.lower()
 
 
 def test_no_ads_rows_reports_n_a_not_zero():
     facts = healthy_facts(ads={"spend": 0.0, "sales": 0.0, "orders": 0, "rows": 0})
-    msg = health.format_message(facts, Health())
+    msg = "\n".join(health.scoreboard_lines(facts))
     assert "no rows" in msg and "n/a" in msg
     assert "$0" not in msg, "zero rows is not zero spend"
 
 
 def test_absent_prior_window_is_stated():
     facts = healthy_facts(prior={"spend": 0, "sales": 0, "orders": 0, "rows": 0})
-    msg = health.format_message(facts, Health())
+    msg = "\n".join(health.scoreboard_lines(facts))
     assert "no prior rows" in msg
 
 
@@ -140,14 +140,16 @@ def test_unreachable_db_reports_once_not_as_five_stale_feeds():
     assert h.severity == CRITICAL
 
 
-def test_degraded_message_lists_plain_faults_and_keeps_the_scoreboard():
+def test_degraded_message_lists_plain_faults_without_scoreboard_or_p0():
     facts = healthy_facts(sqp_age_days=19, heartbeat_age_minutes=None,
                           heartbeat_at=None)
     h = health.evaluate(facts)
     msg = health.format_message(facts, h)
     assert msg.startswith("🚨 Agent attention")
     assert "- " in msg
-    assert "ACOS 40.0%" in msg, "a degraded ping still needs the scoreboard"
+    assert "SQP" in msg
+    assert "ACOS" not in msg
+    assert "Playbook" not in msg and "P0" not in msg
     assert "Traceback" not in msg
 
 
@@ -181,18 +183,34 @@ def test_stuck_in_flight_ads_sync_still_alerts():
 
 # ── debounce ─────────────────────────────────────────────────────────────
 
-def test_one_routine_message_per_calendar_day():
+def test_healthy_is_silent_every_day():
     h = Health()
-    send, _ = health.should_send(h, NOW, {})
-    assert send
+    send, reason = health.should_send(h, NOW, {})
+    assert not send
+    assert "silent" in reason
     state = health.record_sent(h, NOW, {})
-
-    again, reason = health.should_send(h, NOW + timedelta(hours=3), state)
+    again, reason = health.should_send(h, NOW + timedelta(days=1), state)
     assert not again, reason
-    assert "already sent today" in reason
+    assert "silent" in reason
 
-    tomorrow = NOW + timedelta(days=1)
-    assert health.should_send(h, tomorrow, state)[0], "next day must send again"
+
+def test_faults_still_page_once_the_debounce_allows():
+    h = Health([Fault("sqp", WARN, "SQP stale")])
+    send, reason = health.should_send(h, NOW, {})
+    assert send
+    assert "fault" in reason or reason == "fault set changed"
+
+
+def test_run_health_ping_would_send_sqp_and_failed_jobs(monkeypatch):
+    facts = healthy_facts(sqp_age_days=19, failed_jobs=["inventory_sync"])
+    monkeypatch.setattr(health, "collect", lambda **k: facts)
+    r = health.run_health_ping(send=False, now=NOW)
+    assert r["healthy"] is False
+    assert r["would_send"] is True
+    assert any("SQP" in f for f in r["faults"])
+    assert any("inventory_sync" in f for f in r["faults"])
+    assert "ACOS" not in r["message"]
+    assert "Playbook" not in r["message"]
 
 
 def test_same_warning_does_not_repeat_every_hour():
@@ -254,6 +272,7 @@ def test_dry_run_never_touches_telegram(monkeypatch):
 
     r = health.run_health_ping(send=False, now=NOW)
     assert r["sent"] is False
+    assert r["would_send"] is False
     assert r["message"].startswith("✅")
     assert r["error"] is None
 
@@ -281,7 +300,7 @@ def test_collect_never_raises_when_the_database_is_gone(monkeypatch):
     assert "connection refused" in (facts["db_error"] or "")
     # And it must still produce a sendable message rather than a traceback.
     msg = health.format_message(facts, health.evaluate(facts))
-    assert "UNREACHABLE" in msg
+    assert "UNREACHABLE" in msg or "unreachable" in msg.lower()
 
 
 # ── heartbeat ────────────────────────────────────────────────────────────
@@ -347,21 +366,21 @@ def test_failed_jobs_are_reported_by_name_only():
     assert "Traceback" not in fault.text and len(fault.text) < 160
 
 
-def test_mtd_line_survived_the_digest_retirement():
+def test_mtd_and_scoreboard_are_not_on_telegram():
     facts = healthy_facts(mtd={"amazon": 25032.95, "shopify": 5072.34},
                           mtd_start="2026-08-01")
     msg = health.format_message(facts, health.evaluate(facts))
-    assert "MTD from 2026-08-01" in msg
-    assert "$25,033" in msg and "$5,072" in msg
-    assert "total $30,105" in msg
+    assert "MTD" not in msg
+    assert "ACOS" not in msg
+    assert "Playbook" not in msg
 
 
-def test_ping_stays_glanceable_with_the_merged_content():
-    facts = healthy_facts(mtd={"amazon": 25032.95, "shopify": 5072.34},
-                          mtd_start="2026-08-01")
+def test_fault_ping_stays_glanceable():
+    facts = healthy_facts(failed_jobs=["inventory_sync"], sqp_age_days=19)
     msg = health.format_message(facts, health.evaluate(facts))
-    assert len(msg.splitlines()) <= 14, msg
-    assert len(msg) < 900, f"{len(msg)} chars is no longer a glance"
+    assert msg.startswith("⚠️") or msg.startswith("🚨")
+    assert len(msg.splitlines()) <= 10, msg
+    assert len(msg) < 500, f"{len(msg)} chars is no longer a glance"
 
 
 def test_an_import_error_is_not_reported_as_an_auth_failure():

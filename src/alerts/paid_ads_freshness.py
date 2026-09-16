@@ -128,7 +128,7 @@ def run_paid_ads_freshness_check(today: date | None = None) -> dict:
             return {**result, "sent": False}
 
         from src.alerts.telegram import send_telegram
-        sent = send_telegram(message)
+        sent = send_telegram(message, topic="paid_ads_freshness")
         print(f"[Paid Ads Freshness] {result['stale_count']} stale source(s), "
               f"telegram sent={sent.get('sent')}")
         job_finish(run_id, "success", f"{result['stale_count']} stale",

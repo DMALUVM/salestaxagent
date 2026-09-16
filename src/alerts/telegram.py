@@ -1,8 +1,8 @@
 """Telegram alert module.
 
-Default behavior: ONE summary message per analysis run.
-Exception: dedicated single-state message when a state NEWLY crosses
-its economic nexus threshold (was under, now over on this run).
+Important updates only. Every send takes a ``topic`` checked by
+``src.alerts.telegram_gate`` against ``config/business_rules.json``.
+Silent when nothing on the allowlist matters.
 """
 from __future__ import annotations
 
@@ -18,7 +18,21 @@ log = logging.getLogger(__name__)
 
 # ── Low-level sender ────────────────────────────────────────
 
-def send_telegram(message: str, parse_mode: str = "HTML") -> dict:
+def send_telegram(message: str, parse_mode: str = "HTML",
+                  topic: str | None = None) -> dict:
+    """Deliver one Telegram message, or refuse a denied topic.
+
+    ``topic`` is the allow/deny key from ``config/business_rules.json``
+    (``telegram.allow`` / ``telegram.deny``). Missing topics are refused
+    while ``important_updates_only`` is on, so a new sender cannot page
+    until it is allowlisted.
+    """
+    from src.alerts.telegram_gate import telegram_allowed, telegram_decision
+
+    if not telegram_allowed(topic):
+        _, reason = telegram_decision(topic)
+        return {"sent": False, "error": reason, "suppressed": True}
+
     if not settings.telegram_enabled:
         return {"sent": False, "error": "Telegram not configured"}
 
@@ -72,7 +86,7 @@ def send_threshold_crossed(
         f"<b>Action:</b> Register for sales tax in {state_code}. "
         f"Consult CPA for effective date and filing obligations."
     )
-    result = send_telegram(message)
+    result = send_telegram(message, topic="threshold_crossed")
 
     insert_rows("alerts", [{
         "alert_type": "threshold_crossed",
@@ -116,13 +130,10 @@ def send_daily_summary(
     """
     from datetime import date as _date
 
-    from src.alerts.digest_sections import build_sections, render_sections
+    from src.alerts.digest_sections import build_sections, render_important_telegram
     from src.inventory.ledger_health import current_warning as _inventory_warning
     from src.exports.registration_plan import digest_line as _registration_line
     from src.db import fetch_all
-
-    parts: list[str] = []
-    parts.append("<b>📊 Sales Tax Agent — Daily Summary</b>")
 
     today = _date.today()
     try:
@@ -143,29 +154,50 @@ def send_daily_summary(
             inventory_warning=_inventory_warning(),
             registration_line=_registration_line(),
         )
-        body = render_sections(sections, today)
+        body = render_important_telegram(sections, today)
         action_needed = len(sections.action_needed_states)
         overdue_count = len(sections.overdue)
     except Exception as e:  # never let a summary failure break the run
         log.warning("Digest sections failed, falling back to counts: %s", str(e)[:200])
-        body = [f"📦 Physical nexus: {phys_nexus_count} states"]
-        if action_needed:
-            body.append(f"\n⚡ <b>Action needed: {action_needed}</b>")
+        body = []
+        if overdue_count:
+            body.append(f"🚨 Overdue sales-tax filings: {overdue_count}")
 
-    # A newly crossed threshold is genuinely new information — keep it loud,
-    # above the standing picture.
+    # A newly crossed threshold is genuinely new information — keep it loud.
+    head: list[str] = []
     if new_phys_states:
-        parts.append(f"🆕 <b>New physical nexus:</b> {', '.join(new_phys_states)}")
+        head.append(f"🆕 <b>New physical nexus:</b> {', '.join(new_phys_states)}")
     if newly_crossed:
-        parts.append(f"🚨 <b>Newly crossed threshold:</b> {', '.join(newly_crossed)}")
+        head.append(f"🚨 <b>Newly crossed threshold:</b> {', '.join(newly_crossed)}")
 
+    try:
+        from src.inventory.telegram_events import build_inventory_alert_lines
+        inv_lines = build_inventory_alert_lines(
+            fetch_all("inventory_snapshots"),
+            fetch_all("inventory_inbound_shipments"),
+            today,
+        )
+    except Exception:
+        inv_lines = []
+
+    if not head and not body and not inv_lines:
+        return {"sent": False, "error": "nothing important", "suppressed": True}
+
+    parts: list[str] = ["<b>Sales Tax Agent</b>"]
+    parts.extend(head)
     parts.extend(body)
-
-    # ── Footer
+    parts.extend(inv_lines)
     parts.append("\n<i>Monitoring aid — not tax advice.</i>")
 
     message = "\n".join(parts)
-    result = send_telegram(message)
+    topic = (
+        "threshold_crossed" if newly_crossed or new_phys_states
+        else "sales_tax_overdue" if overdue_count
+        else "sales_tax_filing_risk" if body
+        else "inventory_damaged_unfillable" if inv_lines
+        else "sales_tax_filing_risk"
+    )
+    result = send_telegram(message, topic=topic)
 
     insert_rows("alerts", [{
         "alert_type": "daily_summary",
@@ -191,7 +223,7 @@ def send_test_alert() -> dict:
         "• Dedicated alert when a state newly crosses its threshold\n"
         "• Error alerts if data sync fails"
     )
-    return send_telegram(message)
+    return send_telegram(message, topic="test")
 
 
 # ── Legacy wrappers (kept for backward compat) ──────────────
@@ -204,7 +236,7 @@ def send_nexus_alert(state_code: str, nexus_type: str, details: str) -> dict:
         f"{details}\n\n"
         f"<i>Review with your CPA.</i>"
     )
-    return send_telegram(message)
+    return send_telegram(message, topic="threshold_crossed")
 
 
 def send_threshold_alert(state_code: str, progress_pct: float, amount: float,

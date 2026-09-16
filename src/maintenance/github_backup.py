@@ -133,6 +133,9 @@ def _log_failure(result: dict) -> None:
         from src.config import settings
         if settings.telegram_enabled:
             from src.alerts.telegram import send_telegram
-            send_telegram(f"🚨 <b>GitHub Backup Failed</b>\n\n{result.get('error', 'unknown')[:200]}")
+            send_telegram(
+                f"🚨 <b>GitHub Backup Failed</b>\n\n{result.get('error', 'unknown')[:200]}",
+                topic="job_fail",
+            )
     except Exception:
         pass
