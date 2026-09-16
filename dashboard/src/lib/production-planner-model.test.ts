@@ -370,7 +370,8 @@ describe("production planner source lock", () => {
     assert.match(model, /DDPE0004Shop: 5_400/);
     assert.match(model, /DDPE0003Shop: 4_860/);
     assert.match(model, /DDPE0001Shop: 6_480/);
-    assert.match(model, /FIRST_WAVE_AWD_TARGET_CAP = 61_425/);
+    assert.match(model, /FIRST_WAVE_AWD_TARGET_CAP = 43_875/);
+    assert.match(model, /LOCKED_ORANGE_MARPAC_AWD_UNITS = 16_200/);
     assert.match(model, /FIRST_WAVE_AWD_MONTH_BY_SKU/);
   });
 
