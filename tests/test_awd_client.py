@@ -16,7 +16,7 @@ def test_awd_get_403_includes_role_hint(monkeypatch):
 
     monkeypatch.setattr("src.inventory.awd_client.httpx.get", lambda *a, **k: FakeResp())
     monkeypatch.setattr("src.inventory.awd_client._headers", lambda: {})
-    monkeypatch.setattr("src.inventory.awd_client._throttle", lambda: None)
+    monkeypatch.setattr("src.inventory.awd_client._throttle", lambda *a, **k: None)
 
     from src.inventory.awd_client import awd_get
 
@@ -45,7 +45,7 @@ def test_awd_get_retries_429(monkeypatch):
 
     monkeypatch.setattr("src.inventory.awd_client.httpx.get", fake_get)
     monkeypatch.setattr("src.inventory.awd_client._headers", lambda: {})
-    monkeypatch.setattr("src.inventory.awd_client._throttle", lambda: None)
+    monkeypatch.setattr("src.inventory.awd_client._throttle", lambda *a, **k: None)
     monkeypatch.setattr("src.inventory.awd_client.time.sleep", lambda _s: None)
 
     from src.inventory.awd_client import awd_get
@@ -80,7 +80,7 @@ def test_awd_probe_partial_failure(monkeypatch):
         return {"orders": []} if path == "/replenishmentOrders" else {"shipments": []}
 
     monkeypatch.setattr("src.inventory.awd_client.awd_get", fake_get)
-    monkeypatch.setattr("src.inventory.awd_client._throttle", lambda: None)
+    monkeypatch.setattr("src.inventory.awd_client._throttle", lambda *a, **k: None)
     result = awd_probe()
     assert result["all_ok"] is False
     assert result["inventory"]["ok"] is False
