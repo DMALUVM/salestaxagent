@@ -35,7 +35,7 @@ def fetch_awd_inventory(dry_run: bool = False) -> dict:
     next_token: str | None = None
 
     while True:
-        params: dict[str, str] = {"details": "SHOW"}
+        params: dict[str, str] = {"details": "SHOW", "maxResults": "200"}
         if next_token:
             params["nextToken"] = next_token
 

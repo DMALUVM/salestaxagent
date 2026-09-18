@@ -4327,10 +4327,8 @@ def inventory_sync_cmd(dry_run):
     click.echo(f"inventory-sync {_code_revision()}")
     click.echo("Inventory sync started (each step prints when it finishes)...")
     results = sync_all(dry_run=dry_run, echo=click.echo)
-    sync_names = [
-        "fba_summaries", "awd", "restock", "planning",
-        "awd_replenishments", "inbound_shipments", "awd_inbound",
-    ]
+    from src.inventory.sync import INVENTORY_SYNC_STEPS
+    sync_names = list(INVENTORY_SYNC_STEPS)
     for name in sync_names:
         r = results.get(name, {})
         if "error" in r:
@@ -5331,7 +5329,10 @@ def run():
         click.echo("[Scheduler] PPC brief publish daily at 07:30 "
                    "(feeds the dashboard Download/Copy buttons)")
 
-        # Inventory sync daily at 06:30 (after SP-API refresh)
+        # Inventory sync daily at 06:30 (after SP-API refresh).
+        # AWD list/detail is paced per published usage plan. A leftover
+        # 429 schedules one date-trigger (inventory_awd_retry) at 07:00
+        # ET so inbound is fresh before the ~07:15 morning check.
         if settings.amazon_sp_enabled:
             scheduler.add_job(
                 _run_inventory_sync,
@@ -6382,29 +6383,118 @@ def _run_ledger_summary():
     job_finish(run_id, "success", msg)
 
 
+_AWD_RETRY_JOB_ID = "inventory_awd_retry"
+_AWD_RETRY_PREFERRED_HOUR = 7
+_AWD_RETRY_PREFERRED_MINUTE = 0
+_AWD_RETRY_LATEST_HOUR = 7
+_AWD_RETRY_LATEST_MINUTE = 5
+
+
+def awd_retry_run_at(now=None):
+    """One later AWD pass the same morning, before the ~07:15 ET check.
+
+    Prefers 07:00 ET so inbound paging can finish by ~07:10. If the 06:30
+    job already ran past 07:00, fire in 30s — not a wait-loop, not another
+    multi-minute sleep.
+    """
+    from datetime import datetime, timedelta
+    from src.rules import AGENT_TZ
+    now = now or datetime.now(AGENT_TZ)
+    preferred = now.replace(
+        hour=_AWD_RETRY_PREFERRED_HOUR,
+        minute=_AWD_RETRY_PREFERRED_MINUTE,
+        second=0, microsecond=0,
+    )
+    latest = now.replace(
+        hour=_AWD_RETRY_LATEST_HOUR,
+        minute=_AWD_RETRY_LATEST_MINUTE,
+        second=0, microsecond=0,
+    )
+    if now < preferred:
+        return preferred
+    soon = now + timedelta(seconds=30)
+    if soon <= latest:
+        return soon
+    return soon
+
+
+def _schedule_awd_retry() -> bool:
+    """One replaceable date-trigger for AWD-only sync. Not a wait-loop."""
+    if _SCHEDULER is None:
+        print("[Inventory] No scheduler — cannot defer AWD retry")
+        return False
+    from src.rules import AGENT_TZ
+    when = awd_retry_run_at()
+    try:
+        _SCHEDULER.add_job(
+            _run_inventory_awd_retry,
+            "date",
+            run_date=when,
+            id=_AWD_RETRY_JOB_ID,
+            timezone=AGENT_TZ,
+            misfire_grace_time=600,
+            replace_existing=True,
+        )
+        print(f"[Inventory] Scheduled {_AWD_RETRY_JOB_ID} at "
+              f"{when.isoformat(timespec='minutes')}")
+        return True
+    except Exception as e:
+        print(f"[Inventory] Could not schedule {_AWD_RETRY_JOB_ID}: {e}")
+        return False
+
+
+def _run_inventory_awd_retry():
+    """One later AWD-only pass. Does not schedule another retry."""
+    from src.db import job_start, job_finish
+    from src.inventory.sync import AWD_SYNC_NAMES, classify_sync_errors, sync_all
+    run_id = job_start(_AWD_RETRY_JOB_ID)
+    try:
+        results = sync_all(only=AWD_SYNC_NAMES)
+        fatal, quota = classify_sync_errors(results)
+        for name in AWD_SYNC_NAMES:
+            r = results.get(name) or {}
+            if "error" in r:
+                print(f"[Inventory AWD retry] {name}: {r['error'][:100]}")
+            else:
+                print(f"[Inventory AWD retry] {name}: "
+                      f"{r.get('rows_total', r.get('shipments_found', r.get('orders_found', 0)))} rows")
+        if fatal or quota:
+            job_finish(run_id, "fail", "; ".join(fatal + quota)[:500])
+        else:
+            job_finish(run_id, "success", "AWD-only retry synced")
+    except Exception as e:
+        print(f"[Inventory AWD retry] Error: {e}")
+        job_finish(run_id, "fail", str(e)[:500])
+
+
 def _run_inventory_sync():
     """Daily inventory sync: FBA summaries + restock + AWD + velocity."""
     from src.db import job_start, job_finish
     run_id = job_start("inventory_sync")
     errors = []
     skip_notes: list[str] = []
+    awd_quota: list[str] = []
     try:
-        from src.inventory.sync import sync_all
+        from src.inventory.sync import INVENTORY_SYNC_STEPS, classify_sync_errors, sync_all
         from src.inventory.freshness import collect_skip_reasons
         results = sync_all()
-        for name in [
-            "fba_summaries", "awd", "restock", "planning",
-            "inbound_shipments", "awd_replenishments", "awd_inbound",
-        ]:
+        fatal, awd_quota = classify_sync_errors(results)
+        for name in INVENTORY_SYNC_STEPS:
             r = results.get(name, {})
             if "error" in r:
                 print(f"[Inventory] {name}: {r['error'][:100]}")
-                errors.append(f"{name}: {r['error'][:80]}")
             elif r.get("skipped"):
                 print(f"[Inventory] {name}: SKIPPED — {r.get('skip_reason')}")
             else:
                 print(f"[Inventory] {name}: {r.get('rows_total', r.get('shipments_found', r.get('orders_found', 0)))} rows")
+        errors.extend(fatal)
         skip_notes.extend(collect_skip_reasons(results))
+        if awd_quota and _schedule_awd_retry():
+            skip_notes.append(
+                "AWD quota — deferred one AWD-only retry the same morning"
+            )
+        elif awd_quota:
+            skip_notes.append("AWD quota — retry not scheduled")
     except Exception as e:
         print(f"[Inventory Sync] Error: {e}")
         errors.append(str(e)[:200])
