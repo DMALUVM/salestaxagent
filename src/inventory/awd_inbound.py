@@ -39,7 +39,7 @@ def sync_awd_inbound_shipments(days_back: int = 180, dry_run: bool = False) -> d
     while True:
         params: dict = {
             "updatedAfter": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "maxResults": 100,
+            "maxResults": 200,
             "sortOrder": "DESCENDING",
         }
         if next_token:

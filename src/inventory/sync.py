@@ -25,7 +25,7 @@ from src.amazon_sp.client import (
     _marketplace_id,
 )
 from src.db import upsert_rows, log_ingestion
-from src.inventory.awd_client import AWD_ROLE_HINT
+from src.inventory.awd_client import AWD_ROLE_HINT, is_awd_quota_error
 from src.inventory.freshness import skip_empty, stamp_now as _stamp_now
 
 log = logging.getLogger(__name__)
@@ -35,6 +35,18 @@ FBA_ROLE_HINT = (
     "'Inventory and Order Management' roles."
 )
 AWD_SYNC_NAMES = frozenset({"awd", "awd_replenishments", "awd_inbound"})
+# Report polls finish (or skip) before any AWD list/detail pagination.
+# FBA inbound is a different API and runs after AWD so it can use this
+# run's replenishment order IDs without interleaving AWD paging.
+INVENTORY_SYNC_STEPS: tuple[str, ...] = (
+    "fba_summaries",
+    "restock",
+    "planning",
+    "awd",
+    "awd_replenishments",
+    "awd_inbound",
+    "inbound_shipments",
+)
 
 RESTOCK_REPORT = "GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT"
 PLANNING_REPORT = "GET_FBA_INVENTORY_PLANNING_DATA"
@@ -284,8 +296,38 @@ def fetch_fba_summaries(dry_run: bool = False) -> dict:
 # Combined sync
 # ---------------------------------------------------------------------------
 
-def sync_all(dry_run: bool = False, on_poll=None, echo=None) -> dict:
-    """Pull restock + planning + FBA summaries + AWD."""
+def classify_sync_errors(results: dict) -> tuple[list[str], list[str]]:
+    """Split step errors into (fatal, awd_quota).
+
+    An AWD 429 must not fail inventory_sync by itself — sibling tables
+    already committed, and one later AWD-only pass is scheduled instead.
+    """
+    fatal: list[str] = []
+    awd_quota: list[str] = []
+    for name in INVENTORY_SYNC_STEPS:
+        r = results.get(name) or {}
+        err = r.get("error")
+        if not err:
+            continue
+        line = f"{name}: {err}"[:280]
+        if name in AWD_SYNC_NAMES and is_awd_quota_error(err):
+            awd_quota.append(line)
+        else:
+            fatal.append(line)
+    return fatal, awd_quota
+
+
+def sync_all(
+    dry_run: bool = False,
+    on_poll=None,
+    echo=None,
+    only: frozenset[str] | set[str] | None = None,
+) -> dict:
+    """Pull restock + planning + FBA summaries + AWD.
+
+    Report polls finish before AWD list/detail pagination. `only` limits
+    which steps run (used by the one-shot morning AWD retry).
+    """
     from src.inventory.awd import fetch_awd_inventory
 
     def _say(msg: str) -> None:
@@ -296,16 +338,22 @@ def sync_all(dry_run: bool = False, on_poll=None, echo=None) -> dict:
     results = {}
     errors = []
     replenishment_orders: list[dict] | None = None
+    wanted = set(only) if only is not None else set(INVENTORY_SYNC_STEPS)
 
-    for name, fn in [
-        ("fba_summaries", lambda: fetch_fba_summaries(dry_run=dry_run)),
-        ("awd", lambda: fetch_awd_inventory(dry_run=dry_run)),
-        ("restock", lambda: fetch_restock(dry_run=dry_run, on_poll=on_poll)),
-        ("planning", lambda: fetch_planning(dry_run=dry_run, on_poll=on_poll)),
-        ("awd_replenishments", lambda: _sync_awd_replenishments(dry_run)),
-        ("inbound_shipments", lambda: _sync_inbound(dry_run, replenishment_orders)),
-        ("awd_inbound", lambda: _sync_awd_inbound(dry_run)),
-    ]:
+    step_fns = {
+        "fba_summaries": lambda: fetch_fba_summaries(dry_run=dry_run),
+        "restock": lambda: fetch_restock(dry_run=dry_run, on_poll=on_poll),
+        "planning": lambda: fetch_planning(dry_run=dry_run, on_poll=on_poll),
+        "awd": lambda: fetch_awd_inventory(dry_run=dry_run),
+        "awd_replenishments": lambda: _sync_awd_replenishments(dry_run),
+        "awd_inbound": lambda: _sync_awd_inbound(dry_run),
+        "inbound_shipments": lambda: _sync_inbound(dry_run, replenishment_orders),
+    }
+
+    for name in INVENTORY_SYNC_STEPS:
+        if name not in wanted:
+            continue
+        fn = step_fns[name]
         _say(f"  {name}...")
         try:
             results[name] = fn()
