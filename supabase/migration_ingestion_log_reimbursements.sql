@@ -1,17 +1,14 @@
--- Allow SP-API ingestion rows in the audit log.
+-- Allow reimbursements + ledger-adjustments rows in ingestion_log.
 --
--- ingestion_log.file_type carries a CHECK constraint that predates the SP-API
--- integration, so every scheduled `spapi_refresh` run tried to write
--- file_type='amazon_spapi' and got rejected with:
+-- fetch_reimbursements writes file_type='amazon_reimbursements' and
+-- fetch_ledger_adjustments writes 'amazon_ledger_adjustments'. Both were
+-- rejected by ingestion_log_file_type_check (2026-09-19 ~10:08/10:12Z):
 --
 --   new row for relation "ingestion_log" violates check constraint
 --   "ingestion_log_file_type_check"
 --
--- src/db.py:log_ingestion() now swallows that failure so it can never abort the
--- sync mid-run, but the audit rows are still being dropped. Run this once in
--- the Supabase SQL editor to record them properly.
---
--- Safe to re-run: the constraint is dropped IF EXISTS before being recreated.
+-- log_ingestion() already swallows the failure so sync continues; this
+-- restores the audit trail. Safe to re-run: drop IF EXISTS then recreate.
 
 ALTER TABLE ingestion_log
     DROP CONSTRAINT IF EXISTS ingestion_log_file_type_check;

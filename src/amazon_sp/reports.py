@@ -293,6 +293,30 @@ def _date_chunks(start: date, end: date) -> list[tuple[date, date]]:
     return chunks
 
 
+def _span_chunks(start: date, end: date) -> list[tuple[date, date]]:
+    """Split into ≤SPAPI_MAX_CHUNK_DAYS windows without month boundaries.
+
+    Month-aligned ``_date_chunks`` is for sales_by_state. Reimbursements and
+    ledger Adjustments do not need calendar months, and Amazon's
+    GET_FBA_REIMBURSEMENTS_DATA throttles to roughly one request per ~238
+    minutes — a month-split on a 30-day lookback (Aug 19–31 + Sep 1–18)
+    made the second chunk FATAL while the first still returned rows.
+
+    Returns oldest→newest ``(chunk_start, chunk_end)`` tuples. Callers that
+    must prefer fresh data under throttle should iterate ``reversed(...)``.
+    """
+    if end < start:
+        return []
+    chunks: list[tuple[date, date]] = []
+    cursor = start
+    max_span = timedelta(days=SPAPI_MAX_CHUNK_DAYS - 1)
+    while cursor <= end:
+        chunk_end = min(cursor + max_span, end)
+        chunks.append((cursor, chunk_end))
+        cursor = chunk_end + timedelta(days=1)
+    return chunks
+
+
 # ── Orders report parser ─────────────────────────────────────
 
 
@@ -1690,24 +1714,35 @@ def fetch_reimbursements(
     start: date, end: date,
     dry_run: bool = False, on_poll: callable | None = None,
 ) -> dict:
-    """Fetch FBA reimbursements report (chunked ≤30d) and upsert."""
+    """Fetch FBA reimbursements report (chunked ≤30d) and upsert.
+
+    Uses linear ``_span_chunks`` (not month-aligned) and pulls newest chunk
+    first. Amazon throttles GET_FBA_REIMBURSEMENTS_DATA to ~one request per
+    ~238 minutes; a FATAL on a later chunk stops the run so we do not burn
+    more throttled requests. Nightly overlapping 90d windows still fill
+    history as each night's newest 30d succeeds.
+    """
     import logging
     log = logging.getLogger(__name__)
 
-    chunks = _date_chunks(start, end)
+    chunks = _span_chunks(start, end)
     records: list[dict] = []
     rows_parsed = 0
     rows_total = 0
     total_amount = 0.0
     chunk_errors = 0
 
-    for c_start, c_end in chunks:
+    # Newest first so a throttle FATAL still lands recent approvals.
+    for c_start, c_end in reversed(chunks):
         try:
             content = request_and_download(
                 FBA_REIMBURSEMENTS_REPORT, c_start, c_end, on_poll=on_poll)
         except Exception as e:
             chunk_errors += 1
             log.warning("Reimbursements chunk %s->%s failed: %s", c_start, c_end, e)
+            # FATAL/CANCELLED under report-type throttle: stop further chunks.
+            if "FATAL" in str(e) or "CANCELLED" in str(e):
+                break
             continue
         parsed = parse_reimbursements(content)
         records.extend(parsed["records"])
