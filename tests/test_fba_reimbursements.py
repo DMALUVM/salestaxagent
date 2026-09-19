@@ -124,3 +124,26 @@ def test_job_worker_handles_reimbursements_sync():
     assert "amazon_as_of" in helper
     assert "GET_FBA_REIMBURSEMENTS_DATA" in helper
     assert "open_case" not in helper
+
+
+def test_span_chunks_days30_is_single_request():
+    """--days 30 inclusive must not month-split into a throttled 2nd chunk."""
+    from src.amazon_sp.reports import _span_chunks, _date_chunks
+    end = date(2026, 9, 18)
+    start = end - __import__("datetime").timedelta(days=29)  # inclusive 30
+    assert _span_chunks(start, end) == [(start, end)]
+    # Month-aligned helper still splits — that is why reimbursements left it.
+    assert len(_date_chunks(start, end)) == 2
+
+
+def test_span_chunks_90d_is_three_linear_windows():
+    from src.amazon_sp.reports import _span_chunks
+    end = date(2026, 9, 18)
+    start = end - __import__("datetime").timedelta(days=89)
+    chunks = _span_chunks(start, end)
+    assert len(chunks) == 3
+    assert chunks[-1][1] == end
+    assert chunks[0][0] == start
+    # Contiguous, no gaps/overlaps.
+    for (a, b), (c, d) in zip(chunks, chunks[1:]):
+        assert b + __import__("datetime").timedelta(days=1) == c

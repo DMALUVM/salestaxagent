@@ -1339,7 +1339,8 @@ def sync_case_queue(
 
     window = SPAPI_CASE_QUEUE_DAYS if days is None else max(1, min(int(days), 365))
     end = amazon_as_of()
-    start = end - timedelta(days=window)
+    # Inclusive lookback so --days 30 is one ≤30d linear chunk (throttle-safe).
+    start = end - timedelta(days=max(window - 1, 0))
 
     previous_adj_count = 0
     try:
