@@ -3831,7 +3831,9 @@ def spapi_reimbursements_cmd(days, dry_run):
     from src.rules import amazon_as_of
 
     end = amazon_as_of()
-    start = end - timedelta(days=days)
+    # Inclusive lookback: --days 30 → 30 closed days, one ≤30d span chunk.
+    # end - days was 31 inclusive days and month-split into a FATAL 2nd chunk.
+    start = end - timedelta(days=max(days - 1, 0))
     if dry_run:
         click.echo("DRY RUN\n")
 
@@ -6060,7 +6062,7 @@ def _run_spapi_refresh():
     try:
         from src.amazon_sp.reports import fetch_reimbursements
         from src.rules import SPAPI_REIMBURSEMENTS_DAYS
-        reimb_start = end - timedelta(days=SPAPI_REIMBURSEMENTS_DAYS)
+        reimb_start = end - timedelta(days=max(SPAPI_REIMBURSEMENTS_DAYS - 1, 0))
         reimb = fetch_reimbursements(reimb_start, end)
         print(f"[SP-API] {ts} Reimbursements ({reimb_start}→{end}): "
               f"{reimb.get('rows_parsed', 0)} rows, ${reimb.get('total_amount', 0):,.2f}")
@@ -7617,7 +7619,7 @@ def _run_reimbursements_sync(payload: dict | None = None) -> dict:
         days = SPAPI_REIMBURSEMENTS_DAYS
     days = min(days, 365)
     end = amazon_as_of()
-    start = end - timedelta(days=days)
+    start = end - timedelta(days=max(days - 1, 0))
     print(f"[Job Worker] reimbursements_sync {start} → {end}")
     result = fetch_reimbursements(start, end)
     # Refresh paid-vs-open dedupe without another ledger pull.

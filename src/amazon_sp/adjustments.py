@@ -18,7 +18,7 @@ from src.amazon_sp.client import request_and_download
 from src.amazon_sp.reports import (
     INVENTORY_LEDGER_REPORT,
     _build_header_lookup,
-    _date_chunks,
+    _span_chunks,
     _detect_delimiter,
     _get,
     _parse_date,
@@ -158,15 +158,16 @@ def fetch_ledger_adjustments(
     dry_run: bool = False,
     on_poll: callable | None = None,
 ) -> dict:
-    """Fetch ledger Adjustments (chunked ≤30d) and upsert."""
-    chunks = _date_chunks(start, end)
+    """Fetch ledger Adjustments (linear ≤30d chunks, newest first) and upsert."""
+    chunks = _span_chunks(start, end)
     records: list[dict] = []
     rows_parsed = 0
     rows_total = 0
     chunk_errors = 0
     reasons: dict[str, int] = {}
 
-    for c_start, c_end in chunks:
+    # Newest first; FATAL/CANCELLED under report throttle stops further chunks.
+    for c_start, c_end in reversed(chunks):
         try:
             content = request_and_download(
                 INVENTORY_LEDGER_REPORT,
@@ -178,6 +179,8 @@ def fetch_ledger_adjustments(
         except Exception as e:
             chunk_errors += 1
             log.warning("Ledger adjustments chunk %s->%s failed: %s", c_start, c_end, e)
+            if "FATAL" in str(e) or "CANCELLED" in str(e):
+                break
             continue
         parsed = parse_ledger_adjustments(content)
         records.extend(parsed["records"])
