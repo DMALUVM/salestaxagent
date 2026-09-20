@@ -12,6 +12,8 @@ for the Production environment (and Preview if you use preview deploys).
 | `DASHBOARD_USER` | yes | middleware | Basic-auth user. |
 | `DASHBOARD_PASSWORD` | yes | middleware | Basic-auth password. The whole dashboard 503s if this is unset. |
 | `SOLDSCOPE_API_TOKEN` | Mini only | Python daily RT + weekly history jobs | **Do not set on Vercel.** Existing `/ppc`, `/ppc/gno`, and Amazon Ops columns read `soldscope_*` through `SUPABASE_SERVICE_KEY`. Put the token on the Mac Mini `.env` so `soldscope_daily_rt` and `soldscope_weekly_sync` can run. Never commit it. |
+| `AI_GATEWAY_API_KEY` | Vercel only | `/api/shopify-funnel/jev-triage` | **Do not set on Mini.** Jev leak triage. CoS/Dave add via Vercel → Project `dashboard` → Settings → Environment Variables / Secure Vault (Production + Preview). Never commit. Never paste into chat, repo, or Mini `.env`. Missing key → `hold_for_review` (fail closed, no LLM). |
+| `CRON_SECRET` | Vercel only | same route (cron GET) | Optional. Vercel Cron sends `Authorization: Bearer $CRON_SECRET`. Middleware allows that bearer on `/api/shopify-funnel/jev-triage` only. Manual trigger still uses dashboard Basic Auth. Do not put this on Mini. |
 
 `src/lib/supabase-server.ts` resolves server credentials as
 `SUPABASE_URL ?? NEXT_PUBLIC_SUPABASE_URL` and
@@ -25,6 +27,7 @@ surfaces in the card as a visible failure state, not a blank panel.
 |---|---|---|
 | `/api/shopify-customers` | Supabase server creds + `shopify_orders` table | Visible error card naming the migration/backfill |
 | `/api/shopify-funnel` | Supabase server creds + `shopify_funnel_*` / `shopify_abandoned_checkouts` | Visible setup hint naming the migration + `shopify-funnel-sync` + scopes |
+| `/api/shopify-funnel/jev-triage` | Supabase service role + Vercel `AI_GATEWAY_API_KEY` | Fail-closed `hold_for_review` when the key is missing; silent → no LLM |
 | `/api/ppc` | Supabase server creds | Load-failure card |
 | `/api/paid-ads` | Supabase server creds + `paid_ads_snapshots` / `paid_ads_campaigns_window` | Empty Google/Meta cards + optional migration hint |
 | `/api/paid-ads/csv` | Supabase server creds (POST) | 400 if no recognisable Google/Meta/GSC/GA4 rows; upserts `paid_*_daily` |

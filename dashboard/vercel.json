@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/shopify-funnel/jev-triage",
+      "schedule": "45 14 * * *"
+    },
+    {
+      "path": "/api/shopify-funnel/jev-triage",
+      "schedule": "45 15 * * *"
+    }
+  ]
+}

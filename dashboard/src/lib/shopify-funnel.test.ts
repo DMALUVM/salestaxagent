@@ -213,6 +213,7 @@ describe("wiring", () => {
     assert.doesNotMatch(route, /`python -m src\.main shopify-funnel-sync`/);
     assert.doesNotMatch(route, /shopify_orders/);
     assert.doesNotMatch(route, /klaviyo|google ads|gsc/i);
+    assert.doesNotMatch(route, /AI_GATEWAY_API_KEY/);
   });
 
   test("shopper page is full-width with an error boundary", () => {

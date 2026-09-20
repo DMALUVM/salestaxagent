@@ -21,19 +21,19 @@ If a query comes back ACCESS_DENIED the counts for that source stay empty
 and `shopify_funnel_status.missing_scopes` records exactly what Dave must
 grant. We do not invent a number from orders or GA4 to fill the hole.
 
-Jev runs AFTER the warehouse write via `pilots/funnel_jev_triage.py`
-(preferred) using `{items:[...]}` / JSON stdout. Mini keeps a gitignored
-runtime sidecar at `repo/vercel-ai-gateway/` for `bin/jev_evaluate.py`.
-Missing files → hold_for_review. Silent when nothing material changed.
-Never raises. No Shopify / theme / storefront writes.
+Jev triage runs on Vercel (`/api/shopify-funnel/jev-triage`), not Mini.
+Mini writes funnel + abandon rows and stamps `last_stats.silent` /
+`last_stats.jev` (`vercel_runtime` → hold_for_review). The dashboard
+route reads the same `shopify_funnel_status` leak stats, uses Vercel
+`AI_GATEWAY_API_KEY`, and fail-closes to hold_for_review when the key
+is absent. Silent → no LLM. Never raises. No Shopify / theme writes.
+`AI_GATEWAY_API_KEY` must not live in Mini `.env`.
 """
 from __future__ import annotations
 
 import logging
-import os
 import time
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import Callable
 
 import httpx
@@ -418,6 +418,7 @@ def sync(days: int = LOOKBACK_DAYS, dry_run: bool = False,
         "gql_version": GQL_VERSION,
     }
 
+    stats["silent"] = silent
     if dry_run:
         stats["jev"] = maybe_jev_triage(stats, silent)
         return {
@@ -492,50 +493,12 @@ def sync(days: int = LOOKBACK_DAYS, dry_run: bool = False,
     return out
 
 
-# In-repo adapter first; Mini sidecar second; box path last. Never prefer
-# bare jev_evaluate.py — that helper speaks {state, questions}, not items.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-JEV_PILOT_NAME = "funnel_jev_triage.py"
-JEV_TIMEOUT_SEC = 90
-
-
-def _jev_pilot_candidates() -> tuple[Path, ...]:
-    return (
-        _REPO_ROOT / "pilots" / JEV_PILOT_NAME,
-        _REPO_ROOT / "vercel-ai-gateway" / "pilots" / JEV_PILOT_NAME,
-        Path("/workspace/vercel-ai-gateway/pilots") / JEV_PILOT_NAME,
-    )
-
-
-def _jev_helper_candidates() -> tuple[Path, ...]:
-    env = (os.environ.get("JEV_EVALUATE") or "").strip()
-    extra = (Path(env),) if env else ()
-    return extra + (
-        _REPO_ROOT / "vercel-ai-gateway" / "bin" / "jev_evaluate.py",
-        Path("/workspace/vercel-ai-gateway/bin/jev_evaluate.py"),
-    )
-
-
-def resolve_jev_pilot() -> Path | None:
-    env = (os.environ.get("FUNNEL_JEV_TRIAGE") or "").strip()
-    if env:
-        p = Path(env)
-        return p if p.is_file() else None
-    for cand in _jev_pilot_candidates():
-        if cand.is_file():
-            return cand
-    return None
-
-
-def resolve_jev_helper() -> Path | None:
-    for cand in _jev_helper_candidates():
-        if cand.is_file():
-            return cand
-    return None
-
-
 def jev_items_from_stats(stats: dict) -> list[dict]:
-    """Wrap leak + abandon window stats as one pilot item."""
+    """Wrap leak + abandon window stats as one pilot item.
+
+    Protocol twin of dashboard/src/lib/funnel-jev-triage.ts. Mini does not
+    invoke Jev; Vercel reads these fields from shopify_funnel_status.
+    """
     leak = stats.get("leak") or {}
     abandon = stats.get("abandon") or {}
     window = stats.get("window") or {}
@@ -576,88 +539,33 @@ def jev_decision_from_result(parsed: dict) -> str:
     return "hold"
 
 
-def _redact_jev_error(text: str) -> str:
-    key = os.environ.get("AI_GATEWAY_API_KEY") or ""
-    if key and key in text:
-        text = text.replace(key, "[REDACTED]")
-    return text[:200]
-
-
-def _hold_unwired() -> dict:
-    return {
-        "ran": False, "reason": "jev_not_wired",
-        "decision": "hold", "severity": "hold_for_review",
-    }
-
-
 def maybe_jev_triage(stats: dict, silent: bool) -> dict:
-    """Post-sync hook. Fail closed. No LLM when nothing material.
+    """Mini post-sync stamp only. Fail closed. Never calls an LLM.
 
-    Prefers in-repo `pilots/funnel_jev_triage.py` over a sidecar copy, and
-    never invokes bare `jev_evaluate.py` (protocol mismatch). Missing
-    files → hold_for_review. Never raises into the sync.
+    Jev runs on Vercel (`/api/shopify-funnel/jev-triage`) where
+    AI_GATEWAY_API_KEY lives. Mini must not hold that key. Never raises
+    into the sync. No Shopify / theme / storefront writes.
     """
-    if silent:
-        return {"ran": False, "reason": "silent", "decision": None}
-    import json
-    import subprocess
-    import sys
-
     try:
-        script = resolve_jev_pilot()
-        if script is None:
-            return _hold_unwired()
-        # In-repo / sidecar pilot still needs the Mini helper. A FUNNEL_JEV_TRIAGE
-        # override is a test/stub script and does not require the sidecar.
-        helper = resolve_jev_helper()
-        if not os.environ.get("FUNNEL_JEV_TRIAGE") and helper is None:
-            return _hold_unwired()
-        payload = {"items": jev_items_from_stats(stats), "pace_sec": 0}
-        env = os.environ.copy()
-        if helper is not None:
-            env["JEV_EVALUATE"] = str(helper)
-        try:
-            r = subprocess.run(
-                [sys.executable, str(script)],
-                input=json.dumps(payload),
-                capture_output=True, text=True, timeout=JEV_TIMEOUT_SEC,
-                env=env,
-            )
-        except subprocess.TimeoutExpired as e:
-            return {"ran": False, "decision": "hold", "reason": "jev_failed",
-                    "severity": "hold_for_review",
-                    "error": _redact_jev_error(f"timeout: {e}")}
-        try:
-            parsed = json.loads((r.stdout or "").strip() or "{}")
-        except Exception:
-            return {"ran": False, "decision": "hold", "reason": "jev_failed",
-                    "severity": "hold_for_review",
-                    "error": "invalid_json", "rc": r.returncode}
-        if not isinstance(parsed, dict):
-            return {"ran": False, "decision": "hold", "reason": "jev_failed",
-                    "severity": "hold_for_review",
-                    "error": "invalid_json", "rc": r.returncode}
-        decision = jev_decision_from_result(parsed)
-        out = {
-            "ran": True,
-            "decision": decision,
-            "rc": r.returncode,
-            "pursue_n": len(parsed.get("pursue") or []),
-            "hold_n": len(parsed.get("hold") or []),
-            "skip_n": len(parsed.get("skip") or []),
-            "error_n": len(parsed.get("errors") or []),
+        if silent:
+            return {"ran": False, "reason": "silent", "decision": None,
+                    "runtime": "vercel"}
+        return {
+            "ran": False,
+            "reason": "vercel_runtime",
+            "decision": "hold",
+            "severity": "hold_for_review",
+            "runtime": "vercel",
+            "items": jev_items_from_stats(stats or {}),
         }
-        if r.returncode != 0:
-            out["decision"] = "hold"
-            out["severity"] = "hold_for_review"
-            out["reason"] = "jev_failed"
-        elif parsed.get("errors") and decision != "pursue":
-            out["severity"] = "hold_for_review"
-        return out
-    except Exception as e:
-        return {"ran": False, "decision": "hold", "reason": "jev_failed",
-                "severity": "hold_for_review",
-                "error": _redact_jev_error(str(e))}
+    except Exception:
+        return {
+            "ran": False,
+            "reason": "vercel_runtime",
+            "decision": "hold",
+            "severity": "hold_for_review",
+            "runtime": "vercel",
+        }
 
 
 def _table_hint(err: str, table: str) -> str:

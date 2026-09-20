@@ -5,13 +5,16 @@ stdin: {items:[...]} or list. Each item: step metrics, abandon cohort, or leak c
 stdout: {pursue, hold, skip, errors, ...} — pursue = show Dave / act; hold = watch; skip = noise.
 Fail closed → hold. Never prints API keys. Does not mutate Shopify/theme.
 
-HELPER resolution (no /workspace required):
+Protocol reference / box experiment only. Production Jev runs on Vercel
+(`/api/shopify-funnel/jev-triage`) with dashboard-project AI_GATEWAY_API_KEY.
+Mini shopify-funnel-sync must not invoke this script or hold that key.
+
+HELPER resolution (box experiments, no /workspace required):
   1. $JEV_EVALUATE if it points at a file
-  2. repo/vercel-ai-gateway/bin/jev_evaluate.py  (Mini gitignored sidecar)
+  2. repo/vercel-ai-gateway/bin/jev_evaluate.py
   3. <parent>/bin/jev_evaluate.py when this file lives in vercel-ai-gateway/pilots/
   4. /workspace/vercel-ai-gateway/bin/jev_evaluate.py (box fallback only)
 
-Mini keeps the runtime sidecar at repo/vercel-ai-gateway/ (gitignored).
 Do not commit API keys or that tree's node_modules.
 """
 from __future__ import annotations
