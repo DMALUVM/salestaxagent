@@ -480,3 +480,29 @@ def test_docs_and_snapshot_list_the_tables():
         text = Path(rel).read_text()
         assert "ga4_sessions_daily" in text
         assert "conversion_digest_status" in text
+
+
+def test_settings_loads_when_phase2_google_env_is_set(monkeypatch):
+    """Mini .env GOOGLE_* must not forbid Settings() / get_client()."""
+    from src.config import Settings
+
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "id")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("GOOGLE_OAUTH_REFRESH_TOKEN", "refresh")
+    monkeypatch.setenv("GA4_PROPERTY_ID", "411710093")
+    monkeypatch.setenv("GSC_SITE_URL", "sc-domain:tallowbourn.com")
+    monkeypatch.setenv("GOOGLE_ADS_DEVELOPER_TOKEN", "dev")
+    monkeypatch.setenv("META_ADS_ACCESS_TOKEN", "token")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "service-role")
+    # Undeclared Mini keys must not break required Supabase fields.
+    monkeypatch.setenv("SOME_FUTURE_MINI_KEY", "ignore-me")
+
+    loaded = Settings()
+    assert loaded.google_oauth_client_id == "id"
+    assert loaded.google_oauth_client_secret == "secret"
+    assert loaded.google_oauth_refresh_token == "refresh"
+    assert loaded.ga4_property_id == "411710093"
+    assert loaded.gsc_site_url == "sc-domain:tallowbourn.com"
+    assert loaded.supabase_url == "https://example.supabase.co"
+    assert loaded.supabase_service_key == "service-role"
