@@ -41,8 +41,8 @@ We do not invent a value from line items when total_price is missing —
 those rows contribute to count but not to $.
 
 Per-row `stub_triage_severity` is a fail-closed placeholder:
-unknown → hold_for_review. Do not call an LLM from this module. Post-sync
-Jev lives in `shopify_funnel_sync.maybe_jev_triage` and never raises.
+unknown → hold_for_review. Do not call an LLM from this module. Mini
+stamps `last_stats.jev`; Jev runs on Vercel, never from Mini `.env`.
 """
 from __future__ import annotations
 

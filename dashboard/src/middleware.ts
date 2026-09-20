@@ -12,9 +12,21 @@ import { NextRequest, NextResponse } from "next/server";
  *   - If no valid Authorization header → 401 with WWW-Authenticate
  *   - Browser shows native login prompt; credentials cached per session
  *   - No cookies, no JS, works with curl / fetch / browsers
+ *   - One exception: GET/POST `/api/shopify-funnel/jev-triage` may use
+ *     `Authorization: Bearer $CRON_SECRET` (Vercel Cron). Nothing else.
  */
 
 export function middleware(request: NextRequest) {
+  const cronSecret = (process.env.CRON_SECRET ?? "").trim();
+  const authHeader = request.headers.get("authorization") ?? "";
+  if (
+    request.nextUrl.pathname === "/api/shopify-funnel/jev-triage" &&
+    cronSecret &&
+    authHeader === `Bearer ${cronSecret}`
+  ) {
+    return NextResponse.next();
+  }
+
   const password = process.env.DASHBOARD_PASSWORD;
 
   // If no password configured, block everything with a clear error
@@ -26,7 +38,6 @@ export function middleware(request: NextRequest) {
   }
 
   const user = process.env.DASHBOARD_USER ?? "admin";
-  const authHeader = request.headers.get("authorization");
 
   if (authHeader) {
     // Parse "Basic base64(user:pass)"
