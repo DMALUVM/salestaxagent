@@ -211,6 +211,7 @@ describe("wiring", () => {
     assert.match(route, /windowEnd/);
     assert.doesNotMatch(route, /shopify_orders/);
     assert.doesNotMatch(route, /klaviyo|google ads|gsc/i);
+    assert.doesNotMatch(route, /AI_GATEWAY_API_KEY/);
   });
 
   test("shopper page is full-width with an error boundary", () => {

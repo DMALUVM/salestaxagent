@@ -35,9 +35,9 @@ exports/**
 !exports/playbooks/
 !exports/playbooks/**
 
-# Mini runtime sidecar for Jev / Vercel AI Gateway (not source).
-# Keep a checkout at repo/vercel-ai-gateway/ on Mini; never commit keys
-# or that tree's node_modules. The in-repo adapter is pilots/funnel_jev_triage.py.
+# Local box / experiment checkout only. Jev funnel triage runs on Vercel
+# (dashboard project env). Never commit keys or that tree's node_modules.
+# AI_GATEWAY_API_KEY must not live in Mini .env.
 vercel-ai-gateway/
 
 # Next.js / Node build artifacts (also covered under dashboard/.gitignore)
