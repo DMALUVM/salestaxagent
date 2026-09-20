@@ -2725,7 +2725,7 @@ def google_ads_sync_cmd(dry_run):
 def meta_ads_sync_cmd(dry_run):
     """Meta Marketing API daily spend / clicks / conversions (scaffold).
 
-    Official Marketing API only. ads_read + read_insights — no ads_management.
+    Official Marketing API only. ads_read — no ads_management.
     Missing env → needs OAuth, 0 rows. Never invent metrics. One shot.
     See docs/oauth-phase2.md.
     """

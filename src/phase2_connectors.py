@@ -54,7 +54,7 @@ CONNECTORS: dict[str, dict] = {
             "META_ADS_ACCESS_TOKEN",
             "META_ADS_ACCOUNT_ID",
         ),
-        "scopes": ("ads_read", "read_insights"),
+        "scopes": ("ads_read",),
     },
     "gsc": {
         "command": "gsc-sync",
@@ -88,9 +88,10 @@ def needs_oauth_message(connector: str, missing: Iterable[str]) -> str:
     keys = ", ".join(missing)
     return (
         f"{spec['label']} {NEEDS_OAUTH}. Missing: {keys}. "
-        f"Set them on Vercel (dashboard) like AI_GATEWAY_API_KEY; "
-        f"Mini `.env` from 1Password when Dana wires the pull — "
-        f"never chat-paste. See docs/oauth-phase2.md. "
+        f"Set them on Vercel → project dashboard → Settings → "
+        f"Environment Variables (same page as AI_GATEWAY_API_KEY). "
+        f"Mini does not need these keys for the scaffold. "
+        f"Never chat-paste. See docs/oauth-phase2.md. "
         f"Wrote 0 rows. Never invent metrics."
     )
 

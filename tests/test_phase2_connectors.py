@@ -121,8 +121,9 @@ def test_scopes_are_read_minima():
     assert CONNECTORS["gsc"]["scopes"] == (
         "https://www.googleapis.com/auth/webmasters.readonly",
     )
+    assert CONNECTORS["meta_ads"]["scopes"] == ("ads_read",)
     assert "ads_management" not in CONNECTORS["meta_ads"]["scopes"]
-    assert "ads_read" in CONNECTORS["meta_ads"]["scopes"]
+    assert "read_insights" not in CONNECTORS["meta_ads"]["scopes"]
 
 
 def test_click_exception_type():
@@ -160,6 +161,10 @@ def test_docs_and_snapshot_list_the_tables():
     assert "ads_read" in docs
     assert "AI_GATEWAY_API_KEY" in docs
     assert "Never chat-paste" in docs or "never chat-paste" in docs
+    assert "oauthplayground" in docs
+    assert "bc-74a886b6" in docs
+    assert "Do not add a second Jev job on Mini" in docs
+    assert "ecommdashboard.com" in docs
     for rel in (
         "config/warehouse_snapshot_tables.json",
         "dashboard/config/warehouse_snapshot_tables.json",
