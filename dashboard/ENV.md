@@ -82,26 +82,28 @@ The older Ads Ops JSON path (`POST /api/paid-ads/ingest` →
 `paid_ads_snapshots`) still works. Neither path scrapes Ads Manager.
 See `dashboard/PAID_ADS.md`.
 
-## Phase 2 official-API connectors (OAuth later)
+## Phase 2 official-API connectors
 
 Iris conversion digest. **Official APIs only** — not the CSV intel
 tables above. Dave sets these on Vercel the same way as
-`AI_GATEWAY_API_KEY`. Mini does not get chat-pasted keys. Stubs write
-0 rows until OAuth exists (`docs/oauth-phase2.md`).
+`AI_GATEWAY_API_KEY`. Dana mirrors the same `GOOGLE_*` names into Mini
+`.env` from 1Password so `ga4-sync` / `gsc-sync` can pull. Never
+chat-paste keys. Google Ads / Meta stay stubs until those tokens exist
+(`docs/oauth-phase2.md`).
 
-| Variable | Required to *read* digest | Used by (later) |
+| Variable | Required to *read* digest | Used by |
 |---|---|---|
-| `GOOGLE_OAUTH_CLIENT_ID` | no | Mini `ga4-sync` / `google-ads-sync` / `gsc-sync` |
+| `GOOGLE_OAUTH_CLIENT_ID` | no | Mini `ga4-sync` / `gsc-sync` (Ads stub still listed) |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | no | same |
 | `GOOGLE_OAUTH_REFRESH_TOKEN` | no | same |
-| `GA4_PROPERTY_ID` | no | `ga4-sync` |
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | no | `google-ads-sync` |
-| `GOOGLE_ADS_CUSTOMER_ID` | no | `google-ads-sync` |
+| `GA4_PROPERTY_ID` | no | Mini `ga4-sync` |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | no | `google-ads-sync` (scaffold) |
+| `GOOGLE_ADS_CUSTOMER_ID` | no | `google-ads-sync` (scaffold) |
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | no | `google-ads-sync` (MCC, optional) |
-| `GSC_SITE_URL` | no | `gsc-sync` |
-| `META_APP_ID` | no | `meta-ads-sync` |
-| `META_APP_SECRET` | no | `meta-ads-sync` |
-| `META_ADS_ACCESS_TOKEN` | no | `meta-ads-sync` |
-| `META_ADS_ACCOUNT_ID` | no | `meta-ads-sync` |
+| `GSC_SITE_URL` | no | Mini `gsc-sync` |
+| `META_APP_ID` | no | `meta-ads-sync` (scaffold) |
+| `META_APP_SECRET` | no | `meta-ads-sync` (scaffold) |
+| `META_ADS_ACCESS_TOKEN` | no | `meta-ads-sync` (scaffold) |
+| `META_ADS_ACCOUNT_ID` | no | `meta-ads-sync` (scaffold) |
 
 
