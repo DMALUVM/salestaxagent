@@ -101,6 +101,7 @@ separate rule and is unaffected.
 | health_ping | 08:10 daily | **One** Telegram check-in: ads scoreboard + freshness + faults |
 | deadline_check | 09:00 daily | Filing deadline monitoring |
 | shopify_poll | every few hours | Shopify orders → sales_by_state + sales_daily |
+| shopify_funnel_sync | 07:15 daily | ShopifyQL session funnel + abandoned checkouts → `/shopper` |
 | ads_campaigns_backfill | Sun 03:00 | 90d campaigns (3 × 30d chunks) for long trends |
 | source_monitoring | Mon 07:00 | Rule-source change detection |
 | github_backup | Sun 09:00 | Backup branch push |

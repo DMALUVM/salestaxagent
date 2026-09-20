@@ -24,6 +24,7 @@ surfaces in the card as a visible failure state, not a blank panel.
 | Route | Needs | Degrades to |
 |---|---|---|
 | `/api/shopify-customers` | Supabase server creds + `shopify_orders` table | Visible error card naming the migration/backfill |
+| `/api/shopify-funnel` | Supabase server creds + `shopify_funnel_*` / `shopify_abandoned_checkouts` | Visible setup hint naming the migration + `shopify-funnel-sync` + scopes |
 | `/api/ppc` | Supabase server creds | Load-failure card |
 | `/api/paid-ads` | Supabase server creds + `paid_ads_snapshots` / `paid_ads_campaigns_window` | Empty Google/Meta cards + optional migration hint |
 | `/api/paid-ads/csv` | Supabase server creds (POST) | 400 if no recognisable Google/Meta/GSC/GA4 rows; upserts `paid_*_daily` |
