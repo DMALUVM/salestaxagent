@@ -1,12 +1,13 @@
-"""Phase 2 official-API sync — GA4 + Search Console live; Ads/Meta stubs.
+"""Phase 2 official-API sync — GA4 + Search Console + Google Ads live; Meta stub.
 
-GA4 Data API and Search Console API are one-shot REST pulls (refresh token,
-then runReport / searchAnalytics.query). No report wait-loop, no Ads poll,
-no sleep. Missing credentials → a clear "needs OAuth" result and zero rows.
-A metric the API omitted stays NULL. Zero is a real measurement. Never invent
-a session, click, or conversion.
+GA4 Data API, Search Console API, and Google Ads API are one-shot REST pulls
+(refresh token, then runReport / searchAnalytics.query / googleAds:searchStream).
+No report wait-loop, no Ads poll, no sleep. Missing credentials → a clear
+"needs OAuth" result and zero rows. A metric the API omitted stays NULL.
+Zero is a real measurement. Never invent a session, click, or conversion.
 
-Google Ads and Meta stay scaffold stubs (developer token / Meta still blocked).
+Google Ads is read-only usage despite the adwords scope — never mutate.
+Meta stays a scaffold stub.
 
 Secrets live in Vercel env (same pattern as AI_GATEWAY_API_KEY) and, when
 Dana wires Mini, the same names in Mini `.env` from 1Password. Do not
@@ -87,6 +88,11 @@ GA4_REPORT_URL = (
 GSC_QUERY_URL = (
     "https://searchconsole.googleapis.com/webmasters/v3/sites/{site}/searchAnalytics/query"
 )
+# Latest stable REST version as of 2026-09 (sunset Aug 2027). SELECT only.
+GOOGLE_ADS_API_VERSION = "v25"
+GOOGLE_ADS_SEARCH_STREAM_URL = (
+    "https://googleads.googleapis.com/{version}/customers/{customer_id}/googleAds:searchStream"
+)
 
 DEFAULT_LOOKBACK_DAYS = 7
 MAX_LOOKBACK_DAYS = 90
@@ -135,8 +141,9 @@ def needs_oauth_message(connector: str, missing: Iterable[str]) -> str:
         f"{spec['label']} {NEEDS_OAUTH}. Missing: {keys}. "
         f"Set them on Vercel → project dashboard → Settings → "
         f"Environment Variables (same page as AI_GATEWAY_API_KEY). "
-        f"Mini `.env` needs the same GOOGLE_* names for ga4-sync / gsc-sync "
-        f"to pull. Never chat-paste. See docs/oauth-phase2.md. "
+        f"Mini `.env` needs the same GOOGLE_* names for ga4-sync / "
+        f"gsc-sync / google-ads-sync to pull. Never chat-paste. "
+        f"See docs/oauth-phase2.md. "
         f"Wrote 0 rows. Never invent metrics."
     )
 
@@ -159,7 +166,7 @@ def _blank_result(connector: str, *, dry_run: bool, missing: list[str]) -> dict:
 
 def sync_stub(connector: str, *, dry_run: bool = False,
               environ: dict | None = None) -> dict:
-    """Ads/Meta scaffold. One shot. No wait-loop. Zero rows even with OAuth."""
+    """Meta (and leftover) scaffold. One shot. No wait-loop. Zero rows even with OAuth."""
     if connector not in CONNECTORS:
         raise KeyError(f"unknown Phase 2 connector: {connector}")
     spec = CONNECTORS[connector]
@@ -592,6 +599,163 @@ def pull_gsc_rows(token: str, site_url: str, start: date, end: date,
     return {"queries": queries, "pages": pages, "errors": errors}
 
 
+def _ads_customer_id(raw: str) -> str:
+    """Digits only. Ads UI dashes (123-456-7890) are stripped. Invalid → blank."""
+    s = str(raw or "").strip().replace("-", "").replace(" ", "")
+    return s if s.isdigit() else ""
+
+
+def _ads_field(obj: Any, *names: str) -> Any:
+    if not isinstance(obj, dict):
+        return None
+    for name in names:
+        if name in obj:
+            return obj[name]
+    return None
+
+
+def _micros_to_dollars(value: Any) -> float | None:
+    """cost_micros → currency. Unit conversion only — never invent a spend."""
+    if value is None or value == "":
+        return None
+    micros = _api_int(value)
+    if micros is None:
+        return None
+    return round(micros / 1_000_000.0, 2)
+
+
+def _ads_stream_rows(data: Any) -> dict:
+    """searchStream wraps results in a JSON array of batch objects."""
+    if isinstance(data, dict):
+        if data.get("error"):
+            return {"error": "Google Ads searchStream returned an error object", "rows": []}
+        batches = [data]
+    elif isinstance(data, list):
+        batches = data
+    else:
+        return {"error": "Google Ads searchStream response was not JSON array", "rows": []}
+    rows: list[dict] = []
+    for batch in batches:
+        if not isinstance(batch, dict):
+            continue
+        if batch.get("error"):
+            return {"error": "Google Ads searchStream batch contained an error", "rows": []}
+        results = batch.get("results") or []
+        if not isinstance(results, list):
+            return {"error": "Google Ads searchStream results were not a list", "rows": []}
+        rows.extend(r for r in results if isinstance(r, dict))
+    return {"rows": rows}
+
+
+def google_ads_campaign_query(start: date, end: date) -> str:
+    """Read-only GAQL. SELECT only — never mutate."""
+    return (
+        "SELECT segments.date, campaign.id, campaign.name, "
+        "metrics.cost_micros, metrics.clicks, metrics.impressions, "
+        "metrics.conversions, metrics.conversions_value "
+        "FROM campaign "
+        f"WHERE segments.date BETWEEN '{start.isoformat()}' AND '{end.isoformat()}'"
+    )
+
+
+def google_ads_search_stream(
+    token: str,
+    customer_id: str,
+    developer_token: str,
+    query: str,
+    *,
+    login_customer_id: str = "",
+) -> dict:
+    """Google Ads searchStream. One POST — no report poll, no page wait."""
+    url = GOOGLE_ADS_SEARCH_STREAM_URL.format(
+        version=GOOGLE_ADS_API_VERSION,
+        customer_id=customer_id,
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "developer-token": developer_token,
+    }
+    if login_customer_id:
+        headers["login-customer-id"] = login_customer_id
+    try:
+        resp = _http_post(url, headers=headers, json={"query": query})
+    except httpx.HTTPError as e:
+        return {"error": f"Google Ads searchStream failed: {e}"[:400], "rows": []}
+    if resp.status_code >= 400:
+        return {"error": _google_error(resp), "rows": []}
+    try:
+        data = resp.json()
+    except Exception:
+        return {"error": "Google Ads searchStream response was not JSON", "rows": []}
+    return _ads_stream_rows(data)
+
+
+def pull_google_ads_rows(
+    token: str,
+    customer_id: str,
+    developer_token: str,
+    start: date,
+    end: date,
+    fetched_at: str,
+    *,
+    login_customer_id: str = "",
+) -> dict:
+    """Campaign × day grain. metric_date is the API day — never substituted."""
+    query = google_ads_campaign_query(start, end)
+    result = google_ads_search_stream(
+        token, customer_id, developer_token, query,
+        login_customer_id=login_customer_id,
+    )
+    if result.get("error"):
+        return {"rows": [], "errors": [result["error"]]}
+    out: dict[tuple[str, str], dict] = {}
+    for raw in result.get("rows") or []:
+        campaign = raw.get("campaign") or {}
+        metrics = raw.get("metrics") or {}
+        segments = raw.get("segments") or {}
+        if not isinstance(campaign, dict):
+            campaign = {}
+        if not isinstance(metrics, dict):
+            metrics = {}
+        if not isinstance(segments, dict):
+            segments = {}
+        day = _ga4_date(_ads_field(segments, "date"))
+        if not day or not _in_window(day, start, end):
+            continue
+        cid = _ads_field(campaign, "id")
+        if cid is None or cid == "":
+            continue
+        cid = str(cid).strip()
+        if not cid:
+            continue
+        name = _ads_field(campaign, "name")
+        row: dict[str, Any] = {
+            "metric_date": day,
+            "campaign_id": cid,
+            "source": "google_ads_api",
+            "fetched_at": fetched_at,
+        }
+        if name is not None:
+            row["campaign_name"] = str(name)
+        # Present-or-null: omit key only when the API did not return the field.
+        if "costMicros" in metrics or "cost_micros" in metrics:
+            row["spend"] = _micros_to_dollars(
+                _ads_field(metrics, "costMicros", "cost_micros"),
+            )
+        if "clicks" in metrics:
+            row["clicks"] = _api_int(metrics.get("clicks"))
+        if "impressions" in metrics:
+            row["impressions"] = _api_int(metrics.get("impressions"))
+        if "conversions" in metrics:
+            row["conversions"] = _api_float(metrics.get("conversions"))
+        if "conversionsValue" in metrics or "conversions_value" in metrics:
+            val = _api_float(_ads_field(metrics, "conversionsValue", "conversions_value"))
+            row["conversion_value"] = None if val is None else round(val, 2)
+        out[(day, cid)] = row
+    return {"rows": list(out.values()), "errors": []}
+
+
 def _upsert(table: str, rows: list[dict], on_conflict: str,
             upsert_rows: Callable) -> int:
     if not rows:
@@ -808,8 +972,117 @@ def gsc_sync(*, dry_run: bool = False, environ: dict | None = None,
     return out
 
 
-def google_ads_sync(*, dry_run: bool = False, environ: dict | None = None) -> dict:
-    return sync_stub("google_ads", dry_run=dry_run, environ=environ)
+def google_ads_sync(*, dry_run: bool = False, environ: dict | None = None,
+                    as_of: str | date | None = None,
+                    days: int = DEFAULT_LOOKBACK_DAYS,
+                    now: datetime | None = None) -> dict:
+    """Pull Google Ads API → upsert google_ads_daily. Official API only.
+
+    Read-only searchStream despite adwords scope. Never mutate campaigns.
+    """
+    missing = missing_oauth_env("google_ads", environ)
+    out = _blank_result("google_ads", dry_run=dry_run, missing=missing)
+    if missing:
+        out["error"] = needs_oauth_message("google_ads", missing)
+        out["message"] = out["error"]
+        return out
+
+    window = _resolve_window(days, as_of, now)
+    if isinstance(window, dict):
+        out["error"] = window["error"]
+        out["message"] = window["error"]
+        return out
+    start, end = window
+    out["start_date"] = start.isoformat()
+    out["end_date"] = end.isoformat()
+    out["metric_date"] = end.isoformat()
+
+    customer_id = _ads_customer_id(_env_get(environ, "GOOGLE_ADS_CUSTOMER_ID"))
+    if not customer_id:
+        out["error"] = (
+            "GOOGLE_ADS_CUSTOMER_ID must be the 10-digit client id "
+            "(no dashes). Wrote 0 rows. Never invent metrics."
+        )
+        out["message"] = out["error"]
+        return out
+    login_raw = _env_get(environ, "GOOGLE_ADS_LOGIN_CUSTOMER_ID")
+    login_customer_id = _ads_customer_id(login_raw) if login_raw else ""
+    if login_raw and not login_customer_id:
+        out["error"] = (
+            "GOOGLE_ADS_LOGIN_CUSTOMER_ID must be the 10-digit MCC id "
+            "(no dashes) when set. Wrote 0 rows. Never invent metrics."
+        )
+        out["message"] = out["error"]
+        return out
+    developer_token = _env_get(environ, "GOOGLE_ADS_DEVELOPER_TOKEN")
+
+    token_r = refresh_access_token(environ)
+    if token_r.get("error"):
+        out["error"] = token_r["error"]
+        out["message"] = token_r["error"]
+        return out
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    pulled = pull_google_ads_rows(
+        token_r["access_token"], customer_id, developer_token, start, end,
+        fetched_at, login_customer_id=login_customer_id,
+    )
+    rows = pulled.get("rows") or []
+    errors = list(pulled.get("errors") or [])
+    out["errors"] = errors
+    out["fetched"] = {"campaigns": len(rows)}
+    out["customer_id"] = customer_id
+    if login_customer_id:
+        out["login_customer_id"] = login_customer_id
+
+    if dry_run:
+        n = len(rows)
+        out["rows"] = n
+        out["ok"] = not errors or n > 0
+        out["message"] = (
+            f"Google Ads API dry-run {start.isoformat()}…{end.isoformat()} "
+            f"customers/{customer_id} searchStream → "
+            f"{n} google_ads_daily. No upsert. Never mutate. "
+            f"Never invent metrics."
+        )
+        if errors and n == 0:
+            out["error"] = errors[0]
+            out["ok"] = False
+        return out
+
+    written = 0
+    try:
+        from src.db import upsert_rows
+    except Exception as e:
+        out["error"] = f"Supabase client unavailable: {e}"[:400]
+        out["message"] = out["error"]
+        return out
+
+    try:
+        written += _upsert(
+            "google_ads_daily", rows, "metric_date,campaign_id", upsert_rows,
+        )
+    except Exception as e:
+        errors.append(f"google_ads_daily: {e}"[:240])
+
+    n = len(rows)
+    out["rows"] = n
+    out["upserted"] = written
+    out["errors"] = errors
+    out["ok"] = n > 0 or not errors
+    if errors and n == 0:
+        out["error"] = errors[0]
+        out["message"] = out["error"]
+        return out
+    out["message"] = (
+        f"Google Ads API {start.isoformat()}…{end.isoformat()} "
+        f"upserted {n} google_ads_daily. Never mutate. Never invent metrics."
+    )
+    if errors:
+        out["error"] = errors[0]
+        out["ok"] = True
+        out["partial"] = True
+    return out
 
 
 def meta_ads_sync(*, dry_run: bool = False, environ: dict | None = None) -> dict:

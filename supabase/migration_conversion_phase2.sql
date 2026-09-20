@@ -16,9 +16,9 @@
 -- `paid_search_query_daily`, `paid_campaign_daily`) — do not mix.
 --
 -- PULLS
--- Mini `ga4-sync` / `gsc-sync` upsert official-API rows when GOOGLE_* env
--- is present. `google-ads-sync` / `meta-ads-sync` stay stubs. A missing
--- metric stays NULL. Zero is a real measurement. Never invent a count.
+-- Mini `ga4-sync` / `gsc-sync` / `google-ads-sync` upsert official-API
+-- rows when GOOGLE_* env is present. `meta-ads-sync` stays a stub. A
+-- missing metric stays NULL. Zero is a real measurement. Never invent a count.
 --
 -- RLS
 -- Enable RLS, no anon/authenticated policies. service_role bypasses RLS
