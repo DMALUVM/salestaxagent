@@ -25,12 +25,12 @@
 --
 -- KLAVIYO
 --   klaviyo_abandon_flow_daily is a read-only stub. Seeded from Kit's
---   2026-09-19 flow report. Do not call Klaviyo write APIs from this job.
+--   2026-09-19 flow report. Do not call Klaviyo from this job.
+--   Kit refresh (not Mini): get_flow_report
+--     filters contains-any(flow_id,[WcDdsx,SQa2Yy]),
+--     conversion_metric_id UG4R5c, flow_aggregation rows.
 --
--- PHASE 2 HOOKS (do not build here)
---   TODO(phase2-ga4): official GA4 Data API — product-level ATC events.
---   TODO(phase2-ads): official Google Ads / Meta / GSC — not this job family.
---   No Ryze. No third-party MCP SaaS connectors.
+-- Phase 2 connectors are out of this migration.
 
 alter table shopify_abandoned_checkouts
   add column if not exists shipping_address_started boolean,

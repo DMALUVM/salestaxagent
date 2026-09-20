@@ -437,6 +437,53 @@ export function money(v: number | null | undefined, dp = 0): string {
   })}`;
 }
 
+/** Kit Email refresh contract. This app never HTTP those IDs. */
+export const KLAVIYO_KIT_REFRESH = {
+  method: "get_flow_report",
+  flow_ids: ["WcDdsx", "SQa2Yy"],
+  conversion_metric_id: "UG4R5c",
+  aggregation: "flow_aggregation",
+  wrote_klaviyo: false,
+} as const;
+
+export type KlaviyoAbandonRow = {
+  as_of?: string | null;
+  window_days: number;
+  flow_id?: string | null;
+  flow_name?: string | null;
+  revenue?: number | null;
+  unique_clicks?: number | null;
+  conversion_metric_id?: string | null;
+  notes?: string | null;
+};
+
+export type KlaviyoWindowSummary = {
+  window_days: number;
+  revenue: number | null;
+  unique_clicks_zero: boolean;
+};
+
+export function summarizeKlaviyo(rows: KlaviyoAbandonRow[]) {
+  const byWindow = new Map<number, KlaviyoWindowSummary>();
+  for (const r of rows) {
+    const w = Number(r.window_days);
+    if (!Number.isFinite(w)) continue;
+    const b = byWindow.get(w) ?? {
+      window_days: w, revenue: null, unique_clicks_zero: false,
+    };
+    const amt = asMoney(r.revenue);
+    if (amt !== null) b.revenue = Math.round(((b.revenue ?? 0) + amt) * 100) / 100;
+    if (r.unique_clicks === 0) b.unique_clicks_zero = true;
+    byWindow.set(w, b);
+  }
+  return {
+    as_of: rows[0]?.as_of ?? null,
+    conversion_metric_id: rows[0]?.conversion_metric_id ?? "UG4R5c",
+    windows: [...byWindow.values()].sort((a, b) => b.window_days - a.window_days),
+    refresh: KLAVIYO_KIT_REFRESH,
+  };
+}
+
 export const DEFINITIONS: Array<[string, string]> = [
   ["Source", "Shopify Admin GraphQL only. Funnel counts come from ShopifyQL FROM sessions (human sessions). Abandoned checkouts come from abandonedCheckouts. Not GA4, not Clarity, not a CSV export."],
   ["Closed funnel", "sessions → sessions_with_cart_additions → sessions_that_reached_checkout → sessions_that_completed_checkout. Each step is a subset of the previous."],
@@ -450,6 +497,5 @@ export const DEFINITIONS: Array<[string, string]> = [
   ["Friction", "shippingAddress / billingAddress presence, discountCodes, totalDiscountSet, completedAt. GraphQL AbandonedCheckout has no shippingLine or payment-attempt field — those stay unknown. Address values are not stored."],
   ["Kit vs stick", "Token classify on abandoned line-item title/handle (kit/pack/bundle/set vs stick/single). Not a session ATC→checkout. ShopifyQL sessions has no product-handle closed funnel."],
   ["Channel", "ShopifyQL GROUP BY referring_channel when read_reports is granted. Device uses session_device_type."],
-  ["Klaviyo", "Read-only stub seeded from Kit Email (flows WcDdsx / SQa2Yy, metric UG4R5c). This app does not write to Klaviyo."],
-  ["Phase 2", "GA4 / Google Ads / Meta / GSC are not built here. Official APIs later. No Ryze."],
+  ["Klaviyo", "Read-only stub seeded from Kit Email (flows WcDdsx / SQa2Yy, metric UG4R5c). This app does not write to Klaviyo. Kit refresh: get_flow_report contains-any those flow ids."],
 ];

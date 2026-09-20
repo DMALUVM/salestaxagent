@@ -93,6 +93,13 @@ export default function ShopperPage() {
       recipients: number | null; conversion_rate: number | null;
       revenue: number | null; unique_clicks: number | null; notes: string | null;
     }>;
+    summary?: {
+      as_of?: string | null;
+      conversion_metric_id?: string;
+      windows?: Array<{
+        window_days: number; revenue: number | null; unique_clicks_zero: boolean;
+      }>;
+    };
   } | null>(null);
   const [busy, setBusy] = useState(true);
   const [showDefs, setShowDefs] = useState(false);
@@ -593,36 +600,66 @@ export default function ShopperPage() {
           <CardContent>
             <p className="mb-2 text-xs text-muted-foreground">
               Read-only. Conversion metric Placed Order UG4R5c. This app does not write to Klaviyo.
+              {klaviyo.summary?.as_of ? ` As of ${klaviyo.summary.as_of}.` : ""}
             </p>
             {klaviyo.empty || !klaviyo.rows?.length ? (
               <p className="text-sm text-muted-foreground">
                 No kit-seed rows. Run supabase/migration_shopify_funnel_expand.sql.
               </p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Window</TableHead>
-                    <TableHead>Flow</TableHead>
-                    <TableHead className="text-right">Recipients</TableHead>
-                    <TableHead className="text-right">Conv</TableHead>
-                    <TableHead className="text-right">$</TableHead>
-                    <TableHead className="text-right">Clicks</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {klaviyo.rows.map((r) => (
-                    <TableRow key={`${r.window_days}-${r.flow_id}`}>
-                      <TableCell className="tabular-nums">{r.window_days}d</TableCell>
-                      <TableCell>{r.flow_name}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r.recipients ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{pct(r.conversion_rate)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{money(r.revenue, 0)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{r.unique_clicks ?? "—"}</TableCell>
+              <>
+                {klaviyo.summary?.windows?.length ? (
+                  <div className="mb-3 space-y-1 text-sm">
+                    {klaviyo.summary.windows.map((w) => (
+                      <p key={w.window_days}>
+                        <span className="font-medium">{w.window_days}d combined recovery </span>
+                        <span className="tabular-nums">{money(w.revenue, 2)}</span>
+                        {w.unique_clicks_zero ? (
+                          <Badge variant="outline" className="ml-2 align-middle">
+                            unique clicks 0
+                          </Badge>
+                        ) : null}
+                      </p>
+                    ))}
+                    {klaviyo.summary.windows.some((w) => w.unique_clicks_zero) ? (
+                      <p className="text-xs text-muted-foreground">
+                        Unique clicks 0 is a flag only — opens still happen.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Window</TableHead>
+                      <TableHead>Flow</TableHead>
+                      <TableHead className="text-right">Recipients</TableHead>
+                      <TableHead className="text-right">Conv</TableHead>
+                      <TableHead className="text-right">$</TableHead>
+                      <TableHead className="text-right">Clicks</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {klaviyo.rows.map((r) => (
+                      <TableRow key={`${r.window_days}-${r.flow_id}`}>
+                        <TableCell className="tabular-nums">{r.window_days}d</TableCell>
+                        <TableCell>{r.flow_name}</TableCell>
+                        <TableCell className="text-right tabular-nums">{r.recipients ?? "—"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{pct(r.conversion_rate)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{money(r.revenue, 2)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{r.unique_clicks ?? "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {klaviyo.rows.some((r) => r.notes) ? (
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                    {klaviyo.rows.filter((r) => r.notes).map((r) => (
+                      <li key={`${r.window_days}-${r.flow_id}-note`}>{r.notes}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
             )}
           </CardContent>
         </Card>

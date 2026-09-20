@@ -29,9 +29,7 @@ EXPAND (same job family, not a second poller):
   * Kit/stick abandon mix is derived in the dashboard from line items.
   * Klaviyo abandon-flow stub seed (read-only; never writes Klaviyo).
 
-TODO(phase2-ga4): official GA4 Data API for product-level ATC — not here.
-TODO(phase2-ads): official Google Ads / Meta / GSC — not this job.
-No Ryze. Silent Telegram (funnel is not on telegram.allow).
+Phase 2 connectors are out of this job. Silent Telegram (not on telegram.allow).
 """
 from __future__ import annotations
 

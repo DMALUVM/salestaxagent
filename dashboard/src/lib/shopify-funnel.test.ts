@@ -14,6 +14,7 @@ import {
   recoveryOf,
   stepsOf,
   sumDaily,
+  summarizeKlaviyo,
   topAbandonedProducts,
   windowBounds,
   type AbandonedRow,
@@ -196,6 +197,24 @@ describe("expand: kit leak + friction", () => {
     assert.equal(fr.shippingRateUnknown, 1);
     assert.equal(fr.paymentAttemptUnknown, 1);
   });
+
+  test("summarizeKlaviyo 90d combined is 180.03 + 20.81 = 200.84", () => {
+    const s = summarizeKlaviyo([
+      { as_of: "2026-09-19", window_days: 90, flow_id: "WcDdsx", revenue: 180.03, unique_clicks: null, conversion_metric_id: "UG4R5c" },
+      { as_of: "2026-09-19", window_days: 90, flow_id: "SQa2Yy", revenue: 20.81, unique_clicks: null, conversion_metric_id: "UG4R5c" },
+      { as_of: "2026-09-19", window_days: 30, flow_id: "WcDdsx", revenue: 32.55, unique_clicks: 0, conversion_metric_id: "UG4R5c" },
+      { as_of: "2026-09-19", window_days: 30, flow_id: "SQa2Yy", revenue: 20.81, unique_clicks: 0, conversion_metric_id: "UG4R5c" },
+    ]);
+    const by = Object.fromEntries(s.windows.map((w) => [w.window_days, w]));
+    assert.equal(by[90].revenue, 200.84);
+    assert.equal(by[90].unique_clicks_zero, false);
+    assert.equal(by[30].revenue, 53.36);
+    assert.equal(by[30].unique_clicks_zero, true);
+    assert.equal(s.refresh.wrote_klaviyo, false);
+    assert.equal(s.refresh.method, "get_flow_report");
+    const missing = summarizeKlaviyo([{ window_days: 90, revenue: null, unique_clicks: null }]);
+    assert.equal(missing.windows[0].revenue, null);
+  });
 });
 
 describe("wiring", () => {
@@ -234,6 +253,7 @@ describe("wiring", () => {
     const klaviyo = readFileSync(path.join(root, "src/app/api/klaviyo-abandon/route.ts"), "utf8");
     assert.match(klaviyo, /getServerSupabase/);
     assert.match(klaviyo, /klaviyo_abandon_flow_daily/);
+    assert.match(klaviyo, /summarizeKlaviyo/);
     assert.doesNotMatch(klaviyo, /klaviyo\.com|profiles|events/);
   });
 
@@ -245,6 +265,8 @@ describe("wiring", () => {
     assert.doesNotMatch(page, /getSupabase/);
     assert.doesNotMatch(page, /return <LoadingState/);
     assert.match(page, /AbortController/);
+    assert.match(page, /unique clicks 0/);
+    assert.match(page, /combined recovery/);
   });
 
   test("migration enables RLS and stores no recovery URL", () => {
@@ -262,7 +284,10 @@ describe("wiring", () => {
     const expand = readFileSync(path.join(root, "..", "supabase/migration_shopify_funnel_expand.sql"), "utf8");
     assert.match(expand, /klaviyo_abandon_flow_daily/);
     assert.match(expand, /shipping_address_started/);
-    assert.match(expand, /TODO\(phase2-ga4\)/);
+    assert.match(expand, /180\.03/);
+    assert.match(expand, /get_flow_report/);
+    assert.match(expand, /Phase 2 connectors are out/);
+    assert.doesNotMatch(expand, /TODO\(phase2-ga4\)/);
     assert.doesNotMatch(expand, /CREATE POLICY/i);
   });
 });

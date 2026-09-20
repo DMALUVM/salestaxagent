@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 
 from src import shopify_funnel as F
-from src.klaviyo_abandon import rows_from_fixture
+from src.klaviyo_abandon import KIT_REFRESH, rows_from_fixture, summarize
 from src.shopify_funnel_sync import (
     ABANDON_GQL, SHOPIFYQL_GQL, _shopifyql, maybe_jev_triage,
 )
@@ -431,6 +431,36 @@ def test_klaviyo_kit_fixture_has_both_windows_and_no_write_flag():
     assert all(r["source"] == "kit_seed" for r in rows)
     ninety = next(r for r in rows if r["window_days"] == 90 and r["flow_id"] == "WcDdsx")
     assert ninety["recipients"] == 282 and ninety["revenue"] == 180.03
+    assert "W3nGKK" in (ninety.get("notes") or "")
+
+
+def test_klaviyo_summarize_90d_combined_and_30d_clicks_flag():
+    s = summarize(rows_from_fixture())
+    by = {w["window_days"]: w for w in s["windows"]}
+    assert by[90]["revenue"] == 200.84
+    assert by[90]["unique_clicks_zero"] is False
+    assert by[30]["revenue"] == 53.36
+    assert by[30]["unique_clicks_zero"] is True
+    assert s["conversion_metric_id"] == "UG4R5c"
+    assert s["refresh"] == KIT_REFRESH
+    assert s["refresh"]["wrote_klaviyo"] is False
+    assert s["refresh"]["method"] == "get_flow_report"
+
+
+def test_klaviyo_summarize_missing_revenue_stays_missing():
+    s = summarize([{"window_days": 90, "revenue": None, "unique_clicks": None}])
+    assert s["windows"] == [{
+        "window_days": 90, "revenue": None, "unique_clicks_zero": False,
+    }]
+
+
+def test_klaviyo_module_never_calls_klaviyo():
+    from pathlib import Path
+    src = Path("src/klaviyo_abandon.py").read_text()
+    assert "httpx" not in src
+    assert "requests" not in src
+    assert "klaviyo.com" not in src
+    assert "wrote_klaviyo" in src
 
 
 def test_cli_command_is_registered_and_mentions_scopes():

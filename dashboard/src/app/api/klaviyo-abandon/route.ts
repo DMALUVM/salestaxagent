@@ -1,4 +1,5 @@
 import { getServerSupabase } from "@/lib/supabase-server";
+import { summarizeKlaviyo } from "@/lib/shopify-funnel";
 
 /**
  * GET /api/klaviyo-abandon
@@ -31,10 +32,12 @@ export async function GET() {
         setupHint: /klaviyo_abandon/.test(r.error.message) ? SETUP : null,
       });
     }
+    const rows = r.data ?? [];
     return Response.json({
       available: true,
-      empty: !(r.data ?? []).length,
-      rows: r.data ?? [],
+      empty: !rows.length,
+      rows,
+      summary: summarizeKlaviyo(rows),
       setupHint: SETUP,
     });
   } catch (e) {
