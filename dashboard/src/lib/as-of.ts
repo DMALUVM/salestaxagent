@@ -40,6 +40,11 @@ export function amazonAsOf(now: Date = new Date()): string {
   return shiftDays(amazonToday(now), -1);
 }
 
+/** Yesterday in America/New_York — newest closed Shopify / digest day. */
+export function agentAsOf(now: Date = new Date()): string {
+  return shiftDays(agentToday(now), -1);
+}
+
 /** First day of the month containing `isoDate`. */
 export function monthStart(isoDate: string): string {
   return `${isoDate.slice(0, 7)}-01`;
