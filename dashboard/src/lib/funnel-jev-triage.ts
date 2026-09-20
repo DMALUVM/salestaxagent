@@ -91,6 +91,8 @@ export type JevResult = {
   skip_n?: number;
   error_n?: number;
   error?: string;
+  /** Slim pursue rows for Conversion Digest improvements. Omitted when empty. */
+  pursue?: unknown[];
 };
 
 export type EvaluateFn = (
@@ -226,6 +228,7 @@ export async function runFunnelJevTriage(opts: {
     hold_n: buckets.hold.length,
     skip_n: buckets.skip.length,
     error_n: buckets.errors.length,
+    ...(buckets.pursue.length ? { pursue: buckets.pursue.slice(0, 3) } : {}),
     ...(buckets.errors.length && decision !== "pursue"
       ? { severity: "hold_for_review" as const }
       : {}),

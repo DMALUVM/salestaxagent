@@ -101,6 +101,7 @@ describe("fail closed on Vercel", () => {
     assert.equal(out.ran, true);
     assert.equal(out.decision, "pursue");
     assert.equal(out.pursue_n, 1);
+    assert.equal((out.pursue ?? []).length, 1);
   });
 
   test("evaluate throw → hold", async () => {
