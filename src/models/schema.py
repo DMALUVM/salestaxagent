@@ -17,6 +17,7 @@ class InventoryEvent(BaseModel):
     quantity: int = 0
     event_type: Optional[str] = None
     disposition: Optional[str] = None
+    reference_id: Optional[str] = None
     raw_data: Optional[dict] = None
 
 

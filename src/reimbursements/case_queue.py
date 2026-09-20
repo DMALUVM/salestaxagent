@@ -14,9 +14,16 @@ Sources
    shorts (real FBA* shipment_ids). Dashboard never calls Sellerboard.
 
 Dedupe: units already paid in fba_reimbursements for the same SKU + reason
-group, with approval on/after the event (plus a 7-day settle pad), leave
-the Needs-case list. Same FBA shipment_id + SKU from SP-API and Sellerboard
-collapses to one row.
+group leave the Needs-case list for ledger/warehouse rows. Lost_Inbound rows
+tied to a specific FBA shipment only consume reimbursements whose case_id /
+order_id is that shipment (or another FBA* id) — SKU-pooled Lost_Inbound
+cash must not fake a partial on this shipment. Same FBA shipment_id + SKU
+from SP-API and Sellerboard collapses to one row.
+
+Receipts SoT: before keeping a Sellerboard/SP-API Lost_Inbound short,
+``apply_receipt_cover`` checks inventory_events Receipts (Reference ID =
+FBA* when present). If receipts cover shipped qty for that shipment+SKU,
+mark found_offset (durable for zero-recv CLOSED ghosts).
 
 This module never opens Seller Central cases.
 """
@@ -151,6 +158,13 @@ STATUS_CASE_SUBMITTED = "case_submitted"
 CLEAR_NOTE_FILED = "filed"
 CLEAR_NOTE_RECONCILED = "reconciled"
 CLEAR_NOTE_NOT_PURSUING = "not_pursuing"
+CLEAR_NOTE_RECEIPTS_COVER = "receipts_cover"
+
+# Sellerboard CLOSED + UnitsReceived=0 ghosts: ledger Receipts often land at a
+# different FC than the plan destination. Prefer Reference ID (= FBA*) match;
+# fall back to exact-qty SKU receipt pool near plan/event date (consumed once).
+RECEIPT_COVER_BEFORE_DAYS = 14
+RECEIPT_COVER_AFTER_DAYS = 60
 
 SOURCE_LEDGER = "ledger_adjustment"
 SOURCE_INBOUND = "inbound_discrepancy"
@@ -212,6 +226,32 @@ def _parse_day(value: object) -> date | None:
     except ValueError:
         return None
 
+
+def _plan_anchor_day(row: dict) -> date | None:
+    """Best date for receipt-window matching (plan/ship, not stale event_date)."""
+    direct = _parse_day(row.get("plan_date"))
+    if direct:
+        return direct
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else None
+    if raw:
+        plan_ts = raw.get("plan_date") or raw.get("shipment_date")
+        if plan_ts is not None:
+            try:
+                ts = int(plan_ts)
+                if ts > 10_000_000_000:  # ms
+                    ts //= 1000
+                return datetime.fromtimestamp(ts, tz=timezone.utc).date()
+            except (TypeError, ValueError, OSError, OverflowError):
+                pass
+        for key in ("plan_date", "shipment_date", "closed_at"):
+            day = _parse_day(raw.get(key))
+            if day:
+                return day
+    return (
+        _parse_day(row.get("closed_at"))
+        or _parse_day(row.get("last_updated_at"))
+        or _parse_day(row.get("event_date"))
+    )
 
 def _fba_id(value: str | None) -> str | None:
     raw = (value or "").strip().upper()
@@ -390,6 +430,10 @@ def sellerboard_inbound_discrepancies(
             continue
         url, kind = seller_central_link(fba, None)
         fc = raw.get("fulfillment_center") or raw.get("destination_fc")
+        # Keep Sellerboard raw / plan_date so receipt-cover can window off the
+        # real ship plan (event_date is often a stale Dana upsert day).
+        raw_blob = raw.get("raw") if isinstance(raw.get("raw"), dict) else None
+        plan_day = _plan_anchor_day(raw) or _plan_anchor_day({"raw": raw_blob} if raw_blob else {})
         out.append({
             "event_key": inbound_event_key(fba, sku),
             "source": SOURCE_SELLERBOARD,
@@ -410,6 +454,8 @@ def sellerboard_inbound_discrepancies(
             "classification_version": CLASSIFICATION_VERSION,
             "seller_central_url": url,
             "seller_central_link_kind": kind,
+            "raw": raw_blob or raw,
+            "plan_date": plan_day.isoformat() if plan_day else None,
         })
     return out
 
@@ -1058,7 +1104,236 @@ def apply_found_offsets(events: list[dict], found: list[tuple[date, str, str, in
     return out
 
 
+
+def _is_receipt_event(row: dict) -> bool:
+    et = (row.get("event_type") or "").strip().lower()
+    return "receipt" in et
+
+
+
+
+def collect_receipt_qty_by_shipment(
+    receipt_events: Iterable[dict],
+) -> dict[tuple[str, str], int]:
+    """Sum Receipts qty keyed by (FBA shipment_id, normalized SKU).
+
+    Ledger detail Reference ID for Receipts is the FBA* shipment id when
+    Amazon stamped it. Rows without a parseable FBA reference are ignored
+    here (see ``collect_receipt_qty_pool``).
+    """
+    out: dict[tuple[str, str], int] = {}
+    for row in receipt_events:
+        if not _is_receipt_event(row):
+            continue
+        try:
+            qty = int(row.get("quantity") or 0)
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0:
+            continue
+        sid = fba_shipment_id(
+            row.get("reference_id"),
+            row.get("shipment_id"),
+            (row.get("raw_data") or {}).get("reference_id")
+            if isinstance(row.get("raw_data"), dict)
+            else None,
+            (row.get("raw_data") or {}).get("Reference ID")
+            if isinstance(row.get("raw_data"), dict)
+            else None,
+        )
+        sku = normalize_sku(row.get("sku") or row.get("msku"))
+        if not sid or sku == "UNKNOWN":
+            continue
+        key = (sid, sku)
+        out[key] = out.get(key, 0) + qty
+    return out
+
+
+def collect_receipt_qty_pool(
+    receipt_events: Iterable[dict],
+) -> list[dict]:
+    """Consumable Receipts pool for zero-recv CLOSED heuristic cover.
+
+    Each pool row is one ledger Receipt line (sku, day, qty left, fc).
+    Exact-qty consumption prevents one receipt from clearing two ghosts.
+    """
+    pool: list[dict] = []
+    for row in receipt_events:
+        if not _is_receipt_event(row):
+            continue
+        try:
+            qty = int(row.get("quantity") or 0)
+        except (TypeError, ValueError):
+            continue
+        if qty <= 0:
+            continue
+        day = _parse_day(row.get("event_date"))
+        if day is None:
+            continue
+        sku = normalize_sku(row.get("sku") or row.get("msku"))
+        if sku == "UNKNOWN":
+            continue
+        # Skip rows already attributed to a specific FBA id — those are
+        # handled by collect_receipt_qty_by_shipment.
+        sid = fba_shipment_id(
+            row.get("reference_id"),
+            row.get("shipment_id"),
+            (row.get("raw_data") or {}).get("reference_id")
+            if isinstance(row.get("raw_data"), dict)
+            else None,
+        )
+        pool.append({
+            "sku": sku,
+            "day": day,
+            "qty": qty,
+            "fc": (row.get("fc_code") or row.get("fulfillment_center") or "").upper(),
+            "shipment_id": sid,
+        })
+    return pool
+
+
+def _receipt_cover_for_row(
+    row: dict,
+    by_shipment: dict[tuple[str, str], int],
+    pool: list[dict],
+) -> tuple[int, str | None]:
+    """Return (covered_qty, basis) for one Lost_Inbound row."""
+    key = inbound_match_key(row.get("shipment_id"), row.get("sku"))
+    if not key:
+        return 0, None
+    sid, sku = key
+    shipped = _int_or_none(row.get("quantity_shipped"))
+    if shipped is None:
+        shipped = _int_or_none(row.get("quantity"))
+    if shipped is None or shipped <= 0:
+        return 0, None
+
+    direct = int(by_shipment.get(key) or 0)
+    if direct >= shipped:
+        return shipped, "reference_id"
+    if direct > 0:
+        return direct, "reference_id"
+
+    # Heuristic: only for Sellerboard-style zero-recv (or missing recv) CLOSED
+    # ghosts. Real partials keep Amazon/Sellerboard ship−recv.
+    received = _int_or_none(row.get("quantity_received"))
+    if received is not None and received > 0:
+        return 0, None
+
+    anchor = _plan_anchor_day(row) or _parse_day(row.get("event_date"))
+    if anchor is None:
+        return 0, None
+    earliest = anchor - timedelta(days=RECEIPT_COVER_BEFORE_DAYS)
+    latest = anchor + timedelta(days=RECEIPT_COVER_AFTER_DAYS)
+
+    # Prefer exact-qty unused receipt (no shipment_id, or matching sid).
+    for item in pool:
+        if item["qty"] <= 0 or item["sku"] != sku:
+            continue
+        if item["day"] < earliest or item["day"] > latest:
+            continue
+        if item.get("shipment_id") and item["shipment_id"] != sid:
+            continue
+        if item["qty"] == shipped:
+            item["qty"] = 0
+            return shipped, "sku_qty_pool"
+
+    # Otherwise consume multiple receipts up to shipped.
+    covered = 0
+    for item in pool:
+        if covered >= shipped:
+            break
+        if item["qty"] <= 0 or item["sku"] != sku:
+            continue
+        if item["day"] < earliest or item["day"] > latest:
+            continue
+        if item.get("shipment_id") and item["shipment_id"] != sid:
+            continue
+        take = min(shipped - covered, item["qty"])
+        item["qty"] -= take
+        covered += take
+    if covered > 0:
+        return covered, "sku_qty_pool"
+    return 0, None
+
+
+def apply_receipt_cover(
+    events: list[dict],
+    receipt_events: Iterable[dict] | None = None,
+    *,
+    durable_zero_recv: bool = True,
+) -> list[dict]:
+    """Clear Lost_Inbound when warehouse Receipts cover shipped qty.
+
+    Prefer Reference-ID (= FBA*) matches. For CLOSED zero-recv Sellerboard
+    ghosts without reference_id yet, consume an exact-qty SKU receipt pool
+    near the plan/ship date. Durable dismiss (dismissed_at) for full cover
+    on zero-recv so Sellerboard 0-recv dumps cannot reopen the ghost.
+    Real recv shorts (received > 0 and short > 0) are left alone unless a
+    shipment-keyed receipt reduces the remaining short.
+    """
+    receipts = list(receipt_events or [])
+    if not receipts:
+        return events
+    by_shipment = collect_receipt_qty_by_shipment(receipts)
+    pool = collect_receipt_qty_pool(receipts)
+    now = datetime.now(timezone.utc).isoformat()
+    out: list[dict] = []
+    for ev in events:
+        row = dict(ev)
+        if not _is_inbound_event(row):
+            out.append(row)
+            continue
+        if row.get("status") == STATUS_ALREADY_REIMBURSED:
+            out.append(row)
+            continue
+        orig_recv = _int_or_none(row.get("quantity_received"))
+        # case_submitted: only reclassify zero-recv ghosts (wrongly filed)
+        if row.get("status") == STATUS_CASE_SUBMITTED and orig_recv not in (None, 0):
+            out.append(row)
+            continue
+        covered, basis = _receipt_cover_for_row(row, by_shipment, pool)
+        if covered <= 0:
+            out.append(row)
+            continue
+        shipped = _int_or_none(row.get("quantity_shipped"))
+        if shipped is None:
+            shipped = _int_or_none(row.get("quantity")) or covered
+        stored_recv = orig_recv if orig_recv is not None else 0
+        effective_recv = max(stored_recv, covered)
+        short = shipped - effective_recv
+        info = {
+            "quantity_shipped": shipped,
+            "quantity_received": effective_recv,
+        }
+        if short <= 0:
+            row = _mark_inbound_found_offset(row, info)
+            row["dismissed_note"] = CLEAR_NOTE_RECEIPTS_COVER
+            zero_recv_ghost = orig_recv in (None, 0)
+            if durable_zero_recv and zero_recv_ghost and not row.get("dismissed_at"):
+                row["dismissed_at"] = now
+            row["receipt_cover_basis"] = basis
+            row["receipt_cover_qty"] = covered
+        else:
+            # Partial receipt cover on a real short — keep Needs-case remainder.
+            if row.get("status") == STATUS_CASE_SUBMITTED:
+                out.append(dict(ev))
+                continue
+            row["quantity_shipped"] = shipped
+            row["quantity_received"] = effective_recv
+            row["quantity"] = short
+            if row.get("status") == STATUS_FOUND_OFFSET and not row.get("dismissed_at"):
+                row["status"] = STATUS_NEEDS_CASE
+            elif row.get("status") not in (STATUS_FOUND_OFFSET, STATUS_CASE_SUBMITTED):
+                row["status"] = STATUS_NEEDS_CASE
+            row["receipt_cover_basis"] = basis
+            row["receipt_cover_qty"] = covered
+        out.append(row)
+    return out
+
+
 def _paid_units(row: dict) -> int:
+
     total = int(row.get("qty_total") or 0)
     if total != 0:
         return max(total, 0)
@@ -1078,6 +1353,12 @@ def paid_pool(reimbursements: Iterable[dict]) -> list[dict]:
         day = _parse_day(row.get("approval_date"))
         if day is None:
             continue
+        ship_ref = fba_shipment_id(
+            row.get("case_id"),
+            row.get("order_id"),
+            row.get("amazon_order_id"),
+            row.get("shipment_id"),
+        )
         pool.append({
             "sku": normalize_sku(row.get("sku")),
             "group": group,
@@ -1086,6 +1367,7 @@ def paid_pool(reimbursements: Iterable[dict]) -> list[dict]:
             "reimbursement_id": row.get("reimbursement_id"),
             "amount_per_unit": float(row.get("amount_per_unit") or 0) or None,
             "amount_total": float(row.get("amount_total") or 0),
+            "shipment_id": ship_ref,  # FBA* only when paid row ties to a shipment
         })
     return pool
 
@@ -1105,7 +1387,14 @@ def estimate_unit_rate(paid: list[dict], sku: str, group: str) -> tuple[float | 
 
 
 def apply_paid_dedupe(events: list[dict], reimbursements: Iterable[dict]) -> list[dict]:
-    """Subtract paid units; leftover stays Needs case."""
+    """Subtract paid units; leftover stays Needs case.
+
+    Lost_Inbound rows with a real FBA shipment_id only consume reimbursements
+    tied to that shipment (case_id / order_id is FBA*). SKU-pooled Lost_Inbound
+    cash is recorded on ``sku_pool_reimbursed_qty`` for transparency but does
+    **not** reduce that shipment's claimable qty (stops fake "partial reimb
+    28/85 on this shipment").
+    """
     pool = paid_pool(reimbursements)
     out: list[dict] = []
     for ev in sorted(events, key=lambda e: (e["event_date"], e["event_key"])):
@@ -1114,22 +1403,39 @@ def apply_paid_dedupe(events: list[dict], reimbursements: Iterable[dict]) -> lis
             ev.setdefault("amount_basis", AMOUNT_BASIS_UNKNOWN)
             ev.setdefault("matched_reimbursement_id", None)
             ev.setdefault("matched_reimbursed_qty", 0)
+            ev.setdefault("sku_pool_reimbursed_qty", 0)
             out.append(ev)
             continue
         left = int(ev["quantity"])
         matched_id = None
         matched_qty = 0
+        sku_pool_qty = 0
         sku = ev["sku"]
         group = ev["reason_group"]
         event_day: date = ev["event_date"]
+        event_sid = fba_shipment_id(ev.get("shipment_id"))
+        shipment_scoped = bool(event_sid) and group == "lost_inbound"
         for item in pool:
-            if left <= 0:
+            if left <= 0 and not shipment_scoped:
                 break
             if item["qty"] <= 0 or item["sku"] != sku or item["group"] != group:
                 continue
             earliest = event_day - timedelta(days=PAID_SETTLE_PAD_DAYS)
             latest = event_day + timedelta(days=PAID_LOOKAHEAD_DAYS)
             if item["day"] < earliest or item["day"] > latest:
+                continue
+            item_sid = item.get("shipment_id")
+            if shipment_scoped:
+                if item_sid and item_sid == event_sid:
+                    take = min(left, item["qty"])
+                    item["qty"] -= take
+                    left -= take
+                    matched_qty += take
+                    matched_id = item.get("reimbursement_id") or matched_id
+                elif not item_sid:
+                    # SKU-pool only — do not attribute to this shipment.
+                    sku_pool_qty += item["qty"]
+                # else: paid against a different FBA id — ignore
                 continue
             take = min(left, item["qty"])
             item["qty"] -= take
@@ -1140,6 +1446,7 @@ def apply_paid_dedupe(events: list[dict], reimbursements: Iterable[dict]) -> lis
         row = dict(ev)
         row["matched_reimbursement_id"] = matched_id
         row["matched_reimbursed_qty"] = matched_qty
+        row["sku_pool_reimbursed_qty"] = sku_pool_qty if shipment_scoped else 0
         if left <= 0:
             row["quantity"] = 0
             row["status"] = STATUS_ALREADY_REIMBURSED
@@ -1187,6 +1494,7 @@ def build_case_events(
     existing_events: Iterable[dict] | None = None,
     amazon_inbound_rows: Iterable[dict] | None = None,
     amazon_shipment_totals: dict[str, dict] | None = None,
+    receipt_events: Iterable[dict] | None = None,
 ) -> list[dict]:
     """Pure builder — no I/O. Returns rows ready for fba_case_events."""
     as_of = as_of or end
@@ -1196,6 +1504,7 @@ def build_case_events(
     items_list = list(shipment_items)
     sb_live = list(sellerboard_rows or [])
     amazon_rows = list(amazon_inbound_rows or [])
+    receipts = list(receipt_events or [])
     live_qty = collect_live_inbound_qty(sb_live, items_list, amazon_rows)
     ledger = adjustment_candidates(adj_list, start, end)
     spapi_inbound = inbound_discrepancies(shipments, items_list, as_of, start, end)
@@ -1219,6 +1528,9 @@ def build_case_events(
     merged = preserve_found_offset_unless_amazon_short(
         merged, existing_list, amazon_only, amazon_shipment_totals,
     )
+    # Receipts SoT after Amazon/Sellerboard balance — clears zero-recv CLOSED
+    # ghosts even when SP-API is silent or also shows UnitsReceived=0.
+    merged = apply_receipt_cover(merged, receipts)
     merged = _enrich_asin(merged, adj_list, paid_list)
     out = apply_paid_dedupe(merged, paid_list)
     out = preserve_submitted_status(out, existing_list)
@@ -1235,11 +1547,18 @@ def build_case_events(
     return out
 
 
+# Ephemeral builder keys — not columns on fba_case_events.
+_STAMP_DROP = frozenset({
+    "raw", "plan_date", "receipt_cover_basis", "receipt_cover_qty",
+    "sku_pool_reimbursed_qty", "reason_label",
+})
+
+
 def _stamp(rows: list[dict]) -> list[dict]:
     now = datetime.now(timezone.utc).isoformat()
     out = []
     for row in rows:
-        rec = dict(row)
+        rec = {k: v for k, v in row.items() if k not in _STAMP_DROP}
         day = rec.get("event_date")
         if isinstance(day, date):
             rec["event_date"] = day.isoformat()
@@ -1395,6 +1714,16 @@ def sync_case_queue(
     except Exception as e:
         log.warning("fba_reimbursements unavailable: %s", e)
         paid = []
+    try:
+        inventory_events = _with_one_retry(fetch_all, "inventory_events")
+        receipt_events = [
+            r for r in inventory_events
+            if "receipt" in (r.get("event_type") or "").lower()
+            and int(r.get("quantity") or 0) > 0
+        ]
+    except Exception as e:
+        log.warning("inventory_events receipts unavailable: %s", e)
+        receipt_events = []
 
     amazon_rows: list[dict] = []
     amazon_totals: dict[str, dict] = {}
@@ -1417,6 +1746,7 @@ def sync_case_queue(
         existing_events=existing_events,
         amazon_inbound_rows=amazon_rows,
         amazon_shipment_totals=amazon_totals,
+        receipt_events=receipt_events,
     )
     negatives = negative_adjustments_in_window(adjustments, start, end)
     qa = evaluate_queue_qa(

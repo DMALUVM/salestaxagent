@@ -31,8 +31,10 @@ from src.reimbursements.case_queue import (
     STATUS_NEEDS_CASE,
     AMAZON_RECONCILE_BATCH,
     amazon_qty_from_spapi_payloads,
+    CLEAR_NOTE_RECEIPTS_COVER,
     apply_inbound_balance,
     apply_paid_dedupe,
+    apply_receipt_cover,
     build_case_events,
     collect_live_inbound_qty,
     collect_reconcile_shipment_ids,
@@ -564,6 +566,8 @@ def test_sellerboard_paid_dedupe_and_dana_existing_row():
             "qty_total": 77,
             "amount_per_unit": 4.0,
             "amount_total": 308.0,
+            # Shipment-tied paid only (SKU-pool must not clear this FBA id).
+            "case_id": "FBA19K98F8VN",
         }],
         start=date(2026, 6, 17),
         end=date(2026, 9, 14),
@@ -1184,3 +1188,162 @@ def test_deprecated_adjustments_report_is_not_the_source():
     assert "GET_LEDGER_DETAIL_VIEW_DATA" in adj
     assert "deprecated" in adj.lower()
     assert 'eventType": ADJUSTMENTS_EVENT_TYPE' in adj or "eventType" in adj
+
+def test_zero_recv_closed_receipts_full_dismisses():
+    """Sellerboard CLOSED UnitsReceived=0 + Receipts cover shipped → found_offset."""
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 5, 1),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19D3KTVB8",
+            "sku": "DDPE0003Shop",
+            "quantity_shipped": 1080,
+            "quantity_received": 0,
+            "quantity_short": 1080,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-07-02",
+            "fulfillment_center": "SCK4",
+            "raw": {"plan_date": 1746967680, "UnitsReceived": 0, "Units": 1080},
+        }],
+        receipt_events=[{
+            "event_type": "Receipts",
+            "event_date": "2026-05-13",
+            "sku": "DDPE0003SHOP",
+            "quantity": 1080,
+            "fc_code": "XSB3",
+            "reference_id": "FBA19D3KTVB8",
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19D3KTVB8")
+    assert row["status"] == STATUS_FOUND_OFFSET
+    assert row["quantity"] == 0
+    assert row["quantity_received"] == 1080
+    assert row.get("dismissed_at")
+    assert row.get("dismissed_note") == CLEAR_NOTE_RECEIPTS_COVER
+
+
+def test_real_recv_short_kept_as_needs_case():
+    """Real partial receive (e.g. 538/540) stays Needs-case — not a ghost."""
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 1),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19FHXWS31",
+            "sku": "DDPE0001Shop",
+            "quantity_shipped": 540,
+            "quantity_received": 538,
+            "quantity_short": 2,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-07-02",
+            "fulfillment_center": "LBE1",
+            "raw": {"plan_date": 1748971800, "UnitsReceived": 538, "Units": 540},
+        }],
+        receipt_events=[{
+            "event_type": "Receipts",
+            "event_date": "2026-06-04",
+            "sku": "DDPE0001SHOP",
+            "quantity": 540,
+            "fc_code": "XMD5",
+            # Different shipment — must not steal cover from the real short.
+            "reference_id": "FBA19FHXPN77",
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19FHXWS31")
+    assert row["status"] == STATUS_NEEDS_CASE
+    assert row["quantity"] == 2
+
+
+def test_sku_pool_reimb_does_not_reduce_shipment_claimable():
+    """Lost_Inbound SKU-pool cash must not fake partial paid on a shipment."""
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[{
+            "approval_date": "2026-07-16",
+            "reimbursement_id": "R-POOL",
+            "reason": "Lost_Inbound",
+            "sku": "DDPE0001Shop",
+            "qty_total": 85,
+            "amount_per_unit": 6.02,
+            "amount_total": 511.70,
+            "case_id": "21208325051",  # digit case id — not FBA*
+            "order_id": None,
+        }],
+        start=date(2026, 6, 1),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19FHXWS31",
+            "sku": "DDPE0001Shop",
+            "quantity_shipped": 540,
+            "quantity_received": 538,
+            "quantity_short": 2,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-07-02",
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19FHXWS31")
+    assert row["status"] == STATUS_NEEDS_CASE
+    assert row["quantity"] == 2
+    assert row.get("matched_reimbursed_qty", 0) == 0
+
+
+def test_shipment_tied_reimb_still_reduces_claimable():
+    out = apply_paid_dedupe([{
+        "event_key": "inbound|FBA19AAA|SKU-A",
+        "source": SOURCE_SELLERBOARD,
+        "event_date": date(2026, 8, 1),
+        "sku": "SKU-A",
+        "quantity": 10,
+        "reason": "Lost_Inbound",
+        "reason_group": "lost_inbound",
+        "shipment_id": "FBA19AAA",
+        "fulfillment_center": "PHX6",
+    }], [{
+        "approval_date": "2026-08-10",
+        "reimbursement_id": "R-SHIP",
+        "reason": "Lost_Inbound",
+        "sku": "SKU-A",
+        "qty_total": 4,
+        "amount_per_unit": 5.0,
+        "case_id": "FBA19AAA",
+    }])
+    assert out[0]["quantity"] == 6
+    assert out[0]["matched_reimbursed_qty"] == 4
+    assert out[0]["status"] == STATUS_NEEDS_CASE
+
+
+def test_receipt_cover_sku_pool_exact_qty_without_reference_id():
+    """Heuristic: exact-qty Receipts near plan_date clear zero-recv CLOSED."""
+    covered = apply_receipt_cover([{
+        "event_key": "inbound|FBA19GHOST|SKU-Z",
+        "source": SOURCE_SELLERBOARD,
+        "event_date": date(2026, 7, 2),
+        "sku": "SKU-Z",
+        "quantity": 90,
+        "quantity_shipped": 90,
+        "quantity_received": 0,
+        "reason": "Lost_Inbound",
+        "reason_group": "lost_inbound",
+        "shipment_id": "FBA19GHOST",
+        "status": STATUS_NEEDS_CASE,
+        "plan_date": "2026-05-10",
+        "fulfillment_center": "RDU2",
+    }], [{
+        "event_type": "Receipts",
+        "event_date": "2026-05-16",
+        "sku": "SKU-Z",
+        "quantity": 90,
+        "fc_code": "HIA1",
+    }])
+    assert covered[0]["status"] == STATUS_FOUND_OFFSET
+    assert covered[0]["quantity"] == 0
+    assert covered[0].get("dismissed_at")

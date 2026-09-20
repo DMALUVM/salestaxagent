@@ -831,6 +831,7 @@ def parse_inventory_ledger(content: str) -> dict:
         except (ValueError, TypeError):
             qty = 0
 
+        ref = _get(row, H, "reference-id", "reference_id", "referenceid") or None
         event = InventoryEvent(
             source_file=source_file,
             event_date=event_date,
@@ -842,6 +843,7 @@ def parse_inventory_ledger(content: str) -> dict:
             quantity=qty,
             event_type=_get(row, H, "event-type", "event_type") or None,
             disposition=_get(row, H, "disposition") or None,
+            reference_id=(ref.strip().upper() if ref else None) or None,
         )
 
         result["events"].append(event)
