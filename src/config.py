@@ -39,6 +39,23 @@ class Settings(BaseSettings):
     # SoldScope intel (weekly history + daily Rank Tracker reuse-only). Never committed.
     soldscope_api_token: str = ""
 
+    # Phase 2 official APIs. Optional — empty means the connector fail-closes.
+    # Must be declared: pydantic-settings extra=forbid maps GOOGLE_OAUTH_* /
+    # GA4_PROPERTY_ID / GSC_SITE_URL into these names and otherwise refuses
+    # Settings(), which blocks get_client() after a successful GA4/GSC pull.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    google_oauth_refresh_token: str = ""
+    ga4_property_id: str = ""
+    gsc_site_url: str = ""
+    google_ads_developer_token: str = ""
+    google_ads_customer_id: str = ""
+    google_ads_login_customer_id: str = ""
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    meta_ads_access_token: str = ""
+    meta_ads_account_id: str = ""
+
     github_backup_enabled: bool = False
 
     telegram_bot_token: str = ""
@@ -99,7 +116,13 @@ class Settings(BaseSettings):
             and self.amazon_sp_refresh_token
         )
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        # Mini .env grows unused keys. Ignore extras so required fields
+        # (Supabase) still construct. Known Phase 2 names are declared above.
+        "extra": "ignore",
+    }
 
 
 settings = Settings()
