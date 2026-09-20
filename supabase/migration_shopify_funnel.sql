@@ -14,6 +14,11 @@
 --     "Sales Tax Agent" (Admin UI). No writes / theme / storefront.
 --   * Abandoned checkouts: Admin GraphQL `abandonedCheckouts` (live
 --     `read_orders` already works; staff manage_abandoned_checkouts).
+-- LIVE PROBE 2026-09-20 (shop b7905e-3, custom app Sales Tax Agent):
+--   HAS: read_all_orders, read_draft_orders, read_orders, read_products
+--   WORKS: abandonedCheckouts (no new scope)
+--   DENIED: shopifyqlQuery until Dave grants read_reports + PCD L2
+--   Do not invent session counts from shopify_orders.
 --   * PDP step is `sessions` WHERE landing_page_type = 'product' — sessions
 --     that LANDED on a product page, not mid-session PDP views. ShopifyQL's
 --     closed funnel does not expose a first-class "viewed a PDP" count.

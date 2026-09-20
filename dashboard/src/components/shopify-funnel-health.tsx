@@ -98,7 +98,9 @@ export function ShopifyFunnelHealth() {
                 {pct(d.conversionRate ?? null)}
               </p>
               <p className="text-xs text-muted-foreground">
-                {d.funnel?.purchases ?? "—"} / {d.funnel?.sessions ?? "—"} sessions
+                {d.funnel?.sessions == null
+                  ? "sessions blank — needs read_reports"
+                  : `${d.funnel?.purchases ?? "—"} / ${d.funnel?.sessions ?? "—"} sessions`}
               </p>
             </div>
             <div>
@@ -130,7 +132,14 @@ export function ShopifyFunnelHealth() {
             </div>
           </div>
         )}
-        {scopes.length > 0 && (
+        {d?.available && !d.empty && d.funnel?.sessions == null && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            Session counts are blank until read_reports + PCD Level 2 on
+            Sales Tax Agent. Open abandons above are live on the current token.
+            We do not fill sessions from orders.
+          </p>
+        )}
+        {scopes.length > 0 && d?.funnel?.sessions != null && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
             Shopify denied a query. Dave greenlit min READ scopes — grant{" "}
             {scopes.join(", ")} on Sales Tax Agent (no writes / theme / storefront).

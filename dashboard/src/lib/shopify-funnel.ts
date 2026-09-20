@@ -323,4 +323,5 @@ export const DEFINITIONS: Array<[string, string]> = [
   ["Triage", "Stub severity until Jev is wired. Fail closed → hold for review. The sync does not call an LLM."],
   ["Windows", "Last 7 or 28 store days (America/New_York), inclusive of the latest stored date."],
   ["Scopes", "Dave greenlit min READ only: add read_reports + PCD Level 2 on custom app Sales Tax Agent. read_orders is already live (abandoned checkouts work). No write, theme, or storefront scopes. Admin UI owner click — Mini cannot apply this."],
+  ["Live probe 2026-09-20", "abandonedCheckouts works on read_orders. shopifyqlQuery is denied until read_reports + PCD L2. Session counts stay blank. Checkout→purchase tonight is abandoned recovery (completedAt), not an invented session funnel from shopify_orders."],
 ];

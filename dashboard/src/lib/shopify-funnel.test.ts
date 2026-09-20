@@ -195,7 +195,10 @@ describe("wiring", () => {
     assert.match(card, /AbortController/);
     assert.match(card, /\/api\/shopify-funnel/);
     assert.match(card, /content-type/);
+    assert.match(card, /sessions blank — needs read_reports/);
+    assert.match(card, /We do not fill sessions from orders/);
     assert.doesNotMatch(card, /getSupabase/);
+    assert.doesNotMatch(card, /shopify_orders/);
   });
 
   test("API is service-role only and does not invent numbers", () => {
@@ -206,6 +209,7 @@ describe("wiring", () => {
     assert.doesNotMatch(route, /orderCreate|sellerise/i);
     assert.doesNotMatch(route, /write_orders|draftOrderComplete/);
     assert.match(route, /windowEnd/);
+    assert.doesNotMatch(route, /shopify_orders/);
     assert.doesNotMatch(route, /klaviyo|google ads|gsc/i);
   });
 

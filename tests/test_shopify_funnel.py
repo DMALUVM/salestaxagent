@@ -318,6 +318,14 @@ def test_device_window_sums_only_device_rows():
 
 # ── sync documents are queries, never Place Order ────────────────────────
 
+def test_sync_does_not_proxy_sessions_from_orders():
+    from pathlib import Path
+    src = Path("src/shopify_funnel_sync.py").read_text()
+    assert "shopify_orders" not in src
+    assert "abandonedCheckouts" in src
+    assert "maybe_jev_triage" in src
+
+
 def test_graphql_documents_are_queries_only():
     for doc in (SHOPIFYQL_GQL, ABANDON_GQL):
         assert "mutation" not in doc.lower()
