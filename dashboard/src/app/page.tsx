@@ -21,6 +21,7 @@ import { dueDayByState, mergeImpliedObligations } from "@/lib/next-due";
 import { agentToday, amazonAsOf, monthNameFromIso, monthStart, shiftDays, windowStart } from "@/lib/as-of";
 import { InventoryLogisticsPanel } from "@/components/inventory/InventoryLogisticsPanel";
 import { InboundDiscrepancyAlerts } from "@/components/inbound-discrepancy-alerts";
+import { ShopifyFunnelHealth } from "@/components/shopify-funnel-health";
 import { LoadingState } from "@/components/loading";
 import { QueryError } from "@/components/query-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -511,6 +512,8 @@ export default function Pulse() {
 
       {/* ── Amazon logistics (solo-operator daily checklist) ── */}
       {configured && <InventoryLogisticsPanel showSync />}
+
+      {configured && <ShopifyFunnelHealth />}
 
       {/* ── Tax: Actions + Filing + Next Deadlines ── */}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">

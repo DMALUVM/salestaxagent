@@ -87,6 +87,11 @@ test("/paid-ads has an error boundary", () => {
     "without error.tsx a client exception renders the bare crash screen");
 });
 
+test("/shopper has an error boundary", () => {
+  assert.ok(existsSync(path.join(APP, "shopper/error.tsx")),
+    "without error.tsx a client exception renders the bare crash screen");
+});
+
 test("fetches guard against non-JSON responses", () => {
   // A gateway timeout returns HTML; .json() on it throws and kills the render.
   for (const name of ["ppc-playbook.tsx", "registration-plan.tsx", "ppc-gno-watch.tsx"]) {
