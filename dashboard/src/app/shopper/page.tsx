@@ -197,7 +197,9 @@ export default function ShopperPage() {
               Shopify denied a query — numbers below are only what the token could read.
             </p>
             <p className="mt-1 text-muted-foreground">
-              Dave must grant: {scopes.join(", ")}. We do not fill gaps from GA4 or orders.
+              Dave greenlit min READ scopes. Grant: {scopes.join(", ")}
+              {" "}on custom app Sales Tax Agent (Admin UI). No writes, no theme,
+              no storefront. We do not fill gaps from orders.
             </p>
             {d?.status?.last_error && (
               <p className="mt-2 text-xs text-muted-foreground">{d.status.last_error}</p>
@@ -211,8 +213,9 @@ export default function ShopperPage() {
           <CardContent className="p-4 text-sm">
             <p className="font-medium">Session counts are blank until read_reports lands.</p>
             <p className="mt-1 text-muted-foreground">
-              Abandoned checkouts below come from Admin GraphQL on the current
-              token. We do not fill sessions from orders.
+              Dave greenlit adding read_reports + PCD Level 2 on Sales Tax Agent.
+              Abandoned checkouts below already work on the current token.
+              We do not fill sessions from orders.
             </p>
           </CardContent>
         </Card>

@@ -132,7 +132,8 @@ export function ShopifyFunnelHealth() {
         )}
         {scopes.length > 0 && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
-            Shopify denied a query. Dave must grant: {scopes.join(", ")}.
+            Shopify denied a query. Dave greenlit min READ scopes — grant{" "}
+            {scopes.join(", ")} on Sales Tax Agent (no writes / theme / storefront).
           </p>
         )}
       </CardContent>

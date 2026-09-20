@@ -29,9 +29,11 @@ export const dynamic = "force-dynamic";
 const SETUP =
   "Run supabase/migration_shopify_funnel.sql, then " +
   "`python -m src.main shopify-funnel-sync` on the Mini. " +
-  "Live token already has read_orders (abandonedCheckouts works). " +
-  "Session funnel still needs Dave to grant read_reports + Protected " +
-  "customer data Level 2. Do not invent session counts from orders.";
+  "Dave greenlit min READ scopes: add read_reports + Protected customer " +
+  "data Level 2 on custom app Sales Tax Agent (Admin UI). " +
+  "Keep read_orders (abandonedCheckouts already works). " +
+  "Do not add write, theme, or storefront scopes. " +
+  "Do not invent session counts from orders.";
 
 async function loadAll<T>(
   sb: ReturnType<typeof getServerSupabase>,

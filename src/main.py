@@ -2658,8 +2658,9 @@ def shopify_funnel_sync_cmd(days, dry_run):
 
     ShopifyQL FROM sessions (human): sessions → add-to-cart → checkout →
     purchase, plus PDP landings (landing_page_type = product). Abandoned
-    checkouts from Admin GraphQL. Requires read_reports + read_orders and
-    staff permission manage_abandoned_checkouts. Never Place Order.
+    checkouts from Admin GraphQL. Min READ scopes (Dave greenlit):
+    read_reports + read_orders. No writes, no theme, no storefront.
+    Staff permission manage_abandoned_checkouts. Never Place Order.
     """
     from src.shopify_funnel_sync import sync
 

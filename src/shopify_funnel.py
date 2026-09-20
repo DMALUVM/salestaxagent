@@ -577,9 +577,33 @@ def classify_gql_errors(errors: list[dict]) -> list[str]:
     return out
 
 
-REQUIRED_SCOPES = (
-    "read_reports",   # ShopifyQL shopifyqlQuery
-    "read_orders",    # abandonedCheckouts + existing order backfill
+# Dave greenlit 2026-09-20: custom app "Sales Tax Agent" may take the
+# minimum READ set for funnel + abandoned checkouts. Admin UI owner click
+# — Mini / this repo cannot apply scopes. No writes, no theme, no storefront.
+MIN_READ_SCOPES = (
+    "read_reports",  # ShopifyQL shopifyqlQuery — not on the live token
+    "read_orders",   # abandonedCheckouts — already live (2026-09-20 probe)
+)
+REQUIRED_SCOPES = MIN_READ_SCOPES
+
+# Already on shop b7905e-3. Keep. Do not request extras.
+ALREADY_GRANTED_SCOPES = (
+    "read_all_orders",
+    "read_draft_orders",
+    "read_orders",
+    "read_products",
+)
+
+FORBIDDEN_SCOPES = (
+    "write_orders",
+    "write_draft_orders",
+    "write_products",
+    "write_checkouts",
+    "write_themes",
+    "read_themes",
+    "write_theme_code",
+    "unauthenticated_read_product_listings",
+    "unauthenticated_write_checkouts",
 )
 
 REQUIRED_STAFF = (
@@ -589,3 +613,13 @@ REQUIRED_STAFF = (
 REQUIRED_PCD = (
     "protected_customer_data_level_2",  # ShopifyQL requirement
 )
+
+
+def requested_scopes_are_read_only() -> bool:
+    """True when REQUIRED_SCOPES is the greenlit min READ set."""
+    if any(s.startswith("write_") or s.startswith("unauthenticated_")
+           for s in REQUIRED_SCOPES):
+        return False
+    if any(s in FORBIDDEN_SCOPES for s in REQUIRED_SCOPES):
+        return False
+    return tuple(REQUIRED_SCOPES) == MIN_READ_SCOPES

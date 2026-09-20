@@ -9,10 +9,11 @@
 --
 -- SOURCE (do not invent a substitute)
 --   * Daily funnel counts: Admin GraphQL `shopifyqlQuery` against the
---     ShopifyQL `sessions` schema (requires `read_reports` + Protected
---     Customer Data Level 2 on the custom app).
---   * Abandoned checkouts: Admin GraphQL `abandonedCheckouts` (requires
---     `read_orders` plus the staff permission manage_abandoned_checkouts).
+--     ShopifyQL `sessions` schema. Dave greenlit min READ: add
+--     `read_reports` + Protected Customer Data Level 2 on custom app
+--     "Sales Tax Agent" (Admin UI). No writes / theme / storefront.
+--   * Abandoned checkouts: Admin GraphQL `abandonedCheckouts` (live
+--     `read_orders` already works; staff manage_abandoned_checkouts).
 --   * PDP step is `sessions` WHERE landing_page_type = 'product' — sessions
 --     that LANDED on a product page, not mid-session PDP views. ShopifyQL's
 --     closed funnel does not expose a first-class "viewed a PDP" count.

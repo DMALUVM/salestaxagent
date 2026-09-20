@@ -206,7 +206,7 @@ describe("wiring", () => {
     assert.doesNotMatch(route, /orderCreate|sellerise/i);
     assert.doesNotMatch(route, /write_orders|draftOrderComplete/);
     assert.match(route, /windowEnd/);
-    assert.doesNotMatch(route, /klaviyo|ryze|google ads|gsc/i);
+    assert.doesNotMatch(route, /klaviyo|google ads|gsc/i);
   });
 
   test("shopper page is full-width with an error boundary", () => {
@@ -218,7 +218,9 @@ describe("wiring", () => {
     assert.doesNotMatch(page, /return <LoadingState/);
     assert.match(page, /AbortController/);
     assert.match(page, /read_reports/);
-    assert.doesNotMatch(page, /ryze/i);
+    assert.match(page, /greenlit min READ/);
+    assert.match(page, /no theme/);
+    assert.doesNotMatch(page, /klaviyo_abandon|place order/i);
   });
 
   test("migration enables RLS and stores no recovery URL", () => {

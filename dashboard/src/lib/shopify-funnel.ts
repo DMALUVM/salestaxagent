@@ -322,4 +322,5 @@ export const DEFINITIONS: Array<[string, string]> = [
   ["Recovery rate", "Completed (recovered) checkouts ÷ checkouts in the window. Cheap: it is a stored timestamp, not an email-send campaign metric."],
   ["Triage", "Stub severity until Jev is wired. Fail closed → hold for review. The sync does not call an LLM."],
   ["Windows", "Last 7 or 28 store days (America/New_York), inclusive of the latest stored date."],
+  ["Scopes", "Dave greenlit min READ only: add read_reports + PCD Level 2 on custom app Sales Tax Agent. read_orders is already live (abandoned checkouts work). No write, theme, or storefront scopes. Admin UI owner click — Mini cannot apply this."],
 ];

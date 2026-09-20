@@ -286,6 +286,18 @@ def test_classify_gql_errors_names_the_grant():
     assert "manage_abandoned_checkouts" in scopes
 
 
+def test_min_read_scopes_are_greenlit_and_read_only():
+    assert F.REQUIRED_SCOPES == ("read_reports", "read_orders")
+    assert F.REQUIRED_SCOPES == F.MIN_READ_SCOPES
+    assert F.requested_scopes_are_read_only() is True
+    assert all(s.startswith("read_") for s in F.REQUIRED_SCOPES)
+    for s in F.FORBIDDEN_SCOPES:
+        assert s not in F.REQUIRED_SCOPES
+        assert s.startswith("write_") or s.startswith("unauthenticated_") or "theme" in s
+    assert "read_orders" in F.ALREADY_GRANTED_SCOPES
+    assert "read_reports" not in F.ALREADY_GRANTED_SCOPES
+
+
 # ── device window ────────────────────────────────────────────────────────
 
 def test_device_window_sums_only_device_rows():
@@ -334,3 +346,6 @@ def test_cli_command_is_registered_and_mentions_scopes():
     assert '@cli.command("shopify-funnel-sync")' in src
     assert "_run_shopify_funnel_sync" in src
     assert "shopify_funnel_sync" in src
+    assert "Min READ scopes" in src
+    assert "no theme" in src
+    assert "write_orders" not in src or "Never Place Order" in src
