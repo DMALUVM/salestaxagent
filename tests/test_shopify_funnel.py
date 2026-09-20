@@ -7,6 +7,7 @@ from __future__ import annotations
 from src import shopify_funnel as F
 from src.shopify_funnel_sync import (
     ABANDON_GQL, SHOPIFYQL_GQL, _shopifyql, maybe_jev_triage,
+    _jev_pilot_candidates, jev_decision_from_result, jev_items_from_stats,
 )
 
 
@@ -324,6 +325,8 @@ def test_sync_does_not_proxy_sessions_from_orders():
     assert "shopify_orders" not in src
     assert "abandonedCheckouts" in src
     assert "maybe_jev_triage" in src
+    assert "funnel_jev_triage.py" in src
+    assert '"items"' in src or "'items'" in src or "items" in src
 
 
 def test_graphql_documents_are_queries_only():
@@ -372,3 +375,147 @@ def test_jev_triage_silent_and_unwired_fail_closed():
     assert hold["decision"] == "hold"
     assert hold.get("reason") in ("jev_not_wired", "jev_failed")
     assert hold.get("severity") in ("hold_for_review", None)
+
+
+def _stats():
+    return {
+        "leak": {"from": "sessions", "to": "add_to_cart", "lost": 80, "rate": 0.8},
+        "abandon": {"open": 3, "openValue": 90.0},
+        "window": {"end": "2026-09-19"},
+    }
+
+
+def test_jev_items_wrap_leak_and_abandon():
+    items = jev_items_from_stats(_stats())
+    assert len(items) == 1
+    item = items[0]
+    assert item["mode"] == "leak"
+    assert item["period"] == "2026-09-19"
+    assert item["step"] == "sessions"
+    assert item["metric"] == "sessions->add_to_cart"
+    assert item["current"] == 80
+    assert item["delta_pct"] == 0.8
+    assert item["abandon_count"] == 3
+    assert item["abandon_value"] == 90.0
+
+
+def test_jev_decision_mapping_pursue_hold_skip():
+    assert jev_decision_from_result({"pursue": [{"x": 1}], "hold": [], "skip": []}) == "pursue"
+    assert jev_decision_from_result({"pursue": [], "hold": [{"x": 1}], "skip": []}) == "hold"
+    assert jev_decision_from_result({"pursue": [], "hold": [], "skip": [],
+                                    "errors": [{"e": 1}]}) == "hold"
+    assert jev_decision_from_result({"pursue": [], "hold": [], "skip": [{"x": 1}]}) == "skip"
+    assert jev_decision_from_result({}) == "hold"
+    assert jev_decision_from_result({"pursue": [{"x": 1}], "hold": [{"y": 1}],
+                                    "errors": [1]}) == "pursue"
+
+
+def test_jev_pilot_candidates_prefer_in_repo_adapter():
+    names = [p.name for p in _jev_pilot_candidates()]
+    assert names == ["funnel_jev_triage.py"] * len(names)
+    first = str(_jev_pilot_candidates()[0])
+    assert first.endswith("pilots/funnel_jev_triage.py")
+    assert "vercel-ai-gateway" not in first
+
+
+def test_jev_triage_parses_pilot_json(tmp_path, monkeypatch):
+    script = tmp_path / "funnel_jev_triage.py"
+    script.write_text(
+        "import json, sys\n"
+        "raw = json.loads(sys.stdin.read())\n"
+        "assert isinstance(raw.get('items'), list) and raw['items']\n"
+        "assert 'period' in raw['items'][0]\n"
+        "json.dump({'pursue': [raw['items'][0]], 'hold': [], 'skip': [], 'errors': []}, sys.stdout)\n"
+        "sys.stdout.write('\\n')\n"
+    )
+    monkeypatch.setenv("FUNNEL_JEV_TRIAGE", str(script))
+    out = maybe_jev_triage(_stats(), False)
+    assert out["ran"] is True
+    assert out["decision"] == "pursue"
+    assert out["pursue_n"] == 1
+
+
+def test_jev_triage_skip_when_only_skip(tmp_path, monkeypatch):
+    script = tmp_path / "funnel_jev_triage.py"
+    script.write_text(
+        "import json, sys\n"
+        "json.dump({'pursue': [], 'hold': [], 'skip': [{'ok': 1}], 'errors': []}, sys.stdout)\n"
+    )
+    monkeypatch.setenv("FUNNEL_JEV_TRIAGE", str(script))
+    out = maybe_jev_triage(_stats(), False)
+    assert out["decision"] == "skip"
+
+
+def test_jev_triage_errors_and_timeout_fail_closed(tmp_path, monkeypatch):
+    script = tmp_path / "funnel_jev_triage.py"
+    script.write_text(
+        "import json, sys\n"
+        "json.dump({'pursue': [], 'hold': [], 'skip': [{'ok': 1}], "
+        "'errors': [{'error': 'boom'}]}, sys.stdout)\n"
+    )
+    monkeypatch.setenv("FUNNEL_JEV_TRIAGE", str(script))
+    out = maybe_jev_triage(_stats(), False)
+    assert out["decision"] == "hold"
+    assert out.get("severity") == "hold_for_review"
+
+    script.write_text("import sys; sys.stdout.write('not-json')\n")
+    bad = maybe_jev_triage(_stats(), False)
+    assert bad["ran"] is False and bad["decision"] == "hold"
+    assert bad["reason"] == "jev_failed"
+
+    import subprocess as sp
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *a, **k: (_ for _ in ()).throw(sp.TimeoutExpired(cmd="jev", timeout=1)),
+    )
+    timed = maybe_jev_triage(_stats(), False)
+    assert timed["ran"] is False and timed["decision"] == "hold"
+    assert timed["reason"] == "jev_failed"
+
+
+def test_jev_triage_never_raises(monkeypatch):
+    monkeypatch.setattr(
+        "src.shopify_funnel_sync.resolve_jev_pilot",
+        lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    out = maybe_jev_triage(_stats(), False)
+    assert out["decision"] == "hold" and out["reason"] == "jev_failed"
+
+
+def test_bare_jev_evaluate_is_not_invoked_as_script(tmp_path, monkeypatch):
+    """Helper-only sidecar is not a wire — protocol is the pilot."""
+    helper = tmp_path / "jev_evaluate.py"
+    helper.write_text("raise SystemExit('bare jev_evaluate must not run')\n")
+    monkeypatch.setenv("JEV_EVALUATE", str(helper))
+    monkeypatch.setenv("FUNNEL_JEV_TRIAGE", str(tmp_path / "missing.py"))
+    out = maybe_jev_triage(_stats(), False)
+    assert out["ran"] is False
+    assert out["reason"] == "jev_not_wired"
+    assert out["severity"] == "hold_for_review"
+
+
+def test_pilot_helper_resolution_is_not_workspace_only(tmp_path, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "funnel_jev_triage_pilot", Path("pilots/funnel_jev_triage.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    helper = tmp_path / "jev_evaluate.py"
+    helper.write_text("# stub helper\n")
+    monkeypatch.setenv("JEV_EVALUATE", str(helper))
+    assert mod.resolve_jev_helper() == helper
+    src = Path("pilots/funnel_jev_triage.py").read_text()
+    assert "JEV_EVALUATE" in src
+    assert src.index("JEV_EVALUATE") < src.index("/workspace/vercel-ai-gateway")
+    assert "AI_GATEWAY_API_KEY" not in src
+
+
+def test_real_pilot_fail_closed_without_helper(monkeypatch):
+    monkeypatch.delenv("JEV_EVALUATE", raising=False)
+    monkeypatch.setenv("FUNNEL_JEV_TRIAGE", "pilots/funnel_jev_triage.py")
+    out = maybe_jev_triage(_stats(), False)
+    assert out["decision"] == "hold"
+    assert out.get("reason") in ("jev_failed", None)
+    if out.get("ran"):
+        assert out.get("error_n", 0) >= 1 or out.get("hold_n", 0) >= 1
