@@ -15,9 +15,9 @@
 -- Distinct from the CSV intel path (`paid_ga_daily`,
 -- `paid_search_query_daily`, `paid_campaign_daily`) — do not mix.
 --
--- SCAFFOLD
--- Tables start empty. Mini CLI stubs (`ga4-sync`, `google-ads-sync`,
--- `meta-ads-sync`, `gsc-sync`) write nothing until OAuth lands. A missing
+-- PULLS
+-- Mini `ga4-sync` / `gsc-sync` upsert official-API rows when GOOGLE_* env
+-- is present. `google-ads-sync` / `meta-ads-sync` stay stubs. A missing
 -- metric stays NULL. Zero is a real measurement. Never invent a count.
 --
 -- RLS

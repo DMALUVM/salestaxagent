@@ -102,6 +102,8 @@ separate rule and is unaffected.
 | deadline_check | 09:00 daily | Filing deadline monitoring |
 | shopify_poll | every few hours | Shopify orders → sales_by_state + sales_daily |
 | shopify_funnel_sync | 07:15 daily | ShopifyQL session funnel + abandoned checkouts → `/shopper` |
+| ga4_sync | 07:20 daily | GA4 Data API sessions / landings → `ga4_*_daily` (scheduled only when Mini `.env` has `GOOGLE_OAUTH_*` + `GA4_PROPERTY_ID`; prior America/New_York day + 7d lookback; one shot, no poll) |
+| gsc_sync | 07:25 daily | Search Console API queries / pages → `gsc_*_daily` (scheduled only when Mini `.env` has `GOOGLE_OAUTH_*` + `GSC_SITE_URL`; prior America/New_York day + 7d lookback; GSC final data lags ~2d) |
 | ads_campaigns_backfill | Sun 03:00 | 90d campaigns (3 × 30d chunks) for long trends |
 | source_monitoring | Mon 07:00 | Rule-source change detection |
 | github_backup | Sun 09:00 | Backup branch push |
