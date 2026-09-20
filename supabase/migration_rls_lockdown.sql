@@ -105,6 +105,7 @@ ALTER TABLE IF EXISTS public.shopify_funnel_daily     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.shopify_funnel_splits    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.shopify_abandoned_checkouts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.shopify_funnel_status    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.klaviyo_abandon_flow_daily ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.inventory_snapshots      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.pnl_daily                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.sku_costs                ENABLE ROW LEVEL SECURITY;

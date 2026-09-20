@@ -360,6 +360,38 @@ def line_items_from_gql(node: dict) -> list[dict]:
     return out
 
 
+def address_started(node: dict | None) -> bool | None:
+    """True when Admin returned an address object. Never persist the address."""
+    if node is None:
+        return False
+    if not isinstance(node, dict):
+        return True
+    return True
+
+
+def friction_from_gql(node: dict) -> dict:
+    """Checkout friction Admin actually exposes. Missing fields stay null.
+
+    GraphQL AbandonedCheckout (2025-10) has shippingAddress, billingAddress,
+    discountCodes, totalDiscountSet, completedAt. It does NOT have
+    shippingLine or a payment-attempt field. Those stay None.
+    """
+    codes = [str(c).strip() for c in (node.get("discountCodes") or []) if str(c).strip()]
+    discount_amt = money_bag_amount(node, "totalDiscountSet")
+    completed = node.get("completedAt")
+    return {
+        "shipping_address_started": address_started(node.get("shippingAddress")),
+        "billing_address_started": address_started(node.get("billingAddress")),
+        "has_discount": bool(codes) or (discount_amt or 0) > 0,
+        "discount_codes": codes,
+        "discount_amount": discount_amt,
+        # Not on AbandonedCheckout GraphQL. Do not invent from REST.
+        "has_shipping_rate": None,
+        "payment_attempted": None,
+        "recovery_status": "recovered" if completed else "open",
+    }
+
+
 def abandoned_row_from_gql(node: dict, checkout_date: str) -> dict | None:
     gid = node.get("id")
     if not gid:
@@ -369,6 +401,7 @@ def abandoned_row_from_gql(node: dict, checkout_date: str) -> dict | None:
     total = money_bag_amount(node, "totalPriceSet")
     recovered = bool(completed)
     severity, note = stub_triage_severity(total, recovered)
+    friction = friction_from_gql(node)
     return {
         "checkout_id": gid,
         "checkout_name": node.get("name"),
@@ -386,6 +419,7 @@ def abandoned_row_from_gql(node: dict, checkout_date: str) -> dict | None:
         "triage_severity": severity,
         "triage_source": "stub",
         "triage_note": note,
+        **friction,
     }
 
 
@@ -469,6 +503,119 @@ def filter_abandoned(rows: list[dict], start: str, end: str) -> list[dict]:
     return [r for r in rows if start <= str(r.get("checkout_date") or "") <= end]
 
 
+KIT_TOKENS = ("kit", "pack", "bundle", "set")
+STICK_TOKENS = ("stick", "single", "chapstick")
+
+
+def kit_kind(handle: str | None, title: str | None, sku: str | None = None) -> str:
+    """Cheap token classify. Not a catalog. Unknown → other."""
+    blob = " ".join(x for x in (handle, title, sku) if x).lower().replace("-", " ")
+    if any(tok in blob for tok in KIT_TOKENS):
+        return "kit"
+    if any(tok in blob for tok in STICK_TOKENS):
+        return "stick"
+    return "other"
+
+
+def product_leak_from_abandons(rows: list[dict], limit: int = 15) -> dict:
+    """Abandon mix by handle + kit/stick. Not a session ATC→checkout count.
+
+    ShopifyQL `sessions` has no product-handle closed funnel. We do not invent
+    ATC→checkout session numbers. Recovery here is completedAt on the checkout
+    that held the line item.
+    """
+    by_handle: dict[str, dict] = {}
+    by_kind = {
+        "kit": {"kind": "kit", "open": 0, "recovered": 0, "openValue": 0.0, "quantity": 0},
+        "stick": {"kind": "stick", "open": 0, "recovered": 0, "openValue": 0.0, "quantity": 0},
+        "other": {"kind": "other", "open": 0, "recovered": 0, "openValue": 0.0, "quantity": 0},
+    }
+    for r in rows:
+        recovered = bool(r.get("recovered"))
+        for it in r.get("line_items") or []:
+            title = (it.get("title") or "").strip()
+            handle = (it.get("handle") or "").strip() or None
+            if not title and not handle:
+                continue
+            key = handle or title
+            kind = kit_kind(handle, title, it.get("sku"))
+            qty = int(it.get("quantity") or 0)
+            amt = as_money(it.get("amount"))
+            b = by_handle.get(key) or {
+                "handle": handle, "title": title, "kind": kind,
+                "open": 0, "recovered": 0, "quantity": 0, "openValue": 0.0,
+            }
+            b["quantity"] += qty
+            if recovered:
+                b["recovered"] += 1
+            else:
+                b["open"] += 1
+                if amt is not None:
+                    b["openValue"] += amt
+            by_handle[key] = b
+            k = by_kind[kind]
+            k["quantity"] += qty
+            if recovered:
+                k["recovered"] += 1
+            else:
+                k["open"] += 1
+                if amt is not None:
+                    k["openValue"] += amt
+    products = []
+    for b in by_handle.values():
+        total = b["open"] + b["recovered"]
+        products.append({
+            **b,
+            "openValue": round(b["openValue"], 2),
+            "recoveryRate": round(b["recovered"] / total, 4) if total else None,
+        })
+    products.sort(key=lambda x: (-x["openValue"], -x["open"], x["title"]))
+    kinds = []
+    for k in ("kit", "stick", "other"):
+        row = by_kind[k]
+        total = row["open"] + row["recovered"]
+        kinds.append({
+            **row,
+            "openValue": round(row["openValue"], 2),
+            "recoveryRate": round(row["recovered"] / total, 4) if total else None,
+        })
+    return {
+        "source": "abandoned_line_items",
+        "note": (
+            "Abandon mix by product/handle — not ShopifyQL ATC→checkout. "
+            "sessions schema has no product-handle closed funnel."
+        ),
+        "kinds": kinds,
+        "products": products[:limit],
+    }
+
+
+def friction_rollup(rows: list[dict]) -> dict:
+    """Counts on *open* checkouts. Null fields stay 'unknown', never coerced."""
+    open_rows = [r for r in rows if not r.get("recovered")]
+    n = len(open_rows)
+
+    def _count(field: str, want: bool) -> int:
+        return sum(1 for r in open_rows if r.get(field) is want)
+
+    def _unknown(field: str) -> int:
+        return sum(1 for r in open_rows if r.get(field) is None)
+
+    return {
+        "open": n,
+        "shippingAddressStarted": _count("shipping_address_started", True),
+        "shippingAddressMissing": _count("shipping_address_started", False),
+        "billingAddressStarted": _count("billing_address_started", True),
+        "hasDiscount": _count("has_discount", True),
+        "shippingRateUnknown": _unknown("has_shipping_rate"),
+        "paymentAttemptUnknown": _unknown("payment_attempted"),
+        "note": (
+            "shipping rate and payment attempt are not on AbandonedCheckout "
+            "GraphQL (2025-10); those stay unknown."
+        ),
+    }
+
+
 def device_window(rows: Iterable[dict], start: str, end: str) -> list[dict]:
     buckets: dict[str, FunnelCounts] = defaultdict(FunnelCounts)
     for r in rows:
@@ -491,6 +638,32 @@ def device_window(rows: Iterable[dict], start: str, end: str) -> list[dict]:
         out.append({"device": name, **c.as_dict(),
                     "leak": biggest_leak(c)})
     out.sort(key=lambda x: (-(x["sessions"] or 0), x["device"]))
+    return out
+
+
+def channel_window(rows: Iterable[dict], start: str, end: str) -> list[dict]:
+    """split_kind='channel' (ShopifyQL referring_channel). Same math as device."""
+    buckets: dict[str, FunnelCounts] = defaultdict(FunnelCounts)
+    for r in rows:
+        if str(r.get("split_kind") or "") != "channel":
+            continue
+        d = str(r.get("metric_date") or "")
+        if d < start or d > end:
+            continue
+        key = str(r.get("split_value") or "unknown")
+        b = buckets[key]
+        for field_name in ("sessions", "pdp_sessions", "add_to_cart",
+                           "checkout_started", "purchases"):
+            v = as_int(r.get(field_name))
+            if v is None:
+                continue
+            cur = getattr(b, field_name)
+            setattr(b, field_name, (cur or 0) + v)
+    out = []
+    for name, c in buckets.items():
+        out.append({"channel": name, **c.as_dict(),
+                    "leak": biggest_leak(c)})
+    out.sort(key=lambda x: (-(x["sessions"] or 0), x["channel"]))
     return out
 
 
@@ -578,7 +751,7 @@ def classify_gql_errors(errors: list[dict]) -> list[str]:
 
 
 REQUIRED_SCOPES = (
-    "read_reports",   # ShopifyQL shopifyqlQuery
+    "read_reports",   # ShopifyQL shopifyqlQuery — NOT on the live token
     "read_orders",    # abandonedCheckouts + existing order backfill
 )
 
@@ -589,3 +762,13 @@ REQUIRED_STAFF = (
 REQUIRED_PCD = (
     "protected_customer_data_level_2",  # ShopifyQL requirement
 )
+
+# Live probe 2026-09-20 on shop b7905e-3 custom app. Do not invent extras.
+KNOWN_LIVE_SCOPES = (
+    "read_all_orders",
+    "read_draft_orders",
+    "read_orders",
+    "read_products",
+)
+# abandonedCheckouts: WORKS on KNOWN_LIVE_SCOPES.
+# shopifyqlQuery: DENIED until Dave grants read_reports + PCD L2.

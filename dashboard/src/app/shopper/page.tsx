@@ -24,6 +24,10 @@ type AbandonRow = {
   recovered: boolean;
   line_items: Array<{ title?: string | null; quantity?: number }>;
   triage_severity: "hold_for_review" | "needs_eyes" | "noise" | null;
+  shipping_address_started?: boolean | null;
+  has_discount?: boolean | null;
+  discount_codes?: string[] | null;
+  recovery_status?: "open" | "recovered" | null;
 };
 type Payload = {
   available: boolean;
@@ -45,10 +49,20 @@ type Payload = {
     count: number; recovered: number; open: number;
     recoveryRate: number | null; openValue: number;
     topProducts: Array<{ title: string; handle: string | null; quantity: number; amount: number; checkouts: number }>;
+    friction?: {
+      open: number; shippingAddressStarted: number; shippingAddressMissing: number;
+      hasDiscount: number; shippingRateUnknown: number; paymentAttemptUnknown: number;
+    };
+    productLeak?: {
+      note: string;
+      kinds: Array<{ kind: string; open: number; recovered: number; openValue: number; recoveryRate: number | null }>;
+      products: Array<{ title: string; handle: string | null; kind: string; open: number; recovered: number; openValue: number; recoveryRate: number | null }>;
+    };
     rows: AbandonRow[];
   };
   splits?: {
     device: Array<{ device: string; sessions: number | null; addToCart: number | null; purchases: number | null }>;
+    channel?: Array<{ channel: string; sessions: number | null; addToCart: number | null; purchases: number | null }>;
     landingPage: Array<{ path: string; sessions: number | null; addToCart: number | null; purchases: number | null }>;
   };
   status?: {
@@ -72,6 +86,14 @@ export default function ShopperPage() {
   const configured = isConfigured();
   const [windowDays, setWindowDays] = useState<FunnelWindow>(7);
   const [d, setD] = useState<Payload | null>(null);
+  const [klaviyo, setKlaviyo] = useState<{
+    available?: boolean; empty?: boolean; error?: string;
+    rows?: Array<{
+      window_days: number; flow_name: string; flow_id: string;
+      recipients: number | null; conversion_rate: number | null;
+      revenue: number | null; unique_clicks: number | null; notes: string | null;
+    }>;
+  } | null>(null);
   const [busy, setBusy] = useState(true);
   const [showDefs, setShowDefs] = useState(false);
   const [tick, setTick] = useState(0);
@@ -93,6 +115,17 @@ export default function ShopperPage() {
         }
         const payload = await res.json();
         if (!cancelled) setD(payload);
+        try {
+          const kv = await fetch("/api/klaviyo-abandon", {
+            signal: ctrl.signal, credentials: "same-origin",
+          });
+          if (kv.ok && (kv.headers.get("content-type") ?? "").includes("application/json")) {
+            const kpayload = await kv.json();
+            if (!cancelled) setKlaviyo(kpayload);
+          }
+        } catch {
+          /* stub card stays empty — do not invent Klaviyo numbers */
+        }
       } catch (e) {
         if (cancelled) return;
         const aborted = e instanceof Error && e.name === "AbortError";
@@ -331,6 +364,44 @@ export default function ShopperPage() {
 
             <Card>
               <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Kit vs stick (abandon mix)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  {d.abandoned?.productLeak?.note
+                    ?? "Derived from abandoned line items — not a session ATC→checkout."}
+                </p>
+                {!(d.abandoned?.productLeak?.kinds ?? []).some((k) => k.open || k.recovered) ? (
+                  <p className="text-sm text-muted-foreground">No line items in this window.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Kind</TableHead>
+                        <TableHead className="text-right">Open</TableHead>
+                        <TableHead className="text-right">Recovered</TableHead>
+                        <TableHead className="text-right">Open $</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {d.abandoned.productLeak.kinds.map((k) => (
+                        <TableRow key={k.kind}>
+                          <TableCell className="capitalize">{k.kind}</TableCell>
+                          <TableCell className="text-right tabular-nums">{k.open}</TableCell>
+                          <TableCell className="text-right tabular-nums">{k.recovered}</TableCell>
+                          <TableCell className="text-right tabular-nums">{money(k.openValue, 0)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium">Device</CardTitle>
               </CardHeader>
               <CardContent>
@@ -362,7 +433,64 @@ export default function ShopperPage() {
                 )}
               </CardContent>
             </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">Channel</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {!d.splits?.channel?.length ? (
+                  <p className="text-sm text-muted-foreground">
+                    Channel split not stored — ShopifyQL GROUP BY referring_channel
+                    needs read_reports. We do not invent it from GA4.
+                  </p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Referring channel</TableHead>
+                        <TableHead className="text-right">Sessions</TableHead>
+                        <TableHead className="text-right">ATC</TableHead>
+                        <TableHead className="text-right">Purchase</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {d.splits.channel.map((r) => (
+                        <TableRow key={r.channel}>
+                          <TableCell>{r.channel}</TableCell>
+                          <TableCell className="text-right tabular-nums">{r.sessions ?? "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{r.addToCart ?? "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{r.purchases ?? "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
           </div>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Checkout friction (open carts)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {!d.abandoned?.friction ? (
+                <p className="text-sm text-muted-foreground">Friction fields not stored yet.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-3 text-sm">
+                  <p>Shipping address started: <span className="tabular-nums font-medium">{d.abandoned.friction.shippingAddressStarted}</span> / {d.abandoned.friction.open}</p>
+                  <p>Never started address: <span className="tabular-nums font-medium">{d.abandoned.friction.shippingAddressMissing}</span></p>
+                  <p>Discount entered: <span className="tabular-nums font-medium">{d.abandoned.friction.hasDiscount}</span></p>
+                  <p className="sm:col-span-3 text-xs text-muted-foreground">
+                    Shipping rate unknown on {d.abandoned.friction.shippingRateUnknown} ·
+                    payment attempt unknown on {d.abandoned.friction.paymentAttemptUnknown}
+                    {" "}— Admin GraphQL AbandonedCheckout does not expose those fields.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader className="pb-2">
@@ -419,6 +547,7 @@ export default function ShopperPage() {
                       <TableHead>Items</TableHead>
                       <TableHead className="text-right">$</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Friction</TableHead>
                       <TableHead>Triage</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -438,7 +567,13 @@ export default function ShopperPage() {
                           <TableCell className="text-right tabular-nums">
                             {money(r.total_price, 2)}
                           </TableCell>
-                          <TableCell>{r.recovered ? "recovered" : "open"}</TableCell>
+                          <TableCell>{r.recovery_status ?? (r.recovered ? "recovered" : "open")}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {r.shipping_address_started ? "addr" : r.shipping_address_started === false ? "no addr" : "—"}
+                            {r.has_discount
+                              ? ` · ${r.discount_codes?.length ? r.discount_codes.join(",") : "disc"}`
+                              : ""}
+                          </TableCell>
                           <TableCell>{severityBadge(r.triage_severity)}</TableCell>
                         </TableRow>
                       ))}
@@ -448,6 +583,49 @@ export default function ShopperPage() {
             </CardContent>
           </Card>
         </>
+      )}
+
+      {klaviyo?.available && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Klaviyo abandon flows (Kit seed)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Read-only. Conversion metric Placed Order UG4R5c. This app does not write to Klaviyo.
+            </p>
+            {klaviyo.empty || !klaviyo.rows?.length ? (
+              <p className="text-sm text-muted-foreground">
+                No kit-seed rows. Run supabase/migration_shopify_funnel_expand.sql.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Window</TableHead>
+                    <TableHead>Flow</TableHead>
+                    <TableHead className="text-right">Recipients</TableHead>
+                    <TableHead className="text-right">Conv</TableHead>
+                    <TableHead className="text-right">$</TableHead>
+                    <TableHead className="text-right">Clicks</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {klaviyo.rows.map((r) => (
+                    <TableRow key={`${r.window_days}-${r.flow_id}`}>
+                      <TableCell className="tabular-nums">{r.window_days}d</TableCell>
+                      <TableCell>{r.flow_name}</TableCell>
+                      <TableCell className="text-right tabular-nums">{r.recipients ?? "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{pct(r.conversion_rate)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{money(r.revenue, 0)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{r.unique_clicks ?? "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {showDefs && d?.definitions && (

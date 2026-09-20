@@ -8,6 +8,9 @@ import {
   conversionRate,
   dropOff,
   filterAbandoned,
+  frictionRollup,
+  kitKind,
+  productLeakFromAbandons,
   recoveryOf,
   stepsOf,
   sumDaily,
@@ -165,6 +168,36 @@ describe("abandons", () => {
   });
 });
 
+describe("expand: kit leak + friction", () => {
+  test("kitKind tokens and product leak skip blank titles", () => {
+    assert.equal(kitKind("lip-balm-3-pack", "3 Pack Kit"), "kit");
+    assert.equal(kitKind("mint-stick", "Mint Stick"), "stick");
+    assert.equal(kitKind("tallow-balm", "Tallow Balm"), "other");
+    const leak = productLeakFromAbandons([
+      {
+        checkout_id: "a", checkout_name: "#1", checkout_date: "2026-09-18",
+        created_at: "2026-09-18T00:00:00Z", completed_at: null, total_price: 28,
+        currency: "USD", recovered: false,
+        line_items: [{ title: "Lip Balm 3-Pack", handle: "lip-balm-3-pack", quantity: 1, amount: 28 }],
+        line_items_qty: 1, triage_severity: "hold_for_review", triage_note: null,
+      },
+    ]);
+    assert.equal(leak.source, "abandoned_line_items");
+    assert.equal(leak.kinds.find((k) => k.kind === "kit")?.open, 1);
+    const fr = frictionRollup([{
+      checkout_id: "a", checkout_name: "#1", checkout_date: "2026-09-18",
+      created_at: "2026-09-18T00:00:00Z", completed_at: null, total_price: 28,
+      currency: "USD", recovered: false, line_items: [], line_items_qty: 0,
+      triage_severity: "hold_for_review", triage_note: null,
+      shipping_address_started: true, has_discount: false,
+      has_shipping_rate: null, payment_attempted: null,
+    }]);
+    assert.equal(fr.shippingAddressStarted, 1);
+    assert.equal(fr.shippingRateUnknown, 1);
+    assert.equal(fr.paymentAttemptUnknown, 1);
+  });
+});
+
 describe("wiring", () => {
   const root = process.cwd();
   const nav = readFileSync(path.join(root, "src/components/nav.tsx"), "utf8");
@@ -198,6 +231,10 @@ describe("wiring", () => {
     assert.doesNotMatch(route, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
     assert.doesNotMatch(route, /orderCreate|sellerise/i);
     assert.doesNotMatch(route, /write_orders|draftOrderComplete/);
+    const klaviyo = readFileSync(path.join(root, "src/app/api/klaviyo-abandon/route.ts"), "utf8");
+    assert.match(klaviyo, /getServerSupabase/);
+    assert.match(klaviyo, /klaviyo_abandon_flow_daily/);
+    assert.doesNotMatch(klaviyo, /klaviyo\.com|profiles|events/);
   });
 
   test("shopper page is full-width with an error boundary", () => {
@@ -222,5 +259,10 @@ describe("wiring", () => {
     assert.doesNotMatch(executable, /CREATE POLICY/i);
     assert.doesNotMatch(executable, /abandoned_checkout_url|abandonedCheckoutUrl/);
     assert.match(sql, /TODO\(jev\)/);
+    const expand = readFileSync(path.join(root, "..", "supabase/migration_shopify_funnel_expand.sql"), "utf8");
+    assert.match(expand, /klaviyo_abandon_flow_daily/);
+    assert.match(expand, /shipping_address_started/);
+    assert.match(expand, /TODO\(phase2-ga4\)/);
+    assert.doesNotMatch(expand, /CREATE POLICY/i);
   });
 });

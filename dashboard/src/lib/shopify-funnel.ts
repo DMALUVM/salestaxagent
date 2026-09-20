@@ -60,11 +60,20 @@ export type AbandonedRow = {
     title?: string | null;
     quantity?: number;
     handle?: string | null;
+    sku?: string | null;
     amount?: number | null;
   }>;
   line_items_qty: number | null;
   triage_severity: "hold_for_review" | "needs_eyes" | "noise" | null;
   triage_note: string | null;
+  shipping_address_started?: boolean | null;
+  billing_address_started?: boolean | null;
+  has_discount?: boolean | null;
+  discount_codes?: string[] | null;
+  discount_amount?: number | null;
+  has_shipping_rate?: boolean | null;
+  payment_attempted?: boolean | null;
+  recovery_status?: "open" | "recovered" | null;
 };
 
 const CLOSED: Array<[keyof FunnelCounts | string, string]> = [
@@ -260,6 +269,100 @@ export function filterAbandoned(rows: AbandonedRow[], start: string, end: string
   return rows.filter((r) => r.checkout_date >= start && r.checkout_date <= end);
 }
 
+const KIT_TOKENS = ["kit", "pack", "bundle", "set"] as const;
+const STICK_TOKENS = ["stick", "single", "chapstick"] as const;
+
+export function kitKind(handle?: string | null, title?: string | null, sku?: string | null): "kit" | "stick" | "other" {
+  const blob = [handle, title, sku].filter(Boolean).join(" ").toLowerCase().replace(/-/g, " ");
+  if (KIT_TOKENS.some((t) => blob.includes(t))) return "kit";
+  if (STICK_TOKENS.some((t) => blob.includes(t))) return "stick";
+  return "other";
+}
+
+export function productLeakFromAbandons(rows: AbandonedRow[], limit = 15) {
+  const byHandle = new Map<string, {
+    handle: string | null; title: string; kind: ReturnType<typeof kitKind>;
+    open: number; recovered: number; quantity: number; openValue: number;
+  }>();
+  const byKind = {
+    kit: { kind: "kit", open: 0, recovered: 0, openValue: 0, quantity: 0 },
+    stick: { kind: "stick", open: 0, recovered: 0, openValue: 0, quantity: 0 },
+    other: { kind: "other", open: 0, recovered: 0, openValue: 0, quantity: 0 },
+  };
+  for (const r of rows) {
+    const recovered = Boolean(r.recovered);
+    for (const it of r.line_items ?? []) {
+      const title = String(it.title ?? "").trim();
+      const handle = (it.handle ?? "").trim() || null;
+      if (!title && !handle) continue;
+      const key = handle || title;
+      const kind = kitKind(handle, title, it.sku);
+      const qty = Number(it.quantity ?? 0);
+      const amt = asMoney(it.amount);
+      const b = byHandle.get(key) ?? {
+        handle, title, kind, open: 0, recovered: 0, quantity: 0, openValue: 0,
+      };
+      b.quantity += qty;
+      if (recovered) b.recovered += 1;
+      else {
+        b.open += 1;
+        if (amt !== null) b.openValue += amt;
+      }
+      byHandle.set(key, b);
+      const k = byKind[kind];
+      k.quantity += qty;
+      if (recovered) k.recovered += 1;
+      else {
+        k.open += 1;
+        if (amt !== null) k.openValue += amt;
+      }
+    }
+  }
+  const products = [...byHandle.values()]
+    .map((b) => {
+      const total = b.open + b.recovered;
+      return {
+        ...b,
+        openValue: Math.round(b.openValue * 100) / 100,
+        recoveryRate: total ? Math.round((b.recovered / total) * 10000) / 10000 : null,
+      };
+    })
+    .sort((a, b) => b.openValue - a.openValue || b.open - a.open || a.title.localeCompare(b.title))
+    .slice(0, limit);
+  const kinds = (["kit", "stick", "other"] as const).map((kind) => {
+    const row = byKind[kind];
+    const total = row.open + row.recovered;
+    return {
+      ...row,
+      openValue: Math.round(row.openValue * 100) / 100,
+      recoveryRate: total ? Math.round((row.recovered / total) * 10000) / 10000 : null,
+    };
+  });
+  return {
+    source: "abandoned_line_items",
+    note: "Abandon mix by product/handle — not ShopifyQL ATC→checkout.",
+    kinds,
+    products,
+  };
+}
+
+export function frictionRollup(rows: AbandonedRow[]) {
+  const openRows = rows.filter((r) => !r.recovered);
+  const count = (field: keyof AbandonedRow, want: boolean) =>
+    openRows.filter((r) => r[field] === want).length;
+  const unknown = (field: keyof AbandonedRow) =>
+    openRows.filter((r) => r[field] == null).length;
+  return {
+    open: openRows.length,
+    shippingAddressStarted: count("shipping_address_started", true),
+    shippingAddressMissing: count("shipping_address_started", false),
+    billingAddressStarted: count("billing_address_started", true),
+    hasDiscount: count("has_discount", true),
+    shippingRateUnknown: unknown("has_shipping_rate"),
+    paymentAttemptUnknown: unknown("payment_attempted"),
+  };
+}
+
 export function deviceWindow(
   rows: Array<Record<string, unknown>>,
   start: string,
@@ -291,6 +394,37 @@ export function deviceWindow(
     .sort((a, b) => (b.sessions ?? 0) - (a.sessions ?? 0) || a.device.localeCompare(b.device));
 }
 
+export function channelWindow(
+  rows: Array<Record<string, unknown>>,
+  start: string,
+  end: string,
+) {
+  const buckets = new Map<string, FunnelCounts>();
+  const map: Array<[string, keyof FunnelCounts]> = [
+    ["sessions", "sessions"],
+    ["pdp_sessions", "pdpSessions"],
+    ["add_to_cart", "addToCart"],
+    ["checkout_started", "checkoutStarted"],
+    ["purchases", "purchases"],
+  ];
+  for (const r of rows) {
+    if (String(r.split_kind ?? "") !== "channel") continue;
+    const d = String(r.metric_date ?? "");
+    if (d < start || d > end) continue;
+    const key = String(r.split_value || "unknown");
+    const b = buckets.get(key) ?? emptyCounts();
+    for (const [col, field] of map) {
+      const v = asInt(r[col]);
+      if (v === null) continue;
+      b[field] = (b[field] ?? 0) + v;
+    }
+    buckets.set(key, b);
+  }
+  return [...buckets.entries()]
+    .map(([channel, c]) => ({ channel, ...c, leak: biggestLeak(c) }))
+    .sort((a, b) => (b.sessions ?? 0) - (a.sessions ?? 0) || a.channel.localeCompare(b.channel));
+}
+
 export function pct(rate: number | null): string {
   if (rate === null) return "—";
   return `${Math.round(rate * 1000) / 10}%`;
@@ -313,4 +447,9 @@ export const DEFINITIONS: Array<[string, string]> = [
   ["Recovery rate", "Completed (recovered) checkouts ÷ checkouts in the window. Cheap: it is a stored timestamp, not an email-send campaign metric."],
   ["Triage", "Stub severity until Jev is wired. Fail closed → hold for review. The sync does not call an LLM."],
   ["Windows", "Last 7 or 28 store days (America/New_York), inclusive of the latest stored date."],
+  ["Friction", "shippingAddress / billingAddress presence, discountCodes, totalDiscountSet, completedAt. GraphQL AbandonedCheckout has no shippingLine or payment-attempt field — those stay unknown. Address values are not stored."],
+  ["Kit vs stick", "Token classify on abandoned line-item title/handle (kit/pack/bundle/set vs stick/single). Not a session ATC→checkout. ShopifyQL sessions has no product-handle closed funnel."],
+  ["Channel", "ShopifyQL GROUP BY referring_channel when read_reports is granted. Device uses session_device_type."],
+  ["Klaviyo", "Read-only stub seeded from Kit Email (flows WcDdsx / SQa2Yy, metric UG4R5c). This app does not write to Klaviyo."],
+  ["Phase 2", "GA4 / Google Ads / Meta / GSC are not built here. Official APIs later. No Ryze."],
 ];

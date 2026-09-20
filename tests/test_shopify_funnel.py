@@ -4,8 +4,13 @@ No API, no database. Fixtures are small enough to recompute by hand.
 """
 from __future__ import annotations
 
+import json
+
 from src import shopify_funnel as F
-from src.shopify_funnel_sync import ABANDON_GQL, SHOPIFYQL_GQL, _shopifyql
+from src.klaviyo_abandon import rows_from_fixture
+from src.shopify_funnel_sync import (
+    ABANDON_GQL, SHOPIFYQL_GQL, _shopifyql, maybe_jev_triage,
+)
 
 
 def daily(d, sessions, pdp=None, atc=None, chk=None, purch=None, kind="all", val=""):
@@ -194,6 +199,63 @@ def test_abandoned_row_marks_recovered_from_completed_at():
     assert open_row["total_price"] == 32.0
     assert open_row["line_items"][0]["handle"] == "tallow-balm"
     assert "abandonedCheckoutUrl" not in open_row
+    assert "countryCode" not in open_row
+    assert "shippingAddress" not in open_row
+    assert open_row["recovery_status"] == "open"
+    assert rec_row["recovery_status"] == "recovered"
+
+
+def test_friction_booleans_no_pii_and_null_unexposed_fields():
+    node = _gql_checkout()
+    node["shippingAddress"] = {"countryCode": "US"}
+    node["billingAddress"] = None
+    node["discountCodes"] = ["SAVE10"]
+    node["totalDiscountSet"] = {"shopMoney": {"amount": "3.20"}}
+    row = F.abandoned_row_from_gql(node, "2026-09-18")
+    assert row["shipping_address_started"] is True
+    assert row["billing_address_started"] is False
+    assert row["has_discount"] is True
+    assert row["discount_codes"] == ["SAVE10"]
+    assert row["discount_amount"] == 3.2
+    assert row["has_shipping_rate"] is None
+    assert row["payment_attempted"] is None
+    dumped = json.dumps(row)
+    assert "countryCode" not in dumped
+    assert "shippingAddress" not in dumped
+    assert "address1" not in dumped
+
+
+def test_kit_kind_and_product_leak_are_abandon_mix_not_sessions():
+    assert F.kit_kind("tallow-lip-balm-3-pack", "3 Pack Kit") == "kit"
+    assert F.kit_kind("peppermint-stick", "Peppermint Stick") == "stick"
+    assert F.kit_kind("tallow-balm", "Tallow Balm") == "other"
+    open_kit = F.abandoned_row_from_gql(_gql_checkout(
+        "gid://x/k", "40.00",
+        items=[{"title": "Lip Balm 3-Pack", "quantity": 1, "sku": "K1",
+                "variantTitle": None,
+                "originalTotalPriceSet": {"shopMoney": {"amount": "28.00"}},
+                "product": {"handle": "lip-balm-3-pack", "title": "Lip Balm 3-Pack"}}]),
+        "2026-09-18")
+    rec_stick = F.abandoned_row_from_gql(_gql_checkout(
+        "gid://x/s", "12.00", completed="2026-09-19T00:00:00Z",
+        items=[{"title": "Mint Stick", "quantity": 1, "sku": "S1",
+                "variantTitle": None,
+                "originalTotalPriceSet": {"shopMoney": {"amount": "8.00"}},
+                "product": {"handle": "mint-stick", "title": "Mint Stick"}}]),
+        "2026-09-18")
+    leak = F.product_leak_from_abandons([open_kit, rec_stick])
+    assert leak["source"] == "abandoned_line_items"
+    by = {k["kind"]: k for k in leak["kinds"]}
+    assert by["kit"]["open"] == 1 and by["stick"]["recovered"] == 1
+    assert by["kit"]["openValue"] == 28.0
+
+
+def test_friction_rollup_keeps_unexposed_fields_unknown():
+    row = F.abandoned_row_from_gql(_gql_checkout(), "2026-09-18")
+    r = F.friction_rollup([row])
+    assert r["open"] == 1
+    assert r["shippingRateUnknown"] == 1
+    assert r["paymentAttemptUnknown"] == 1
 
 
 def test_recovery_rate_and_open_value_ignore_recovered():
@@ -312,6 +374,12 @@ def test_graphql_documents_are_queries_only():
         assert "abandonedCheckoutUrl" not in doc
     assert "shopifyqlQuery" in SHOPIFYQL_GQL
     assert "abandonedCheckouts" in ABANDON_GQL
+    assert "discountCodes" in ABANDON_GQL
+    assert "shippingAddress" in ABANDON_GQL
+    assert "countryCode" in ABANDON_GQL
+    assert "shippingLine" not in ABANDON_GQL
+    assert "customer {" not in ABANDON_GQL
+    assert "email" not in ABANDON_GQL
 
 
 def test_shopifyql_strings_use_official_closed_funnel_metrics():
@@ -326,6 +394,43 @@ def test_shopifyql_strings_use_official_closed_funnel_metrics():
     land = _shopifyql("landing", 7, group="landing_page_path", limit=25)
     assert "GROUP BY landing_page_path" in land
     assert "LIMIT 25" in land
+    ch = _shopifyql("channel", 28, group="referring_channel")
+    assert "GROUP BY referring_channel" in ch
+    assert "FROM sessions" in ch
+
+
+def test_channel_window_sums_only_channel_rows():
+    rows = [
+        daily("2026-09-18", 10, atc=4, chk=2, purch=1, kind="channel", val="email"),
+        daily("2026-09-19", 5, atc=1, chk=1, purch=0, kind="channel", val="email"),
+        daily("2026-09-18", 8, atc=3, chk=1, purch=1, kind="channel", val="social"),
+        daily("2026-09-18", 99, atc=9, chk=9, purch=9),
+    ]
+    out = F.channel_window(rows, "2026-09-18", "2026-09-19")
+    by = {r["channel"]: r for r in out}
+    assert by["email"]["sessions"] == 15
+    assert by["social"]["sessions"] == 8
+
+
+def test_jev_triage_silent_and_unwired_fail_closed():
+    silent = maybe_jev_triage({"leak": {}}, True)
+    assert silent["ran"] is False and silent["reason"] == "silent"
+    hold = maybe_jev_triage({"leak": {"from": "sessions", "lost": 9},
+                             "abandon": {"open": 2},
+                             "window": {"end": "2026-09-19"}}, False)
+    assert hold["decision"] == "hold"
+    assert hold.get("reason") in ("jev_not_wired", "jev_failed", None)
+
+
+def test_klaviyo_kit_fixture_has_both_windows_and_no_write_flag():
+    rows = rows_from_fixture()
+    assert {(r["window_days"], r["flow_id"]) for r in rows} == {
+        (90, "WcDdsx"), (90, "SQa2Yy"), (30, "WcDdsx"), (30, "SQa2Yy"),
+    }
+    assert all(r["conversion_metric_id"] == "UG4R5c" for r in rows)
+    assert all(r["source"] == "kit_seed" for r in rows)
+    ninety = next(r for r in rows if r["window_days"] == 90 and r["flow_id"] == "WcDdsx")
+    assert ninety["recipients"] == 282 and ninety["revenue"] == 180.03
 
 
 def test_cli_command_is_registered_and_mentions_scopes():

@@ -2,11 +2,14 @@ import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
 import {
   biggestLeak,
+  channelWindow,
   closedDropOff,
   conversionRate,
   deviceWindow,
   dropOffPath,
   filterAbandoned,
+  frictionRollup,
+  productLeakFromAbandons,
   recoveryOf,
   stepsOf,
   sumDaily,
@@ -60,6 +63,26 @@ async function handleGet(request: NextRequest) {
   try {
     const sb = getServerSupabase();
 
+    const abandonSelectCore =
+      "checkout_id,checkout_name,checkout_date,created_at,completed_at,total_price,currency,recovered,line_items,line_items_qty,triage_severity,triage_note";
+    const abandonSelectExpand =
+      abandonSelectCore +
+      ",shipping_address_started,billing_address_started,has_discount,discount_codes,discount_amount,has_shipping_rate,payment_attempted,recovery_status";
+
+    const loadAbandons = async () => {
+      try {
+        return await loadAll<AbandonedRow>(
+          sb, "shopify_abandoned_checkouts", abandonSelectExpand, "checkout_date");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/column|schema cache|does not exist/i.test(msg)) {
+          return loadAll<AbandonedRow>(
+            sb, "shopify_abandoned_checkouts", abandonSelectCore, "checkout_date");
+        }
+        throw e;
+      }
+    };
+
     const [daily, splits, abandons, statusRows] = await Promise.all([
       loadAll<Record<string, unknown>>(
         sb, "shopify_funnel_daily",
@@ -71,11 +94,7 @@ async function handleGet(request: NextRequest) {
         "window_days,window_end,split_kind,split_value,sessions,add_to_cart,checkout_started,purchases",
         "window_end",
       ),
-      loadAll<AbandonedRow>(
-        sb, "shopify_abandoned_checkouts",
-        "checkout_id,checkout_name,checkout_date,created_at,completed_at,total_price,currency,recovered,line_items,line_items_qty,triage_severity,triage_note",
-        "checkout_date",
-      ),
+      loadAbandons(),
       sb.from("shopify_funnel_status").select(
         "last_synced_at,funnel_ok,abandon_ok,missing_scopes,last_error,last_stats",
       ).eq("id", 1).limit(1),
@@ -89,7 +108,10 @@ async function handleGet(request: NextRequest) {
     const allDates = daily
       .filter((r) => String(r.split_kind ?? "all") === "all")
       .map((r) => String(r.metric_date));
-    const end = allDates.length ? allDates[allDates.length - 1] : null;
+    const abandonDates = abandons.map((r) => String(r.checkout_date)).sort();
+    const end = allDates.length
+      ? allDates[allDates.length - 1]
+      : (abandonDates.length ? abandonDates[abandonDates.length - 1] : null);
 
     if (!end) {
       return Response.json({
@@ -111,6 +133,9 @@ async function handleGet(request: NextRequest) {
     const abandon = recoveryOf(windowAbandons);
     const topProducts = topAbandonedProducts(windowAbandons);
     const devices = deviceWindow(daily, start, end);
+    const channels = channelWindow(daily, start, end);
+    const friction = frictionRollup(windowAbandons);
+    const productLeak = productLeakFromAbandons(windowAbandons);
 
     const landing = splits
       .filter((r) => String(r.split_kind) === "landing_page"
@@ -153,9 +178,11 @@ async function handleGet(request: NextRequest) {
       abandoned: {
         ...abandon,
         topProducts,
+        friction,
+        productLeak,
         rows: view === "health" ? [] : windowAbandons,
       },
-      splits: { device: devices, landingPage: landing },
+      splits: { device: devices, channel: channels, landingPage: landing },
       byDay: view === "health" ? [] : byDay,
       status: status ?? null,
       definitions: DEFINITIONS,

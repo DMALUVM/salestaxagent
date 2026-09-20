@@ -5763,7 +5763,10 @@ def run():
 
 
 def _run_shopify_funnel_sync():
-    """Weekday-morning-capable daily shopper funnel. One shot, no wait-loop."""
+    """Weekday-morning-capable daily shopper funnel. One shot, no wait-loop.
+
+    Telegram stays silent: shopify_funnel is not on telegram.allow.
+    """
     from src.db import job_start, job_finish
     from src.shopify_funnel_sync import sync
 

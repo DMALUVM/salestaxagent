@@ -1,0 +1,66 @@
+{
+  "as_of": "2026-09-19",
+  "source": "kit_seed",
+  "conversion_metric_id": "UG4R5c",
+  "conversion_metric_name": "Placed Order",
+  "note": "Kit Email Phase-1 read-only. Do not call Klaviyo writes from the Mini.",
+  "windows": [
+    {
+      "window_days": 90,
+      "flows": [
+        {
+          "flow_id": "WcDdsx",
+          "flow_name": "Abandoned Checkout",
+          "trigger_metric": "Checkout Started VRtFX4",
+          "recipients": 282,
+          "unique_conversions": 4,
+          "conversion_rate": 0.0143,
+          "revenue": 180.03,
+          "rpr": 0.64,
+          "unique_clicks": null,
+          "notes": "Checkout Email 3 W3nGKK (10% off) = $125.98 of this recovery"
+        },
+        {
+          "flow_id": "SQa2Yy",
+          "flow_name": "Abandoned Cart",
+          "trigger_metric": "Added to Cart VLb9JV",
+          "recipients": 112,
+          "unique_conversions": 1,
+          "conversion_rate": 0.0089,
+          "revenue": 20.81,
+          "rpr": 0.19,
+          "unique_clicks": null
+        }
+      ]
+    },
+    {
+      "window_days": 30,
+      "flows": [
+        {
+          "flow_id": "WcDdsx",
+          "flow_name": "Abandoned Checkout",
+          "trigger_metric": "Checkout Started VRtFX4",
+          "recipients": 103,
+          "unique_conversions": null,
+          "conversion_rate": 0.0098,
+          "revenue": 32.55,
+          "rpr": null,
+          "unique_clicks": 0,
+          "notes": "unique clicks 0 — flag only; opens still happen"
+        },
+        {
+          "flow_id": "SQa2Yy",
+          "flow_name": "Abandoned Cart",
+          "trigger_metric": "Added to Cart VLb9JV",
+          "recipients": 44,
+          "unique_conversions": null,
+          "conversion_rate": 0.0227,
+          "revenue": 20.81,
+          "rpr": null,
+          "unique_clicks": 0,
+          "notes": "unique clicks 0 — flag only; opens still happen"
+        }
+      ]
+    }
+  ]
+}
