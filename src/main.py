@@ -2648,6 +2648,40 @@ def shopify_metrics_cmd(months, since):
     click.echo(f"    {note['doNotDo']}")
 
 
+@cli.command("shopify-funnel-sync")
+@click.option("--days", default=28, show_default=True, type=int,
+              help="Lookback for ShopifyQL + abandoned checkouts (max 90)")
+@click.option("--dry-run", is_flag=True,
+              help="Fetch + transform, do not write Supabase")
+def shopify_funnel_sync_cmd(days, dry_run):
+    """Store Shopify session funnel + abandoned checkouts (one job, no poll).
+
+    ShopifyQL FROM sessions (human): sessions → add-to-cart → checkout →
+    purchase, plus PDP landings (landing_page_type = product). Abandoned
+    checkouts from Admin GraphQL. Min READ scopes (Dave greenlit):
+    read_reports + read_orders. No writes, no theme, no storefront.
+    Staff permission manage_abandoned_checkouts. Never Place Order.
+    """
+    from src.shopify_funnel_sync import sync
+
+    click.echo(f"Shopify shopper funnel — last {days}d"
+               + (" (dry-run)" if dry_run else ""))
+    r = sync(days=days, dry_run=dry_run, progress=click.echo)
+    if r.get("error") and not r.get("partial"):
+        raise click.ClickException(r["error"])
+    click.echo(f"\n  {r.get('message')}")
+    scopes = r.get("missing_scopes") or []
+    if scopes:
+        click.echo("  Dave must grant: " + ", ".join(scopes))
+        req = r.get("required") or {}
+        click.echo("  scopes: " + ", ".join(req.get("scopes") or []))
+        click.echo("  staff:  " + ", ".join(req.get("staff") or []))
+        click.echo("  PCD:    " + ", ".join(req.get("protectedCustomerData") or []))
+    if r.get("errors"):
+        for e in r["errors"]:
+            click.echo(f"  note: {e}")
+
+
 @cli.command("health-ping")
 @click.option("--send", is_flag=True, help="Actually deliver to Telegram")
 @click.option("--dry-run", "dry", is_flag=True, default=False,
@@ -5526,6 +5560,20 @@ def run():
         )
         click.echo("[Scheduler] Action outcome snapshots daily at 07:00 (after P&L)")
 
+        if settings.shopify_enabled:
+            scheduler.add_job(
+                _run_shopify_funnel_sync,
+                "cron",
+                hour=7,
+                minute=15,
+                id="shopify_funnel_sync",
+                misfire_grace_time=3600,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo("[Scheduler] Shopify shopper funnel daily at 07:15 "
+                       "(ShopifyQL + abandoned checkouts; one job, no poll)")
+
         # Safe ff-only pull of origin/main. One job inside this scheduler —
         # not a second launchd agent — so it cannot race the running process.
         # 04:30 is before ads_campaigns_sync (05:00). A startup pass catches
@@ -5713,6 +5761,30 @@ def run():
         click.echo("Agent stopped.")
 
     observer.join()
+
+
+def _run_shopify_funnel_sync():
+    """Weekday-morning-capable daily shopper funnel. One shot, no wait-loop."""
+    from src.db import job_start, job_finish
+    from src.shopify_funnel_sync import sync
+
+    run_id = job_start("shopify_funnel_sync")
+    try:
+        r = sync()
+        if r.get("error") and not r.get("partial"):
+            job_finish(run_id, "fail", r["error"][:500], r.get("stats"))
+            print(f"[Shopify Funnel] FAILED: {r['error'][:200]}")
+            return
+        status = "partial" if r.get("partial") else "success"
+        msg = r.get("message") or "ok"
+        if r.get("silent"):
+            print(f"[Shopify Funnel] silent — {msg}")
+        else:
+            print(f"[Shopify Funnel] {msg}")
+        job_finish(run_id, status, msg, r.get("stats"))
+    except Exception as e:
+        job_finish(run_id, "fail", str(e)[:500])
+        print(f"[Shopify Funnel] FAILED: {e}")
 
 
 def _run_shopify_poll():

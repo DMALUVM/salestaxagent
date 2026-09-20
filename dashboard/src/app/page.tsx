@@ -21,6 +21,7 @@ import { dueDayByState, mergeImpliedObligations } from "@/lib/next-due";
 import { agentToday, amazonAsOf, monthNameFromIso, monthStart, shiftDays, windowStart } from "@/lib/as-of";
 import { InventoryLogisticsPanel } from "@/components/inventory/InventoryLogisticsPanel";
 import { InboundDiscrepancyAlerts } from "@/components/inbound-discrepancy-alerts";
+import { ShopifyFunnelHealth } from "@/components/shopify-funnel-health";
 import { LoadingState } from "@/components/loading";
 import { QueryError } from "@/components/query-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -281,17 +282,29 @@ export default function Pulse() {
   }, [filings, nexus, recs, filingToday, entityOverdue, stateRules]);
 
   if (!configured) return <SetupPrompt />;
-  if (l1 || l2 || l3) return <LoadingState />;
+  // Funnel health is a separate service-role read — don't hide it behind
+  // Pulse sales/nexus/filing warehouse loads (those can hang on a dummy URL).
+  if (l1 || l2 || l3) {
+    return (
+      <div className="space-y-6">
+        <LoadingState />
+        <ShopifyFunnelHealth />
+      </div>
+    );
+  }
   if (e1 || e2 || e3) {
     return (
-      <QueryError
-        message={e1 || e2 || e3}
-        onRetry={() => {
-          refetchSales();
-          refetchNexus();
-          refetchFilings();
-        }}
-      />
+      <div className="space-y-6">
+        <QueryError
+          message={e1 || e2 || e3}
+          onRetry={() => {
+            refetchSales();
+            refetchNexus();
+            refetchFilings();
+          }}
+        />
+        <ShopifyFunnelHealth />
+      </div>
     );
   }
 
@@ -511,6 +524,8 @@ export default function Pulse() {
 
       {/* ── Amazon logistics (solo-operator daily checklist) ── */}
       {configured && <InventoryLogisticsPanel showSync />}
+
+      {configured && <ShopifyFunnelHealth />}
 
       {/* ── Tax: Actions + Filing + Next Deadlines ── */}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
