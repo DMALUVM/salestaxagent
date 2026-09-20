@@ -51,14 +51,14 @@ export type Phase2Connector = keyof typeof PHASE2_CONNECTORS;
 
 export function missingEnv(
   keys: readonly string[],
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.Dict<string> = process.env,
 ): string[] {
   return keys.filter((k) => !String(env[k] ?? "").trim());
 }
 
 export function connectorStatus(
   name: Phase2Connector,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.Dict<string> = process.env,
 ) {
   const spec = PHASE2_CONNECTORS[name];
   const missing = missingEnv(spec.env, env);
