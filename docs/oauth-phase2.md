@@ -1,6 +1,6 @@
 # Phase 2 — Dave click checklists + Iris pipeline
 
-Hand this to Dave. One Google OAuth dance covers GA4 + Google Ads + Search Console. Meta is a separate Business app. Dave pastes secrets **only** on Vercel project `dashboard`. Dana mirrors the same `GOOGLE_*` names into Mini `.env` from 1Password so `ga4-sync` / `gsc-sync` can run. Never chat-paste keys.
+Hand this to Dave. One Google OAuth dance covers GA4 + Google Ads + Search Console. Meta is a separate Business app. Dave pastes secrets **only** on Vercel project `dashboard`. Dana mirrors the same `GOOGLE_*` names into Mini `.env` from 1Password so `ga4-sync` / `gsc-sync` / `google-ads-sync` can run. Never chat-paste keys.
 
 Production site: `https://www.ecommdashboard.com`
 Vercel env page: `https://vercel.com/dave-maloneys-projects/dashboard/settings/environment-variables`
@@ -10,7 +10,7 @@ Vercel env page: `https://vercel.com/dave-maloneys-projects/dashboard/settings/e
 ## Daily pipeline (Iris) — one path, Jev is not an orphan
 
 1. **Mini** `python -m src.main shopify-funnel-sync` writes `shopify_funnel_*` + abandons (already scheduled 07:15 ET).
-2. **Mini** `ga4-sync` (07:20 ET) and `gsc-sync` (07:25 ET) pull the official GA4 Data API / Search Console API for the prior `America/New_York` day (7d lookback). Scheduled only when Mini `.env` has the same `GOOGLE_*` names as Vercel. `metric_date` is the API day — never an older substitute. GSC final data lags ~2 days → `phase2.seo` stays null until that locked day exists. Do not add poll agents. Google Ads / Meta stay stubs.
+2. **Mini** `ga4-sync` (07:20 ET), `gsc-sync` (07:25 ET), and `google-ads-sync` (07:30 ET) pull the official GA4 Data API / Search Console API / Google Ads API for the prior `America/New_York` day (7d lookback). Scheduled only when Mini `.env` has the same `GOOGLE_*` names as Vercel. `metric_date` is the API day — never an older substitute. GSC final data lags ~2 days → `phase2.seo` stays null until that locked day exists. Do not add poll agents. Meta stays a stub.
 3. **Vercel** `GET`/`POST /api/shopify-funnel/jev-triage` (landed #153, sibling `bc-74a886b6`) evaluates leaks with `AI_GATEWAY_API_KEY` already on Vercel and writes `shopify_funnel_status.last_stats.jev`. Fail closed → `hold_for_review` / empty pursue. Does **not** call Mini.
 4. **Iris** `GET /api/conversion-digest` (landed #154/#155) reads the prior-day `America/New_York` Shopify funnel snapshot and runs landed Jev. Missing day → GAP. Never substitutes an older day. `phase2.landing_drops` / `seo` stay **null** until official-API rows exist for that day. OAuth is **not** required to read the Iris fields.
 
@@ -204,7 +204,17 @@ curl -s -u "$DASHBOARD_USER:$DASHBOARD_PASSWORD" \
 
 Success: `connectors.google_ads.configured` is `true`.
 
-**You’re done when:** customer ID + developer token + shared `GOOGLE_OAUTH_*` are on Vercel.
+Mini `.env` also needs the Ads names (plus the shared `GOOGLE_OAUTH_*`):
+
+```
+GOOGLE_ADS_DEVELOPER_TOKEN
+GOOGLE_ADS_CUSTOMER_ID=5332206723
+GOOGLE_ADS_LOGIN_CUSTOMER_ID=7137868835
+```
+
+Then `python -m src.main google-ads-sync` pulls `googleAds:searchStream` and upserts `google_ads_daily`. Missing Mini env → `needs OAuth` / `Wrote 0 rows` (fail closed). `--dry-run` documents the path and does not upsert. Read-only despite `adwords` scope — never mutate.
+
+**You’re done when:** customer ID + developer token + shared `GOOGLE_OAUTH_*` are on Vercel, Mini `.env` has the same names, and a pull upserts the locked day (or 0 rows if the API returned none).
 
 **Fail modes:** pasted the MCC id into `GOOGLE_ADS_CUSTOMER_ID` (that reads the manager, not Tallowbourn); left the dashes in the id; applied on API Center after the 2026 sunset; added mutate / campaign-write tooling (we never will).
 
