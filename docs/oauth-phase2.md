@@ -10,10 +10,10 @@ Vercel env page: `https://vercel.com/dave-maloneys-projects/dashboard/settings/e
 ## Daily pipeline (Iris) — one path, Jev is not an orphan
 
 1. **Mini** `python -m src.main shopify-funnel-sync` writes `shopify_funnel_*` + abandons (already scheduled 07:15 ET).
-2. **Vercel** `POST /api/jev-funnel` reads that warehouse and stored Jev. Uses `AI_GATEWAY_API_KEY` already on Vercel. Fail closed → `improvements: []`. Does **not** call Mini. Sibling Jev PR (`bc-74a886b6`, branch `cursor/jev-funnel-triage-c239`) is not merged yet — until it persists `shopify_funnel_status.last_stats.jev.pursue[]`, this step stays empty on purpose.
-3. **Iris** `GET /api/conversion-digest` reads the prior-day `America/New_York` snapshot (funnel, leak, abandons, optional GA4/GSC, `improvements` max 3).
+2. **Vercel** `GET`/`POST /api/shopify-funnel/jev-triage` (landed #153, sibling `bc-74a886b6`) evaluates leaks with `AI_GATEWAY_API_KEY` already on Vercel and writes `shopify_funnel_status.last_stats.jev`. Fail closed → `hold_for_review` / empty pursue. Does **not** call Mini.
+3. **Iris** `GET /api/conversion-digest` (landed #154) reads the prior-day `America/New_York` Shopify funnel snapshot. Missing day → GAP. Never substitutes an older day. Phase 2 GA4/Ads/GSC OAuth is **not** required to read.
 
-Do not add a second Jev job on Mini.
+Do not add a second Jev job on Mini. Do not add a second digest or `/api/jev-funnel` route.
 
 ---
 
@@ -159,7 +159,7 @@ curl -s -u "$DASHBOARD_USER:$DASHBOARD_PASSWORD" \
   "https://www.ecommdashboard.com/api/conversion-digest"
 ```
 
-Success: HTTP 200, `"dateLock": true`, `"landingDrops": null` until a real GA4 day is pulled. Never an older day’s landings.
+Success: HTTP 200, `"as_of"` is prior-day ET, status `CLEAR`/`HOLD`/`GAP`. Never an older day’s numbers. Phase 2 GA4 landings stay unused until a later additive read — this checklist does not invent them.
 
 Optional Mini (secrets are **not** on Mini): `python -m src.main ga4-sync` prints `needs OAuth` / `Wrote 0 rows`. That is correct.
 
@@ -284,19 +284,19 @@ Then conversion-digest `"seo": null` until a locked-day GSC row exists. GSC lags
 
 ```bash
 curl -s -u "$DASHBOARD_USER:$DASHBOARD_PASSWORD" \
-  -X POST https://www.ecommdashboard.com/api/jev-funnel
+  -X POST https://www.ecommdashboard.com/api/shopify-funnel/jev-triage
 ```
 
-Success **today** (sibling not merged): HTTP 200, `"improvements": []`, `"reason"` is `silent` or `jev_not_wired`. That is fail-closed and correct. A non-empty `improvements` array with invented copy is a bug.
+Success: HTTP 200. Missing key → `"decision": "hold"` / `hold_for_review` and no LLM. Silent last_stats → no LLM. A non-empty `pursue` list with invented copy is a bug.
 
 ```bash
 curl -s -u "$DASHBOARD_USER:$DASHBOARD_PASSWORD" \
   "https://www.ecommdashboard.com/api/conversion-digest"
 ```
 
-Success: `"improvements": []` and `"jev": { "source": "unwired" | "conversion_digest_status" | "shopify_funnel_status.last_stats.jev", "sibling": { "id": "bc-74a886b6" } }`. Max 3 pursue items when the sibling lands.
+Success: HTTP 200, `"as_of"` is prior-day ET, `"improvements"` empty or at most 3 Jev pursue rows. Never invent copy.
 
-**You’re done when:** POST `/api/jev-funnel` and GET `/api/conversion-digest` both return 200 without inventing copy.
+**You’re done when:** POST `/api/shopify-funnel/jev-triage` and GET `/api/conversion-digest` both return 200 without inventing copy.
 
 ---
 
@@ -310,6 +310,6 @@ In Supabase SQL editor run `supabase/migration_conversion_phase2.sql`. RLS on, n
 
 1. Phase 2 migration is applied.
 2. `/api/phase2-status` shows the connectors Dave finished as `configured: true` (blank connectors stay `false` — that is safer than a guessed token).
-3. `/api/conversion-digest` returns `dateLock: true` for prior-day ET.
-4. `/api/jev-funnel` returns `improvements: []` until sibling Jev persist lands.
-5. `/api/shopify-funnel` still works (Phase 1). No Mini Jev job.
+3. `/api/conversion-digest` returns prior-day ET `as_of` (GAP if that day is missing — never substitutes).
+4. `/api/shopify-funnel/jev-triage` is the only Jev evaluate (Vercel). Fail closed when the gateway key is missing.
+5. `/api/shopify-funnel` still works (Phase 1). No Mini Jev job. No `/api/jev-funnel`.

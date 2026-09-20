@@ -1,11 +1,12 @@
 import { connectorStatus, PHASE2_CONNECTORS } from "@/lib/phase2-env";
-import { hasAiGatewayKey, JEV_SIBLING } from "@/lib/jev-funnel";
+import { hasGatewayKey } from "@/lib/funnel-jev-triage";
 
 /**
  * GET /api/phase2-status
  *
  * Boolean configured flags only. Never echoes secret values.
  * Dave/Dana use this after pasting Vercel env names.
+ * Jev evaluate is the landed Vercel route — not a second Mini path.
  */
 export const dynamic = "force-dynamic";
 
@@ -19,9 +20,9 @@ export async function GET() {
     secretsOn: "Vercel",
     connectors,
     jev: {
-      aiGatewayKey: hasAiGatewayKey(),
-      sibling: JEV_SIBLING,
-      evaluateWired: false,
+      aiGatewayKey: hasGatewayKey(),
+      route: "/api/shopify-funnel/jev-triage",
+      evaluateWired: true,
     },
   });
 }
