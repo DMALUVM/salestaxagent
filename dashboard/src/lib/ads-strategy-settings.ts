@@ -40,7 +40,7 @@ export function fileDefaults(): { doc: StrategyDoc; source: string } {
     path.join(process.cwd(), "config", "ads_strategy.json"),
   ]) {
     try {
-      const doc = JSON.parse(fs.readFileSync(candidate, "utf8")) as StrategyDoc;
+      const doc = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ candidate, "utf8")) as StrategyDoc;
       if (doc?.roles) {
         fileCache = { doc, source: candidate };
         return fileCache;
