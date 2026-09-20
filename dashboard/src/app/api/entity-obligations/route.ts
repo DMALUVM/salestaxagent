@@ -15,7 +15,7 @@ function repoPaths(file: string): string[] {
 async function readJson(file: string): Promise<Record<string, unknown> | null> {
   for (const p of repoPaths(file)) {
     try {
-      return JSON.parse(await readFile(p, "utf8"));
+      return JSON.parse(await readFile(/* turbopackIgnore: true */ p, "utf8"));
     } catch { /* try the next path */ }
   }
   return null;
