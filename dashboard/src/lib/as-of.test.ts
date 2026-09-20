@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { agentToday, AGENT_TZ, amazonAsOf, amazonToday, AMAZON_TZ, formatLocalYmd, shiftDays, windowStart } from "./as-of";
+import { agentAsOf, agentToday, AGENT_TZ, amazonAsOf, amazonToday, AMAZON_TZ, formatLocalYmd, shiftDays, windowStart } from "./as-of";
 
 describe("agentToday", () => {
   test("uses America/New_York, not UTC", () => {
@@ -9,6 +9,7 @@ describe("agentToday", () => {
     // 00:30 UTC on the 21st is still the 20th in Eastern (EDT, UTC-4).
     const utc = new Date("2026-08-21T00:30:00.000Z");
     assert.equal(agentToday(utc), "2026-08-20");
+    assert.equal(agentAsOf(utc), "2026-08-19");
   });
 });
 
