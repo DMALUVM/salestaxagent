@@ -43,11 +43,8 @@ async function loadOptionalDay(
   date: string,
 ): Promise<Array<Record<string, unknown>>> {
   const r = await sb.from(table).select(select).eq("metric_date", date).limit(500);
-  if (r.error) {
-    if (/does not exist|schema cache|PGRST/i.test(r.error.message)) return [];
-    return [];
-  }
-  return (r.data ?? []) as Array<Record<string, unknown>>;
+  if (r.error || !Array.isArray(r.data)) return [];
+  return r.data as unknown as Array<Record<string, unknown>>;
 }
 
 export async function GET(request: NextRequest) {
