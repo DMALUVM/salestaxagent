@@ -197,6 +197,15 @@ export function biggestLeak(c: FunnelCounts): Leak | null {
   };
 }
 
+/** Latest day we can roll up. Funnel dates win; abandons alone are enough
+ *  when ShopifyQL is denied (live token today). Never invents a session count. */
+export function windowEnd(funnelDates: string[], abandonDates: string[]): string | null {
+  const funnel = funnelDates.filter(Boolean).sort();
+  if (funnel.length) return funnel[funnel.length - 1];
+  const abandons = abandonDates.filter(Boolean).sort();
+  return abandons.length ? abandons[abandons.length - 1] : null;
+}
+
 export function windowBounds(end: string, days: FunnelWindow): { start: string; end: string } {
   const [y, m, d] = end.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));

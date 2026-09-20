@@ -12,6 +12,7 @@ import {
   sumDaily,
   topAbandonedProducts,
   windowBounds,
+  windowEnd,
   DEFINITIONS,
   type AbandonedRow,
   type FunnelWindow,
@@ -28,9 +29,9 @@ export const dynamic = "force-dynamic";
 const SETUP =
   "Run supabase/migration_shopify_funnel.sql, then " +
   "`python -m src.main shopify-funnel-sync` on the Mini. " +
-  "The custom app needs read_reports (ShopifyQL) and read_orders " +
-  "(abandoned checkouts), plus staff permission manage_abandoned_checkouts " +
-  "and Protected customer data Level 2. Do not invent numbers from other analytics.";
+  "Live token already has read_orders (abandonedCheckouts works). " +
+  "Session funnel still needs Dave to grant read_reports + Protected " +
+  "customer data Level 2. Do not invent session counts from orders.";
 
 async function loadAll<T>(
   sb: ReturnType<typeof getServerSupabase>,
@@ -89,7 +90,8 @@ async function handleGet(request: NextRequest) {
     const allDates = daily
       .filter((r) => String(r.split_kind ?? "all") === "all")
       .map((r) => String(r.metric_date));
-    const end = allDates.length ? allDates[allDates.length - 1] : null;
+    const abandonDates = abandons.map((r) => String(r.checkout_date));
+    const end = windowEnd(allDates, abandonDates);
 
     if (!end) {
       return Response.json({

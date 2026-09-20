@@ -206,6 +206,18 @@ export default function ShopperPage() {
         </Card>
       )}
 
+      {d?.available && !d.empty && d.funnel?.sessions == null && (
+        <Card className="border-amber-500/40">
+          <CardContent className="p-4 text-sm">
+            <p className="font-medium">Session counts are blank until read_reports lands.</p>
+            <p className="mt-1 text-muted-foreground">
+              Abandoned checkouts below come from Admin GraphQL on the current
+              token. We do not fill sessions from orders.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {d?.available && !d.empty && (
         <>
           <div className="grid gap-3 sm:grid-cols-3">

@@ -13,6 +13,7 @@ import {
   sumDaily,
   topAbandonedProducts,
   windowBounds,
+  windowEnd,
   type AbandonedRow,
 } from "./shopify-funnel";
 
@@ -73,6 +74,12 @@ describe("window rollup", () => {
       start: "2026-09-14", end: "2026-09-20",
     });
     assert.equal(windowBounds("2026-09-20", 28).start, "2026-08-24");
+  });
+
+  test("windowEnd uses abandons when ShopifyQL days are missing", () => {
+    assert.equal(windowEnd([], ["2026-09-10", "2026-09-18"]), "2026-09-18");
+    assert.equal(windowEnd(["2026-09-12"], ["2026-09-18"]), "2026-09-12");
+    assert.equal(windowEnd([], []), null);
   });
 });
 
@@ -198,6 +205,8 @@ describe("wiring", () => {
     assert.doesNotMatch(route, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
     assert.doesNotMatch(route, /orderCreate|sellerise/i);
     assert.doesNotMatch(route, /write_orders|draftOrderComplete/);
+    assert.match(route, /windowEnd/);
+    assert.doesNotMatch(route, /klaviyo|ryze|google ads|gsc/i);
   });
 
   test("shopper page is full-width with an error boundary", () => {
@@ -208,6 +217,8 @@ describe("wiring", () => {
     assert.doesNotMatch(page, /getSupabase/);
     assert.doesNotMatch(page, /return <LoadingState/);
     assert.match(page, /AbortController/);
+    assert.match(page, /read_reports/);
+    assert.doesNotMatch(page, /ryze/i);
   });
 
   test("migration enables RLS and stores no recovery URL", () => {
