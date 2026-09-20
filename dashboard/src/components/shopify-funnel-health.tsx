@@ -27,23 +27,39 @@ type Payload = {
 export function ShopifyFunnelHealth() {
   const [d, setD] = useState<Payload | null>(null);
 
-  useEffect(() => { load(); }, []);
-
-  async function load() {
-    try {
-      const res = await fetch("/api/shopify-funnel?window=7&view=health");
-      const ct = res.headers.get("content-type") ?? "";
-      if (!ct.includes("application/json")) {
-        throw new Error(`Unexpected ${res.status} response.`);
+  useEffect(() => {
+    let cancelled = false;
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 12_000);
+    (async () => {
+      try {
+        const res = await fetch("/api/shopify-funnel?window=7&view=health", {
+          signal: ctrl.signal,
+          credentials: "same-origin",
+        });
+        const ct = res.headers.get("content-type") ?? "";
+        if (!ct.includes("application/json")) {
+          throw new Error(`Unexpected ${res.status} response.`);
+        }
+        const payload = await res.json();
+        if (!cancelled) setD(payload);
+      } catch (e) {
+        if (cancelled) return;
+        const aborted = e instanceof Error && e.name === "AbortError";
+        setD({
+          available: false,
+          error: aborted
+            ? "Timed out talking to the warehouse."
+            : e instanceof Error ? e.message : String(e),
+        });
       }
-      setD(await res.json());
-    } catch (e) {
-      setD({
-        available: false,
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
-  }
+    })();
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const leak = d?.biggestLeak;
   const scopes = d?.status?.missing_scopes ?? [];

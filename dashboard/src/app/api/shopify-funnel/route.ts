@@ -51,7 +51,7 @@ async function loadAll<T>(
   return rows;
 }
 
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const windowRaw = Number(params.get("window") ?? 7);
   const windowDays: FunnelWindow = windowRaw === 28 ? 28 : 7;
@@ -171,5 +171,24 @@ export async function GET(request: NextRequest) {
       setupHint: /shopify_funnel|shopify_abandoned/.test(msg) ? SETUP : null,
       definitions: DEFINITIONS,
     });
+  }
+}
+
+export async function GET(request: NextRequest) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<Response>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(Response.json({
+        available: false,
+        error: "Warehouse timed out.",
+        setupHint: SETUP,
+        definitions: DEFINITIONS,
+      }));
+    }, 8000);
+  });
+  try {
+    return await Promise.race([handleGet(request), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

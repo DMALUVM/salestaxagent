@@ -181,7 +181,11 @@ describe("wiring", () => {
 
   test("Overview mounts the thin funnel-health card", () => {
     assert.match(overview, /ShopifyFunnelHealth/);
-    assert.match(card, /useEffect\(\s*\(\)\s*=>\s*\{\s*load\(\)/);
+    // Card must still mount while Pulse sales queries are loading.
+    const loadGate = overview.match(/if \(l1 \|\| l2 \|\| l3\)[\s\S]{0,350}/);
+    assert.ok(loadGate, "Pulse still has the l1||l2||l3 loading gate");
+    assert.match(loadGate[0], /ShopifyFunnelHealth/);
+    assert.match(card, /AbortController/);
     assert.match(card, /\/api\/shopify-funnel/);
     assert.match(card, /content-type/);
     assert.doesNotMatch(card, /getSupabase/);
@@ -202,6 +206,8 @@ describe("wiring", () => {
     assert.match(page, /\/api\/shopify-funnel/);
     assert.match(page, /content-type/);
     assert.doesNotMatch(page, /getSupabase/);
+    assert.doesNotMatch(page, /return <LoadingState/);
+    assert.match(page, /AbortController/);
   });
 
   test("migration enables RLS and stores no recovery URL", () => {

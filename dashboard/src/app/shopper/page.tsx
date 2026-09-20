@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { LoadingState } from "@/components/loading";
 import { isConfigured } from "@/lib/supabase";
 import { money, pct, type FunnelWindow } from "@/lib/shopify-funnel";
 import { Shield } from "lucide-react";
@@ -73,28 +72,49 @@ export default function ShopperPage() {
   const configured = isConfigured();
   const [windowDays, setWindowDays] = useState<FunnelWindow>(7);
   const [d, setD] = useState<Payload | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [showDefs, setShowDefs] = useState(false);
+  const [tick, setTick] = useState(0);
 
-  useEffect(() => { load(windowDays); }, [windowDays]);
-
-  async function load(w: FunnelWindow) {
+  useEffect(() => {
+    let cancelled = false;
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 12_000);
     setBusy(true);
-    try {
-      const res = await fetch(`/api/shopify-funnel?window=${w}&view=full`);
-      const ct = res.headers.get("content-type") ?? "";
-      if (!ct.includes("application/json")) {
-        throw new Error(`Unexpected ${res.status} response.`);
+    (async () => {
+      try {
+        const res = await fetch(`/api/shopify-funnel?window=${windowDays}&view=full`, {
+          signal: ctrl.signal,
+          credentials: "same-origin",
+        });
+        const ct = res.headers.get("content-type") ?? "";
+        if (!ct.includes("application/json")) {
+          throw new Error(`Unexpected ${res.status} response.`);
+        }
+        const payload = await res.json();
+        if (!cancelled) setD(payload);
+      } catch (e) {
+        if (cancelled) return;
+        const aborted = e instanceof Error && e.name === "AbortError";
+        setD({
+          available: false,
+          error: aborted
+            ? "Timed out talking to the warehouse."
+            : e instanceof Error ? e.message : String(e),
+        });
+      } finally {
+        if (!cancelled) setBusy(false);
       }
-      setD(await res.json());
-    } catch (e) {
-      setD({
-        available: false,
-        error: e instanceof Error ? e.message : String(e),
-      });
-    } finally {
-      setBusy(false);
-    }
+    })();
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+      window.clearTimeout(timer);
+    };
+  }, [windowDays, tick]);
+
+  function reload() {
+    setTick((n) => n + 1);
   }
 
   if (!configured) {
@@ -108,8 +128,6 @@ export default function ShopperPage() {
       </div>
     );
   }
-
-  if (busy && !d) return <LoadingState />;
 
   const maxStep = Math.max(1, ...(d?.steps ?? []).map((s) => s.count ?? 0));
   const scopes = d?.status?.missing_scopes ?? [];
@@ -138,11 +156,18 @@ export default function ShopperPage() {
           <Button variant="ghost" size="sm" onClick={() => setShowDefs((v) => !v)}>
             {showDefs ? "Hide definitions" : "Definitions"}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => load(windowDays)} disabled={busy}>
+          <Button variant="outline" size="sm" onClick={reload} disabled={busy}>
             {busy ? "Loading…" : "Refresh"}
           </Button>
         </div>
       </div>
+
+      {busy && !d && (
+        <div className="space-y-2" aria-busy="true">
+          <div className="h-24 animate-pulse rounded-md bg-muted" />
+          <div className="h-40 animate-pulse rounded-md bg-muted" />
+        </div>
+      )}
 
       {d && !d.available && (
         <Card className="border-amber-500/40">
@@ -150,7 +175,7 @@ export default function ShopperPage() {
             <p className="font-medium">could not load</p>
             <p className="mt-1 text-muted-foreground">{d.error}</p>
             {d.setupHint && <p className="mt-2 text-xs">{d.setupHint}</p>}
-            <Button className="mt-3" size="sm" variant="outline" onClick={() => load(windowDays)}>
+            <Button className="mt-3" size="sm" variant="outline" onClick={reload}>
               Try again
             </Button>
           </CardContent>

@@ -282,17 +282,29 @@ export default function Pulse() {
   }, [filings, nexus, recs, filingToday, entityOverdue, stateRules]);
 
   if (!configured) return <SetupPrompt />;
-  if (l1 || l2 || l3) return <LoadingState />;
+  // Funnel health is a separate service-role read — don't hide it behind
+  // Pulse sales/nexus/filing warehouse loads (those can hang on a dummy URL).
+  if (l1 || l2 || l3) {
+    return (
+      <div className="space-y-6">
+        <LoadingState />
+        <ShopifyFunnelHealth />
+      </div>
+    );
+  }
   if (e1 || e2 || e3) {
     return (
-      <QueryError
-        message={e1 || e2 || e3}
-        onRetry={() => {
-          refetchSales();
-          refetchNexus();
-          refetchFilings();
-        }}
-      />
+      <div className="space-y-6">
+        <QueryError
+          message={e1 || e2 || e3}
+          onRetry={() => {
+            refetchSales();
+            refetchNexus();
+            refetchFilings();
+          }}
+        />
+        <ShopifyFunnelHealth />
+      </div>
     );
   }
 
