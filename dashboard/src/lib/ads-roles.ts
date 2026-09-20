@@ -49,7 +49,7 @@ function load() {
     path.join(process.cwd(), "config", "ads_strategy.json"),
   ]) {
     try {
-      const raw = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      const raw = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ candidate, "utf8"));
       if (raw?.roles?.patterns) {
         cfg = raw.roles as RoleConfig;
         source = candidate;

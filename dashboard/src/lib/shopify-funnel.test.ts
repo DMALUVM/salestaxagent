@@ -230,11 +230,15 @@ describe("wiring", () => {
     assert.doesNotMatch(page, /klaviyo_abandon|place order/i);
   });
 
-  test("Triage definition says Jev runs on Vercel, not that it is unwired", () => {
+  test("Triage definition says Jev runs on Vercel digest, not that it is unwired", () => {
     const defs = readFileSync(path.join(root, "src/lib/shopify-funnel.ts"), "utf8");
     assert.match(defs, /Jev leak triage runs on Vercel/);
-    assert.match(defs, /shopify-funnel-sync does not call an LLM/);
+    assert.match(defs, /conversion-digest/);
+    assert.match(defs, /warmup only/);
+    assert.match(defs, /shopify-funnel-sync stamps last_stats\.jev/);
+    assert.match(defs, /does not call an LLM/);
     assert.doesNotMatch(defs, /until Jev is wired/);
+    assert.doesNotMatch(defs, /twice-daily cron/);
   });
 
   test("migration enables RLS and stores no recovery URL", () => {

@@ -21,11 +21,12 @@ If a query comes back ACCESS_DENIED the counts for that source stay empty
 and `shopify_funnel_status.missing_scopes` records exactly what Dave must
 grant. We do not invent a number from orders or GA4 to fill the hole.
 
-Jev triage runs on Vercel (`/api/shopify-funnel/jev-triage`), not Mini.
-Mini writes funnel + abandon rows and stamps `last_stats.silent` /
-`last_stats.jev` (`vercel_runtime` → hold_for_review). The dashboard
-route reads the same `shopify_funnel_status` leak stats, uses Vercel
-`AI_GATEWAY_API_KEY`, and fail-closes to hold_for_review when the key
+Jev triage runs on Vercel, not Mini. Mini writes funnel + abandon rows
+and stamps `last_stats.silent` / `last_stats.jev` (`vercel_runtime` →
+hold_for_review). Iris reads `GET /api/conversion-digest`, which runs
+or reuses Jev (`ensureFunnelJevTriage`) against those stats. Cron
+`/api/shopify-funnel/jev-triage` is warmup only. Vercel uses
+`AI_GATEWAY_API_KEY` and fail-closes to hold_for_review when the key
 is absent. Silent → no LLM. Never raises. No Shopify / theme writes.
 `AI_GATEWAY_API_KEY` must not live in Mini `.env`.
 """

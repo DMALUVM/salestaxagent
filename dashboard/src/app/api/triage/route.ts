@@ -28,9 +28,9 @@ export async function GET() {
     join(process.cwd(), "..", "config", "fba_nexus_posture.json"),
   ];
   for (const p of paths) {
-    if (existsSync(p)) {
+    if (existsSync(/* turbopackIgnore: true */ p)) {
       try {
-        const raw = JSON.parse(readFileSync(p, "utf-8"));
+        const raw = JSON.parse(readFileSync(/* turbopackIgnore: true */ p, "utf-8"));
         postures = raw.postures ?? {};
       } catch { /* ignore parse errors */ }
       break;

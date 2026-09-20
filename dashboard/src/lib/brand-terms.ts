@@ -32,7 +32,7 @@ function loadRules(): BrandRules {
     path.join(process.cwd(), "config", "brand_terms.json"),
   ]) {
     try {
-      const doc = JSON.parse(fs.readFileSync(candidate, "utf8")) as {
+      const doc = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ candidate, "utf8")) as {
         phrases?: unknown[];
         tokens?: unknown[];
       };
