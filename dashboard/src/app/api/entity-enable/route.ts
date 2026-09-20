@@ -25,7 +25,7 @@ function repoRoot(): string[] {
 
 async function findFile(rel: string): Promise<string | null> {
   for (const root of repoRoot()) {
-    const p = path.join(root, rel);
+    const p = path.join(/* turbopackIgnore: true */ root, rel);
     try {
       await readFile(/* turbopackIgnore: true */ p, "utf8");
       return p;

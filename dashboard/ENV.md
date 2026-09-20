@@ -28,7 +28,8 @@ surfaces in the card as a visible failure state, not a blank panel.
 | `/api/shopify-customers` | Supabase server creds + `shopify_orders` table | Visible error card naming the migration/backfill |
 | `/api/shopify-funnel` | Supabase server creds + `shopify_funnel_*` / `shopify_abandoned_checkouts` | Visible setup hint naming the migration + `shopify-funnel-sync` + scopes |
 | `/api/shopify-funnel/jev-triage` | Supabase service role + Vercel `AI_GATEWAY_API_KEY` | Cron warmup. Same `ensureFunnelJevTriage` as the digest. Fail-closed `hold_for_review` when the key is missing; silent → no LLM |
-| `/api/conversion-digest` | Supabase service role + `shopify_funnel_*`; Jev key on Vercel | Iris contract. Prior-day ET date-lock; HOLD/GAP if the day is missing — never substitutes. On a closed day with Mini `last_stats`, runs or reuses Jev and copies pursue (max 3). Fail closed → `improvements: []`. |
+| `/api/conversion-digest` | Supabase service role + `shopify_funnel_*`; Jev key on Vercel | Iris contract. Prior-day ET date-lock; HOLD/GAP if the day is missing — never substitutes. On a closed day with Mini `last_stats`, runs or reuses Jev and copies pursue (max 3). Fail closed → `improvements: []`. Phase 2 GA4/Ads/GSC OAuth is **not** required to read. |
+| `/api/phase2-status` | none (boolean env flags only) | `configured: true/false` + missing names. Never echoes secret values. See `docs/oauth-phase2.md`. |
 | `/api/ppc` | Supabase server creds | Load-failure card |
 | `/api/paid-ads` | Supabase server creds + `paid_ads_snapshots` / `paid_ads_campaigns_window` | Empty Google/Meta cards + optional migration hint |
 | `/api/paid-ads/csv` | Supabase server creds (POST) | 400 if no recognisable Google/Meta/GSC/GA4 rows; upserts `paid_*_daily` |
@@ -80,5 +81,27 @@ export, GSC Queries/Chart/Pages, GA4 Explore) into `paid_campaign_daily`,
 The older Ads Ops JSON path (`POST /api/paid-ads/ingest` →
 `paid_ads_snapshots`) still works. Neither path scrapes Ads Manager.
 See `dashboard/PAID_ADS.md`.
+
+## Phase 2 official-API connectors (OAuth later)
+
+Iris conversion digest. **Official APIs only** — not the CSV intel
+tables above. Dave sets these on Vercel the same way as
+`AI_GATEWAY_API_KEY`. Mini does not get chat-pasted keys. Stubs write
+0 rows until OAuth exists (`docs/oauth-phase2.md`).
+
+| Variable | Required to *read* digest | Used by (later) |
+|---|---|---|
+| `GOOGLE_OAUTH_CLIENT_ID` | no | Mini `ga4-sync` / `google-ads-sync` / `gsc-sync` |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | no | same |
+| `GOOGLE_OAUTH_REFRESH_TOKEN` | no | same |
+| `GA4_PROPERTY_ID` | no | `ga4-sync` |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | no | `google-ads-sync` |
+| `GOOGLE_ADS_CUSTOMER_ID` | no | `google-ads-sync` |
+| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | no | `google-ads-sync` (MCC, optional) |
+| `GSC_SITE_URL` | no | `gsc-sync` |
+| `META_APP_ID` | no | `meta-ads-sync` |
+| `META_APP_SECRET` | no | `meta-ads-sync` |
+| `META_ADS_ACCESS_TOKEN` | no | `meta-ads-sync` |
+| `META_ADS_ACCOUNT_ID` | no | `meta-ads-sync` |
 
 
