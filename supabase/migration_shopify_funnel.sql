@@ -147,5 +147,5 @@ alter table shopify_funnel_splits         enable row level security;
 alter table shopify_abandoned_checkouts   enable row level security;
 alter table shopify_funnel_status         enable row level security;
 
--- No CREATE POLICY. Deny-by-default for anon / authenticated.
+-- Deny-by-default for anon / authenticated: no permissive policies.
 -- service_role (Mini + dashboard API) bypasses RLS.

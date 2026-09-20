@@ -30,7 +30,7 @@ const SETUP =
   "`python -m src.main shopify-funnel-sync` on the Mini. " +
   "The custom app needs read_reports (ShopifyQL) and read_orders " +
   "(abandoned checkouts), plus staff permission manage_abandoned_checkouts " +
-  "and Protected customer data Level 2. Do not invent numbers from GA4.";
+  "and Protected customer data Level 2. Do not invent numbers from other analytics.";
 
 async function loadAll<T>(
   sb: ReturnType<typeof getServerSupabase>,

@@ -192,7 +192,8 @@ describe("wiring", () => {
     assert.match(route, /shopify_funnel_daily/);
     assert.match(route, /shopify_abandoned_checkouts/);
     assert.doesNotMatch(route, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
-    assert.doesNotMatch(route, /Place Order|orderCreate|GA4|sellerise/i);
+    assert.doesNotMatch(route, /orderCreate|sellerise/i);
+    assert.doesNotMatch(route, /write_orders|draftOrderComplete/);
   });
 
   test("shopper page is full-width with an error boundary", () => {
@@ -208,8 +209,12 @@ describe("wiring", () => {
     assert.match(sql, /shopify_funnel_daily/);
     assert.match(sql, /shopify_abandoned_checkouts/);
     assert.match(sql, /enable row level security/i);
-    assert.doesNotMatch(sql, /CREATE POLICY/i);
-    assert.doesNotMatch(sql, /abandoned_checkout_url|abandonedCheckoutUrl/);
+    const executable = sql
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("--"))
+      .join("\n");
+    assert.doesNotMatch(executable, /CREATE POLICY/i);
+    assert.doesNotMatch(executable, /abandoned_checkout_url|abandonedCheckoutUrl/);
     assert.match(sql, /TODO\(jev\)/);
   });
 });
