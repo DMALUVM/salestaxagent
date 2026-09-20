@@ -5,7 +5,11 @@
  * (GET_FBA_REIMBURSEMENTS_DATA). This queue is rebuilt from:
  *   - GET_LEDGER_DETAIL_VIEW_DATA (eventType=Adjustments)
  *   - inbound shipped − received shorts (SP-API live + Sellerboard CLOSED)
- * minus units already reimbursed for the same SKU + reason group.
+ * minus units already reimbursed for the same SKU + reason group
+ * (Lost_Inbound tied to an FBA shipment only subtracts reimbursements
+ * whose case_id/order_id is that shipment — SKU-pool cash is not a
+ * fake partial on this shipment). Sellerboard CLOSED zero-recv is
+ * cleared when inventory_events Receipts cover shipped qty.
  *
  * Amazon has no SP-API for open claims / eligibility. Do not fake
  * Eligible rows from the paid desk.
