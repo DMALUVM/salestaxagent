@@ -244,19 +244,22 @@ describe("wiring", () => {
   );
   const miniEnv = readFileSync(path.join(root, "..", ".env.example"), "utf8");
 
-  test("route is service-role read-only and date-locked", () => {
+  test("route is service-role, date-locked, and runs Jev on read", () => {
     assert.match(route, /getServerSupabase/);
     assert.match(route, /shopify_funnel_daily/);
     assert.match(route, /shopify_abandoned_checkouts/);
     assert.match(route, /shopify_funnel_status/);
     assert.match(route, /parseDigestDate/);
     assert.match(route, /buildConversionDigest/);
+    assert.match(route, /ensureFunnelJevTriage/);
+    assert.match(route, /isClosedEasternDay/);
     assert.doesNotMatch(route, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
     assert.doesNotMatch(route, /orderCreate|draftOrderComplete|abandonedCheckoutUrl/);
     assert.doesNotMatch(route, /write_themes|unauthenticated_/);
     assert.doesNotMatch(route, /ga4|meta ads|klaviyo|ryze/i);
     assert.doesNotMatch(route, /AI_GATEWAY_API_KEY/);
     assert.doesNotMatch(route, /shopify_orders/);
+    assert.doesNotMatch(route, /api\/jev-funnel/);
   });
 
   test("lib never substitutes an older day and names the payload fields", () => {

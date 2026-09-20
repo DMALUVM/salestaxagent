@@ -181,6 +181,78 @@ export function statsAreSilent(stats: Record<string, unknown> | null | undefined
   return jev?.reason === "silent";
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return Boolean(v) && typeof v === "object" && !Array.isArray(v);
+}
+
+/** True when last_stats.jev already ran on Vercel (digest / cron can skip LLM). */
+export function jevAlreadyRan(stats: Record<string, unknown> | null | undefined): boolean {
+  const jev = stats && isRecord(stats.jev) ? stats.jev : null;
+  return jev?.ran === true && jev?.runtime === "vercel";
+}
+
+/** Run Jev unless Mini stamped silent or a Vercel run is already persisted. */
+export function shouldRunJev(
+  stats: Record<string, unknown> | null | undefined,
+  force = false,
+): boolean {
+  if (force) return true;
+  if (!stats) return false;
+  if (statsAreSilent(stats)) return false;
+  if (jevAlreadyRan(stats)) return false;
+  return true;
+}
+
+export function mergeJevIntoStats(
+  stats: Record<string, unknown>,
+  result: JevResult,
+  at: Date = new Date(),
+): Record<string, unknown> {
+  return { ...stats, jev: { ...result, at: at.toISOString() } };
+}
+
+/**
+ * Digest / cron shared path: read last_stats.jev or run + persist.
+ * Fail closed (no LLM) when silent, key missing, or evaluate missing.
+ */
+export async function ensureFunnelJevTriage(opts: {
+  stats: Record<string, unknown> | null | undefined;
+  hasGatewayKey: boolean;
+  evaluate?: EvaluateFn;
+  force?: boolean;
+  persist?: (merged: Record<string, unknown>, result: JevResult) => Promise<void>;
+}): Promise<JevResult> {
+  const { stats, hasGatewayKey: keyed, evaluate, force, persist } = opts;
+  if (!force && jevAlreadyRan(stats) && isRecord(stats?.jev)) {
+    const prev = stats.jev as JevResult;
+    return {
+      ran: true,
+      decision: prev.decision ?? "hold",
+      runtime: "vercel",
+      reason: "already_ran",
+      pursue_n: prev.pursue_n,
+      hold_n: prev.hold_n,
+      skip_n: prev.skip_n,
+      error_n: prev.error_n,
+      ...(Array.isArray(prev.pursue) ? { pursue: prev.pursue } : {}),
+    };
+  }
+  const result = await runFunnelJevTriage({
+    stats,
+    hasGatewayKey: keyed,
+    force,
+    evaluate: keyed ? evaluate : undefined,
+  });
+  if (persist && stats) {
+    try {
+      await persist(mergeJevIntoStats(stats, result), result);
+    } catch {
+      /* Iris still gets this read's result; cron can retry the write. */
+    }
+  }
+  return result;
+}
+
 export async function runFunnelJevTriage(opts: {
   stats: Record<string, unknown> | null | undefined;
   hasGatewayKey: boolean;

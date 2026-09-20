@@ -4,11 +4,14 @@ import { readFileSync } from "node:fs";
 import path from "path";
 import {
   bucketItem,
+  ensureFunnelJevTriage,
   evaluateViaGateway,
   hasGatewayKey,
+  jevAlreadyRan,
   jevDecisionFromResult,
   jevItemsFromStats,
   runFunnelJevTriage,
+  shouldRunJev,
   statsAreSilent,
 } from "./funnel-jev-triage";
 
@@ -129,6 +132,67 @@ describe("fail closed on Vercel", () => {
     assert.equal(statsAreSilent(stats), false);
   });
 
+  test("shouldRunJev skips silent and already-ran Vercel results", () => {
+    assert.equal(shouldRunJev(null), false);
+    assert.equal(shouldRunJev({ ...stats, silent: true }), false);
+    assert.equal(shouldRunJev({
+      ...stats,
+      jev: { ran: true, runtime: "vercel", decision: "pursue" },
+    }), false);
+    assert.equal(shouldRunJev({
+      ...stats,
+      jev: { ran: false, reason: "vercel_runtime", runtime: "vercel" },
+    }), true);
+    assert.equal(shouldRunJev({
+      ...stats,
+      jev: { ran: true, runtime: "vercel" },
+    }, true), true);
+    assert.equal(jevAlreadyRan({ jev: { ran: true, runtime: "vercel" } }), true);
+  });
+
+  test("ensureFunnelJevTriage reuses persisted pursue and persists a new run", async () => {
+    const reused = await ensureFunnelJevTriage({
+      stats: {
+        ...stats,
+        jev: {
+          ran: true, runtime: "vercel", decision: "pursue",
+          pursue: [{ metric: "sessions->add_to_cart", current: 80, severity: "p0" }],
+        },
+      },
+      hasGatewayKey: true,
+      evaluate: async () => {
+        throw new Error("should not call");
+      },
+    });
+    assert.equal(reused.reason, "already_ran");
+    assert.equal(reused.decision, "pursue");
+    assert.equal((reused.pursue ?? []).length, 1);
+
+    let persisted = 0;
+    const ran = await ensureFunnelJevTriage({
+      stats: { ...stats, jev: { ran: false, reason: "vercel_runtime" } },
+      hasGatewayKey: true,
+      evaluate: async () => ({ answers: { severity: { choice: "p0" } } }),
+      persist: async (merged, result) => {
+        persisted += 1;
+        assert.equal(result.decision, "pursue");
+        assert.equal((merged.jev as { ran?: boolean }).ran, true);
+      },
+    });
+    assert.equal(ran.ran, true);
+    assert.equal(ran.decision, "pursue");
+    assert.equal(persisted, 1);
+
+    const closed = await ensureFunnelJevTriage({
+      stats: { ...stats, jev: { ran: false, reason: "vercel_runtime" } },
+      hasGatewayKey: false,
+      evaluate: async () => ({ answers: { severity: { choice: "p0" } } }),
+    });
+    assert.equal(closed.ran, false);
+    assert.equal(closed.reason, "missing_gateway_key");
+    assert.deepEqual(closed.pursue, undefined);
+  });
+
   test("evaluateViaGateway fails closed without key and redacts it", async () => {
     const prev = process.env.AI_GATEWAY_API_KEY;
     delete process.env.AI_GATEWAY_API_KEY;
@@ -169,7 +233,7 @@ describe("wiring", () => {
     assert.match(route, /shopify_funnel_status/);
     assert.match(route, /AI_GATEWAY_API_KEY/);
     assert.match(route, /holdClosed/);
-    assert.match(route, /runFunnelJevTriage/);
+    assert.match(route, /ensureFunnelJevTriage/);
     assert.doesNotMatch(route, /orderCreate|draftOrderComplete|abandonedCheckoutUrl/);
     assert.doesNotMatch(route, /write_themes|unauthenticated_/);
     assert.doesNotMatch(route, /NEXT_PUBLIC_AI_GATEWAY/);
@@ -191,7 +255,20 @@ describe("wiring", () => {
     assert.match(envMd, /AI_GATEWAY_API_KEY/);
     assert.match(envMd, /Do not set on Mini/);
     assert.match(envMd, /Secure Vault/);
+    assert.match(envMd, /conversion-digest/);
     assert.doesNotMatch(miniEnv, /AI_GATEWAY_API_KEY/);
     assert.match(vercel, /shopify-funnel\/jev-triage/);
+  });
+
+  test("dynamic config reads stay turbopackIgnore", () => {
+    for (const rel of [
+      "src/lib/registration-plan.ts",
+      "src/lib/ads-roles.ts",
+      "src/lib/ads-strategy-settings.ts",
+      "src/lib/brand-terms.ts",
+    ]) {
+      const src = readFileSync(path.join(root, rel), "utf8");
+      assert.match(src, /turbopackIgnore: true/);
+    }
   });
 });
