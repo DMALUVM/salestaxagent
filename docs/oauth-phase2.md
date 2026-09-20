@@ -11,7 +11,7 @@ Vercel env page: `https://vercel.com/dave-maloneys-projects/dashboard/settings/e
 
 1. **Mini** `python -m src.main shopify-funnel-sync` writes `shopify_funnel_*` + abandons (already scheduled 07:15 ET).
 2. **Vercel** `GET`/`POST /api/shopify-funnel/jev-triage` (landed #153, sibling `bc-74a886b6`) evaluates leaks with `AI_GATEWAY_API_KEY` already on Vercel and writes `shopify_funnel_status.last_stats.jev`. Fail closed → `hold_for_review` / empty pursue. Does **not** call Mini.
-3. **Iris** `GET /api/conversion-digest` (landed #154) reads the prior-day `America/New_York` Shopify funnel snapshot. Missing day → GAP. Never substitutes an older day. Phase 2 GA4/Ads/GSC OAuth is **not** required to read.
+3. **Iris** `GET /api/conversion-digest` (landed #154/#155) reads the prior-day `America/New_York` Shopify funnel snapshot and runs landed Jev. Missing day → GAP. Never substitutes an older day. `phase2.landing_drops` / `seo` stay **null** until official-API rows exist for that day. OAuth is **not** required to read the Iris fields.
 
 Do not add a second Jev job on Mini. Do not add a second digest or `/api/jev-funnel` route.
 
@@ -159,7 +159,7 @@ curl -s -u "$DASHBOARD_USER:$DASHBOARD_PASSWORD" \
   "https://www.ecommdashboard.com/api/conversion-digest"
 ```
 
-Success: HTTP 200, `"as_of"` is prior-day ET, status `CLEAR`/`HOLD`/`GAP`. Never an older day’s numbers. Phase 2 GA4 landings stay unused until a later additive read — this checklist does not invent them.
+Success: HTTP 200, `"as_of"` is prior-day ET, status `CLEAR`/`HOLD`/`GAP`. `"phase2": { "landing_drops": null, … }` until a locked-day `ga4_landing_daily` row exists. Never an older day’s landings.
 
 Optional Mini (secrets are **not** on Mini): `python -m src.main ga4-sync` prints `needs OAuth` / `Wrote 0 rows`. That is correct.
 

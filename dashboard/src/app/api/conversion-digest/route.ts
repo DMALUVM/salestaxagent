@@ -10,6 +10,7 @@ import {
   evaluateViaGateway,
   hasGatewayKey,
 } from "@/lib/funnel-jev-triage";
+import { emptyPhase2, phase2FromLockedDay } from "@/lib/phase2-digest";
 import type { AbandonedRow } from "@/lib/shopify-funnel";
 
 /**
@@ -22,6 +23,10 @@ import type { AbandonedRow } from "@/lib/shopify-funnel";
  * Jev triage and copies pursue (max 3) into improvements. Fail closed
  * → improvements: []. No Shopify / theme writes. No Mini gateway key.
  *
+ * Phase 2 extras (`phase2.landing_drops` / `seo` / `connectors`) are
+ * null/false until official-API rows exist for the locked day. Missing
+ * tables are not an error. Never invents GA4/GSC/ads numbers.
+ *
  * Auth: dashboard Basic Auth + service-role warehouse. Not anon.
  */
 export const dynamic = "force-dynamic";
@@ -29,6 +34,20 @@ export const maxDuration = 60;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return Boolean(v) && typeof v === "object" && !Array.isArray(v);
+}
+
+async function loadOptionalDay(
+  sb: ReturnType<typeof getServerSupabase>,
+  table: string,
+  select: string,
+  date: string,
+): Promise<Array<Record<string, unknown>>> {
+  const r = await sb.from(table).select(select).eq("metric_date", date).limit(500);
+  if (r.error) {
+    if (/does not exist|schema cache|PGRST/i.test(r.error.message)) return [];
+    return [];
+  }
+  return (r.data ?? []) as Array<Record<string, unknown>>;
 }
 
 export async function GET(request: NextRequest) {
@@ -41,7 +60,7 @@ export async function GET(request: NextRequest) {
       abandons: [],
       jev: null,
     });
-    return Response.json({ ...digest, gap: parsed.error });
+    return Response.json({ ...digest, gap: parsed.error, phase2: emptyPhase2() });
   }
 
   try {
@@ -64,13 +83,16 @@ export async function GET(request: NextRequest) {
     ]);
 
     if (daily.error && /shopify_funnel_daily/.test(daily.error.message)) {
-      return Response.json(buildConversionDigest({
-        asOf: parsed.asOf,
-        dailyRow: null,
-        funnelOk: false,
-        abandons: [],
-        jev: null,
-      }));
+      return Response.json({
+        ...buildConversionDigest({
+          asOf: parsed.asOf,
+          dailyRow: null,
+          funnelOk: false,
+          abandons: [],
+          jev: null,
+        }),
+        phase2: emptyPhase2(),
+      });
     }
 
     const lastStats = isRecord(status.data?.last_stats) ? status.data.last_stats : null;
@@ -110,15 +132,32 @@ export async function GET(request: NextRequest) {
       abandons: (abandons.data ?? []) as AbandonedRow[],
       jev,
     });
-    return Response.json(digest);
+
+    const [ga4, gscQueries, gscPages, googleAds, metaAds] = await Promise.all([
+      loadOptionalDay(sb, "ga4_landing_daily", "metric_date,landing_page,device,sessions,engaged_sessions,landings,view_item,add_to_cart,begin_checkout,purchase", parsed.asOf),
+      loadOptionalDay(sb, "gsc_query_daily", "metric_date,query,clicks,impressions,ctr,position", parsed.asOf),
+      loadOptionalDay(sb, "gsc_page_daily", "metric_date,page,clicks,impressions,ctr,position", parsed.asOf),
+      loadOptionalDay(sb, "google_ads_daily", "metric_date,campaign_id,spend,clicks,conversions", parsed.asOf),
+      loadOptionalDay(sb, "meta_ads_daily", "metric_date,campaign_id,spend,clicks,conversions", parsed.asOf),
+    ]);
+
+    return Response.json({
+      ...digest,
+      phase2: phase2FromLockedDay(parsed.asOf, {
+        ga4, gscQueries, gscPages, googleAds, metaAds,
+      }),
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return Response.json(buildConversionDigest({
-      asOf: parsed.asOf,
-      dailyRow: null,
-      funnelOk: false,
-      abandons: [],
-      jev: null,
-    }), { status: /not configured/i.test(msg) ? 503 : 200 });
+    return Response.json({
+      ...buildConversionDigest({
+        asOf: parsed.asOf,
+        dailyRow: null,
+        funnelOk: false,
+        abandons: [],
+        jev: null,
+      }),
+      phase2: emptyPhase2(),
+    }, { status: /not configured/i.test(msg) ? 503 : 200 });
   }
 }
