@@ -2682,6 +2682,69 @@ def shopify_funnel_sync_cmd(days, dry_run):
             click.echo(f"  note: {e}")
 
 
+def _phase2_sync_cmd(name, dry_run):
+    """Shared fail-closed stub runner. One shot — no wait-loop."""
+    from src.phase2_connectors import sync_stub
+
+    r = sync_stub(name, dry_run=dry_run)
+    click.echo(r.get("message") or r.get("error"))
+    if r.get("needs_oauth") or r.get("error"):
+        raise click.ClickException(r.get("error") or "needs OAuth")
+    return r
+
+
+@cli.command("ga4-sync")
+@click.option("--dry-run", is_flag=True,
+              help="Check credentials only; never write rows")
+def ga4_sync_cmd(dry_run):
+    """GA4 Data API daily sessions / landings (scaffold — OAuth later).
+
+    Official Analytics Data API only. READ scope analytics.readonly.
+    Missing Vercel/Mini env → needs OAuth, 0 rows. Never invent metrics.
+    One shot, no report wait-loop. See docs/oauth-phase2.md.
+    """
+    _phase2_sync_cmd("ga4", dry_run)
+
+
+@cli.command("google-ads-sync")
+@click.option("--dry-run", is_flag=True,
+              help="Check credentials only; never write rows")
+def google_ads_sync_cmd(dry_run):
+    """Google Ads API daily spend / clicks / site conversions (scaffold).
+
+    Official Google Ads API only. Never mutate campaigns. Missing env →
+    needs OAuth, 0 rows. Never invent metrics. One shot, no wait-loop.
+    See docs/oauth-phase2.md.
+    """
+    _phase2_sync_cmd("google_ads", dry_run)
+
+
+@cli.command("meta-ads-sync")
+@click.option("--dry-run", is_flag=True,
+              help="Check credentials only; never write rows")
+def meta_ads_sync_cmd(dry_run):
+    """Meta Marketing API daily spend / clicks / conversions (scaffold).
+
+    Official Marketing API only. ads_read — no ads_management.
+    Missing env → needs OAuth, 0 rows. Never invent metrics. One shot.
+    See docs/oauth-phase2.md.
+    """
+    _phase2_sync_cmd("meta_ads", dry_run)
+
+
+@cli.command("gsc-sync")
+@click.option("--dry-run", is_flag=True,
+              help="Check credentials only; never write rows")
+def gsc_sync_cmd(dry_run):
+    """Search Console API daily queries / pages (scaffold — OAuth later).
+
+    Official Search Console API only. READ scope webmasters.readonly.
+    Missing env → needs OAuth, 0 rows. Never invent metrics. One shot.
+    See docs/oauth-phase2.md.
+    """
+    _phase2_sync_cmd("gsc", dry_run)
+
+
 @cli.command("health-ping")
 @click.option("--send", is_flag=True, help="Actually deliver to Telegram")
 @click.option("--dry-run", "dry", is_flag=True, default=False,

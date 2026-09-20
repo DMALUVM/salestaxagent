@@ -15,7 +15,7 @@ export async function GET() {
   ];
   for (const p of candidates) {
     try {
-      const doc = JSON.parse(await readFile(p, "utf8"));
+      const doc = JSON.parse(await readFile(/* turbopackIgnore: true */ p, "utf8"));
       const rows = Object.entries(doc.jurisdictions ?? {}).map(
         ([state, r]) => ({ state, ...(r as Record<string, unknown>) }),
       );

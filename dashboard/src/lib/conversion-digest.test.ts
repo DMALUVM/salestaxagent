@@ -256,7 +256,9 @@ describe("wiring", () => {
     assert.doesNotMatch(route, /NEXT_PUBLIC_SUPABASE_ANON_KEY/);
     assert.doesNotMatch(route, /orderCreate|draftOrderComplete|abandonedCheckoutUrl/);
     assert.doesNotMatch(route, /write_themes|unauthenticated_/);
-    assert.doesNotMatch(route, /ga4|meta ads|klaviyo|ryze/i);
+    assert.doesNotMatch(route, /klaviyo|ryze|paid_ga_daily/i);
+    assert.match(route, /phase2FromLockedDay/);
+    assert.match(route, /ga4_landing_daily/);
     assert.doesNotMatch(route, /AI_GATEWAY_API_KEY/);
     assert.doesNotMatch(route, /shopify_orders/);
     assert.doesNotMatch(route, /api\/jev-funnel/);
