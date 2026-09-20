@@ -209,6 +209,8 @@ describe("wiring", () => {
     assert.doesNotMatch(route, /orderCreate|sellerise/i);
     assert.doesNotMatch(route, /write_orders|draftOrderComplete/);
     assert.match(route, /windowEnd/);
+    assert.match(route, /\.\/\.venv\/bin\/python -m src\.main shopify-funnel-sync/);
+    assert.doesNotMatch(route, /`python -m src\.main shopify-funnel-sync`/);
     assert.doesNotMatch(route, /shopify_orders/);
     assert.doesNotMatch(route, /klaviyo|google ads|gsc/i);
   });

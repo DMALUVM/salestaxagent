@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
 
 const SETUP =
   "Run supabase/migration_shopify_funnel.sql, then " +
-  "`python -m src.main shopify-funnel-sync` on the Mini. " +
+  "`./.venv/bin/python -m src.main shopify-funnel-sync` on the Mini. " +
   "Dave greenlit min READ scopes: add read_reports + Protected customer " +
   "data Level 2 on custom app Sales Tax Agent (Admin UI). " +
   "Keep read_orders (abandonedCheckouts already works). " +
