@@ -5,7 +5,9 @@ No API, no database. Fixtures are small enough to recompute by hand.
 from __future__ import annotations
 
 from src import shopify_funnel as F
-from src.shopify_funnel_sync import ABANDON_GQL, SHOPIFYQL_GQL, _shopifyql
+from src.shopify_funnel_sync import (
+    ABANDON_GQL, SHOPIFYQL_GQL, _shopifyql, maybe_jev_triage,
+)
 
 
 def daily(d, sessions, pdp=None, atc=None, chk=None, purch=None, kind="all", val=""):
@@ -349,3 +351,16 @@ def test_cli_command_is_registered_and_mentions_scopes():
     assert "Min READ scopes" in src
     assert "no theme" in src
     assert "write_orders" not in src or "Never Place Order" in src
+
+
+def test_jev_triage_silent_and_unwired_fail_closed():
+    silent = maybe_jev_triage({"leak": {}}, True)
+    assert silent["ran"] is False and silent["reason"] == "silent"
+    hold = maybe_jev_triage({
+        "leak": {"from": "sessions", "lost": 9},
+        "abandon": {"open": 2},
+        "window": {"end": "2026-09-19"},
+    }, False)
+    assert hold["decision"] == "hold"
+    assert hold.get("reason") in ("jev_not_wired", "jev_failed")
+    assert hold.get("severity") in ("hold_for_review", None)

@@ -20,6 +20,10 @@ draftOrderComplete, no orderCreate.
 If a query comes back ACCESS_DENIED the counts for that source stay empty
 and `shopify_funnel_status.missing_scopes` records exactly what Dave must
 grant. We do not invent a number from orders or GA4 to fill the hole.
+
+Jev runs AFTER the warehouse write. Missing
+`/workspace/vercel-ai-gateway/{bin/jev_evaluate.py,pilots/funnel_jev_triage.py}`
+→ hold_for_review. Silent when nothing material changed. Never raises.
 """
 from __future__ import annotations
 
@@ -411,6 +415,7 @@ def sync(days: int = LOOKBACK_DAYS, dry_run: bool = False,
     }
 
     if dry_run:
+        stats["jev"] = maybe_jev_triage(stats, silent)
         return {
             "dry_run": True,
             "funnel_ok": funnel_ok,
@@ -441,6 +446,8 @@ def sync(days: int = LOOKBACK_DAYS, dry_run: bool = False,
                         on_conflict="checkout_id")
         except Exception as e:
             write_errors.append(_table_hint(str(e), "shopify_abandoned_checkouts"))
+
+    stats["jev"] = maybe_jev_triage(stats, silent)
 
     status_row = {
         "id": 1,
@@ -479,6 +486,64 @@ def sync(days: int = LOOKBACK_DAYS, dry_run: bool = False,
     if failed:
         out["error"] = errors[0] if errors else "funnel sync failed"
     return out
+
+
+def maybe_jev_triage(stats: dict, silent: bool) -> dict:
+    """Post-sync hook. Fail closed. No LLM when nothing material.
+
+    Looks for the Vercel AI Gateway Jev pilot if the Mini has it. Missing
+    files → hold_for_review. Never raises into the sync.
+    """
+    if silent:
+        return {"ran": False, "reason": "silent", "decision": None}
+    from pathlib import Path
+    import json
+    import subprocess
+    import sys
+
+    roots = (
+        Path("/workspace/vercel-ai-gateway"),
+        Path(__file__).resolve().parent.parent / "vercel-ai-gateway",
+    )
+    script = None
+    for root in roots:
+        for rel in ("bin/jev_evaluate.py", "pilots/funnel_jev_triage.py"):
+            cand = root / rel
+            if cand.exists():
+                script = cand
+                break
+        if script:
+            break
+    if script is None:
+        return {
+            "ran": False, "reason": "jev_not_wired",
+            "decision": "hold", "severity": "hold_for_review",
+        }
+    leak = stats.get("leak") or {}
+    abandon = stats.get("abandon") or {}
+    payload = {
+        "period": (stats.get("window") or {}).get("end"),
+        "step": leak.get("from"),
+        "baseline": None,
+        "current": leak.get("lost"),
+        "delta_pct": leak.get("rate"),
+        "abandon_open": abandon.get("open"),
+        "abandon_value": abandon.get("openValue"),
+    }
+    try:
+        r = subprocess.run(
+            [sys.executable, str(script)],
+            input=json.dumps(payload),
+            capture_output=True, text=True, timeout=20,
+        )
+        token = (r.stdout or "").strip().split()[:1]
+        decision = token[0] if token else "hold"
+        if decision not in ("pursue", "hold", "skip"):
+            decision = "hold"
+        return {"ran": True, "decision": decision, "rc": r.returncode}
+    except Exception as e:
+        return {"ran": False, "decision": "hold", "reason": "jev_failed",
+                "error": str(e)[:200]}
 
 
 def _table_hint(err: str, table: str) -> str:
