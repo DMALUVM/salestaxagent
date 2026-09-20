@@ -12,6 +12,7 @@ from src.phase2_connectors import (
     CONNECTORS,
     NEEDS_OAUTH,
     ga4_sync,
+    google_ads_campaign_query,
     google_ads_sync,
     gsc_sync,
     meta_ads_sync,
@@ -39,9 +40,16 @@ def _google_env(**extra):
         "GOOGLE_OAUTH_REFRESH_TOKEN": "refresh",
         "GA4_PROPERTY_ID": "411710093",
         "GSC_SITE_URL": "sc-domain:tallowbourn.com",
+        "GOOGLE_ADS_DEVELOPER_TOKEN": "devtok",
+        "GOOGLE_ADS_CUSTOMER_ID": "5332206723",
+        "GOOGLE_ADS_LOGIN_CUSTOMER_ID": "7137868835",
     }
     env.update(extra)
     return env
+
+
+def _ads_stream(results):
+    return [{"results": results}]
 
 
 class _Resp:
@@ -136,6 +144,18 @@ def _route_google(url, json=None, **_kwargs):
                 "clicks": 3, "impressions": 40, "ctr": 0.075, "position": 6.1,
             }]})
         return _Resp({})
+    if "googleAds:searchStream" in url:
+        return _Resp(_ads_stream([{
+            "campaign": {"id": "111", "name": "Tallow Search"},
+            "segments": {"date": "2026-09-19"},
+            "metrics": {
+                "costMicros": "2500000",
+                "clicks": "12",
+                "impressions": "400",
+                "conversions": "1.5",
+                "conversionsValue": "42.0",
+            },
+        }]))
     raise AssertionError(f"unexpected URL {url}")
 
 
@@ -160,24 +180,22 @@ def test_each_connector_needs_oauth_and_writes_zero(monkeypatch):
         assert "docs/oauth-phase2.md" in r["error"]
 
 
-def test_ads_meta_credentials_present_still_write_zero_rows():
+def test_meta_credentials_present_still_write_zero_rows():
     env = {
-        "GOOGLE_OAUTH_CLIENT_ID": "id",
-        "GOOGLE_OAUTH_CLIENT_SECRET": "secret",
-        "GOOGLE_OAUTH_REFRESH_TOKEN": "refresh",
-        "GOOGLE_ADS_DEVELOPER_TOKEN": "dev",
-        "GOOGLE_ADS_CUSTOMER_ID": "123",
         "META_APP_ID": "app",
         "META_APP_SECRET": "secret",
         "META_ADS_ACCESS_TOKEN": "token",
         "META_ADS_ACCOUNT_ID": "act_1",
     }
-    for name in ("google_ads", "meta_ads"):
-        r = sync_stub(name, environ=env)
-        assert r["needs_oauth"] is False
-        assert r["rows"] == 0
-        assert r["scaffold"] is True
-        assert "Never invent metrics" in r["message"]
+    r = meta_ads_sync(environ=env)
+    assert r["needs_oauth"] is False
+    assert r["rows"] == 0
+    assert r["ok"] is False
+    assert r["scaffold"] is True
+    assert "Never invent metrics" in r["message"]
+    stub = sync_stub("meta_ads", environ=env)
+    assert stub["scaffold"] is True
+    assert stub["rows"] == 0
 
 
 def test_prior_ny_day_is_america_new_york():
@@ -366,7 +384,212 @@ def test_cli_commands_fail_closed_without_oauth(monkeypatch):
         assert "0 rows" in result.output or "Wrote 0" in result.output
 
 
-def test_cli_ga4_and_gsc_success_mocked(monkeypatch):
+def test_google_ads_success_mocked_http_upserts_locked_day(monkeypatch):
+    upserts: list[tuple] = []
+    seen_headers: list[dict] = []
+
+    def capture(url, headers=None, json=None, **kwargs):
+        if headers:
+            seen_headers.append(dict(headers))
+        return _route_google(url, json=json, headers=headers, **kwargs)
+
+    def fake_upsert(table, rows, on_conflict=None):
+        upserts.append((table, list(rows), on_conflict))
+        return len(rows)
+
+    monkeypatch.setattr("src.phase2_connectors._http_post", capture)
+    monkeypatch.setattr("src.db.upsert_rows", fake_upsert)
+
+    r = google_ads_sync(environ=_google_env(), as_of="2026-09-19", days=1)
+    assert r["needs_oauth"] is False
+    assert r["ok"] is True
+    assert r["rows"] == 1
+    assert r["start_date"] == r["end_date"] == "2026-09-19"
+    assert r.get("scaffold") is not True
+    assert r["customer_id"] == "5332206723"
+    assert r["login_customer_id"] == "7137868835"
+    assert upserts[0][0] == "google_ads_daily"
+    assert upserts[0][2] == "metric_date,campaign_id"
+    row = upserts[0][1][0]
+    assert row["metric_date"] == "2026-09-19"
+    assert row["campaign_id"] == "111"
+    assert row["campaign_name"] == "Tallow Search"
+    assert row["spend"] == 2.50
+    assert row["clicks"] == 12
+    assert row["impressions"] == 400
+    assert row["conversions"] == 1.5
+    assert row["conversion_value"] == 42.0
+    assert row["source"] == "google_ads_api"
+
+    ads_headers = [h for h in seen_headers if h.get("developer-token")]
+    assert ads_headers
+    assert ads_headers[0]["developer-token"] == "devtok"
+    assert ads_headers[0]["login-customer-id"] == "7137868835"
+    assert ads_headers[0]["Authorization"] == "Bearer ya29.test-token"
+
+
+def test_google_ads_omitted_metric_stays_null(monkeypatch):
+    def partial(url, json=None, **kwargs):
+        if "googleAds:searchStream" in url:
+            return _Resp(_ads_stream([{
+                "campaign": {"id": "222", "name": "PMax"},
+                "segments": {"date": "2026-09-19"},
+                "metrics": {"clicks": "3"},
+            }]))
+        return _route_google(url, json=json, **kwargs)
+
+    upserts = []
+    monkeypatch.setattr("src.phase2_connectors._http_post", partial)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda t, rows, on_conflict=None: upserts.append((t, rows)) or len(rows),
+    )
+    google_ads_sync(environ=_google_env(), as_of="2026-09-19", days=1)
+    rows = next(r for t, r in upserts if t == "google_ads_daily")
+    assert rows[0]["clicks"] == 3
+    assert "spend" not in rows[0]
+    assert "impressions" not in rows[0]
+    assert "conversions" not in rows[0]
+    assert "conversion_value" not in rows[0]
+
+
+def test_google_ads_empty_day_is_success_zero_rows(monkeypatch):
+    def empty(url, json=None, **kwargs):
+        if "googleAds:searchStream" in url:
+            return _Resp([])
+        return _route_google(url, json=json, **kwargs)
+
+    called = []
+    monkeypatch.setattr("src.phase2_connectors._http_post", empty)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda *a, **k: called.append(1) or 0,
+    )
+    r = google_ads_sync(environ=_google_env(), as_of="2026-09-19", days=1)
+    assert r["ok"] is True
+    assert r["rows"] == 0
+    assert called == []
+
+
+def test_google_ads_dry_run_documents_path_without_upsert(monkeypatch):
+    monkeypatch.setattr("src.phase2_connectors._http_post", _route_google)
+
+    def boom(*_a, **_k):
+        raise AssertionError("dry-run must not upsert")
+
+    monkeypatch.setattr("src.db.upsert_rows", boom)
+    r = google_ads_sync(environ=_google_env(), as_of="2026-09-19", days=1,
+                        dry_run=True)
+    assert r["ok"] is True
+    assert r["dry_run"] is True
+    assert r["rows"] == 1
+    assert "No upsert" in r["message"]
+    assert "searchStream" in r["message"]
+    assert "Never mutate" in r["message"]
+
+
+def test_google_ads_skips_dates_outside_requested_window(monkeypatch):
+    def weird(url, json=None, **kwargs):
+        if "googleAds:searchStream" in url:
+            return _Resp(_ads_stream([
+                {
+                    "campaign": {"id": "1", "name": "old"},
+                    "segments": {"date": "2026-09-10"},
+                    "metrics": {"costMicros": "9000000", "clicks": "9"},
+                },
+                {
+                    "campaign": {"id": "2", "name": "locked"},
+                    "segments": {"date": "2026-09-19"},
+                    "metrics": {"costMicros": "1000000", "clicks": "1"},
+                },
+            ]))
+        return _route_google(url, json=json, **kwargs)
+
+    upserts = []
+    monkeypatch.setattr("src.phase2_connectors._http_post", weird)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda t, rows, on_conflict=None: upserts.append(rows) or len(rows),
+    )
+    google_ads_sync(environ=_google_env(), as_of="2026-09-19", days=1)
+    rows = upserts[0]
+    assert all(row["metric_date"] == "2026-09-19" for row in rows)
+    assert not any(row["metric_date"] == "2026-09-10" for row in rows)
+    assert rows[0]["campaign_name"] == "locked"
+
+
+def test_google_ads_rejects_non_digit_customer_id(monkeypatch):
+    monkeypatch.setattr(
+        "src.phase2_connectors._http_post",
+        lambda *a, **k: _Resp({"access_token": "tok"}),
+    )
+    r = google_ads_sync(
+        environ=_google_env(GOOGLE_ADS_CUSTOMER_ID="not-an-id"),
+        as_of="2026-09-19", days=1,
+    )
+    assert r["ok"] is False
+    assert r["rows"] == 0
+    assert "10-digit" in r["error"]
+
+
+def test_google_ads_strips_dashes_and_omits_login_when_unset(monkeypatch):
+    seen = []
+
+    def capture(url, headers=None, json=None, **kwargs):
+        seen.append((url, dict(headers or {})))
+        return _route_google(url, json=json, headers=headers, **kwargs)
+
+    monkeypatch.setattr("src.phase2_connectors._http_post", capture)
+    monkeypatch.setattr("src.db.upsert_rows", lambda *a, **k: 1)
+    env = _google_env(
+        GOOGLE_ADS_CUSTOMER_ID="533-220-6723",
+        GOOGLE_ADS_LOGIN_CUSTOMER_ID="",
+    )
+    r = google_ads_sync(environ=env, as_of="2026-09-19", days=1)
+    assert r["ok"] is True
+    assert r["customer_id"] == "5332206723"
+    assert "login_customer_id" not in r
+    ads = [u for u, _h in seen if "googleAds:searchStream" in u]
+    assert ads and "/customers/5332206723/" in ads[0]
+    ads_headers = [h for u, h in seen if "googleAds:searchStream" in u]
+    assert "login-customer-id" not in ads_headers[0]
+
+
+def test_google_ads_api_error_fails_closed_zero_rows(monkeypatch):
+    def boom(url, json=None, **kwargs):
+        if "googleAds:searchStream" in url:
+            return _Resp(
+                {"error": {"code": 403, "message": "developer token not approved",
+                           "status": "PERMISSION_DENIED"}},
+                status=403,
+                text="denied",
+            )
+        return _route_google(url, json=json, **kwargs)
+
+    called = []
+    monkeypatch.setattr("src.phase2_connectors._http_post", boom)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda *a, **k: called.append(1) or 0,
+    )
+    r = google_ads_sync(environ=_google_env(), as_of="2026-09-19", days=1)
+    assert r["ok"] is False
+    assert r["rows"] == 0
+    assert "403" in r["error"]
+    assert called == []
+
+
+def test_google_ads_query_is_select_only():
+    q = google_ads_campaign_query(date(2026, 9, 13), date(2026, 9, 19))
+    assert q.startswith("SELECT ")
+    assert "FROM campaign" in q
+    assert "BETWEEN '2026-09-13' AND '2026-09-19'" in q
+    assert "mutate" not in q.lower()
+    assert "REMOVE" not in q
+    assert "SET " not in q
+
+
+def test_cli_ga4_gsc_and_ads_success_mocked(monkeypatch):
     monkeypatch.setattr("src.phase2_connectors._http_post", _route_google)
     monkeypatch.setattr("src.db.upsert_rows", lambda *a, **k: 1)
     for key, val in _google_env().items():
@@ -380,6 +603,10 @@ def test_cli_ga4_and_gsc_success_mocked(monkeypatch):
     gsc = runner.invoke(cli, ["gsc-sync", "--date", "2026-09-19", "--days", "1"])
     assert gsc.exit_code == 0, gsc.output
     assert "gsc_query_daily" in gsc.output
+    ads = runner.invoke(cli, ["google-ads-sync", "--date", "2026-09-19", "--days", "1"])
+    assert ads.exit_code == 0, ads.output
+    assert "google_ads_daily" in ads.output
+    assert "Never mutate" in ads.output
 
 
 def test_cli_registered_and_read_only():
@@ -392,15 +619,15 @@ def test_cli_registered_and_read_only():
     sched = src[src.find("def run():"):]
     assert "BlockingScheduler" in sched
     assert "shopify_funnel_sync" in sched  # Phase 1 stays scheduled
-    # Live GA4/GSC only when Mini env is present. Ads/Meta stay unscheduled.
+    # Live GA4/GSC/Ads only when Mini env is present. Meta stays unscheduled.
     assert "connector_env_ready" in sched
     assert "_run_ga4_sync" in sched
     assert "_run_gsc_sync" in sched
+    assert "_run_google_ads_sync" in sched
     assert "ga4_sync" in sched
     assert "gsc_sync" in sched
-    assert "google-ads-sync" not in sched
+    assert "google_ads_sync" in sched
     assert "meta-ads-sync" not in sched
-    assert "_run_google_ads" not in sched
     assert "_run_meta_ads" not in sched
 
 
@@ -418,7 +645,11 @@ def test_live_connectors_have_no_wait_loop_or_mutate():
     assert "pnl_daily" not in src
     assert "analyticsdata.googleapis.com" in src
     assert "searchconsole.googleapis.com" in src
-    assert "google-ads" not in src or "GOOGLE_ADS" in src
+    assert "googleads.googleapis.com" in src
+    assert "googleAds:searchStream" in src
+    assert "never mutate" in src.lower()
+    assert "googleAds:mutate" not in src
+    assert "GOOGLE_ADS" in src
 
 
 def test_scopes_are_read_minima():
@@ -470,6 +701,8 @@ def test_docs_and_snapshot_list_the_tables():
     assert "Never chat-paste" in docs or "never chat-paste" in docs
     assert "oauthplayground" in docs
     assert "bc-74a886b6" in docs
+    assert "googleAds:searchStream" in docs
+    assert "Never mutate" in docs or "never mutate" in docs
     assert "Do not add a second Jev job on Mini" in docs
     assert "ecommdashboard.com" in docs
     assert "Mini `.env`" in docs
