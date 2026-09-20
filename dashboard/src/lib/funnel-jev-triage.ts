@@ -100,7 +100,9 @@ export type EvaluateFn = (
   questions: typeof LEAK_Q,
 ) => Promise<{ answers?: JevAnswers }>;
 
-export function hasGatewayKey(env: NodeJS.ProcessEnv = process.env): boolean {
+export function hasGatewayKey(
+  env: { [key: string]: string | undefined } = process.env,
+): boolean {
   return Boolean((env.AI_GATEWAY_API_KEY ?? "").trim());
 }
 

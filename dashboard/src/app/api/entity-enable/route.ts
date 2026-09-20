@@ -27,7 +27,7 @@ async function findFile(rel: string): Promise<string | null> {
   for (const root of repoRoot()) {
     const p = path.join(root, rel);
     try {
-      await readFile(p, "utf8");
+      await readFile(/* turbopackIgnore: true */ p, "utf8");
       return p;
     } catch { /* try the next root */ }
   }
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     if (!rulesPath) {
       return Response.json({ ok: false, error: "config/seed_entity_obligations.json not found." }, { status: 500 });
     }
-    const rules = JSON.parse(await readFile(rulesPath, "utf8"));
+    const rules = JSON.parse(await readFile(/* turbopackIgnore: true */ rulesPath, "utf8"));
     const [state, type] = key.split(":");
     const rule = (rules.obligations ?? []).find(
       (r: { state_code?: string; obligation_type?: string; applies_when?: string }) =>
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     if (!profilePath) {
       return Response.json({ ok: false, error: "config/entity_profile.json not found." }, { status: 500 });
     }
-    const raw = await readFile(profilePath, "utf8");
+    const raw = await readFile(/* turbopackIgnore: true */ profilePath, "utf8");
     const profile = JSON.parse(raw);
     profile.enabled_obligations = profile.enabled_obligations ?? {};
     if (enabled) {

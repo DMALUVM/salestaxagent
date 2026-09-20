@@ -266,6 +266,9 @@ describe("wiring", () => {
       "src/lib/ads-roles.ts",
       "src/lib/ads-strategy-settings.ts",
       "src/lib/brand-terms.ts",
+      "src/app/api/entity-enable/route.ts",
+      "src/app/api/entity-obligations/route.ts",
+      "src/app/api/triage/route.ts",
     ]) {
       const src = readFileSync(path.join(root, rel), "utf8");
       assert.match(src, /turbopackIgnore: true/);
