@@ -2,21 +2,34 @@ import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
 import {
   buildConversionDigest,
+  isClosedEasternDay,
   parseDigestDate,
 } from "@/lib/conversion-digest";
+import {
+  ensureFunnelJevTriage,
+  evaluateViaGateway,
+  hasGatewayKey,
+} from "@/lib/funnel-jev-triage";
 import type { AbandonedRow } from "@/lib/shopify-funnel";
 
 /**
  * GET /api/conversion-digest?date=YYYY-MM-DD
  *
- * Read-only Conversion Digest for Iris. Dana owns the numbers.
- * Default date = yesterday America/New_York. Never substitutes an older
- * complete day when the requested day is missing (Iris date-lock).
+ * Iris contract. Dana owns the numbers. Default date = yesterday
+ * America/New_York. Never substitutes an older complete day.
  *
- * Auth: same dashboard Basic Auth + service-role warehouse as other
- * /api routes. Not anon. No Shopify / theme writes. No Mini gateway key.
+ * After Mini writes shopify_funnel_* , this read runs or reuses Vercel
+ * Jev triage and copies pursue (max 3) into improvements. Fail closed
+ * → improvements: []. No Shopify / theme writes. No Mini gateway key.
+ *
+ * Auth: dashboard Basic Auth + service-role warehouse. Not anon.
  */
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return Boolean(v) && typeof v === "object" && !Array.isArray(v);
+}
 
 export async function GET(request: NextRequest) {
   const parsed = parseDigestDate(request.nextUrl.searchParams.get("date"));
@@ -44,7 +57,7 @@ export async function GET(request: NextRequest) {
         .select("checkout_id,checkout_name,checkout_date,created_at,completed_at,total_price,currency,recovered,line_items,line_items_qty,triage_severity,triage_note")
         .eq("checkout_date", parsed.asOf),
       sb.from("shopify_funnel_status")
-        .select("funnel_ok,last_stats")
+        .select("id,funnel_ok,last_stats")
         .eq("id", 1)
         .limit(1)
         .maybeSingle(),
@@ -60,15 +73,42 @@ export async function GET(request: NextRequest) {
       }));
     }
 
-    const lastStats = status.data?.last_stats && typeof status.data.last_stats === "object"
-      ? status.data.last_stats as Record<string, unknown>
-      : null;
+    const lastStats = isRecord(status.data?.last_stats) ? status.data.last_stats : null;
+    let jev: unknown = lastStats?.jev ?? null;
+    const dailyRow = daily.data ?? null;
+    if (dailyRow && isClosedEasternDay(parsed.asOf) && lastStats) {
+      const keyed = hasGatewayKey();
+      try {
+        jev = await ensureFunnelJevTriage({
+          stats: lastStats,
+          hasGatewayKey: keyed,
+          evaluate: keyed ? evaluateViaGateway : undefined,
+          persist: status.data?.id === 1
+            ? async (merged) => {
+              const { error: writeErr } = await sb
+                .from("shopify_funnel_status")
+                .update({
+                  last_stats: merged,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", 1);
+              if (writeErr) {
+                throw new Error(writeErr.message);
+              }
+            }
+            : undefined,
+        });
+      } catch {
+        jev = lastStats.jev ?? null;
+      }
+    }
+
     const digest = buildConversionDigest({
       asOf: parsed.asOf,
-      dailyRow: daily.data ?? null,
+      dailyRow,
       funnelOk: status.data?.funnel_ok ?? null,
       abandons: (abandons.data ?? []) as AbandonedRow[],
-      jev: lastStats?.jev ?? null,
+      jev,
     });
     return Response.json(digest);
   } catch (e) {

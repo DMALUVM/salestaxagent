@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
 import { getServerSupabase } from "@/lib/supabase-server";
 import {
+  ensureFunnelJevTriage,
   evaluateViaGateway,
   hasGatewayKey,
   holdClosed,
-  runFunnelJevTriage,
   type JevResult,
 } from "@/lib/funnel-jev-triage";
 
@@ -46,48 +46,27 @@ async function handle(request: NextRequest): Promise<Response> {
     }
 
     const stats = isRecord(data?.last_stats) ? data.last_stats : null;
-    const existingJev = stats && isRecord(stats.jev) ? stats.jev : null;
-    if (
-      !force &&
-      existingJev?.ran === true &&
-      existingJev?.runtime === "vercel"
-    ) {
-      return Response.json({
-        ran: false,
-        reason: "already_ran",
-        decision: existingJev.decision ?? "hold",
-        runtime: "vercel",
-        previous: existingJev,
-      });
-    }
-
     const keyed = hasGatewayKey();
-    const result: JevResult = await runFunnelJevTriage({
+    const result: JevResult = await ensureFunnelJevTriage({
       stats,
       hasGatewayKey: keyed,
       force,
       evaluate: keyed ? evaluateViaGateway : undefined,
+      persist: data?.id === 1 && stats
+        ? async (merged) => {
+          const { error: writeErr } = await sb
+            .from("shopify_funnel_status")
+            .update({
+              last_stats: merged,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", 1);
+          if (writeErr) {
+            throw new Error(writeErr.message);
+          }
+        }
+        : undefined,
     });
-
-    if (data?.id === 1 && stats) {
-      const merged = {
-        ...stats,
-        jev: { ...result, at: new Date().toISOString() },
-      };
-      const { error: writeErr } = await sb
-        .from("shopify_funnel_status")
-        .update({
-          last_stats: merged,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", 1);
-      if (writeErr) {
-        return Response.json({
-          ...holdClosed("status_unwritable"),
-          error: writeErr.message.slice(0, 200),
-        });
-      }
-    }
 
     return Response.json(result);
   } catch (e) {

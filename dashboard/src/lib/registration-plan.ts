@@ -545,7 +545,7 @@ async function overlayCitationsFromDisk(citations: Record<string, CitationPacket
   ];
   for (const p of candidates) {
     try {
-      const doc = JSON.parse(await readFile(p, "utf8")) as {
+      const doc = JSON.parse(await readFile(/* turbopackIgnore: true */ p, "utf8")) as {
         states?: Record<string, CitationPacket>;
       };
       for (const [sc, pkt] of Object.entries(doc.states ?? {})) {
@@ -572,7 +572,7 @@ async function overlayRulesFromDisk(rules: Record<string, RuleFact>): Promise<vo
   ];
   for (const p of candidates) {
     try {
-      const doc = JSON.parse(await readFile(p, "utf8")) as {
+      const doc = JSON.parse(await readFile(/* turbopackIgnore: true */ p, "utf8")) as {
         states?: Record<string, { has_sales_tax?: unknown; fba_inventory_creates_nexus?: unknown }>;
       };
       for (const [sc, r] of Object.entries(doc.states ?? {})) {
@@ -595,7 +595,7 @@ async function entityStatesFromDisk(): Promise<Set<string>> {
   ];
   for (const p of candidates) {
     try {
-      const doc = JSON.parse(await readFile(p, "utf8")) as {
+      const doc = JSON.parse(await readFile(/* turbopackIgnore: true */ p, "utf8")) as {
         jurisdictions?: Record<string, { obligations?: unknown[] }>;
       };
       const out = new Set<string>();

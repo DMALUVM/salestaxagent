@@ -327,6 +327,8 @@ def test_sync_does_not_proxy_sessions_from_orders():
     assert "maybe_jev_triage" in src
     assert "vercel_runtime" in src
     assert "must not live in Mini" in src
+    assert "conversion-digest" in src
+    assert "ensureFunnelJevTriage" in src
     assert "subprocess" not in src
 
 
