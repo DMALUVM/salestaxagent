@@ -2693,17 +2693,37 @@ def _phase2_sync_cmd(name, dry_run):
     return r
 
 
+def _phase2_live_cmd(name, dry_run, as_of, days):
+    """GA4 / GSC official-API pull. One shot — no wait-loop."""
+    from src.phase2_connectors import ga4_sync, gsc_sync
+
+    fn = ga4_sync if name == "ga4" else gsc_sync
+    r = fn(dry_run=dry_run, as_of=as_of, days=days)
+    click.echo(r.get("message") or r.get("error"))
+    if r.get("errors"):
+        for e in r["errors"]:
+            click.echo(f"  note: {e}")
+    if r.get("needs_oauth") or (r.get("error") and not r.get("ok")):
+        raise click.ClickException(r.get("error") or "needs OAuth")
+    return r
+
+
 @cli.command("ga4-sync")
+@click.option("--date", "as_of", default=None,
+              help="End date YYYY-MM-DD (default: prior America/New_York day)")
+@click.option("--days", default=7, show_default=True, type=int,
+              help="Lookback ending at --date (1–90). Covers late-arriving days.")
 @click.option("--dry-run", is_flag=True,
-              help="Check credentials only; never write rows")
-def ga4_sync_cmd(dry_run):
-    """GA4 Data API daily sessions / landings (scaffold — OAuth later).
+              help="Pull official API; never write rows")
+def ga4_sync_cmd(as_of, days, dry_run):
+    """GA4 Data API daily sessions / landings.
 
     Official Analytics Data API only. READ scope analytics.readonly.
     Missing Vercel/Mini env → needs OAuth, 0 rows. Never invent metrics.
-    One shot, no report wait-loop. See docs/oauth-phase2.md.
+    One shot, no report wait-loop. metric_date is the API day.
+    Mini `.env` needs the same GOOGLE_* names as Vercel. See docs/oauth-phase2.md.
     """
-    _phase2_sync_cmd("ga4", dry_run)
+    _phase2_live_cmd("ga4", dry_run, as_of, days)
 
 
 @cli.command("google-ads-sync")
@@ -2733,16 +2753,21 @@ def meta_ads_sync_cmd(dry_run):
 
 
 @cli.command("gsc-sync")
+@click.option("--date", "as_of", default=None,
+              help="End date YYYY-MM-DD (default: prior America/New_York day)")
+@click.option("--days", default=7, show_default=True, type=int,
+              help="Lookback ending at --date (1–90). Covers GSC ~2d lag.")
 @click.option("--dry-run", is_flag=True,
-              help="Check credentials only; never write rows")
-def gsc_sync_cmd(dry_run):
-    """Search Console API daily queries / pages (scaffold — OAuth later).
+              help="Pull official API; never write rows")
+def gsc_sync_cmd(as_of, days, dry_run):
+    """Search Console API daily queries / pages.
 
     Official Search Console API only. READ scope webmasters.readonly.
-    Missing env → needs OAuth, 0 rows. Never invent metrics. One shot.
-    See docs/oauth-phase2.md.
+    Missing Vercel/Mini env → needs OAuth, 0 rows. Never invent metrics.
+    One shot, no report wait-loop. metric_date is the API day.
+    Mini `.env` needs the same GOOGLE_* names as Vercel. See docs/oauth-phase2.md.
     """
-    _phase2_sync_cmd("gsc", dry_run)
+    _phase2_live_cmd("gsc", dry_run, as_of, days)
 
 
 @cli.command("health-ping")
@@ -5637,6 +5662,37 @@ def run():
             click.echo("[Scheduler] Shopify shopper funnel daily at 07:15 "
                        "(ShopifyQL + abandoned checkouts; one job, no poll)")
 
+        # Phase 2 official APIs — only when Mini `.env` has the same names
+        # as Vercel. Missing env stays unscheduled so mornings do not fail.
+        # Google Ads / Meta stay stubs (no poll agents).
+        from src.phase2_connectors import connector_env_ready
+        if connector_env_ready("ga4"):
+            scheduler.add_job(
+                _run_ga4_sync,
+                "cron",
+                hour=7,
+                minute=20,
+                id="ga4_sync",
+                misfire_grace_time=3600,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo("[Scheduler] GA4 Data API daily at 07:20 "
+                       "(prior America/New_York day + 7d lookback; one shot)")
+        if connector_env_ready("gsc"):
+            scheduler.add_job(
+                _run_gsc_sync,
+                "cron",
+                hour=7,
+                minute=25,
+                id="gsc_sync",
+                misfire_grace_time=3600,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo("[Scheduler] Search Console API daily at 07:25 "
+                       "(prior America/New_York day + 7d lookback; one shot)")
+
         # Safe ff-only pull of origin/main. One job inside this scheduler —
         # not a second launchd agent — so it cannot race the running process.
         # 04:30 is before ads_campaigns_sync (05:00). A startup pass catches
@@ -5824,6 +5880,64 @@ def run():
         click.echo("Agent stopped.")
 
     observer.join()
+
+
+def _run_ga4_sync():
+    """Daily GA4 Data API. Prior NY day + 7d lookback. One shot, no wait-loop."""
+    from src.db import job_start, job_finish
+    from src.phase2_connectors import ga4_sync
+
+    run_id = job_start("ga4_sync")
+    try:
+        r = ga4_sync()
+        if r.get("error") and not r.get("ok"):
+            job_finish(run_id, "fail", r["error"][:500], {
+                "rows": r.get("rows"),
+                "start_date": r.get("start_date"),
+                "end_date": r.get("end_date"),
+            })
+            print(f"[GA4] FAILED: {r['error'][:200]}")
+            return
+        status = "partial" if r.get("partial") or r.get("errors") else "success"
+        msg = r.get("message") or "ok"
+        print(f"[GA4] {msg}")
+        job_finish(run_id, status, msg, {
+            "rows": r.get("rows"),
+            "start_date": r.get("start_date"),
+            "end_date": r.get("end_date"),
+        })
+    except Exception as e:
+        job_finish(run_id, "fail", str(e)[:500])
+        print(f"[GA4] FAILED: {e}")
+
+
+def _run_gsc_sync():
+    """Daily Search Console API. Prior NY day + 7d lookback. One shot."""
+    from src.db import job_start, job_finish
+    from src.phase2_connectors import gsc_sync
+
+    run_id = job_start("gsc_sync")
+    try:
+        r = gsc_sync()
+        if r.get("error") and not r.get("ok"):
+            job_finish(run_id, "fail", r["error"][:500], {
+                "rows": r.get("rows"),
+                "start_date": r.get("start_date"),
+                "end_date": r.get("end_date"),
+            })
+            print(f"[GSC] FAILED: {r['error'][:200]}")
+            return
+        status = "partial" if r.get("partial") or r.get("errors") else "success"
+        msg = r.get("message") or "ok"
+        print(f"[GSC] {msg}")
+        job_finish(run_id, status, msg, {
+            "rows": r.get("rows"),
+            "start_date": r.get("start_date"),
+            "end_date": r.get("end_date"),
+        })
+    except Exception as e:
+        job_finish(run_id, "fail", str(e)[:500])
+        print(f"[GSC] FAILED: {e}")
 
 
 def _run_shopify_funnel_sync():

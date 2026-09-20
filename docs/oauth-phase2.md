@@ -1,6 +1,6 @@
 # Phase 2 — Dave click checklists + Iris pipeline
 
-Hand this to Dave. One Google OAuth dance covers GA4 + Google Ads + Search Console. Meta is a separate Business app. Secrets go **only** on Vercel project `dashboard`. Never chat-paste keys. Mini does not need these keys for the scaffold.
+Hand this to Dave. One Google OAuth dance covers GA4 + Google Ads + Search Console. Meta is a separate Business app. Dave pastes secrets **only** on Vercel project `dashboard`. Dana mirrors the same `GOOGLE_*` names into Mini `.env` from 1Password so `ga4-sync` / `gsc-sync` can run. Never chat-paste keys.
 
 Production site: `https://www.ecommdashboard.com`
 Vercel env page: `https://vercel.com/dave-maloneys-projects/dashboard/settings/environment-variables`
@@ -10,8 +10,9 @@ Vercel env page: `https://vercel.com/dave-maloneys-projects/dashboard/settings/e
 ## Daily pipeline (Iris) — one path, Jev is not an orphan
 
 1. **Mini** `python -m src.main shopify-funnel-sync` writes `shopify_funnel_*` + abandons (already scheduled 07:15 ET).
-2. **Vercel** `GET`/`POST /api/shopify-funnel/jev-triage` (landed #153, sibling `bc-74a886b6`) evaluates leaks with `AI_GATEWAY_API_KEY` already on Vercel and writes `shopify_funnel_status.last_stats.jev`. Fail closed → `hold_for_review` / empty pursue. Does **not** call Mini.
-3. **Iris** `GET /api/conversion-digest` (landed #154/#155) reads the prior-day `America/New_York` Shopify funnel snapshot and runs landed Jev. Missing day → GAP. Never substitutes an older day. `phase2.landing_drops` / `seo` stay **null** until official-API rows exist for that day. OAuth is **not** required to read the Iris fields.
+2. **Mini** `ga4-sync` (07:20 ET) and `gsc-sync` (07:25 ET) pull the official GA4 Data API / Search Console API for the prior `America/New_York` day (7d lookback). Scheduled only when Mini `.env` has the same `GOOGLE_*` names as Vercel. `metric_date` is the API day — never an older substitute. GSC final data lags ~2 days → `phase2.seo` stays null until that locked day exists. Do not add poll agents. Google Ads / Meta stay stubs.
+3. **Vercel** `GET`/`POST /api/shopify-funnel/jev-triage` (landed #153, sibling `bc-74a886b6`) evaluates leaks with `AI_GATEWAY_API_KEY` already on Vercel and writes `shopify_funnel_status.last_stats.jev`. Fail closed → `hold_for_review` / empty pursue. Does **not** call Mini.
+4. **Iris** `GET /api/conversion-digest` (landed #154/#155) reads the prior-day `America/New_York` Shopify funnel snapshot and runs landed Jev. Missing day → GAP. Never substitutes an older day. `phase2.landing_drops` / `seo` stay **null** until official-API rows exist for that day. OAuth is **not** required to read the Iris fields.
 
 Do not add a second Jev job on Mini. Do not add a second digest or `/api/jev-funnel` route.
 
@@ -161,9 +162,18 @@ curl -s -u "$DASHBOARD_USER:$DASHBOARD_PASSWORD" \
 
 Success: HTTP 200, `"as_of"` is prior-day ET, status `CLEAR`/`HOLD`/`GAP`. `"phase2": { "landing_drops": null, … }` until a locked-day `ga4_landing_daily` row exists. Never an older day’s landings.
 
-Optional Mini (secrets are **not** on Mini): `python -m src.main ga4-sync` prints `needs OAuth` / `Wrote 0 rows`. That is correct.
+Mini needs the same names in `.env` (Dana mirrors from 1Password — never chat-paste):
 
-**You’re done when:** Property ID is on Vercel and `/api/phase2-status` shows GA4 configured.
+```
+GOOGLE_OAUTH_CLIENT_ID
+GOOGLE_OAUTH_CLIENT_SECRET
+GOOGLE_OAUTH_REFRESH_TOKEN
+GA4_PROPERTY_ID=411710093
+```
+
+Then `python -m src.main ga4-sync` pulls `runReport` and upserts `ga4_sessions_daily` / `ga4_landing_daily`. Missing Mini env → `needs OAuth` / `Wrote 0 rows` (fail closed). `--dry-run` documents the path and does not upsert.
+
+**You’re done when:** Property ID is on Vercel, Mini `.env` has the same `GOOGLE_*` names, and `/api/phase2-status` shows GA4 configured.
 
 **Fail modes:** copied a **Measurement ID** (`G-XXXX`) instead of Property ID; picked the wrong property in the Admin header; Data API not enabled on this Cloud project; `analytics.edit` added (remove it).
 
@@ -272,7 +282,9 @@ Success: `connectors.gsc.configured` is `true`.
 
 Then conversion-digest `"seo": null` until a locked-day GSC row exists. GSC lags ~2 days — that is a **null section**, not a reason to reuse Tuesday’s queries.
 
-**You’re done when:** `GSC_SITE_URL` matches the property type (domain vs URL-prefix) and phase2-status shows GSC configured.
+Mini `.env` also needs `GSC_SITE_URL=sc-domain:tallowbourn.com` (plus the shared `GOOGLE_OAUTH_*` names). Then `python -m src.main gsc-sync` pulls `searchAnalytics.query` and upserts `gsc_query_daily` / `gsc_page_daily`. Missing Mini env → `needs OAuth` / 0 rows.
+
+**You’re done when:** `GSC_SITE_URL` matches the property type (domain vs URL-prefix), Mini has the same names, and phase2-status shows GSC configured.
 
 **Fail modes:** `https://www.tallowbourn.com/` when the property is the domain; missing `sc-domain:` prefix; missing trailing slash on a URL-prefix property; added `webmasters` write scope.
 
