@@ -108,11 +108,15 @@ export function WebInsightsCard({ insights }: { insights: WebInsights }) {
             <h3 className="text-[12px] font-semibold">GSC queries — money terms off page 1, branded pos-1 with 0 clicks</h3>
             {insights.windows.gsc_queries && insights.windows.gsc_chart ? (
               <p className="text-[11px] text-muted-foreground">
-                Queries {insights.windows.gsc_queries.label} vs chart {insights.windows.gsc_chart.label}. Dates are blank on query/page rows — not invented.
+                Queries {insights.windows.gsc_queries.label} vs chart {insights.windows.gsc_chart.label}.
+                {insights.windows.gsc_queries.start
+                  ? ""
+                  : " Dates are blank on query/page rows — not invented."}
               </p>
             ) : insights.windows.gsc_queries ? (
               <p className="text-[11px] text-muted-foreground">
-                Queries {insights.windows.gsc_queries.label}. Chart.csv not in this upload.
+                Queries {insights.windows.gsc_queries.label}.
+                {insights.windows.gsc_queries.start ? "" : " Chart.csv not in this upload."}
               </p>
             ) : null}
             {insights.money_queries.length === 0 ? (

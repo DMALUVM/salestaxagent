@@ -40,7 +40,7 @@ function HowtoLink({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-/** Manual CSV pull steps for /paid-ads. Download + Dashboard Upload only. */
+/** Manual CSV pull steps for /paid-ads. Meta is the live upload. Google/GA4/GSC are optional fallback. */
 function PaidAdsCsvHowto({
   open, onOpenChange,
 }: {
@@ -53,12 +53,14 @@ function PaidAdsCsvHowto({
         <DialogHeader>
           <DialogTitle>How-to: pull CSVs</DialogTitle>
           <DialogDescription>
-            Last 7 days unless you pick another range. Download each CSV, then Upload on this Dashboard page.
+            Google Ads, GA4, and Search Console load from official API sync. Upload Meta CSV until
+            meta_ads_daily has rows. Google / GA4 / GSC CSVs are optional fallback only.
           </DialogDescription>
         </DialogHeader>
         <ol className="list-decimal space-y-3 pl-4 text-[13px] leading-snug">
           <li>
             <p className="font-medium">Google Ads</p>
+            <p className="text-muted-foreground">Optional fallback — prefer google_ads_daily API sync.</p>
             <p>
               Open saved report Tallowbourn Ads Ops Daily:{" "}
               <HowtoLink href={GOOGLE_ADS_CSV_URL}>{GOOGLE_ADS_CSV_URL}</HowtoLink>
@@ -88,6 +90,7 @@ function PaidAdsCsvHowto({
           </li>
           <li>
             <p className="font-medium">Search Console</p>
+            <p className="text-muted-foreground">Optional fallback — prefer gsc_query_daily / gsc_page_daily API sync.</p>
             <p>
               tallowbourn.com Performance (Search results) → Last 7 → Export → Download CSV.
               Keep Queries.csv + Pages.csv + Chart.csv + Search Appearance.csv
@@ -99,6 +102,7 @@ function PaidAdsCsvHowto({
           </li>
           <li>
             <p className="font-medium">GA4 Explore</p>
+            <p className="text-muted-foreground">Optional fallback — prefer ga4_landing_daily API sync.</p>
             <p>
               Save an Explore with these columns, then Export CSV (skip # comments / Grand total):
               Date, Session default channel group, Landing page, Device category, Sessions, Active users,
@@ -107,8 +111,8 @@ function PaidAdsCsvHowto({
           </li>
         </ol>
         <p className="text-[13px] leading-snug">
-          Then on Dashboard: /paid-ads → Upload → select ALL files at once
-          (the recommended 7: Google + Meta + Queries + Pages + Chart + Search Appearance + GA4;
+          Then on Dashboard: /paid-ads → Upload → Meta Ads Manager export. Optional fallback: select ALL files at once
+          (Google + Meta + Queries + Pages + Chart + Search Appearance + GA4;
           parser IDs by header). Matching days overwrite; older days stay.
         </p>
       </DialogContent>
@@ -645,8 +649,18 @@ function FreshnessBanner({ freshness }: { freshness: IntelBundle["freshness"] })
   const stale = freshness.stale;
   if (!stale && behind < 3) return null;
   const laggards = (freshness.sources ?? [])
-    .filter((s) => s.dated && s.rows > 0 && s.stale)
-    .map((s) => s.file);
+    .filter((s) => s.dated && s.rows > 0 && s.stale);
+  const apiLaggards = laggards.filter((s) => s.origin === "api").map((s) => s.label);
+  const csvLaggards = laggards.filter((s) => s.origin !== "api").map((s) => s.file);
+  const fetched = (freshness.sources ?? [])
+    .map((s) => s.fetched_at)
+    .filter((d): d is string => Boolean(d))
+    .sort()
+    .pop();
+  const newest = [...(freshness.sources ?? [])]
+    .filter((s) => s.dated && s.max_date)
+    .sort((a, b) => (a.max_date ?? "").localeCompare(b.max_date ?? ""))
+    .pop()?.max_date;
   return (
     <Card className={stale
       ? "border-amber-300 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/30"
@@ -656,8 +670,8 @@ function FreshnessBanner({ freshness }: { freshness: IntelBundle["freshness"] })
         <AlertTriangle className={`h-4 w-4 ${stale ? "text-amber-600" : "text-muted-foreground"}`} />
         <p className="text-[13px]">
           {stale
-            ? `Paid data is ${behind} days behind — send a fresh export${laggards.length ? `: ${laggards.join(", ")}` : ""}. The numbers below still describe the window ending ${freshness.sources?.[0]?.max_date ?? ""}.`
-            : `Newest paid row is ${behind} day${behind === 1 ? "" : "s"} old. Fresh enough — the nudge starts at ${freshness.stale_after_days} days.`}
+            ? `Paid data is ${behind} days behind${apiLaggards.length ? ` — API lag: ${apiLaggards.join(", ")}` : ""}${csvLaggards.length ? ` — send a fresh export: ${csvLaggards.join(", ")}` : "."} The numbers below still describe the window ending ${newest ?? ""}${fetched ? ` · last API fetch ${fetched.slice(0, 16).replace("T", " ")}` : ""}.`
+            : `Newest paid row is ${behind} day${behind === 1 ? "" : "s"} old${fetched ? ` · last API fetch ${fetched.slice(0, 16).replace("T", " ")}` : ""}. Fresh enough — the nudge starts at ${freshness.stale_after_days} days.`}
         </p>
       </CardContent>
     </Card>
@@ -734,22 +748,31 @@ function DataStatus({
               <TableRow key={s.source}>
                 <TableCell>
                   <div className="font-medium">{s.label}</div>
-                  <div className="text-[10px] text-muted-foreground">{s.file}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {s.origin === "api" ? "API" : s.origin === "csv" ? "CSV" : ""}{s.origin ? " · " : ""}{s.file}
+                  </div>
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{fmt(s.rows)}</TableCell>
                 <TableCell className="text-[11px] tabular-nums text-muted-foreground">
-                  {s.rows === 0 ? "not uploaded"
+                  {s.rows === 0 ? (s.origin === "api" ? "no API rows" : "not uploaded")
                     : s.dated ? `${s.min_date} → ${s.max_date}`
                     : "snapshot (no dates)"}
                 </TableCell>
                 <TableCell className="text-[11px] tabular-nums">
                   {s.dated ? (s.max_date ?? "—") : "—"}
+                  {s.fetched_at ? (
+                    <div className="text-[10px] text-muted-foreground">
+                      fetched {s.fetched_at.slice(0, 16).replace("T", " ")}
+                    </div>
+                  ) : null}
                 </TableCell>
                 <TableCell className="text-[11px] tabular-nums">
                   {s.rows === 0 ? (
                     <span className="text-muted-foreground">—</span>
                   ) : !s.dated ? (
                     <span className="text-muted-foreground">replaced each upload</span>
+                  ) : s.origin === "api" && s.stale ? (
+                    <span className="text-amber-700 dark:text-amber-400">{s.days_behind}d — API lag</span>
                   ) : s.stale ? (
                     <button
                       type="button"
@@ -769,19 +792,21 @@ function DataStatus({
         </Table>
         <div className="space-y-1 border-t p-3">
           <p className="text-[11px] text-muted-foreground">
-            Every upload adds to this history. Uploading 7 days each week builds the 14 / 30 / 90 / 365 windows
-            over time — matching days are overwritten, older days are kept.
+            Google Ads, GA4, and Search Console prefer official API tables (max metric_date + fetched_at).
+            Meta stays on CSV until meta_ads_daily has rows. Optional CSV fallback still overwrites matching days.
           </p>
           {thin.length > 0 && (
             <p className="text-[11px] text-amber-700 dark:text-amber-400">
               Thin for {rangeLabel}: {thin.map((s) => `${s.label} has ${s.days_in_range} of ${s.expected_days || s.range_days} days`).join("; ")}.
-              That window is real but incomplete — upload a longer export to fill it.
+              That window is real but incomplete
+              {thin.some((s) => s.origin !== "api") ? " — upload a longer export to fill CSV sources" : ""}.
               Reporting lag is already accounted for.
             </p>
           )}
           {missing.length > 0 && (
             <p className="text-[11px] text-muted-foreground">
-              Not uploaded yet: {missing.map((s) => s.file).join(", ")}.
+              {missing.some((s) => s.origin === "api") ? "No API rows yet: " : "Not uploaded yet: "}
+              {missing.map((s) => s.file).join(", ")}.
             </p>
           )}
         </div>
@@ -1004,7 +1029,7 @@ export function PaidAdsIntel({
     >
       {drag && (
         <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-background/70 text-sm font-medium">
-          Drop Google / Meta / GSC / GA4 CSVs
+          Drop Meta CSV (Google / GA4 / GSC optional fallback)
         </div>
       )}
 
@@ -1018,15 +1043,15 @@ export function PaidAdsIntel({
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Paid Ads (Shopify)</h1>
           <p className="text-sm text-muted-foreground">
-            Tallowbourn ads Intel from your CSVs — Google, Meta, GSC, GA4. No OAuth.
-            Range is relative to the newest date <em>in the files</em>
+            Tallowbourn ads Intel from Google Ads / GA4 / Search Console API sync. Meta still uses CSV until
+            meta_ads_daily has rows. Range is relative to the newest date <em>in the loaded sources</em>
             {data.as_of ? ` (${data.as_of})` : ""}, not today.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={busy}>
             <Upload className="mr-1.5 h-3.5 w-3.5" />
-            {busy ? "Reading…" : "Upload CSVs"}
+            {busy ? "Reading…" : "Upload Meta CSV"}
           </Button>
           <input
             ref={inputRef}
@@ -1034,7 +1059,7 @@ export function PaidAdsIntel({
             multiple
             accept=".csv,.zip,text/csv,application/zip"
             className="hidden"
-            aria-label="Upload Google, Meta, GSC, or GA4 CSVs"
+            aria-label="Upload Meta CSV; Google, GSC, or GA4 CSVs remain optional fallback"
             onChange={(e) => onFiles(e.target.files)}
           />
           <Button variant="outline" size="sm" onClick={copyGrok} disabled={empty}>
@@ -1104,10 +1129,11 @@ export function PaidAdsIntel({
           <CardContent className="py-12 text-center">
             <Megaphone className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">
-              Drop Google Ads Daily, Meta campaign export, GSC (Queries + Pages + Chart + Search Appearance), and a GA4 Explore CSV.
+              Google Ads, GA4, and Search Console load from API sync. Drop a Meta Ads Manager campaign export
+              until meta_ads_daily has rows.
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Select all of them at once — the parser identifies each file by its header.
+              Google / GA4 / GSC CSVs remain an optional fallback — the parser still identifies each file by its header.
               A missing source omits that channel; it does not crash. Matching days overwrite; older days stay.
             </p>
           </CardContent>
@@ -1178,7 +1204,7 @@ export function PaidAdsIntel({
             <h2 className="text-sm font-semibold tracking-tight">This week</h2>
             <Card>
               <CardContent className="space-y-3 p-4">
-                <p className="text-sm leading-relaxed">{brief.headline || "Upload CSVs to build this week’s brief."}</p>
+                <p className="text-sm leading-relaxed">{brief.headline || "API sync or a Meta CSV builds this week’s brief."}</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <p className="text-[13px] text-muted-foreground">
                     <span className="font-medium text-foreground">Ads lead. </span>{brief.ads || "No paid-media stack yet."}
