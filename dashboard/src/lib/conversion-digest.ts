@@ -5,10 +5,10 @@
  * Never substitute an older complete day when the requested day is missing.
  *
  * Funnel / primary_leak / abandons: shopify_funnel_* only.
- * improvements: ranked as_of actions from that day's Shopify leak plus
- * locked-day GA4 / GSC / Ads when material. Empty when nothing material.
- * Jev hold does not blank evidence-backed items. Never invents metrics.
- * No Meta copy. No theme / Shopify writes.
+ * improvements: ranked as_of actions (max 5). Morgan/CoS locked schema:
+ * owner (one of Harry|Nora|Blake|Blair|Kit), severity, evidence, concrete_ask,
+ * dave_tap, rank, text. One owner. Ban “fix PDP/ATC”. Meta skipped.
+ * Empty when nothing material. Never invents metrics.
  */
 
 import { agentAsOf, agentToday } from "./as-of";
@@ -38,10 +38,43 @@ export const DEFINITIONS_NOTE =
 
 export type DigestStatus = "CLEAR" | "HOLD" | "GAP";
 
+export const DIGEST_OWNERS = ["Harry", "Nora", "Blake", "Blair", "Kit"] as const;
+export type DigestOwner = (typeof DIGEST_OWNERS)[number];
+
+/** Generic copy Morgan banned. concrete_ask / text must not match. */
+export const IMPROVEMENT_BAN = [
+  /fix PDP\/ATC/i,
+  /fix pdp\/atc/i,
+] as const;
+
+export type DigestEvidence = {
+  source: "ga4" | "gsc" | "ads" | "shopify";
+  path?: string;
+  device?: string;
+  query?: string;
+  page?: string;
+  campaign?: string;
+  sessions?: number;
+  purchases?: number;
+  lost?: number;
+  impressions?: number;
+  clicks?: number;
+  position?: number;
+  spend?: number;
+  conversions?: number;
+  abandon_value?: number;
+  abandon_count?: number;
+  rate?: number;
+};
+
 export type DigestImprovement = {
   rank: number;
   text: string;
+  owner: DigestOwner;
   severity: string;
+  evidence: DigestEvidence;
+  concrete_ask: string;
+  dave_tap: boolean;
   step: string;
 };
 
@@ -256,33 +289,266 @@ function fmtConv(n: number): string {
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
 }
 
-export function improvementFromAction(item: JevItem): DigestImprovement | null {
-  const sev = (item.severity || "p1").toLowerCase();
-  const step = item.step || "unclear";
-  let text: string | null = null;
+function fmtPct(rate: number | null | undefined): string | null {
+  if (rate == null || !Number.isFinite(rate)) return null;
+  const pct = Math.round(rate * 100);
+  return `${pct}%`;
+}
+
+function fmtPos(n: number): string {
+  const rounded = Math.round(n * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+
+function titleCaseDevice(device: string): string {
+  const d = device.trim().toLowerCase();
+  if (d === "mobile") return "Mobile";
+  if (d === "desktop") return "Desktop";
+  if (d === "tablet") return "Tablet";
+  return device.trim();
+}
+
+function pathNorm(path: string | null | undefined): string {
+  if (!path) return "";
+  return path.toLowerCase().split("?")[0].replace(/\/+$/, "") || "/";
+}
+
+/** Blair only for checkout theme or theme/bug paths. Collections stay Harry. */
+export function isBlairThemeBugPath(path: string | null | undefined): boolean {
+  const p = pathNorm(path);
+  if (!p || /\/products?\//.test(p)) return false;
+  return /^\/(checkouts?)(\/|$)/.test(p)
+    || /theme|layout|template/.test(p)
+    || /^\/apps(\/|$)/.test(p);
+}
+
+export function isThemeLayoutPath(path: string | null | undefined): boolean {
+  return isBlairThemeBugPath(path);
+}
+
+export function ownerForAction(item: JevItem): DigestOwner | null {
+  if (item.mode === "landing") {
+    return isBlairThemeBugPath(item.path) ? "Blair" : "Harry";
+  }
+  if (item.mode === "seo") return "Nora";
+  if (item.mode === "ads") return "Blake";
+  if (item.mode === "abandon") return "Kit";
   if (item.mode === "leak") {
-    const metric = item.metric || step;
+    if (item.step === "checkout_to_purchase") return "Blair";
+    return "Harry";
+  }
+  return null;
+}
+
+/** Dave only for money / recover-sends / a real fork. Not routine copy or SEO. */
+export function daveTapForAction(item: JevItem, severity: string): boolean {
+  if (item.mode === "abandon") return true;
+  if (item.mode === "ads" && item.spend != null && item.spend >= 50) return true;
+  if (severity === "P0" && item.mode === "ads") return true;
+  return false;
+}
+
+function normalizeSeverity(raw: string | undefined): string {
+  const s = (raw || "p1").trim();
+  const up = s.toUpperCase();
+  if (up === "P0" || up === "P1" || up === "P2") return up;
+  return s;
+}
+
+function benefitFromPath(path: string): string | null {
+  const slug = path.split("/").filter(Boolean).pop() ?? "";
+  if (!slug) return null;
+  const tokens = slug.split(/[-_]/).filter(Boolean);
+  if (!tokens.length) return null;
+  const joined = tokens.map((t) => t.toLowerCase()).join(" ");
+  if (/\bextra\b/.test(joined) && /\bstrength\b/.test(joined)) return "Extra Strength";
+  return tokens.map((t) => t.charAt(0).toUpperCase() + t.slice(1)).join(" ");
+}
+
+function leakAsk(step: string): string {
+  if (step === "session_to_pdp") return "move sessions onto a PDP before the offer";
+  if (step === "pdp_to_atc") return "rewrite PDP CTA and simplify ATC";
+  if (step === "atc_to_checkout") return "cut cart-to-checkout friction";
+  if (step === "checkout_to_purchase") return "repair checkout theme so started checkouts complete";
+  return "act on the closed-funnel step with the lost-session count";
+}
+
+function landingAsk(path: string): string {
+  if (/\/products?\//i.test(path)) {
+    const benefit = benefitFromPath(path);
+    if (benefit) return `rewrite above-fold CTA to ${benefit} benefit + simplify ATC`;
+    return "rewrite above-fold CTA to the product benefit + simplify ATC";
+  }
+  if (isBlairThemeBugPath(path)) return "repair checkout or theme bug on this path";
+  return "rewrite above-fold CTA and simplify the next click";
+}
+
+function seoAsk(item: JevItem): string {
+  const kind = item.metric === "gsc_page" ? "page" : "query";
+  if (item.clicks === 0) return `rewrite title and meta for this ${kind} gap`;
+  if (item.position != null && Number.isFinite(item.position) && item.position >= 15) {
+    return `rewrite title and meta to climb this ${kind}`;
+  }
+  return `rewrite title and meta for this ${kind}`;
+}
+
+function pick<T extends Record<string, unknown>>(obj: T): T {
+  const out = { ...obj };
+  for (const [k, v] of Object.entries(out)) {
+    if (v === undefined || v === null || v === "") delete (out as Record<string, unknown>)[k];
+  }
+  return out;
+}
+
+function evidenceFor(item: JevItem): DigestEvidence | null {
+  if (item.mode === "landing") {
+    if (!item.path || item.current == null) return null;
+    return pick({
+      source: "ga4" as const,
+      path: item.path,
+      device: item.device || undefined,
+      sessions: item.sessions ?? undefined,
+      purchases: item.purchases ?? undefined,
+      lost: item.current,
+      rate: item.delta_pct ?? undefined,
+    });
+  }
+  if (item.mode === "seo") {
+    if (!item.query || item.impressions == null || item.clicks == null) return null;
+    const page = item.metric === "gsc_page";
+    return pick({
+      source: "gsc" as const,
+      query: page ? undefined : item.query,
+      page: page ? item.query : undefined,
+      impressions: item.impressions,
+      clicks: item.clicks,
+      position: item.position ?? undefined,
+    });
+  }
+  if (item.mode === "ads") {
+    if (!item.campaign || item.spend == null || item.conversions == null) return null;
+    return pick({
+      source: "ads" as const,
+      campaign: item.campaign,
+      spend: item.spend,
+      clicks: item.clicks ?? undefined,
+      conversions: item.conversions,
+    });
+  }
+  if (item.mode === "abandon") {
+    if (item.abandon_value == null) return null;
+    return pick({
+      source: "shopify" as const,
+      abandon_value: item.abandon_value,
+      abandon_count: item.abandon_count ?? undefined,
+    });
+  }
+  if (item.mode === "leak") {
+    if (item.current == null) return null;
+    return pick({
+      source: "shopify" as const,
+      lost: item.current,
+      rate: item.delta_pct ?? undefined,
+    });
+  }
+  return null;
+}
+
+function ownerCountInText(text: string): number {
+  return (text.match(/\[(Harry|Nora|Blake|Blair|Kit)\]/g) || []).length;
+}
+
+export function improvementContractErrors(row: DigestImprovement): string[] {
+  const errs: string[] = [];
+  if (!DIGEST_OWNERS.includes(row.owner)) errs.push("owner");
+  if (!row.severity) errs.push("severity");
+  if (!row.evidence || typeof row.evidence !== "object" || Array.isArray(row.evidence)) {
+    errs.push("evidence");
+  } else if (!row.evidence.source) {
+    errs.push("evidence.source");
+  }
+  if (!row.concrete_ask || !row.concrete_ask.trim()) errs.push("concrete_ask");
+  if (typeof row.dave_tap !== "boolean") errs.push("dave_tap");
+  if (typeof row.rank !== "number") errs.push("rank");
+  if (!row.text || !row.text.trim()) errs.push("text");
+  if (row.concrete_ask && ownerCountInText(row.concrete_ask) > 1) errs.push("multi_owner");
+  if (row.text && ownerCountInText(row.text) > 1) errs.push("multi_owner");
+  const banned = [...IMPROVEMENT_BAN];
+  for (const re of banned) {
+    if (re.test(row.concrete_ask || "") || re.test(row.text || "")) errs.push("ban");
+  }
+  if (row.owner === "Kit" && row.evidence?.source && row.evidence.source !== "shopify") {
+    errs.push("owner_source");
+  }
+  return [...new Set(errs)];
+}
+
+export function improvementFromAction(item: JevItem): DigestImprovement | null {
+  const owner = ownerForAction(item);
+  const step = item.step || "unclear";
+  const severity = normalizeSeverity(item.severity);
+  const evidence = evidenceFor(item);
+  if (!owner || !evidence) return null;
+  const tag = `[${owner}]`;
+  let ask: string | null = null;
+  if (item.mode === "leak") {
+    const metric = (item.metric || step).replace(/->/g, "→");
     const lost = item.current;
     if (!metric || lost == null) return null;
-    text = `${sev.toUpperCase()} · ${metric} · ${lost} sessions lost`;
+    const bits = [`${lost} sessions lost`];
+    const pct = fmtPct(item.delta_pct);
+    if (pct) bits[0] += ` (${pct})`;
+    ask = `Shopify ${metric}: ${bits.join(" · ")} — ${leakAsk(step)} ${tag}`;
+  } else if (item.mode === "abandon") {
+    if (item.abandon_value == null) return null;
+    const n = item.abandon_count;
+    const countBit = n != null ? ` / ${n} checkout${n === 1 ? "" : "s"}` : "";
+    ask = `Shopify abandons: $${fmtMoney(item.abandon_value)} open${countBit} — send recover sequence ${tag}`;
   } else if (item.mode === "landing") {
     const path = (item.path || "").trim();
     if (!path || item.current == null) return null;
-    const device = (item.device || "").trim();
-    const where = device ? `${path} ${device}` : path;
-    const hint = item.notes ? ` — ${item.notes}` : "";
-    text = `${sev.toUpperCase()} · landing ${where} · ${item.current} lost${hint}`;
+    const device = titleCaseDevice(item.device || "");
+    const head = [device, path].filter(Boolean).join(" ");
+    let metric: string;
+    if (item.sessions != null && item.purchases != null) {
+      metric = `${item.sessions} sessions → ${item.purchases} purchases`;
+    } else {
+      metric = `${item.current} lost sessions`;
+      const pct = fmtPct(item.delta_pct);
+      if (pct) metric += ` (${pct})`;
+    }
+    ask = `${head}: ${metric} — ${landingAsk(path)} ${tag}`;
   } else if (item.mode === "seo") {
-    const query = (item.query || "").trim();
-    if (!query || item.impressions == null || item.clicks == null) return null;
-    text = `GSC · query '${query}' · ${item.impressions} impr · ${item.clicks} clicks`;
+    const key = (item.query || "").trim();
+    if (!key || item.impressions == null || item.clicks == null) return null;
+    const kind = item.metric === "gsc_page" ? "page" : "query";
+    const label = kind === "page" ? `GSC page ${key}` : `GSC query '${key}'`;
+    const bits = [`${item.impressions} impr`, `${item.clicks} clicks`];
+    if (item.position != null && Number.isFinite(item.position)) {
+      bits.push(`pos ${fmtPos(item.position)}`);
+    }
+    ask = `${label}: ${bits.join(" / ")} — ${seoAsk(item)} ${tag}`;
   } else if (item.mode === "ads") {
     const campaign = (item.campaign || "").trim();
     if (!campaign || item.spend == null || item.conversions == null) return null;
-    text = `Ads · ${campaign} · $${fmtMoney(item.spend)} spend · ${fmtConv(item.conversions)} conv — review`;
+    const bits = [`$${fmtMoney(item.spend)}`];
+    if (item.clicks != null) bits.push(`${item.clicks} clicks`);
+    bits.push(`${fmtConv(item.conversions)} conv`);
+    ask = `Ads ${campaign}: ${bits.join(" / ")} — review negatives or pause ${tag}`;
   }
-  if (!text) return null;
-  return { rank: 0, text, severity: sev, step };
+  if (!ask) return null;
+  const row: DigestImprovement = {
+    rank: 0,
+    text: ask,
+    owner,
+    severity,
+    evidence,
+    concrete_ask: ask,
+    dave_tap: daveTapForAction(item, severity),
+    step,
+  };
+  if (improvementContractErrors(row).length) return null;
+  return row;
 }
 
 /** Locked-day ranked actions. Empty when no material as_of rows. */
@@ -307,7 +573,10 @@ export function improvementsFromLockedDay(input: {
   const abandon = input.abandons?.length ? recoveryOf(input.abandons) : null;
   const p2 = input.phase2;
   const landings = (p2?.landing_drops ?? []).filter((d) => d.lost >= 10 && d.path);
-  const seo = gscOpportunities(p2?.seo?.queries ?? []);
+  const seo = [
+    ...gscOpportunities(p2?.seo?.queries ?? []).map((q) => ({ ...q, kind: "query" as const })),
+    ...gscOpportunities(p2?.seo?.pages ?? []).map((q) => ({ ...q, kind: "page" as const })),
+  ];
   const ads = adsWaste(p2?.ads ?? []);
   const items = jevItemsFromLockedDay({
     asOf: input.asOf,

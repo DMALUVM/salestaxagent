@@ -54,7 +54,7 @@ const STATE_KEYS = [
   "evidence", "notes",
 ] as const;
 
-export type JevItemMode = "leak" | "landing" | "seo" | "ads";
+export type JevItemMode = "leak" | "landing" | "seo" | "ads" | "abandon";
 
 export type JevItem = {
   mode: JevItemMode;
@@ -74,6 +74,9 @@ export type JevItem = {
   conversions?: number | null;
   impressions?: number | null;
   clicks?: number | null;
+  sessions?: number | null;
+  purchases?: number | null;
+  position?: number | null;
   evidence?: { leak?: unknown; abandon?: unknown; landing?: unknown; seo?: unknown; ads?: unknown };
   notes?: string;
   severity?: string;
@@ -124,6 +127,7 @@ export const GA4_LANDING_MIN_LOST = 10;
 export const GSC_MIN_IMPRESSIONS = 50;
 export const ADS_MIN_SPEND = 5;
 export const ADS_NEAR_ZERO_CONV = 0.5;
+export const DIGEST_ABANDON_KIT_MIN = 40;
 export const DIGEST_MAX_IMPROVEMENTS = 5;
 export const DIGEST_MAX_PER_SOURCE = 2;
 
@@ -166,6 +170,7 @@ type LockedLanding = {
 
 type LockedSeo = {
   key: string;
+  kind?: "query" | "page";
   clicks: number | null;
   impressions: number | null;
   ctr: number | null;
@@ -214,6 +219,23 @@ export function jevItemsFromLockedDay(input: {
     });
   }
 
+  const abandonValue = typeof input.abandon?.openValue === "number" ? input.abandon.openValue : null;
+  const abandonOpen = typeof input.abandon?.open === "number" ? input.abandon.open : null;
+  if (abandonValue != null && abandonValue >= DIGEST_ABANDON_KIT_MIN) {
+    out.push({
+      mode: "abandon",
+      period: asOf,
+      step: "unclear",
+      metric: "abandon_value",
+      current: abandonValue,
+      abandon_count: abandonOpen,
+      abandon_value: abandonValue,
+      severity: abandonValue >= 80 ? "p0" : "p1",
+      score: abandonValue * 2,
+      evidence: { abandon: input.abandon },
+    });
+  }
+
   for (const drop of input.landingDrops ?? []) {
     if (!drop.path || drop.lost < GA4_LANDING_MIN_LOST) continue;
     const device = drop.device || "";
@@ -226,10 +248,11 @@ export function jevItemsFromLockedDay(input: {
       device,
       current: drop.lost,
       delta_pct: drop.rate,
+      sessions: drop.sessions,
+      purchases: drop.purchases,
       severity: "p1",
       score: drop.lost,
       evidence: { landing: drop },
-      notes: /\/products?\//i.test(drop.path) ? "fix PDP/ATC" : undefined,
     });
   }
 
@@ -241,14 +264,16 @@ export function jevItemsFromLockedDay(input: {
     const weakCtr = q.ctr != null && Number.isFinite(q.ctr) && q.ctr < 0.02 && q.impressions >= 100;
     const weakPos = q.position != null && Number.isFinite(q.position) && q.position >= 15 && clicks <= 1;
     if (!zeroClick && !weakCtr && !weakPos) continue;
+    const kind = q.kind === "page" ? "page" : "query";
     out.push({
       mode: "seo",
       period: asOf,
       step: "unclear",
-      metric: "gsc_query",
+      metric: kind === "page" ? "gsc_page" : "gsc_query",
       query: q.key,
       impressions: q.impressions,
       clicks: clicks,
+      position: q.position,
       current: q.impressions,
       severity: "p1",
       score: q.impressions + (zeroClick ? 25 : 0),
@@ -274,7 +299,6 @@ export function jevItemsFromLockedDay(input: {
       severity: "p1",
       score: ad.spend * 3,
       evidence: { ads: ad },
-      notes: "review",
     });
   }
 
