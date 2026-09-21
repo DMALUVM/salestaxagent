@@ -7,9 +7,26 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
-load_dotenv()
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Always load repo-root .env (cwd-independent). Bare CLI + launchd KeepAlive
+# must work without a manual load_dotenv() in the shell.
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+def load_project_dotenv(root: Path | None = None, *, override: bool = False) -> bool:
+    """Load Mini `.env` from an absolute project path, not process cwd.
+
+    `python -m src.main google-ads-sync` (and ga4/gsc) import connectors
+    that read `os.environ` via `missing_oauth_env`. A cwd-relative
+    `load_dotenv()` misses `/Users/.../sales-tax-agent/.env` when the
+    shell is elsewhere. override=False keeps already-set Vercel/process
+    env from being overwritten.
+    """
+    return bool(load_dotenv((root or PROJECT_ROOT) / ".env", override=override))
+
+
+load_project_dotenv()
 
 
 class Settings(BaseSettings):
@@ -117,7 +134,7 @@ class Settings(BaseSettings):
         )
 
     model_config = {
-        "env_file": ".env",
+        "env_file": str(PROJECT_ROOT / ".env"),
         "env_file_encoding": "utf-8",
         # Mini .env grows unused keys. Ignore extras so required fields
         # (Supabase) still construct. Known Phase 2 names are declared above.
