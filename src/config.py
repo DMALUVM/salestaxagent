@@ -7,9 +7,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
-load_dotenv()
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Always load repo-root .env (cwd-independent). Bare CLI + launchd KeepAlive
+# must work without a manual load_dotenv() in the shell.
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 class Settings(BaseSettings):
@@ -117,7 +119,7 @@ class Settings(BaseSettings):
         )
 
     model_config = {
-        "env_file": ".env",
+        "env_file": str(PROJECT_ROOT / ".env"),
         "env_file_encoding": "utf-8",
         # Mini .env grows unused keys. Ignore extras so required fields
         # (Supabase) still construct. Known Phase 2 names are declared above.
