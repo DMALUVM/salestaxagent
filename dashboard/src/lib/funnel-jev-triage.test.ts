@@ -9,7 +9,9 @@ import {
   hasGatewayKey,
   jevAlreadyRan,
   jevDecisionFromResult,
+  jevItemsFromLockedDay,
   jevItemsFromStats,
+  rankDigestItems,
   runFunnelJevTriage,
   shouldRunJev,
   statsAreSilent,
@@ -31,6 +33,34 @@ describe("funnel Jev protocol", () => {
     assert.equal(items[0].current, 80);
     assert.equal(items[0].abandon_count, 3);
     assert.equal(items[0].abandon_value, 90);
+  });
+
+  test("locked-day items are as_of only and skip unnamed / sub-floor rows", () => {
+    assert.deepEqual(jevItemsFromLockedDay({
+      asOf: "2026-09-19",
+      leak: { from: "sessions", to: "add_to_cart", lost: 3, rate: 0.2 },
+      landingDrops: [{ path: "/old", device: "mobile", sessions: 8, purchases: 1, lost: 7, rate: 0.875 }],
+      seoQueries: [{ key: "tiny", clicks: 0, impressions: 10, ctr: 0, position: 20 }],
+      ads: [{ campaign_id: "1", campaign_name: "Cheap", spend: 2, clicks: 3, conversions: 0 }],
+    }), []);
+
+    const items = jevItemsFromLockedDay({
+      asOf: "2026-09-19",
+      leak: { from: "sessions", to: "add_to_cart", lost: 75, rate: 0.75 },
+      landingDrops: [{
+        path: "/products/tallow-balm", device: "mobile",
+        sessions: 70, purchases: 4, lost: 66, rate: 0.94,
+      }],
+      seoQueries: [{ key: "tallow balm", clicks: 0, impressions: 120, ctr: 0, position: 22 }],
+      ads: [{ campaign_id: "99", campaign_name: "Brand Search", spend: 42, clicks: 18, conversions: 0 }],
+    });
+    assert.equal(items.every((i) => i.period === "2026-09-19"), true);
+    assert.equal(items.some((i) => i.mode === "leak" && i.current === 75), true);
+    assert.equal(items.some((i) => i.mode === "landing" && i.path === "/products/tallow-balm"), true);
+    assert.equal(items.some((i) => i.mode === "seo" && i.query === "tallow balm"), true);
+    assert.equal(items.some((i) => i.mode === "ads" && i.campaign === "Brand Search"), true);
+    assert.equal(rankDigestItems(items).length <= 5, true);
+    assert.equal(rankDigestItems(items, 3).length, 3);
   });
 
   test("decision map: pursue / hold / skip / fail closed", () => {

@@ -20,12 +20,15 @@ import type { AbandonedRow } from "@/lib/shopify-funnel";
  * America/New_York. Never substitutes an older complete day.
  *
  * After Mini writes shopify_funnel_* , this read runs or reuses Vercel
- * Jev triage and copies pursue (max 3) into improvements. Fail closed
- * → improvements: []. No Shopify / theme writes. No Mini gateway key.
+ * Jev (optional severity on the as_of Shopify leak). improvements are
+ * ranked locked-day actions (Shopify leak + GA4 / GSC / Ads when
+ * material; max 5). Jev hold does not blank evidence. Fail closed
+ * → improvements: [] when no material as_of rows. No Shopify / theme
+ * writes. No Mini gateway key.
  *
- * Phase 2 extras (`phase2.landing_drops` / `seo` / `connectors`) are
- * null/false until official-API rows exist for the locked day. Missing
- * tables are not an error. Never invents GA4/GSC/ads numbers.
+ * Phase 2 extras (`phase2.landing_drops` / `seo` / `ads` / `connectors`)
+ * are null/false until official-API rows exist for the locked day.
+ * Missing tables are not an error. Never invents GA4/GSC/ads numbers.
  *
  * Auth: dashboard Basic Auth + service-role warehouse. Not anon.
  */
@@ -122,27 +125,29 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const [ga4, gscQueries, gscPages, googleAds, metaAds] = await Promise.all([
+      loadOptionalDay(sb, "ga4_landing_daily", "metric_date,landing_page,device,sessions,engaged_sessions,landings,view_item,add_to_cart,begin_checkout,purchase", parsed.asOf),
+      loadOptionalDay(sb, "gsc_query_daily", "metric_date,query,clicks,impressions,ctr,position", parsed.asOf),
+      loadOptionalDay(sb, "gsc_page_daily", "metric_date,page,clicks,impressions,ctr,position", parsed.asOf),
+      loadOptionalDay(sb, "google_ads_daily", "metric_date,campaign_id,campaign_name,spend,clicks,conversions", parsed.asOf),
+      loadOptionalDay(sb, "meta_ads_daily", "metric_date,campaign_id,campaign_name,spend,clicks,conversions", parsed.asOf),
+    ]);
+
+    const phase2 = phase2FromLockedDay(parsed.asOf, {
+      ga4, gscQueries, gscPages, googleAds, metaAds,
+    });
     const digest = buildConversionDigest({
       asOf: parsed.asOf,
       dailyRow,
       funnelOk: status.data?.funnel_ok ?? null,
       abandons: (abandons.data ?? []) as AbandonedRow[],
       jev,
+      phase2,
     });
-
-    const [ga4, gscQueries, gscPages, googleAds, metaAds] = await Promise.all([
-      loadOptionalDay(sb, "ga4_landing_daily", "metric_date,landing_page,device,sessions,engaged_sessions,landings,view_item,add_to_cart,begin_checkout,purchase", parsed.asOf),
-      loadOptionalDay(sb, "gsc_query_daily", "metric_date,query,clicks,impressions,ctr,position", parsed.asOf),
-      loadOptionalDay(sb, "gsc_page_daily", "metric_date,page,clicks,impressions,ctr,position", parsed.asOf),
-      loadOptionalDay(sb, "google_ads_daily", "metric_date,campaign_id,spend,clicks,conversions", parsed.asOf),
-      loadOptionalDay(sb, "meta_ads_daily", "metric_date,campaign_id,spend,clicks,conversions", parsed.asOf),
-    ]);
 
     return Response.json({
       ...digest,
-      phase2: phase2FromLockedDay(parsed.asOf, {
-        ga4, gscQueries, gscPages, googleAds, metaAds,
-      }),
+      phase2,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

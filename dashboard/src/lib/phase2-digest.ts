@@ -30,9 +30,18 @@ export type SeoSection = {
   pages: SeoRow[];
 };
 
+export type AdsCampaign = {
+  campaign_id: string;
+  campaign_name: string;
+  spend: number | null;
+  clicks: number | null;
+  conversions: number | null;
+};
+
 export type Phase2Digest = {
   landing_drops: LandingDrop[] | null;
   seo: SeoSection | null;
+  ads: AdsCampaign[] | null;
   connectors: {
     ga4: boolean;
     gsc: boolean;
@@ -45,6 +54,7 @@ export function emptyPhase2(): Phase2Digest {
   return {
     landing_drops: null,
     seo: null,
+    ads: null,
     connectors: { ga4: false, gsc: false, google_ads: false, meta_ads: false },
   };
 }
@@ -88,7 +98,7 @@ function seoRows(
   rows: Array<Record<string, unknown>>,
   date: string,
   keyField: "query" | "page",
-  limit = 10,
+  limit = 40,
 ): SeoRow[] {
   return rows
     .filter((r) => String(r.metric_date ?? "") === date)
@@ -115,6 +125,89 @@ export function seoSection(
   return { queries: q, pages: p };
 }
 
+function asMoney(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
+}
+
+function asQty(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Locked-day Google Ads campaign facts. Null when that day has no rows. */
+export function adsCampaigns(
+  rows: Array<Record<string, unknown>>,
+  date: string,
+  limit = 10,
+): AdsCampaign[] | null {
+  const day = rows.filter((r) => String(r.metric_date ?? "") === date);
+  if (!day.length) return null;
+  const out: AdsCampaign[] = [];
+  for (const r of day) {
+    const campaign_id = String(r.campaign_id ?? "").trim();
+    const campaign_name = String(r.campaign_name ?? "").trim();
+    if (!campaign_id && !campaign_name) continue;
+    out.push({
+      campaign_id,
+      campaign_name,
+      spend: asMoney(r.spend),
+      clicks: asInt(r.clicks),
+      conversions: asQty(r.conversions),
+    });
+  }
+  if (!out.length) return null;
+  return out
+    .sort((a, b) =>
+      (b.spend ?? -1) - (a.spend ?? -1)
+      || a.campaign_name.localeCompare(b.campaign_name)
+      || a.campaign_id.localeCompare(b.campaign_id))
+    .slice(0, limit);
+}
+
+/** High-impression, weak-CTR/position queries on the locked day. */
+export function gscOpportunities(queries: SeoRow[] | null | undefined, limit = 3): SeoRow[] {
+  if (!queries?.length) return [];
+  return queries
+    .filter((q) => {
+      if (!q.key) return false;
+      if (q.impressions == null || q.impressions < 50) return false;
+      if (q.clicks === 0) return true;
+      if (q.clicks == null) return false;
+      if (q.ctr != null && Number.isFinite(q.ctr) && q.ctr < 0.02 && q.impressions >= 100) {
+        return true;
+      }
+      if (q.position != null && Number.isFinite(q.position)
+        && q.position >= 15 && q.clicks <= 1) {
+        return true;
+      }
+      return false;
+    })
+    .sort((a, b) =>
+      (b.impressions ?? 0) - (a.impressions ?? 0)
+      || (a.clicks ?? 0) - (b.clicks ?? 0)
+      || a.key.localeCompare(b.key))
+    .slice(0, limit);
+}
+
+/** Spend with ~0 conversions. Null conversions are skipped — never invented. */
+export function adsWaste(campaigns: AdsCampaign[] | null | undefined, limit = 3): AdsCampaign[] {
+  if (!campaigns?.length) return [];
+  return campaigns
+    .filter((c) => {
+      if (!c.campaign_name && !c.campaign_id) return false;
+      if (c.spend == null || c.spend < 5) return false;
+      if (c.conversions == null) return false;
+      return c.conversions < 0.5;
+    })
+    .sort((a, b) =>
+      (b.spend ?? 0) - (a.spend ?? 0)
+      || (a.campaign_name || a.campaign_id).localeCompare(b.campaign_name || b.campaign_id))
+    .slice(0, limit);
+}
+
 export function phase2FromLockedDay(
   date: string,
   tables: {
@@ -133,6 +226,7 @@ export function phase2FromLockedDay(
   return {
     landing_drops: topLandingDrops(ga4, date),
     seo: seoSection(gscQueries, gscPages, date),
+    ads: adsCampaigns(googleAds, date),
     connectors: {
       ga4: hasDate(ga4, date),
       gsc: hasDate(gscQueries, date) || hasDate(gscPages, date),
