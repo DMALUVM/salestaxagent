@@ -1,6 +1,7 @@
 """Phase 2 official-API connectors — fail closed, no invented metrics, no wait-loops."""
 from __future__ import annotations
 
+import os
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -8,6 +9,7 @@ from zoneinfo import ZoneInfo
 import click
 from click.testing import CliRunner
 
+from src.config import load_project_dotenv
 from src.phase2_connectors import (
     CONNECTORS,
     NEEDS_OAUTH,
@@ -165,6 +167,57 @@ def test_missing_oauth_lists_required_vercel_names(monkeypatch):
     assert "GOOGLE_OAUTH_CLIENT_ID" in missing
     assert "GA4_PROPERTY_ID" in missing
     assert "GOOGLE_ADS_DEVELOPER_TOKEN" not in missing
+
+
+def test_project_dotenv_loads_google_ads_keys_when_cwd_is_elsewhere(
+    tmp_path, monkeypatch,
+):
+    """Mini `.env` is path-absolute — CLI cwd must not hide GOOGLE_* keys."""
+    project = tmp_path / "sales-tax-agent"
+    elsewhere = tmp_path / "elsewhere"
+    project.mkdir()
+    elsewhere.mkdir()
+    keys = (
+        "GOOGLE_OAUTH_CLIENT_ID",
+        "GOOGLE_OAUTH_CLIENT_SECRET",
+        "GOOGLE_OAUTH_REFRESH_TOKEN",
+        "GOOGLE_ADS_DEVELOPER_TOKEN",
+        "GOOGLE_ADS_CUSTOMER_ID",
+    )
+    (project / ".env").write_text(
+        "\n".join(f"{key}=present-{i}" for i, key in enumerate(keys)) + "\n",
+        encoding="utf-8",
+    )
+    for key in keys:
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.chdir(elsewhere)
+    assert Path.cwd() == elsewhere
+    assert os.environ.get("GOOGLE_OAUTH_CLIENT_ID") in (None, "")
+    assert missing_oauth_env("google_ads") == list(keys)
+
+    loaded = load_project_dotenv(project)
+    assert loaded is True
+    assert missing_oauth_env("google_ads") == []
+    for key in keys:
+        assert str(os.environ.get(key) or "").strip()
+
+
+def test_project_dotenv_absent_stays_fail_closed(tmp_path, monkeypatch):
+    """No invented credentials when the absolute `.env` is missing."""
+    project = tmp_path / "empty-project"
+    elsewhere = tmp_path / "elsewhere"
+    project.mkdir()
+    elsewhere.mkdir()
+    keys = CONNECTORS["google_ads"]["env"]
+    for key in keys:
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.chdir(elsewhere)
+    loaded = load_project_dotenv(project)
+    assert loaded is False
+    missing = missing_oauth_env("google_ads")
+    assert missing == list(keys)
 
 
 def test_each_connector_needs_oauth_and_writes_zero(monkeypatch):

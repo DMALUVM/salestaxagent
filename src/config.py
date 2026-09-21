@@ -7,9 +7,22 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
-load_dotenv()
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def load_project_dotenv(root: Path | None = None, *, override: bool = False) -> bool:
+    """Load Mini `.env` from an absolute project path, not process cwd.
+
+    `python -m src.main google-ads-sync` (and ga4/gsc) import connectors
+    that read `os.environ` via `missing_oauth_env`. A cwd-relative
+    `load_dotenv()` misses `/Users/.../sales-tax-agent/.env` when the
+    shell is elsewhere. override=False keeps already-set Vercel/process
+    env from being overwritten.
+    """
+    return bool(load_dotenv((root or PROJECT_ROOT) / ".env", override=override))
+
+
+load_project_dotenv()
 
 
 class Settings(BaseSettings):
