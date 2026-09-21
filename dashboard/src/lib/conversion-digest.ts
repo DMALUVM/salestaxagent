@@ -231,14 +231,13 @@ export function improvementsFromJev(jev: unknown): DigestImprovement[] {
     const lost = typeof row.current === "number" ? row.current
       : typeof leak?.lost === "number" ? leak.lost
       : null;
-    const metric = typeof row.metric === "string" ? row.metric : "";
     const built = improvementFromAction({
       mode: "leak",
-      metric: metric || undefined,
+      metric: typeof row.metric === "string" ? row.metric : null,
       current: lost,
-      step: stepChoice || undefined,
-      severity: sevChoice || undefined,
-    } as JevItem);
+      step: stepChoice || "unclear",
+      severity: sevChoice || "p1",
+    });
     if (!built) continue;
     built.rank = out.length + 1;
     out.push(built);

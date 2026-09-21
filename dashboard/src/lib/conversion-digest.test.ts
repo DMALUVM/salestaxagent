@@ -186,7 +186,7 @@ describe("improvements from Jev pursue", () => {
     }
   });
 
-  test("max 3 from pursue, evidence-only text", () => {
+  test("max 3 from pursue, locked DigestImprovement fields", () => {
     const jev = {
       ran: true,
       decision: "pursue",
@@ -221,12 +221,17 @@ describe("improvements from Jev pursue", () => {
     assert.equal(rows[0].owner, "Harry");
     assert.equal(rows[0].severity, "P0");
     assert.equal(rows[0].step, "pdp_to_atc");
+    assert.equal(typeof rows[0].dave_tap, "boolean");
+    assert.equal(rows[0].evidence.source, "shopify");
+    assert.equal(rows[0].evidence.lost, 80);
+    assert.match(rows[0].concrete_ask, /80 sessions lost/);
     assert.match(rows[0].text, /sessions→add_to_cart/);
     assert.match(rows[0].text, /80 sessions lost/);
     assert.match(rows[0].text, /\[Harry\]/);
     assert.doesNotMatch(rows[0].text, /fix PDP\/ATC/);
     assert.equal(rows[2].rank, 3);
     assert.doesNotMatch(rows.map((r) => r.text).join(" "), /should-not-appear/);
+    assert.equal(rows.every((r) => improvementContractErrors(r).length === 0), true);
   });
 
   test("skips pursue rows with no evidence (no fluff)", () => {
