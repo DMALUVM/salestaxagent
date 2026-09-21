@@ -81,6 +81,7 @@ export interface ParsedFiles {
 }
 
 export type FreshnessSource = "google" | "meta" | "ga4" | "gsc_trend" | "gsc_snapshot" | "gsc_appearance";
+export type WarehouseOrigin = "api" | "csv";
 
 export interface SourceFreshness {
   source: FreshnessSource;
@@ -90,6 +91,10 @@ export interface SourceFreshness {
   rows: number;
   min_date: string | null;
   max_date: string | null;
+  /** api = official connector table; csv = paid_* upload table. */
+  origin?: WarehouseOrigin;
+  /** Max fetched_at from the API table. Null for CSV. */
+  fetched_at?: string | null;
   days_behind: number | null;
   stale: boolean;
   /** Undated snapshots (Queries.csv / Pages.csv) have no date to age. */

@@ -7,3 +7,4 @@ export * from "./intel";
 export * from "./grok";
 export * from "./outcome";
 export * from "./web-insights";
+export * from "./api-adapt";

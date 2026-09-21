@@ -4,13 +4,13 @@ import { deriveCpc, deriveRoas, round2 } from "./csv";
 import type {
   CampaignAgg, CampaignDaily, FreshnessSource, GaDaily, IntelFilter, IntelFreshness,
   IntelRangeDays, PlatformKpis, ProductAgg, ProductLine, ProductWeights,
-  SearchQueryDaily, SourceFreshness,
+  SearchQueryDaily, SourceFreshness, WarehouseOrigin,
 } from "./types";
 
 /** GA4 channel groups that represent paid traffic. Cross-network ≈ PMax. */
 const PAID_CHANNELS = /^(paid search|paid social|cross-network|display|paid other|paid shopping)$/i;
 
-/** Upload a fresh export once the newest paid row is this many days behind today. */
+/** Flag a source once the newest metric_date is this many days behind today. */
 export const STALE_AFTER_DAYS = 7;
 
 /** A window this thin is not worth trusting as a "30 day" read. */
@@ -25,14 +25,46 @@ export function daysBetween(from: string, to: string): number {
 
 /**
  * Freshness is measured against the real calendar, not the file as-of.
- * `as_of` drives the range windows; this drives the "upload fresh data" nudge
+ * `as_of` drives the range windows; this drives the stale nudge
  * and the per-source coverage of the selected window.
+ * Google / GA4 / GSC age from API max metric_date (+ fetched_at when present).
  */
 /** True table-wide totals, so a windowed read still reports real history. */
 export type SourceStats = Partial<Record<
   FreshnessSource,
-  { rows: number; min_date: string | null; max_date: string | null }
+  {
+    rows: number;
+    min_date: string | null;
+    max_date: string | null;
+    origin?: WarehouseOrigin;
+    fetched_at?: string | null;
+  }
 >>;
+
+const CSV_FILES: Record<FreshnessSource, { label: string; file: string }> = {
+  google: { label: "Google Ads", file: "Google Ads Daily (Campaign × Day)" },
+  meta: { label: "Meta Ads", file: "Ads Manager campaign export" },
+  ga4: { label: "GA4 Explore", file: "GA4 Explore (Free form)" },
+  gsc_trend: { label: "Search Console trend", file: "Chart.csv" },
+  gsc_snapshot: { label: "Search Console snapshot", file: "Queries.csv + Pages.csv" },
+  gsc_appearance: { label: "Search appearance", file: "Search Appearance.csv" },
+};
+
+const API_FILES: Record<FreshnessSource, { label: string; file: string }> = {
+  google: { label: "Google Ads", file: "google_ads_daily" },
+  meta: { label: "Meta Ads", file: "meta_ads_daily" },
+  ga4: { label: "GA4 Data API", file: "ga4_landing_daily" },
+  gsc_trend: { label: "Search Console API", file: "gsc_query_daily (daily rollup)" },
+  gsc_snapshot: { label: "Search Console API", file: "gsc_query_daily + gsc_page_daily" },
+  gsc_appearance: { label: "Search appearance", file: "Search Appearance.csv" },
+};
+
+function sourceCopy(
+  key: FreshnessSource,
+  origin?: WarehouseOrigin,
+): { label: string; file: string } {
+  return origin === "api" ? API_FILES[key] : CSV_FILES[key];
+}
 
 export function buildFreshness(opts: {
   campaigns: Array<{ date: string; platform?: string }>;
@@ -96,6 +128,8 @@ export function buildFreshness(opts: {
       rows: totalRows,
       min_date: min || null,
       max_date: max || null,
+      origin: stat?.origin,
+      fetched_at: stat?.fetched_at ?? null,
       days_behind: behind,
       stale: behind == null || behind >= STALE_AFTER_DAYS,
       dated: true,
@@ -106,33 +140,54 @@ export function buildFreshness(opts: {
     };
   };
 
+  const googleCopy = sourceCopy("google", opts.stats?.google?.origin);
+  const metaCopy = sourceCopy("meta", opts.stats?.meta?.origin);
+  const gaCopy = sourceCopy("ga4", opts.stats?.ga4?.origin);
+  const trendCopy = sourceCopy("gsc_trend", opts.stats?.gsc_trend?.origin);
+  const snapCopy = sourceCopy("gsc_snapshot", opts.stats?.gsc_snapshot?.origin);
+  const appearanceCopy = sourceCopy("gsc_appearance", opts.stats?.gsc_appearance?.origin);
+  const datedSnapshot = opts.queries.some((q) =>
+    Boolean(q.date) && (q.kind === "query" || q.kind === "page"))
+    || Boolean(opts.stats?.gsc_snapshot?.min_date || opts.stats?.gsc_snapshot?.max_date);
+
   const sources: SourceFreshness[] = [
-    dated("google", "Google Ads", "Google Ads Daily (Campaign × Day)", google),
-    dated("meta", "Meta Ads", "Ads Manager campaign export", meta),
-    dated("ga4", "GA4 Explore", "GA4 Explore (Free form)", opts.ga),
-    dated("gsc_trend", "Search Console trend", "Chart.csv", trend),
-    {
-      source: "gsc_snapshot",
-      label: "Search Console snapshot",
-      file: "Queries.csv + Pages.csv",
-      rows: opts.stats?.gsc_snapshot?.rows ?? snapshot.length,
-      min_date: null,
-      max_date: null,
-      days_behind: null,
-      stale: false,
-      dated: false,
-      days_in_range: 0,
-      range_days: range,
-      expected_days: 0,
-      coverage: null,
-    },
+    dated("google", googleCopy.label, googleCopy.file, google),
+    dated("meta", metaCopy.label, metaCopy.file, meta),
+    dated("ga4", gaCopy.label, gaCopy.file, opts.ga),
+    dated("gsc_trend", trendCopy.label, trendCopy.file, trend),
+    datedSnapshot
+      ? dated(
+        "gsc_snapshot",
+        snapCopy.label,
+        snapCopy.file,
+        opts.queries.filter((q) => q.kind === "query" || q.kind === "page"),
+      )
+      : {
+        source: "gsc_snapshot",
+        label: snapCopy.label,
+        file: snapCopy.file,
+        rows: opts.stats?.gsc_snapshot?.rows ?? snapshot.length,
+        min_date: null,
+        max_date: null,
+        origin: opts.stats?.gsc_snapshot?.origin,
+        fetched_at: opts.stats?.gsc_snapshot?.fetched_at ?? null,
+        days_behind: null,
+        stale: false,
+        dated: false,
+        days_in_range: 0,
+        range_days: range,
+        expected_days: 0,
+        coverage: null,
+      },
     {
       source: "gsc_appearance",
-      label: "Search appearance",
-      file: "Search Appearance.csv",
+      label: appearanceCopy.label,
+      file: appearanceCopy.file,
       rows: opts.stats?.gsc_appearance?.rows ?? appearance.length,
       min_date: null,
       max_date: null,
+      origin: opts.stats?.gsc_appearance?.origin,
+      fetched_at: opts.stats?.gsc_appearance?.fetched_at ?? null,
       days_behind: null,
       stale: false,
       dated: false,
