@@ -225,37 +225,25 @@ export function improvementsFromJev(jev: unknown): DigestImprovement[] {
       ? (answers.step as { choice?: string }).choice : undefined)
       || (typeof row.primary_step === "string" ? row.primary_step : "")
       || (typeof row.step === "string" ? row.step : "");
-    const text = improvementText(row, sevChoice, stepChoice);
-    if (!text) continue;
-    out.push({
-      rank: out.length + 1,
-      text,
-      severity: sevChoice || "p1",
-      step: stepChoice || "unclear",
-    });
+    const leak = row.evidence && typeof row.evidence === "object"
+      ? (row.evidence as { leak?: Record<string, unknown> }).leak
+      : undefined;
+    const lost = typeof row.current === "number" ? row.current
+      : typeof leak?.lost === "number" ? leak.lost
+      : null;
+    const metric = typeof row.metric === "string" ? row.metric : "";
+    const built = improvementFromAction({
+      mode: "leak",
+      metric: metric || undefined,
+      current: lost,
+      step: stepChoice || undefined,
+      severity: sevChoice || undefined,
+    } as JevItem);
+    if (!built) continue;
+    built.rank = out.length + 1;
+    out.push(built);
   }
   return out;
-}
-
-function improvementText(
-  row: Record<string, unknown>,
-  sev: string,
-  step: string,
-): string | null {
-  const leak = row.evidence && typeof row.evidence === "object"
-    ? (row.evidence as { leak?: Record<string, unknown> }).leak
-    : undefined;
-  const lost = typeof row.current === "number" ? row.current
-    : typeof leak?.lost === "number" ? leak.lost
-    : null;
-  const metric = typeof row.metric === "string" ? row.metric : "";
-  if (!step && !metric && lost == null) return null;
-  const bits: string[] = [];
-  if (sev) bits.push(sev.toUpperCase());
-  if (metric) bits.push(metric);
-  else if (step) bits.push(step);
-  if (lost != null) bits.push(`${lost} sessions lost`);
-  return bits.join(" · ") || null;
 }
 
 function jevLabels(jev: unknown): { severity: string; step: string } | null {

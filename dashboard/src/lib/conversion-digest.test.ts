@@ -218,11 +218,13 @@ describe("improvements from Jev pursue", () => {
     const rows = improvementsFromJev(jev);
     assert.equal(rows.length, 3);
     assert.equal(rows[0].rank, 1);
-    assert.equal(rows[0].severity, "p0");
+    assert.equal(rows[0].owner, "Harry");
+    assert.equal(rows[0].severity, "P0");
     assert.equal(rows[0].step, "pdp_to_atc");
-    assert.match(rows[0].text, /P0/);
-    assert.match(rows[0].text, /sessions->add_to_cart/);
+    assert.match(rows[0].text, /sessions→add_to_cart/);
     assert.match(rows[0].text, /80 sessions lost/);
+    assert.match(rows[0].text, /\[Harry\]/);
+    assert.doesNotMatch(rows[0].text, /fix PDP\/ATC/);
     assert.equal(rows[2].rank, 3);
     assert.doesNotMatch(rows.map((r) => r.text).join(" "), /should-not-appear/);
   });
