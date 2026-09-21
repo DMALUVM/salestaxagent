@@ -2,15 +2,17 @@
 
 `/paid-ads` is the Shopify storefront ads desk. **Amazon PPC stays on `/ppc`.**
 
-Primary path: **upload the four CSV types**. No OAuth. No demo data.
-Range 7/14/30/90/365/all is relative to the **max date in the files**, not today.
+Primary path: **official API tables** for Google Ads, GA4, and Search Console.
+Meta stays on CSV until `meta_ads_daily` has rows. CSV upload remains a fallback
+(`POST /api/paid-ads/csv`). No demo data.
+Range 7/14/30/90/365/all is relative to the **max metric_date / date in the preferred source**, not today.
 
-| Source | File | Warehouse |
+| Source | Live read | Fallback |
 |---|---|---|
-| Google Ads Daily (Campaign × Day, typed columns or Cost/Impr./Clicks/Conv.) | `paid_campaign_daily` `platform=google` | Upsert `platform\|date\|campaign_name`. Typed `Search_Search top IS` / `Search_Search impr. share` (and Shopping/PMax equivalents) store as `search_top_is` / `search_impr_share` from the dominant campaign type. Lost IS budget/rank unchanged. |
-| Meta Ads Manager campaign export | `paid_campaign_daily` `platform=meta` | Skip $0 **and** 0-impression days. Never map CPC / cost-per-purchase as spend or revenue. |
-| GSC `Queries.csv` + `Pages.csv` + `Chart.csv` + **`Search Appearance.csv`** (or a zip of those) | `paid_search_query_daily` | Queries/Pages/Appearance are snapshots (`date=''`) and replace other empty-date rows of that kind only. Chart is daily. Do not invent Δ position from Queries.csv. Appearance `query` = appearance name (e.g. Product snippets). |
-| GA4 Explore | `paid_ga_daily` | Skip `#` comments and Grand total. Do not treat Total revenue as ads conversion value. Cross-network ≈ PMax. |
+| Google Ads | `google_ads_daily` (`metric_date`, `conversion_value` → intel `date` / `conv_value`) | `paid_campaign_daily` `platform=google` (CSV) |
+| Meta Ads | `meta_ads_daily` when it has rows | `paid_campaign_daily` `platform=meta` (CSV upload) |
+| Search Console | `gsc_query_daily` + `gsc_page_daily` (dated; CTR 0–1 → 0–100) | `paid_search_query_daily` (CSV) |
+| GA4 | `ga4_landing_daily` (`purchase` → `key_events`; no invented channel/revenue) | `paid_ga_daily` (CSV Explore) |
 
 HTTP: `POST /api/paid-ads/csv` (multipart files or JSON `{ files: [{ name, content }] }`).
 Read: `GET /api/paid-ads/intel?range=7&filter=all`.
@@ -28,8 +30,9 @@ undated GSC snapshots (`Queries.csv`, `Pages.csv`, `Search Appearance.csv`)
 replace the previous snapshot of that same kind — they carry no date to key on.
 
 **Freshness** is measured against the real calendar (`America/New_York`), not the
-file as-of: once the newest paid row is `STALE_AFTER_DAYS` (7) behind, the page
-asks for a fresh export. Range windows still key off the file as-of.
+file as-of. Google / GA4 / GSC age from API `max(metric_date)` and show
+`fetched_at`. Meta CSV still asks for a fresh export once it is
+`STALE_AFTER_DAYS` (7) behind. Range windows still key off the loaded as-of.
 
 The **Data** panel is the answer to "what is loaded and is it current?" — per
 source it shows row count, full history span, newest date, age in days, and how

@@ -289,29 +289,28 @@ describe("page / API invariants", () => {
     assert.ok(paid > ppc && paid - ppc < 400);
   });
 
-  test("copy names CSV intel and forbids a live scrape", () => {
+  test("copy names API-first intel and forbids a live scrape", () => {
     assert.match(intelUi, /Tallowbourn ads Intel/);
     assert.match(intelUi, /newest date/);
-    assert.match(intelUi, /Upload CSVs/);
+    assert.match(intelUi, /API sync/);
+    assert.match(intelUi, /Upload Meta CSV/);
     assert.match(intelUi, /Copy for Grok/);
     assert.match(intelUi, /EMPTY_BRIEF|brief \?\?/);
     assert.equal(PAID_ADS_ATTRIBUTION.includes("not a live"), true);
     assert.doesNotMatch(page, /puppeteer|playwright|ads\.google\.com|business\.facebook\.com/i);
     assert.doesNotMatch(intelUi, /puppeteer|playwright/i);
-    assert.match(intelUi, /No OAuth/);
+    assert.doesNotMatch(intelUi, /No OAuth/);
     assert.doesNotMatch(ingest, /puppeteer|playwright|ads\.google\.com/i);
     assert.doesNotMatch(csvIngest, /puppeteer|playwright|ads\.google\.com/i);
   });
 
-  test("DataStatus How-to is the manual CSV pull; re-export opens it", () => {
+  test("DataStatus How-to stays for Meta CSV; API lag is not a re-export", () => {
     const status = intelUi.slice(intelUi.indexOf("function DataStatus("));
     assert.match(status, /What data is loaded/);
     assert.match(status, /PaidAdsCsvHowto/);
     assert.match(intelUi, /How-to: pull CSVs/);
     assert.match(status, /setHowtoOpen\(true\)/);
-    const stale = status.slice(status.indexOf("s.stale ?"), status.indexOf("s.days_behind}d"));
-    assert.match(stale, /<button/);
-    assert.doesNotMatch(stale, /<span/);
+    assert.match(status, /API lag/);
     assert.match(status, /\{s\.days_behind\}d — re-export/);
     const reexport = status.slice(
       status.lastIndexOf("<button", status.indexOf("{s.days_behind}d — re-export")),
@@ -319,6 +318,21 @@ describe("page / API invariants", () => {
     );
     assert.match(reexport, /onClick=\{\(\) => setHowtoOpen\(true\)\}/);
     assert.match(reexport, /\{s\.days_behind\}d — re-export/);
+  });
+
+  test("intel read prefers official API tables and keeps CSV ingest as fallback", () => {
+    assert.match(intelRead, /google_ads_daily/);
+    assert.match(intelRead, /ga4_landing_daily/);
+    assert.match(intelRead, /gsc_query_daily/);
+    assert.match(intelRead, /gsc_page_daily/);
+    assert.match(intelRead, /meta_ads_daily/);
+    assert.match(intelRead, /preferApiWhenPresent/);
+    assert.match(intelRead, /metric_date/);
+    assert.match(intelRead, /fetched_at/);
+    assert.match(intelRead, /paid_campaign_daily/);
+    assert.match(csvIngest, /paid_campaign_daily/);
+    assert.match(csvIngest, /paid_search_query_daily/);
+    assert.match(csvIngest, /paid_ga_daily/);
   });
 
   test("How-to has exact Google/Meta/GSC URLs and GSC file names", () => {
