@@ -12,7 +12,7 @@ Vercel env page: `https://vercel.com/dave-maloneys-projects/dashboard/settings/e
 1. **Mini** `python -m src.main shopify-funnel-sync` writes `shopify_funnel_*` + abandons (already scheduled 07:15 ET).
 2. **Mini** `ga4-sync` (07:20 ET), `gsc-sync` (07:25 ET), and `google-ads-sync` (07:30 ET) pull the official GA4 Data API / Search Console API / Google Ads API for the prior `America/New_York` day (7d lookback). Scheduled only when Mini `.env` has the same `GOOGLE_*` names as Vercel. `metric_date` is the API day — never an older substitute. GSC final data lags ~2 days → `phase2.seo` stays null until that locked day exists. Do not add poll agents. Meta stays a stub.
 3. **Vercel** `GET`/`POST /api/shopify-funnel/jev-triage` (landed #153, sibling `bc-74a886b6`) evaluates leaks with `AI_GATEWAY_API_KEY` already on Vercel and writes `shopify_funnel_status.last_stats.jev`. Fail closed → `hold_for_review` / empty pursue. Does **not** call Mini.
-4. **Iris** `GET /api/conversion-digest` (landed #154/#155) reads the prior-day `America/New_York` Shopify funnel snapshot and runs landed Jev. Missing day → GAP. Never substitutes an older day. `phase2.landing_drops` / `seo` stay **null** until official-API rows exist for that day. OAuth is **not** required to read the Iris fields.
+4. **Iris** `GET /api/conversion-digest` (landed #154/#155) reads the prior-day `America/New_York` Shopify funnel snapshot and runs landed Jev. Missing day → GAP. Never substitutes an older day. `improvements` are ranked as_of actions (Shopify leak + GA4/GSC/Ads when material). `phase2.landing_drops` / `seo` / `ads` stay **null** until official-API rows exist for that day. OAuth is **not** required to read the Iris fields.
 
 Do not add a second Jev job on Mini. Do not add a second digest or `/api/jev-funnel` route.
 
@@ -316,7 +316,7 @@ curl -s -u "$DASHBOARD_USER:$DASHBOARD_PASSWORD" \
   "https://www.ecommdashboard.com/api/conversion-digest"
 ```
 
-Success: HTTP 200, `"as_of"` is prior-day ET, `"improvements"` empty or at most 3 Jev pursue rows. Never invent copy.
+Success: HTTP 200, `"as_of"` is prior-day ET, `"improvements"` empty or at most 5 ranked as_of actions (named path / query / campaign). Never invent copy. Never use an older day’s numbers.
 
 **You’re done when:** POST `/api/shopify-funnel/jev-triage` and GET `/api/conversion-digest` both return 200 without inventing copy.
 
