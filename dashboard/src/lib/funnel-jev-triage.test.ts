@@ -56,9 +56,14 @@ describe("funnel Jev protocol", () => {
     });
     assert.equal(items.every((i) => i.period === "2026-09-19"), true);
     assert.equal(items.some((i) => i.mode === "leak" && i.current === 75), true);
-    assert.equal(items.some((i) => i.mode === "landing" && i.path === "/products/tallow-balm"), true);
-    assert.equal(items.some((i) => i.mode === "seo" && i.query === "tallow balm"), true);
+    assert.equal(items.some((i) => i.mode === "landing" && i.path === "/products/tallow-balm" && i.sessions === 70 && i.purchases === 4), true);
+    assert.equal(items.some((i) => i.mode === "seo" && i.query === "tallow balm" && i.position === 22), true);
     assert.equal(items.some((i) => i.mode === "ads" && i.campaign === "Brand Search"), true);
+    assert.equal(items.every((i) => i.notes !== "fix PDP/ATC"), true);
+    assert.equal(jevItemsFromLockedDay({
+      asOf: "2026-09-19",
+      abandon: { open: 1, openValue: 90 },
+    }).some((i) => i.mode === "abandon" && i.abandon_value === 90), true);
     assert.equal(rankDigestItems(items).length <= 5, true);
     assert.equal(rankDigestItems(items, 3).length, 3);
   });
