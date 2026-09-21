@@ -417,7 +417,7 @@ describe("improvements from locked-day actions", () => {
     assert.match(texts, /GSC query 'tallow balm': 120 impr \/ 0 clicks \/ pos 22 — title\+meta or content gap \[Nora\]/);
     assert.match(texts, /Ads Brand Search: \$42\.00 \/ 18 clicks \/ 0 conv — review negatives or pause \[Blake\]/);
     assert.doesNotMatch(texts, /fix PDP\/ATC/);
-    assert.doesNotMatch(texts, /[Mm]eta/);
+    assert.doesNotMatch(texts, /\bMeta\b|meta_ads|\[Meta\]/);
     assert.equal(d.improvements[0].rank, 1);
     assert.equal(d.improvements.at(-1)?.rank, d.improvements.length);
   });
