@@ -74,9 +74,9 @@ async function tableStats(
   };
   try {
     const sb = getServerSupabase();
-    const cols = opts.fetchedAt ? `${dateCol},fetched_at` : dateCol;
     const base = () => {
-      let q = sb.from(table).select(cols, { count: "exact" });
+      const columns = opts.fetchedAt ? `${dateCol},fetched_at` : dateCol;
+      let q = sb.from(table).select(columns, { count: "exact" });
       for (const [k, v] of Object.entries(opts.eq ?? {})) q = q.eq(k, v);
       if (opts.datedOnly) q = q.neq(dateCol, "");
       return q;
@@ -89,8 +89,8 @@ async function tableStats(
       if (isMissing(minRes.error.message)) return empty;
       return { ...empty, missing: false };
     }
-    const minRow = (minRes.data ?? [])[0] as Record<string, unknown> | undefined;
-    const maxRow = (maxRes.data ?? [])[0] as Record<string, unknown> | undefined;
+    const minRow = ((minRes.data ?? [])[0] ?? null) as unknown as Record<string, unknown> | null;
+    const maxRow = ((maxRes.data ?? [])[0] ?? null) as unknown as Record<string, unknown> | null;
     return {
       rows: minRes.count ?? 0,
       min_date: isoDate(minRow?.[dateCol]) || (typeof minRow?.[dateCol] === "string" ? String(minRow[dateCol]) : null) || null,
@@ -334,7 +334,7 @@ export async function GET(request: Request) {
 
     const appearance = csvSnapRes.rows
       .map(queryRow)
-      .filter((r): r is SearchQueryDaily => Boolean(r) && r.kind === "appearance");
+      .filter((r): r is SearchQueryDaily => r != null && r.kind === "appearance");
     const queries: SearchQueryDaily[] = gscOrigin === "api"
       ? (() => {
         const q = gscQueryRes.rows.map(adaptGscQueryDaily).filter((r): r is SearchQueryDaily => Boolean(r));

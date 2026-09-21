@@ -153,7 +153,7 @@ describe("adaptGa4LandingDaily", () => {
 
 describe("gsc adapters", () => {
   test("converts API 0–1 CTR to the 0–100 intel scale", () => {
-    assert.equal(gscCtrToPct("0.045455"), 4.5455);
+    assert.ok(Math.abs((gscCtrToPct("0.045455") ?? 0) - 4.5455) < 1e-6);
     assert.equal(gscCtrToPct(1), 100);
     assert.equal(gscCtrToPct(null), null);
     assert.equal(bounceFromEngaged(8, 1), 87.5);
