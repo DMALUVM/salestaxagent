@@ -50,11 +50,14 @@ export const LEAK_Q = {
 const STATE_KEYS = [
   "mode", "period", "step", "metric", "baseline", "current", "delta_pct",
   "abandon_count", "abandon_value", "product", "handle", "device", "channel",
+  "path", "query", "campaign", "spend", "conversions", "impressions", "clicks",
   "evidence", "notes",
 ] as const;
 
+export type JevItemMode = "leak" | "landing" | "seo" | "ads";
+
 export type JevItem = {
-  mode: "leak";
+  mode: JevItemMode;
   period?: string | null;
   step?: string | null;
   metric?: string | null;
@@ -63,8 +66,18 @@ export type JevItem = {
   delta_pct?: number | null;
   abandon_count?: number | null;
   abandon_value?: number | null;
-  evidence?: { leak?: unknown; abandon?: unknown };
+  path?: string | null;
+  device?: string | null;
+  query?: string | null;
+  campaign?: string | null;
+  spend?: number | null;
+  conversions?: number | null;
+  impressions?: number | null;
+  clicks?: number | null;
+  evidence?: { leak?: unknown; abandon?: unknown; landing?: unknown; seo?: unknown; ads?: unknown };
   notes?: string;
+  severity?: string;
+  score?: number;
 };
 
 export type JevAnswers = {
@@ -106,6 +119,14 @@ export function hasGatewayKey(
   return Boolean((env.AI_GATEWAY_API_KEY ?? "").trim());
 }
 
+export const SHOPIFY_LEAK_MIN_LOST = 10;
+export const GA4_LANDING_MIN_LOST = 10;
+export const GSC_MIN_IMPRESSIONS = 50;
+export const ADS_MIN_SPEND = 5;
+export const ADS_NEAR_ZERO_CONV = 0.5;
+export const DIGEST_MAX_IMPROVEMENTS = 5;
+export const DIGEST_MAX_PER_SOURCE = 2;
+
 export function jevItemsFromStats(stats: Record<string, unknown> | null | undefined): JevItem[] {
   const leak = (stats?.leak && typeof stats.leak === "object" ? stats.leak : {}) as Record<string, unknown>;
   const abandon = (stats?.abandon && typeof stats.abandon === "object" ? stats.abandon : {}) as Record<string, unknown>;
@@ -125,6 +146,167 @@ export function jevItemsFromStats(stats: Record<string, unknown> | null | undefi
     abandon_value: typeof abandon.openValue === "number" ? abandon.openValue : null,
     evidence: { leak, abandon },
   }];
+}
+
+type LockedLeak = {
+  from: string;
+  to: string;
+  lost: number;
+  rate: number | null;
+};
+
+type LockedLanding = {
+  path: string;
+  device: string;
+  sessions: number;
+  purchases: number;
+  lost: number;
+  rate: number | null;
+};
+
+type LockedSeo = {
+  key: string;
+  clicks: number | null;
+  impressions: number | null;
+  ctr: number | null;
+  position: number | null;
+};
+
+type LockedAd = {
+  campaign_id: string;
+  campaign_name: string;
+  spend: number | null;
+  clicks: number | null;
+  conversions: number | null;
+};
+
+/**
+ * Day-locked digest candidates. Uses shopify_funnel_daily as_of leak,
+ * not the Mini 7d last_stats window. Older GA4/GSC/Ads days must not
+ * be passed in — callers filter to as_of first.
+ */
+export function jevItemsFromLockedDay(input: {
+  asOf: string;
+  leak?: LockedLeak | null;
+  abandon?: { open?: number; openValue?: number } | null;
+  landingDrops?: LockedLanding[] | null;
+  seoQueries?: LockedSeo[] | null;
+  ads?: LockedAd[] | null;
+}): JevItem[] {
+  const asOf = input.asOf;
+  const out: JevItem[] = [];
+
+  const leak = input.leak;
+  if (leak && leak.lost >= SHOPIFY_LEAK_MIN_LOST && leak.from && leak.to) {
+    const metric = `${leak.from}->${leak.to}`;
+    out.push({
+      mode: "leak",
+      period: asOf,
+      step: leakStepOf(leak.from, leak.to),
+      metric,
+      current: leak.lost,
+      delta_pct: leak.rate,
+      abandon_count: typeof input.abandon?.open === "number" ? input.abandon.open : null,
+      abandon_value: typeof input.abandon?.openValue === "number" ? input.abandon.openValue : null,
+      severity: leak.lost >= 50 || ((leak.rate ?? 0) >= 0.7 && leak.lost >= 20) ? "p0" : "p1",
+      score: leak.lost * 2,
+      evidence: { leak, abandon: input.abandon ?? {} },
+    });
+  }
+
+  for (const drop of input.landingDrops ?? []) {
+    if (!drop.path || drop.lost < GA4_LANDING_MIN_LOST) continue;
+    const device = drop.device || "";
+    out.push({
+      mode: "landing",
+      period: asOf,
+      step: "pdp_to_atc",
+      metric: "landing",
+      path: drop.path,
+      device,
+      current: drop.lost,
+      delta_pct: drop.rate,
+      severity: "p1",
+      score: drop.lost,
+      evidence: { landing: drop },
+      notes: /\/products?\//i.test(drop.path) ? "fix PDP/ATC" : undefined,
+    });
+  }
+
+  for (const q of input.seoQueries ?? []) {
+    if (!q.key || q.impressions == null || q.impressions < GSC_MIN_IMPRESSIONS) continue;
+    const clicks = q.clicks;
+    if (clicks == null) continue;
+    const zeroClick = clicks === 0;
+    const weakCtr = q.ctr != null && Number.isFinite(q.ctr) && q.ctr < 0.02 && q.impressions >= 100;
+    const weakPos = q.position != null && Number.isFinite(q.position) && q.position >= 15 && clicks <= 1;
+    if (!zeroClick && !weakCtr && !weakPos) continue;
+    out.push({
+      mode: "seo",
+      period: asOf,
+      step: "unclear",
+      metric: "gsc_query",
+      query: q.key,
+      impressions: q.impressions,
+      clicks: clicks,
+      current: q.impressions,
+      severity: "p1",
+      score: q.impressions + (zeroClick ? 25 : 0),
+      evidence: { seo: q },
+    });
+  }
+
+  for (const ad of input.ads ?? []) {
+    const name = (ad.campaign_name || ad.campaign_id || "").trim();
+    if (!name) continue;
+    if (ad.spend == null || ad.spend < ADS_MIN_SPEND) continue;
+    if (ad.conversions == null || ad.conversions >= ADS_NEAR_ZERO_CONV) continue;
+    out.push({
+      mode: "ads",
+      period: asOf,
+      step: "unclear",
+      metric: "ads_spend",
+      campaign: name,
+      spend: ad.spend,
+      conversions: ad.conversions,
+      clicks: ad.clicks,
+      current: ad.spend,
+      severity: "p1",
+      score: ad.spend * 3,
+      evidence: { ads: ad },
+      notes: "review",
+    });
+  }
+
+  return out;
+}
+
+function leakStepOf(from: string, to: string): string {
+  const key = `${from}->${to}`;
+  if (key.includes("sessions") && (key.includes("pdp") || key.includes("add"))) {
+    return from.includes("pdp") || to.includes("pdp") ? "session_to_pdp" : "pdp_to_atc";
+  }
+  if (key.includes("add") && key.includes("checkout")) return "atc_to_checkout";
+  if (key.includes("checkout") && key.includes("purchase")) return "checkout_to_purchase";
+  return "unclear";
+}
+
+/** Rank material items. Max few, max two per source. Empty when nothing material. */
+export function rankDigestItems(items: JevItem[], max = DIGEST_MAX_IMPROVEMENTS): JevItem[] {
+  const sorted = [...items].sort((a, b) =>
+    (b.score ?? 0) - (a.score ?? 0)
+    || (b.current ?? 0) - (a.current ?? 0)
+    || (a.mode || "").localeCompare(b.mode || ""));
+  const used: Record<string, number> = {};
+  const out: JevItem[] = [];
+  for (const item of sorted) {
+    const n = used[item.mode] ?? 0;
+    if (n >= DIGEST_MAX_PER_SOURCE) continue;
+    used[item.mode] = n + 1;
+    out.push(item);
+    if (out.length >= max) break;
+  }
+  return out;
 }
 
 export function jevDecisionFromResult(parsed: JevBuckets | Record<string, unknown> | null): "pursue" | "hold" | "skip" {

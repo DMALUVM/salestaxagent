@@ -4,11 +4,24 @@
  * Date-lock: as_of is a closed America/New_York day. Default is yesterday ET.
  * Never substitute an older complete day when the requested day is missing.
  *
- * Source: shopify_funnel_* / shopify_abandoned_checkouts only.
- * No GA4, no Meta, no orders-as-sessions, no theme writes.
+ * Funnel / primary_leak / abandons: shopify_funnel_* only.
+ * improvements: ranked as_of actions from that day's Shopify leak plus
+ * locked-day GA4 / GSC / Ads when material. Empty when nothing material.
+ * Jev hold does not blank evidence-backed items. Never invents metrics.
+ * No Meta copy. No theme / Shopify writes.
  */
 
 import { agentAsOf, agentToday } from "./as-of";
+import {
+  jevItemsFromLockedDay,
+  rankDigestItems,
+  type JevItem,
+} from "./funnel-jev-triage";
+import {
+  adsWaste,
+  gscOpportunities,
+  type Phase2Digest,
+} from "./phase2-digest";
 import {
   asInt,
   biggestLeak,
@@ -212,6 +225,117 @@ function improvementText(
   return bits.join(" · ") || null;
 }
 
+function jevLabels(jev: unknown): { severity: string; step: string } | null {
+  if (!jev || typeof jev !== "object") return null;
+  const j = jev as Record<string, unknown>;
+  if (j.ran !== true || j.decision !== "pursue") return null;
+  const rows = Array.isArray(j.pursue) ? j.pursue : [];
+  for (const raw of rows) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const answers = (row.jev && typeof row.jev === "object"
+      ? row.jev : {}) as Record<string, unknown>;
+    const sev = (answers.severity && typeof answers.severity === "object"
+      ? (answers.severity as { choice?: string }).choice : undefined)
+      || (typeof row.severity === "string" ? row.severity : "");
+    const step = (answers.step && typeof answers.step === "object"
+      ? (answers.step as { choice?: string }).choice : undefined)
+      || (typeof row.primary_step === "string" ? row.primary_step : "")
+      || (typeof row.step === "string" ? row.step : "");
+    if (sev || step) return { severity: sev, step };
+  }
+  return null;
+}
+
+function fmtMoney(n: number): string {
+  return n.toFixed(2);
+}
+
+function fmtConv(n: number): string {
+  const rounded = Math.round(n * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+
+export function improvementFromAction(item: JevItem): DigestImprovement | null {
+  const sev = (item.severity || "p1").toLowerCase();
+  const step = item.step || "unclear";
+  let text: string | null = null;
+  if (item.mode === "leak") {
+    const metric = item.metric || step;
+    const lost = item.current;
+    if (!metric || lost == null) return null;
+    text = `${sev.toUpperCase()} · ${metric} · ${lost} sessions lost`;
+  } else if (item.mode === "landing") {
+    const path = (item.path || "").trim();
+    if (!path || item.current == null) return null;
+    const device = (item.device || "").trim();
+    const where = device ? `${path} ${device}` : path;
+    const hint = item.notes ? ` — ${item.notes}` : "";
+    text = `${sev.toUpperCase()} · landing ${where} · ${item.current} lost${hint}`;
+  } else if (item.mode === "seo") {
+    const query = (item.query || "").trim();
+    if (!query || item.impressions == null || item.clicks == null) return null;
+    text = `GSC · query '${query}' · ${item.impressions} impr · ${item.clicks} clicks`;
+  } else if (item.mode === "ads") {
+    const campaign = (item.campaign || "").trim();
+    if (!campaign || item.spend == null || item.conversions == null) return null;
+    text = `Ads · ${campaign} · $${fmtMoney(item.spend)} spend · ${fmtConv(item.conversions)} conv — review`;
+  }
+  if (!text) return null;
+  return { rank: 0, text, severity: sev, step };
+}
+
+/** Locked-day ranked actions. Empty when no material as_of rows. */
+export function improvementsFromLockedDay(input: {
+  asOf: string;
+  dailyRow: Record<string, unknown> | null | undefined;
+  abandons?: AbandonedRow[];
+  jev?: unknown;
+  phase2?: Phase2Digest | null;
+}): DigestImprovement[] {
+  if (!input.dailyRow) return [];
+  const counts = countsFromDailyRow(input.dailyRow);
+  const rawLeak = biggestLeak(counts);
+  const leak = rawLeak
+    ? {
+      from: LEAK_KEY[rawLeak.from] ?? rawLeak.from,
+      to: LEAK_KEY[rawLeak.to] ?? rawLeak.to,
+      lost: rawLeak.lost,
+      rate: rawLeak.rate,
+    }
+    : null;
+  const abandon = input.abandons?.length ? recoveryOf(input.abandons) : null;
+  const p2 = input.phase2;
+  const landings = (p2?.landing_drops ?? []).filter((d) => d.lost >= 10 && d.path);
+  const seo = gscOpportunities(p2?.seo?.queries ?? []);
+  const ads = adsWaste(p2?.ads ?? []);
+  const items = jevItemsFromLockedDay({
+    asOf: input.asOf,
+    leak,
+    abandon,
+    landingDrops: landings,
+    seoQueries: seo,
+    ads,
+  });
+  const labels = jevLabels(input.jev);
+  if (labels) {
+    for (const item of items) {
+      if (item.mode !== "leak") continue;
+      if (labels.severity) item.severity = labels.severity;
+      if (labels.step) item.step = labels.step;
+    }
+  }
+  const ranked = rankDigestItems(items);
+  const out: DigestImprovement[] = [];
+  for (const item of ranked) {
+    const row = improvementFromAction(item);
+    if (!row) continue;
+    row.rank = out.length + 1;
+    out.push(row);
+  }
+  return out;
+}
+
 export function buildConversionDigest(input: {
   asOf: string;
   now?: Date;
@@ -219,6 +343,7 @@ export function buildConversionDigest(input: {
   funnelOk: boolean | null;
   abandons: AbandonedRow[];
   jev: unknown;
+  phase2?: Phase2Digest | null;
 }): ConversionDigest {
   const now = input.now ?? new Date();
   const base = {
@@ -279,7 +404,13 @@ export function buildConversionDigest(input: {
         ? leakRef(leak.from, leak.to, leak.lost, leak.rate)
         : null,
       abandons: abandonsOf(input.abandons),
-      improvements: improvementsFromJev(input.jev),
+      improvements: improvementsFromLockedDay({
+        asOf: input.asOf,
+        dailyRow: input.dailyRow,
+        abandons: input.abandons,
+        jev: input.jev,
+        phase2: input.phase2,
+      }),
     };
   }
 
@@ -294,7 +425,13 @@ export function buildConversionDigest(input: {
       ? leakRef(leak.from, leak.to, leak.lost, leak.rate)
       : null,
     abandons: abandonsOf(input.abandons),
-    improvements: improvementsFromJev(input.jev),
+    improvements: improvementsFromLockedDay({
+      asOf: input.asOf,
+      dailyRow: input.dailyRow,
+      abandons: input.abandons,
+      jev: input.jev,
+      phase2: input.phase2,
+    }),
   };
 }
 
