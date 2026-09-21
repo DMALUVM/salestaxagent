@@ -25,6 +25,8 @@ from urllib.parse import quote
 
 import httpx
 
+import src.config  # noqa: F401 — absolute Mini `.env` load before missing_oauth_env
+
 log = logging.getLogger(__name__)
 
 # Vercel (dashboard) + Mini `.env` — same names. Read-only official APIs.
