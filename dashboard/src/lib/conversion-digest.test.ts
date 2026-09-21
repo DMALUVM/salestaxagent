@@ -11,6 +11,8 @@ import {
   improvementFromAction,
   improvementsFromJev,
   improvementsFromLockedDay,
+  isThemeLayoutPath,
+  ownerTagsForAction,
   parseDigestDate,
 } from "./conversion-digest";
 import { emptyPhase2, type Phase2Digest } from "./phase2-digest";
@@ -141,8 +143,11 @@ describe("CLEAR / HOLD", () => {
     assert.equal(d.abandons.top_products[0]?.qty, 2);
     assert.equal(d.abandons.top_products[0]?.value, 28);
     assert.equal(d.improvements.length, 1);
-    assert.match(d.improvements[0].text, /sessions->add_to_cart/);
+    assert.match(d.improvements[0].text, /sessions→add_to_cart/);
     assert.match(d.improvements[0].text, /75 sessions lost/);
+    assert.match(d.improvements[0].text, /\[Harry\]/);
+    assert.doesNotMatch(d.improvements[0].text, /\[Kit\]/);
+    assert.doesNotMatch(d.improvements[0].text, /fix PDP\/ATC/);
     assert.equal(d.definitions_note, DEFINITIONS_NOTE);
     assert.equal(d.source, DIGEST_SOURCE);
   });
@@ -232,25 +237,49 @@ function phase2Of(partial: Partial<Phase2Digest> = {}): Phase2Digest {
 }
 
 describe("improvements from locked-day actions", () => {
-  test("text shapes name path / query / campaign and never invent", () => {
+  test("text shapes name path / query / campaign, ask, and owner — never invent", () => {
     const landing = improvementFromAction({
-      mode: "landing", period: "2026-09-19", path: "/products/tallow-balm",
-      device: "mobile", current: 66, severity: "p1", step: "pdp_to_atc",
-      notes: "fix PDP/ATC",
+      mode: "landing", period: "2026-09-19",
+      path: "/products/natural-tallow-deodorant-extra-strength",
+      device: "mobile", current: 66, sessions: 66, purchases: 0,
+      severity: "p1", step: "pdp_to_atc",
     });
-    assert.match(landing?.text ?? "", /P1 · landing \/products\/tallow-balm mobile · 66 lost — fix PDP\/ATC/);
+    assert.equal(
+      landing?.text,
+      "Mobile PDP /products/natural-tallow-deodorant-extra-strength: 66 sessions → 0 purchases — rewrite above-fold benefit + ATC friction [Harry]",
+    );
+    assert.deepEqual(ownerTagsForAction({
+      mode: "landing", path: "/products/natural-tallow-deodorant-extra-strength",
+    }), ["Harry"]);
+
+    const theme = improvementFromAction({
+      mode: "landing", path: "/collections/all", device: "mobile",
+      current: 40, sessions: 40, purchases: 1, severity: "p1",
+    });
+    assert.match(theme?.text ?? "", /Mobile \/collections\/all: 40 sessions → 1 purchases — theme\/layout or nav friction \[Harry\] \[Blair\]/);
+    assert.equal(isThemeLayoutPath("/collections/all"), true);
+    assert.equal(isThemeLayoutPath("/products/x"), false);
+    assert.deepEqual(ownerTagsForAction({ mode: "landing", path: "/collections/all" }), ["Harry", "Blair"]);
 
     const gsc = improvementFromAction({
       mode: "seo", period: "2026-09-19", query: "tallow balm",
-      impressions: 120, clicks: 0, severity: "p1", step: "unclear",
+      impressions: 80, clicks: 0, position: 12, severity: "p1", step: "unclear",
     });
-    assert.equal(gsc?.text, "GSC · query 'tallow balm' · 120 impr · 0 clicks");
+    assert.equal(gsc?.text, "GSC query 'tallow balm': 80 impr / 0 clicks / pos 12 — title+meta or content gap [Nora]");
+    assert.deepEqual(ownerTagsForAction({ mode: "seo", query: "tallow balm" }), ["Nora"]);
+
+    const gscNoPos = improvementFromAction({
+      mode: "seo", query: "tallow", impressions: 90, clicks: 0, severity: "p1",
+    });
+    assert.equal(gscNoPos?.text, "GSC query 'tallow': 90 impr / 0 clicks — title+meta or content gap [Nora]");
+    assert.doesNotMatch(gscNoPos?.text ?? "", /pos /);
 
     const ads = improvementFromAction({
-      mode: "ads", period: "2026-09-19", campaign: "Brand Search",
-      spend: 42, conversions: 0, severity: "p1", step: "unclear",
+      mode: "ads", period: "2026-09-19", campaign: "AI MAX Search V1",
+      spend: 15.19, conversions: 0, severity: "p1", step: "unclear",
     });
-    assert.equal(ads?.text, "Ads · Brand Search · $42.00 spend · 0 conv — review");
+    assert.equal(ads?.text, "Ads AI MAX Search V1: $15.19 / 0 conv — review negatives or pause [Blake]");
+    assert.deepEqual(ownerTagsForAction({ mode: "ads", campaign: "AI MAX Search V1" }), ["Blake"]);
 
     assert.equal(improvementFromAction({
       mode: "landing", path: "", current: 66, severity: "p1",
@@ -261,6 +290,57 @@ describe("improvements from locked-day actions", () => {
     assert.equal(improvementFromAction({
       mode: "ads", campaign: "Brand", spend: 40, conversions: null, severity: "p1",
     }), null);
+    assert.doesNotMatch(landing?.text ?? "", /fix PDP\/ATC/);
+
+    const page = improvementFromAction({
+      mode: "seo", metric: "gsc_page", query: "/products/tallow-balm",
+      impressions: 80, clicks: 0, position: 18, severity: "p1",
+    });
+    assert.equal(
+      page?.text,
+      "GSC page /products/tallow-balm: 80 impr / 0 clicks / pos 18 — title+meta or content gap [Nora]",
+    );
+
+    const lostOnly = improvementFromAction({
+      mode: "landing", path: "/products/x", device: "mobile",
+      current: 66, severity: "p1",
+    });
+    assert.match(lostOnly?.text ?? "", /Mobile PDP \/products\/x: 66 lost sessions — rewrite above-fold benefit \+ ATC friction \[Harry\]/);
+    assert.doesNotMatch(lostOnly?.text ?? "", /→ 0 purchases/);
+  });
+
+  test("Shopify leak tags Harry, and Kit when abandon $ is material", () => {
+    const leak = improvementFromAction({
+      mode: "leak", metric: "sessions->add_to_cart", current: 75,
+      delta_pct: 0.75, step: "pdp_to_atc", severity: "p0",
+    });
+    assert.equal(
+      leak?.text,
+      "Shopify sessions→add_to_cart: 75 sessions lost (75%) — rewrite PDP benefit + ATC [Harry]",
+    );
+    assert.doesNotMatch(leak?.text ?? "", /\[Kit\]/);
+
+    const withKit = improvementFromAction({
+      mode: "leak", metric: "sessions->add_to_cart", current: 75,
+      delta_pct: 0.75, step: "pdp_to_atc", severity: "p0",
+      abandon_value: 90,
+    });
+    assert.match(withKit?.text ?? "", /\$90\.00 open abandons/);
+    assert.match(withKit?.text ?? "", /\[Harry\] \[Kit\]/);
+    assert.deepEqual(ownerTagsForAction({
+      mode: "leak", abandon_value: 90,
+    }), ["Harry", "Kit"]);
+    assert.deepEqual(ownerTagsForAction({
+      mode: "leak", abandon_value: 32,
+    }), ["Harry"]);
+
+    const fromDay = improvementsFromLockedDay({
+      asOf: "2026-09-19",
+      dailyRow: daily(),
+      abandons: [abandon({ total_price: 90 })],
+    });
+    assert.match(fromDay[0]?.text ?? "", /\$90\.00 open abandons/);
+    assert.match(fromDay[0]?.text ?? "", /\[Harry\] \[Kit\]/);
   });
 
   test("empty when no material as_of rows", () => {
@@ -329,11 +409,14 @@ describe("improvements from locked-day actions", () => {
     assert.ok(d.improvements.length >= 3);
     assert.ok(d.improvements.length <= 5);
     const texts = d.improvements.map((r) => r.text).join("\n");
-    assert.match(texts, /sessions->add_to_cart/);
+    assert.match(texts, /sessions→add_to_cart/);
     assert.match(texts, /75 sessions lost/);
-    assert.match(texts, /landing \/products\/tallow-balm mobile · 66 lost/);
-    assert.match(texts, /GSC · query 'tallow balm' · 120 impr · 0 clicks/);
-    assert.match(texts, /Ads · Brand Search · \$42\.00 spend · 0 conv — review/);
+    assert.match(texts, /\[Harry\]/);
+    assert.match(texts, /Mobile PDP \/products\/tallow-balm: 70 sessions → 4 purchases/);
+    assert.match(texts, /rewrite above-fold benefit \+ ATC friction \[Harry\]/);
+    assert.match(texts, /GSC query 'tallow balm': 120 impr \/ 0 clicks \/ pos 22 — title\+meta or content gap \[Nora\]/);
+    assert.match(texts, /Ads Brand Search: \$42\.00 \/ 18 clicks \/ 0 conv — review negatives or pause \[Blake\]/);
+    assert.doesNotMatch(texts, /fix PDP\/ATC/);
     assert.doesNotMatch(texts, /[Mm]eta/);
     assert.equal(d.improvements[0].rank, 1);
     assert.equal(d.improvements.at(-1)?.rank, d.improvements.length);
@@ -357,8 +440,8 @@ describe("improvements from locked-day actions", () => {
     });
     assert.equal(rows[0].severity, "p0");
     assert.equal(rows[0].step, "pdp_to_atc");
-    assert.match(rows[0].text, /P0/);
     assert.match(rows[0].text, /75 sessions lost/);
+    assert.match(rows[0].text, /\[Harry\]/);
     assert.doesNotMatch(rows[0].text, /800/);
   });
 
