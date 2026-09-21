@@ -237,8 +237,11 @@ describe("wiring", () => {
     assert.match(defs, /warmup only/);
     assert.match(defs, /shopify-funnel-sync stamps last_stats\.jev/);
     assert.match(defs, /does not call an LLM/);
+    assert.match(defs, /Jev hold does not blank/);
+    assert.match(defs, /Never Meta/);
     assert.doesNotMatch(defs, /until Jev is wired/);
     assert.doesNotMatch(defs, /twice-daily cron/);
+    assert.doesNotMatch(defs, /digest improvements stay empty/);
   });
 
   test("migration enables RLS and stores no recovery URL", () => {
