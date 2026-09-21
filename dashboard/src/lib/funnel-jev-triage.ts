@@ -54,7 +54,7 @@ const STATE_KEYS = [
   "evidence", "notes",
 ] as const;
 
-export type JevItemMode = "leak" | "landing" | "seo" | "ads";
+export type JevItemMode = "leak" | "landing" | "seo" | "ads" | "abandon";
 
 export type JevItem = {
   mode: JevItemMode;
@@ -216,6 +216,23 @@ export function jevItemsFromLockedDay(input: {
       severity: leak.lost >= 50 || ((leak.rate ?? 0) >= 0.7 && leak.lost >= 20) ? "p0" : "p1",
       score: leak.lost * 2,
       evidence: { leak, abandon: input.abandon ?? {} },
+    });
+  }
+
+  const abandonValue = typeof input.abandon?.openValue === "number" ? input.abandon.openValue : null;
+  const abandonOpen = typeof input.abandon?.open === "number" ? input.abandon.open : null;
+  if (abandonValue != null && abandonValue >= DIGEST_ABANDON_KIT_MIN) {
+    out.push({
+      mode: "abandon",
+      period: asOf,
+      step: "unclear",
+      metric: "abandon_value",
+      current: abandonValue,
+      abandon_count: abandonOpen,
+      abandon_value: abandonValue,
+      severity: abandonValue >= 80 ? "p0" : "p1",
+      score: abandonValue * 2,
+      evidence: { abandon: input.abandon },
     });
   }
 

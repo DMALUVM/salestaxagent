@@ -8,11 +8,12 @@ import {
   DEFINITIONS_NOTE,
   DIGEST_SOURCE,
   funnelFromCounts,
+  improvementContractErrors,
   improvementFromAction,
   improvementsFromJev,
   improvementsFromLockedDay,
-  isThemeLayoutPath,
-  ownerTagsForAction,
+  isBlairThemeBugPath,
+  ownerForAction,
   parseDigestDate,
 } from "./conversion-digest";
 import { emptyPhase2, type Phase2Digest } from "./phase2-digest";
@@ -143,6 +144,9 @@ describe("CLEAR / HOLD", () => {
     assert.equal(d.abandons.top_products[0]?.qty, 2);
     assert.equal(d.abandons.top_products[0]?.value, 28);
     assert.equal(d.improvements.length, 1);
+    assert.equal(d.improvements[0].owner, "Harry");
+    assert.equal(d.improvements[0].dave_tap, false);
+    assert.deepEqual(improvementContractErrors(d.improvements[0]), []);
     assert.match(d.improvements[0].text, /sessions→add_to_cart/);
     assert.match(d.improvements[0].text, /75 sessions lost/);
     assert.match(d.improvements[0].text, /\[Harry\]/);
@@ -237,7 +241,7 @@ function phase2Of(partial: Partial<Phase2Digest> = {}): Phase2Digest {
 }
 
 describe("improvements from locked-day actions", () => {
-  test("text shapes name path / query / campaign, ask, and owner — never invent", () => {
+  test("schema + ban-list: one owner, evidence, ask, dave_tap", () => {
     const landing = improvementFromAction({
       mode: "landing", period: "2026-09-19",
       path: "/products/natural-tallow-deodorant-extra-strength",
@@ -245,41 +249,72 @@ describe("improvements from locked-day actions", () => {
       severity: "p1", step: "pdp_to_atc",
     });
     assert.equal(
-      landing?.text,
-      "Mobile PDP /products/natural-tallow-deodorant-extra-strength: 66 sessions → 0 purchases — rewrite above-fold benefit + ATC friction [Harry]",
+      landing?.concrete_ask,
+      "Mobile /products/natural-tallow-deodorant-extra-strength: 66 sessions → 0 purchases — rewrite above-fold CTA to Extra Strength benefit + simplify ATC [Harry]",
     );
-    assert.deepEqual(ownerTagsForAction({
+    assert.equal(landing?.owner, "Harry");
+    assert.equal(landing?.severity, "P1");
+    assert.equal(landing?.dave_tap, false);
+    assert.equal(landing?.evidence.source, "ga4");
+    assert.equal(landing?.evidence.path, "/products/natural-tallow-deodorant-extra-strength");
+    assert.equal(landing?.evidence.device, "mobile");
+    assert.equal(landing?.evidence.sessions, 66);
+    assert.equal(landing?.evidence.purchases, 0);
+    assert.deepEqual(improvementContractErrors(landing!), []);
+    assert.equal(ownerForAction({
       mode: "landing", path: "/products/natural-tallow-deodorant-extra-strength",
-    }), ["Harry"]);
+    }), "Harry");
 
-    const theme = improvementFromAction({
+    const collection = improvementFromAction({
       mode: "landing", path: "/collections/all", device: "mobile",
       current: 40, sessions: 40, purchases: 1, severity: "p1",
     });
-    assert.match(theme?.text ?? "", /Mobile \/collections\/all: 40 sessions → 1 purchases — theme\/layout or nav friction \[Harry\] \[Blair\]/);
-    assert.equal(isThemeLayoutPath("/collections/all"), true);
-    assert.equal(isThemeLayoutPath("/products/x"), false);
-    assert.deepEqual(ownerTagsForAction({ mode: "landing", path: "/collections/all" }), ["Harry", "Blair"]);
+    assert.equal(collection?.owner, "Harry");
+    assert.doesNotMatch(collection?.text ?? "", /\[Blair\]/);
+    assert.equal(isBlairThemeBugPath("/collections/all"), false);
+    assert.equal(isBlairThemeBugPath("/checkouts/cn"), true);
+    assert.equal(ownerForAction({ mode: "landing", path: "/checkouts/cn" }), "Blair");
 
     const gsc = improvementFromAction({
       mode: "seo", period: "2026-09-19", query: "tallow balm",
       impressions: 80, clicks: 0, position: 12, severity: "p1", step: "unclear",
     });
-    assert.equal(gsc?.text, "GSC query 'tallow balm': 80 impr / 0 clicks / pos 12 — title+meta or content gap [Nora]");
-    assert.deepEqual(ownerTagsForAction({ mode: "seo", query: "tallow balm" }), ["Nora"]);
+    assert.equal(gsc?.owner, "Nora");
+    assert.equal(gsc?.dave_tap, false);
+    assert.equal(gsc?.evidence.query, "tallow balm");
+    assert.equal(gsc?.evidence.impressions, 80);
+    assert.equal(gsc?.evidence.clicks, 0);
+    assert.equal(gsc?.evidence.position, 12);
+    assert.match(gsc?.concrete_ask ?? "", /GSC query 'tallow balm': 80 impr \/ 0 clicks \/ pos 12/);
+    assert.match(gsc?.concrete_ask ?? "", /\[Nora\]$/);
+    assert.deepEqual(improvementContractErrors(gsc!), []);
 
     const gscNoPos = improvementFromAction({
       mode: "seo", query: "tallow", impressions: 90, clicks: 0, severity: "p1",
     });
-    assert.equal(gscNoPos?.text, "GSC query 'tallow': 90 impr / 0 clicks — title+meta or content gap [Nora]");
     assert.doesNotMatch(gscNoPos?.text ?? "", /pos /);
+    assert.equal(gscNoPos?.evidence.position, undefined);
 
     const ads = improvementFromAction({
       mode: "ads", period: "2026-09-19", campaign: "AI MAX Search V1",
       spend: 15.19, conversions: 0, severity: "p1", step: "unclear",
     });
-    assert.equal(ads?.text, "Ads AI MAX Search V1: $15.19 / 0 conv — review negatives or pause [Blake]");
-    assert.deepEqual(ownerTagsForAction({ mode: "ads", campaign: "AI MAX Search V1" }), ["Blake"]);
+    assert.equal(
+      ads?.concrete_ask,
+      "Ads AI MAX Search V1: $15.19 / 0 conv — review negatives or pause [Blake]",
+    );
+    assert.equal(ads?.owner, "Blake");
+    assert.equal(ads?.dave_tap, false);
+    assert.equal(ads?.evidence.campaign, "AI MAX Search V1");
+    assert.equal(ads?.evidence.spend, 15.19);
+    assert.equal(ads?.evidence.conversions, 0);
+    assert.deepEqual(improvementContractErrors(ads!), []);
+
+    const adsMoney = improvementFromAction({
+      mode: "ads", campaign: "AI MAX Search V1",
+      spend: 80, conversions: 0, severity: "p1",
+    });
+    assert.equal(adsMoney?.dave_tap, true);
 
     assert.equal(improvementFromAction({
       mode: "landing", path: "", current: 66, severity: "p1",
@@ -290,57 +325,97 @@ describe("improvements from locked-day actions", () => {
     assert.equal(improvementFromAction({
       mode: "ads", campaign: "Brand", spend: 40, conversions: null, severity: "p1",
     }), null);
-    assert.doesNotMatch(landing?.text ?? "", /fix PDP\/ATC/);
 
     const page = improvementFromAction({
       mode: "seo", metric: "gsc_page", query: "/products/tallow-balm",
       impressions: 80, clicks: 0, position: 18, severity: "p1",
     });
-    assert.equal(
-      page?.text,
-      "GSC page /products/tallow-balm: 80 impr / 0 clicks / pos 18 — title+meta or content gap [Nora]",
-    );
+    assert.equal(page?.owner, "Nora");
+    assert.equal(page?.evidence.page, "/products/tallow-balm");
+    assert.match(page?.concrete_ask ?? "", /GSC page \/products\/tallow-balm: 80 impr \/ 0 clicks \/ pos 18/);
 
     const lostOnly = improvementFromAction({
       mode: "landing", path: "/products/x", device: "mobile",
       current: 66, severity: "p1",
     });
-    assert.match(lostOnly?.text ?? "", /Mobile PDP \/products\/x: 66 lost sessions — rewrite above-fold benefit \+ ATC friction \[Harry\]/);
+    assert.match(lostOnly?.text ?? "", /Mobile \/products\/x: 66 lost sessions/);
     assert.doesNotMatch(lostOnly?.text ?? "", /→ 0 purchases/);
+    assert.equal(lostOnly?.evidence.purchases, undefined);
   });
 
-  test("Shopify leak tags Harry, and Kit when abandon $ is material", () => {
+  test("Shopify leak is Harry; abandon $ spike is Kit only", () => {
     const leak = improvementFromAction({
       mode: "leak", metric: "sessions->add_to_cart", current: 75,
       delta_pct: 0.75, step: "pdp_to_atc", severity: "p0",
     });
-    assert.equal(
-      leak?.text,
-      "Shopify sessions→add_to_cart: 75 sessions lost (75%) — rewrite PDP benefit + ATC [Harry]",
-    );
+    assert.equal(leak?.owner, "Harry");
+    assert.equal(leak?.severity, "P0");
+    assert.equal(leak?.dave_tap, false);
+    assert.match(leak?.concrete_ask ?? "", /Shopify sessions→add_to_cart: 75 sessions lost \(75%\)/);
+    assert.match(leak?.concrete_ask ?? "", /\[Harry\]$/);
     assert.doesNotMatch(leak?.text ?? "", /\[Kit\]/);
+    assert.deepEqual(improvementContractErrors(leak!), []);
 
-    const withKit = improvementFromAction({
-      mode: "leak", metric: "sessions->add_to_cart", current: 75,
-      delta_pct: 0.75, step: "pdp_to_atc", severity: "p0",
-      abandon_value: 90,
+    const checkout = improvementFromAction({
+      mode: "leak", metric: "checkout_started->purchases", current: 12,
+      step: "checkout_to_purchase", severity: "p1",
     });
-    assert.match(withKit?.text ?? "", /\$90\.00 open abandons/);
-    assert.match(withKit?.text ?? "", /\[Harry\] \[Kit\]/);
-    assert.deepEqual(ownerTagsForAction({
-      mode: "leak", abandon_value: 90,
-    }), ["Harry", "Kit"]);
-    assert.deepEqual(ownerTagsForAction({
-      mode: "leak", abandon_value: 32,
-    }), ["Harry"]);
+    assert.equal(checkout?.owner, "Blair");
+    assert.match(checkout?.concrete_ask ?? "", /\[Blair\]$/);
+
+    const kit = improvementFromAction({
+      mode: "abandon", abandon_value: 90, abandon_count: 1, severity: "p0",
+    });
+    assert.equal(kit?.owner, "Kit");
+    assert.equal(kit?.dave_tap, true);
+    assert.equal(
+      kit?.concrete_ask,
+      "Shopify abandons: $90.00 open / 1 checkout — send recover sequence [Kit]",
+    );
+    assert.deepEqual(improvementContractErrors(kit!), []);
 
     const fromDay = improvementsFromLockedDay({
       asOf: "2026-09-19",
       dailyRow: daily(),
       abandons: [abandon({ total_price: 90 })],
     });
-    assert.match(fromDay[0]?.text ?? "", /\$90\.00 open abandons/);
-    assert.match(fromDay[0]?.text ?? "", /\[Harry\] \[Kit\]/);
+    const owners = fromDay.map((r) => r.owner);
+    assert.ok(owners.includes("Harry"));
+    assert.ok(owners.includes("Kit"));
+    assert.equal(fromDay.filter((r) => r.owner === "Kit").length, 1);
+    assert.equal(fromDay.every((r) => improvementContractErrors(r).length === 0), true);
+    const kitRow = fromDay.find((r) => r.owner === "Kit");
+    assert.match(kitRow?.text ?? "", /\$90\.00 open/);
+    assert.doesNotMatch(fromDay.map((r) => r.text).join(" "), /\[Harry\] \[Kit\]/);
+  });
+
+  test("ban-list rejects generic fix PDP/ATC and multi-owner", () => {
+    const ok = improvementFromAction({
+      mode: "landing", path: "/products/tallow-balm", device: "mobile",
+      current: 66, sessions: 66, purchases: 0, severity: "p1",
+    });
+    assert.doesNotMatch(ok?.concrete_ask ?? "", /fix PDP\/ATC/i);
+    assert.deepEqual(improvementContractErrors(ok!), []);
+    assert.deepEqual(improvementContractErrors({
+      rank: 1,
+      text: "P1 · landing /products/x · 66 lost — fix PDP/ATC [Harry]",
+      owner: "Harry",
+      severity: "P1",
+      evidence: { source: "ga4", path: "/products/x", lost: 66 },
+      concrete_ask: "fix PDP/ATC [Harry]",
+      dave_tap: false,
+      step: "pdp_to_atc",
+    }), ["ban"]);
+    assert.ok(improvementContractErrors({
+      rank: 1,
+      text: "leak [Harry] [Kit]",
+      owner: "Harry",
+      severity: "P1",
+      evidence: { source: "shopify", lost: 75 },
+      concrete_ask: "do both [Harry] [Kit]",
+      dave_tap: false,
+      step: "pdp_to_atc",
+    }).includes("multi_owner"));
   });
 
   test("empty when no material as_of rows", () => {
@@ -409,15 +484,19 @@ describe("improvements from locked-day actions", () => {
     assert.ok(d.improvements.length >= 3);
     assert.ok(d.improvements.length <= 5);
     const texts = d.improvements.map((r) => r.text).join("\n");
+    assert.equal(d.improvements.every((r) => improvementContractErrors(r).length === 0), true);
     assert.match(texts, /sessions→add_to_cart/);
     assert.match(texts, /75 sessions lost/);
     assert.match(texts, /\[Harry\]/);
-    assert.match(texts, /Mobile PDP \/products\/tallow-balm: 70 sessions → 4 purchases/);
-    assert.match(texts, /rewrite above-fold benefit \+ ATC friction \[Harry\]/);
-    assert.match(texts, /GSC query 'tallow balm': 120 impr \/ 0 clicks \/ pos 22 — title\+meta or content gap \[Nora\]/);
+    assert.match(texts, /Mobile \/products\/tallow-balm: 70 sessions → 4 purchases/);
+    assert.match(texts, /rewrite above-fold CTA to Tallow Balm benefit \+ simplify ATC \[Harry\]/);
+    assert.match(texts, /GSC query 'tallow balm': 120 impr \/ 0 clicks \/ pos 22/);
+    assert.match(texts, /\[Nora\]/);
     assert.match(texts, /Ads Brand Search: \$42\.00 \/ 18 clicks \/ 0 conv — review negatives or pause \[Blake\]/);
     assert.doesNotMatch(texts, /fix PDP\/ATC/);
     assert.doesNotMatch(texts, /\bMeta\b|meta_ads|\[Meta\]/);
+    assert.equal(new Set(d.improvements.map((r) => r.owner)).has("Harry"), true);
+    assert.equal(d.improvements.find((r) => r.owner === "Blake")?.dave_tap, false);
     assert.equal(d.improvements[0].rank, 1);
     assert.equal(d.improvements.at(-1)?.rank, d.improvements.length);
   });
@@ -438,11 +517,13 @@ describe("improvements from locked-day actions", () => {
         }],
       },
     });
-    assert.equal(rows[0].severity, "p0");
+    assert.equal(rows[0].severity, "P0");
     assert.equal(rows[0].step, "pdp_to_atc");
+    assert.equal(rows[0].owner, "Harry");
     assert.match(rows[0].text, /75 sessions lost/);
     assert.match(rows[0].text, /\[Harry\]/);
     assert.doesNotMatch(rows[0].text, /800/);
+    assert.deepEqual(improvementContractErrors(rows[0]), []);
   });
 
   test("max 5 ranked items and empty when phase2 sections are null", () => {
@@ -468,6 +549,8 @@ describe("improvements from locked-day actions", () => {
     });
     assert.ok(rows.length <= 5);
     assert.equal(rows.length, 5);
+    assert.equal(rows.every((r) => improvementContractErrors(r).length === 0), true);
+    assert.equal(rows.every((r) => !/fix PDP\/ATC/i.test(r.concrete_ask)), true);
     assert.deepEqual(improvementsFromLockedDay({
       asOf: "2026-09-19",
       dailyRow: daily({ sessions: 8, add_to_cart: 7, checkout_started: 6, purchases: 5 }),
