@@ -12,7 +12,10 @@ from click.testing import CliRunner
 from src.config import load_project_dotenv
 from src.phase2_connectors import (
     CONNECTORS,
+    GSC_APPEARANCE_DIMENSION,
+    GSC_APPEARANCE_KIND,
     GSC_PDP_INSPECT_ALLOWLIST,
+    GSC_SITE_DIMS,
     NEEDS_OAUTH,
     ga4_sync,
     google_ads_campaign_query,
@@ -166,9 +169,23 @@ def _route_google(url, json=None, **_kwargs):
                 "keys": ["2026-09-19", "usa"],
                 "clicks": 7, "impressions": 90, "ctr": 0.0778, "position": 4.8,
             }]})
-        if dims == ["date", "searchAppearance"]:
+        # Google forbids searchAppearance with any other dimension, including date.
+        if "searchAppearance" in dims and dims != ["searchAppearance"]:
+            return _Resp(
+                {"error": {
+                    "code": 400,
+                    "message": (
+                        "Cannot group by search appearance dimension "
+                        "together with another dimension."
+                    ),
+                    "status": "INVALID_ARGUMENT",
+                }},
+                status=400,
+                text="Cannot group by search appearance dimension together with another dimension.",
+            )
+        if dims == ["searchAppearance"]:
             return _Resp({"rows": [{
-                "keys": ["2026-09-19", "PRODUCT_SNIPPETS"],
+                "keys": ["PRODUCT_SNIPPETS"],
                 "clicks": 1, "impressions": 50, "ctr": 0.02, "position": 8.1,
             }]})
         return _Resp({})
@@ -449,6 +466,7 @@ def test_gsc_success_mocked_http_upserts_locked_day(monkeypatch):
     assert by_kind["device"]["dim_value"] == "MOBILE"
     assert by_kind["country"]["dim_value"] == "usa"
     assert by_kind["search_appearance"]["dim_value"] == "PRODUCT_SNIPPETS"
+    assert by_kind["search_appearance"]["metric_date"] == "2026-09-19"
 
     inspects = next(rows for t, rows, _ in upserts if t == "gsc_url_inspection")
     assert len(inspects) == 3
@@ -560,12 +578,76 @@ def test_gsc_never_groups_search_appearance_with_query(monkeypatch):
     monkeypatch.setattr("src.db.upsert_rows", lambda *a, **k: 1)
     gsc_sync(environ=_google_env(), as_of="2026-09-19", days=1)
     analytics = [d for d in seen if d]
-    assert ["date", "searchAppearance"] in analytics
+    assert ["searchAppearance"] in analytics
     for dims in analytics:
         if "searchAppearance" in dims:
-            assert dims == ["date", "searchAppearance"]
+            assert dims == ["searchAppearance"]
+            assert "date" not in dims
+            assert "query" not in dims
+            assert "page" not in dims
     assert all("/products/" in u for u in GSC_PDP_INSPECT_ALLOWLIST)
     assert len(GSC_PDP_INSPECT_ALLOWLIST) <= 8
+
+
+def test_gsc_search_appearance_request_excludes_date(monkeypatch):
+    """Mocked Search Analytics body for appearance is dimensions=['searchAppearance'] only."""
+    seen: list[dict] = []
+
+    def capture(url, json=None, **kwargs):
+        if "searchAnalytics/query" in url:
+            seen.append(dict(json or {}))
+        return _route_google(url, json=json, **kwargs)
+
+    monkeypatch.setattr("src.phase2_connectors._http_post", capture)
+    monkeypatch.setattr("src.db.upsert_rows", lambda *a, **k: 1)
+    gsc_sync(environ=_google_env(), as_of="2026-09-19", days=2)
+
+    appearance = [
+        p for p in seen
+        if GSC_APPEARANCE_DIMENSION in (p.get("dimensions") or [])
+    ]
+    assert appearance, "gsc-sync must request searchAppearance"
+    windows = []
+    for payload in appearance:
+        dims = payload.get("dimensions") or []
+        assert dims == [GSC_APPEARANCE_DIMENSION]
+        assert "date" not in dims
+        assert len(dims) == 1
+        assert payload.get("dataState") == "final"
+        # Day-bounded: stamp metric_date from this window, not from keys.
+        assert payload["startDate"] == payload["endDate"]
+        windows.append(payload["startDate"])
+    assert windows == ["2026-09-18", "2026-09-19"]
+
+    # Other harvests still include the date dimension — do not regress them.
+    assert ["date", "query"] in [p.get("dimensions") for p in seen]
+    assert ["date", "page"] in [p.get("dimensions") for p in seen]
+    assert ["date", "device"] in [p.get("dimensions") for p in seen]
+    assert ["date", "country"] in [p.get("dimensions") for p in seen]
+    assert ["date", "query", "device"] in [p.get("dimensions") for p in seen]
+    assert ["date", "page", "device"] in [p.get("dimensions") for p in seen]
+    assert GSC_APPEARANCE_DIMENSION not in {name for name, _ in GSC_SITE_DIMS}
+
+
+def test_gsc_search_appearance_stamps_metric_date_from_request_window(monkeypatch):
+    upserts: list[tuple] = []
+
+    def fake_upsert(table, rows, on_conflict=None):
+        upserts.append((table, list(rows), on_conflict))
+        return len(rows)
+
+    monkeypatch.setattr("src.phase2_connectors._http_post", _route_google)
+    monkeypatch.setattr("src.db.upsert_rows", fake_upsert)
+    r = gsc_sync(environ=_google_env(), as_of="2026-09-19", days=2)
+    assert r["ok"] is True
+    dims = next(rows for t, rows, _ in upserts if t == "gsc_dim_daily")
+    appearance = [row for row in dims if row["dim_kind"] == GSC_APPEARANCE_KIND]
+    assert {row["metric_date"] for row in appearance} == {"2026-09-18", "2026-09-19"}
+    assert all(row["dim_value"] == "PRODUCT_SNIPPETS" for row in appearance)
+    # Device/country still come from the dated harvest (mock only returns 2026-09-19).
+    by_kind = {row["dim_kind"]: row for row in dims if row["dim_kind"] != GSC_APPEARANCE_KIND}
+    assert by_kind["device"]["metric_date"] == "2026-09-19"
+    assert by_kind["country"]["metric_date"] == "2026-09-19"
 
 
 def test_cli_commands_fail_closed_without_oauth(monkeypatch):

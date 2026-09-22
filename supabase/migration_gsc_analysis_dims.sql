@@ -8,7 +8,9 @@
 --   * site-wide device / country / search_appearance in one dim table
 --     (ga4_sessions_daily split_kind / split_value pattern)
 -- searchAppearance is site-wide only — Google forbids grouping it with
--- other dimensions, and query×appearance would explode quota.
+-- any other dimension, including date. Day-bound startDate/endDate and
+-- stamp metric_date from the request window. query×appearance is also
+-- forbidden and would explode quota.
 --
 -- URL Inspection is a tiny hardcoded tallowbourn.com PDP allowlist
 -- (latest row per URL). Not a crawl. Fail closed: log + continue.
