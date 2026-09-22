@@ -274,13 +274,13 @@ Then `python -m src.main meta-ads-sync` GETs `graph.facebook.com/v25.0/{act_…}
 
 | Table | Graph | Why kept |
 |---|---|---|
-| `meta_ads_daily` | `level=campaign` | Campaign SoT for KPIs / keep-kill / freshness |
+| `meta_ads_daily` | `level=campaign` | Campaign SoT for KPIs / keep-kill / freshness / Meta call sheet |
 | `meta_ads_adset_daily` | `level=adset` | Fatigue / `frequency_peak` |
 | `meta_ads_ad_daily` | `level=ad` | Creative keep/kill |
 | `meta_ads_platform_daily` | campaign + `breakdowns=publisher_platform` | Placement waste (IG vs FB vs Audience Network) |
 | `meta_ads_demo_daily` | campaign + `breakdowns=age,gender` | Audience waste. Not crossed with platform |
 
-Fields: spend, clicks, impressions, reach, frequency, ctr, cpc, cpm, inline_link_clicks, unique_clicks / unique_inline_link_clicks (level pulls only), plus `actions` / `action_values` parsed first-match for purchase / add_to_cart / initiate_checkout (never sum types). Daily job stays prior NY day + 7d. Catch-up: `--days 90` (chunked ≤30d). Missing Mini env → `needs OAuth` / `Wrote 0 rows` (fail closed). `--dry-run` documents the path and does not upsert. `ads_read` only — never `ads_management`. Mini schedules `meta_ads_sync` at 07:35 ET only after these names are present. Apply `supabase/migration_meta_ads_enrichment.sql` once (additive; RLS on; no lockdown file). Meta CSV on `/paid-ads` is retired.
+Fields: spend, clicks, impressions, reach, frequency, ctr, cpc, cpm, inline_link_clicks, unique_clicks / unique_inline_link_clicks (level pulls only), plus `actions` / `action_values` parsed first-match for purchase / add_to_cart / initiate_checkout (never sum types). Daily job stays prior NY day + 7d. Catch-up: `--days 90` (chunked ≤30d). Missing Mini env → `needs OAuth` / `Wrote 0 rows` (fail closed). `--dry-run` documents the path and does not upsert. `ads_read` only — never `ads_management`. Mini schedules `meta_ads_sync` at 07:35 ET only after these names are present. Apply `supabase/migration_meta_ads_enrichment.sql` once (additive; RLS on; no lockdown file). Meta CSV on `/paid-ads` is retired. `/paid-ads` ranks a Meta call sheet (pause / cut / refresh / scale / keep) from these tables; conversion-digest `phase2.meta_actions` is the locked-day pause subset.
 
 **You’re done when:** all four `META_*` names are on Vercel, Mini `.env` has the same names, Dana applied the enrichment SQL, and a pull upserts the locked day (or 0 rows if the API returned none).
 

@@ -33,7 +33,7 @@ surfaces in the card as a visible failure state, not a blank panel.
 | `/api/ppc` | Supabase server creds | Load-failure card |
 | `/api/paid-ads` | Supabase server creds + `paid_ads_snapshots` / `paid_ads_campaigns_window` | Empty Google/Meta cards + optional migration hint |
 | `/api/paid-ads/csv` | Supabase server creds (POST) | 400 if no recognisable Google/Meta/GSC/GA4 rows; upserts `paid_*_daily` |
-| `/api/paid-ads/intel` | Supabase server creds. Prefers `google_ads_daily` / `ga4_landing_daily` / `gsc_query_daily` / `gsc_page_daily` / `gsc_dim_daily` (search_appearance) / `meta_ads_daily` (+ adset/ad/platform/demo grains). Meta CSV is retired. | Empty intel when no preferred API rows exist — never blocks on Meta CSV |
+| `/api/paid-ads/intel` | Supabase server creds. Prefers `google_ads_daily` / `ga4_landing_daily` / `gsc_query_daily` / `gsc_page_daily` / `gsc_dim_daily` (search_appearance) / `meta_ads_daily` (+ adset/ad/platform/demo grains). Builds `meta_call_sheet` from those grains. Meta CSV is retired. | Empty intel when no preferred API rows exist — never blocks on Meta CSV |
 | `/api/paid-ads/decision` | Supabase server creds + `paid_intel_decisions` | 409 naming the migration if the table is missing |
 | `/api/paid-ads/ingest` | Supabase server creds (POST, Basic Auth) | 400 on bad payload; upserts those two tables on their production uniques |
 | `/api/data-freshness` | Supabase server creds | Layout strip hidden (fail-soft) |

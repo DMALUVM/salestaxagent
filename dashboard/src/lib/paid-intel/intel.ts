@@ -8,10 +8,11 @@ import { buildCardPrompt, buildGrok, type SitePromptContext } from "./grok";
 import { gradeOutcome, measureCheck, type MeasureContext } from "./outcome";
 import { gscPerformanceRows } from "./api-adapt";
 import { buildWebInsights } from "./web-insights";
+import { buildMetaCallSheet } from "./meta-call";
 import type {
   CampaignAgg, CampaignDaily, DecisionStatus, GaDaily, IntelBrief, IntelBundle,
   IntelCard, IntelCheck, IntelDecision, IntelFilter, IntelOwner, IntelRangeDays,
-  PlatformKpis, SearchQueryDaily, WinLoseRow,
+  MetaDetail, PlatformKpis, SearchQueryDaily, WinLoseRow,
 } from "./types";
 
 const PAID_GA = /^(paid search|paid social|cross-network|display|paid other)$/i;
@@ -948,6 +949,7 @@ export function buildIntel(opts: {
   decisions?: IntelDecision[];
   today?: string;
   stats?: SourceStats;
+  meta_detail?: MetaDetail;
 }): IntelBundle {
   const freshness = buildFreshness({
     campaigns: opts.campaigns,
@@ -988,6 +990,8 @@ export function buildIntel(opts: {
         asOf: null,
       }),
       sources: { campaigns: 0, queries: opts.queries.length, ga: opts.ga.length },
+      meta_detail: opts.meta_detail,
+      meta_call_sheet: { as_of: null, items: [] },
     };
   }
 
@@ -1108,9 +1112,16 @@ export function buildIntel(opts: {
     asOf, google, meta, blended, wow, cards: adsCards, siteCards, site: siteCtx,
   });
 
+  const metaCallSheet = buildMetaCallSheet({
+    campaigns: opts.campaigns,
+    adsets: opts.meta_detail?.adsets,
+    ads: opts.meta_detail?.ads,
+    asOf,
+  });
   const grok = buildGrok({
     asOf, range, google, meta, blended, wow, camps, products, cards, brief,
     site: siteCtx, queries, pages, appearance, paidLanders: paidLandersOf(ga), ga4,
+    callSheet: metaCallSheet,
   });
   const chartRows = opts.campaigns.filter((r) => filter === "all" || r.platform === filter);
 
@@ -1144,6 +1155,8 @@ export function buildIntel(opts: {
       queries: opts.queries.length,
       ga: opts.ga.length,
     },
+    meta_detail: opts.meta_detail,
+    meta_call_sheet: metaCallSheet,
   };
 }
 

@@ -410,6 +410,7 @@ export async function GET(request: Request) {
       range,
       filter,
       stats,
+      meta_detail: metaDetail,
     });
 
     return Response.json({

@@ -18,6 +18,7 @@ describe("Phase 2 extras are null until OAuth rows exist", () => {
     assert.equal(e.landing_drops, null);
     assert.equal(e.seo, null);
     assert.equal(e.ads, null);
+    assert.equal(e.meta_actions, null);
     assert.equal(e.connectors.ga4, false);
     assert.equal(e.connectors.gsc, false);
     assert.equal(e.connectors.google_ads, false);
@@ -139,6 +140,30 @@ describe("Phase 2 extras are null until OAuth rows exist", () => {
     assert.equal(extras.ads?.length, 1);
     assert.equal(extras.ads?.[0].campaign_name, "UGC Balm");
     assert.equal(extras.ads?.[0].spend, 12);
+    assert.deepEqual(extras.meta_actions, []);
+  });
+
+  test("locked-day Meta pause lines attach without inventing conversions", () => {
+    const extras = phase2FromLockedDay("2026-09-19", {
+      metaAds: [
+        {
+          metric_date: "2026-09-19", campaign_id: "1", campaign_name: "Dead UGC",
+          spend: 18, clicks: 6, conversions: 0,
+        },
+        {
+          metric_date: "2026-09-19", campaign_id: "2", campaign_name: "Unknown",
+          spend: 40, clicks: 9,
+        },
+        {
+          metric_date: "2026-09-18", campaign_id: "3", campaign_name: "Yesterday",
+          spend: 99, clicks: 40, conversions: 0,
+        },
+      ],
+    });
+    assert.equal(extras.meta_actions?.length, 1);
+    assert.equal(extras.meta_actions?.[0].campaign_name, "Dead UGC");
+    assert.equal(extras.meta_actions?.[0].say, "Pause Dead UGC.");
+    assert.doesNotMatch(extras.meta_actions?.[0].say ?? "", /Brand Search/);
   });
 
   test("ads waste and GSC opportunities fail closed without inventing", () => {

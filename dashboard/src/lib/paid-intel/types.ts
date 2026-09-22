@@ -26,8 +26,36 @@ export interface MetaGrainRow {
   conversions: number;
   frequency: number | null;
   reach: number | null;
+  ctr: number | null;
   add_to_cart: number | null;
   initiate_checkout: number | null;
+}
+
+export type MetaCallAction = "kill" | "cut" | "refresh" | "scale" | "hold";
+export type MetaCallEntity = "campaign" | "adset" | "ad";
+
+/** One line Dave can say on the weekly Ads Manager call. Never invented. */
+export interface MetaCallItem {
+  rank: number;
+  action: MetaCallAction;
+  entity_kind: MetaCallEntity;
+  entity_name: string;
+  campaign_name: string;
+  spend: number;
+  conv_value: number;
+  conversions: number;
+  roas: number;
+  cpa: number | null;
+  prior_spend: number | null;
+  prior_roas: number | null;
+  /** One spoken ask. Never "move this onto Brand Search". */
+  say: string;
+  why: string;
+}
+
+export interface MetaCallSheet {
+  as_of: string | null;
+  items: MetaCallItem[];
 }
 
 export interface MetaDetail {
@@ -451,4 +479,6 @@ export interface IntelBundle {
   sources: { campaigns: number; queries: number; ga: number };
   /** Meta ad-set / ad / placement / demo grains from official API tables. */
   meta_detail?: MetaDetail;
+  /** Ranked keep/kill/scale list for the weekly Ads Manager call. */
+  meta_call_sheet?: MetaCallSheet;
 }

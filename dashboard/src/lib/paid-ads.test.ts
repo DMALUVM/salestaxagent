@@ -335,6 +335,9 @@ describe("page / API invariants", () => {
     assert.match(intelRead, /preferApiWhenPresent/);
     assert.match(intelUi, /meta_ads_adset_daily/);
     assert.match(intelUi, /meta_ads_platform_daily/);
+    assert.match(intelUi, /Meta call sheet/);
+    assert.match(intelUi, /never move Meta onto Brand Search/);
+    assert.match(intelRead, /meta_detail: metaDetail/);
     assert.match(intelRead, /metric_date/);
     assert.match(intelRead, /fetched_at/);
     assert.match(intelRead, /paid_campaign_daily/);

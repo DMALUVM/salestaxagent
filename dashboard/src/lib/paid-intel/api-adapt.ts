@@ -163,6 +163,7 @@ export function adaptMetaGrain(
     conversions: num(row.conversions),
     frequency: optionalNum(row.frequency),
     reach: optionalNum(row.reach),
+    ctr: optionalNum(row.ctr),
     add_to_cart: optionalNum(row.add_to_cart),
     initiate_checkout: optionalNum(row.initiate_checkout),
   };

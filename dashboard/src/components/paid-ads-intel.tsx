@@ -10,7 +10,8 @@ import {
 import { SectionNav } from "@/components/section-nav";
 import { WebInsightsCard } from "@/components/web-insights-card";
 import type {
-  IntelBundle, IntelCard, IntelFilter, IntelRangeDays, MetaGrainRow, PlatformKpis,
+  IntelBundle, IntelCard, IntelFilter, IntelRangeDays, MetaCallItem, MetaCallSheet,
+  MetaGrainRow, PlatformKpis,
 } from "@/lib/paid-intel/types";
 import { INTEL_FILTERS, INTEL_RANGES } from "@/lib/paid-intel/types";
 import {
@@ -169,6 +170,92 @@ const LEFT_BORDER: Record<IntelCard["severity"], string> = {
   warn: "#d97706",
   info: "#64748b",
 };
+
+const CALL_ACTION: Record<MetaCallItem["action"], { label: string; className: string }> = {
+  kill: { label: "PAUSE", className: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900" },
+  cut: { label: "CUT 30%", className: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900" },
+  refresh: { label: "REFRESH", className: "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/30 dark:text-orange-300 dark:border-orange-900" },
+  scale: { label: "SCALE", className: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-900" },
+  keep: { label: "KEEP", className: "bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-700" },
+  hold: { label: "HOLD", className: "bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-300 dark:border-slate-700" },
+};
+
+function MetaCallSheetView({
+  sheet, onError,
+}: {
+  sheet: MetaCallSheet;
+  onError: (msg: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const lines = sheet.items.map((item) => `${item.rank}. ${item.say} (${item.why})`).join("\n");
+
+  async function copySheet() {
+    if (!lines) {
+      onError("No Meta call lines yet.");
+      return;
+    }
+    try {
+      await copyText(lines);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2500);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Clipboard blocked.");
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 border-b">
+        <div>
+          <CardTitle className="text-sm">Meta call sheet</CardTitle>
+          <p className="text-[11px] text-muted-foreground">
+            Last-7 vs prior-7 from meta_ads_* · spend ≥ $1 · never move Meta onto Brand Search
+            {sheet.as_of ? ` · as-of ${sheet.as_of}` : ""}
+          </p>
+        </div>
+        {sheet.items.length > 0 && (
+          <Button variant="outline" size="sm" onClick={copySheet}>
+            <ClipboardCopy className="mr-1.5 h-3.5 w-3.5" />
+            {copied ? "Copied" : "Copy asks"}
+          </Button>
+        )}
+      </CardHeader>
+      <CardContent className="p-0">
+        {sheet.items.length === 0 ? (
+          <p className="px-4 py-6 text-sm text-muted-foreground">
+            No material Meta ask this week. Win/lose still needs spend ≥ $1 and a named campaign.
+          </p>
+        ) : (
+          <ol className="divide-y">
+            {sheet.items.map((item) => {
+              const tone = CALL_ACTION[item.action];
+              return (
+                <li key={`${item.entity_kind}:${item.campaign_name}:${item.entity_name}:${item.action}`} className="px-4 py-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[11px] tabular-nums text-muted-foreground">{item.rank}</span>
+                        <Badge variant="outline" className={tone.className}>{tone.label}</Badge>
+                        <span className="text-[10px] uppercase text-muted-foreground">{item.entity_kind}</span>
+                      </div>
+                      <p className="mt-1 text-sm font-medium leading-snug">{item.say}</p>
+                      <p className="text-[11px] text-muted-foreground">{item.why}</p>
+                    </div>
+                    <div className="shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+                      <div>{money(item.spend)} · {item.roas.toFixed(2)}x</div>
+                      {item.cpa != null ? <div>CPA {money(item.cpa)}</div> : null}
+                      {item.prior_roas != null ? <div>prior {item.prior_roas.toFixed(2)}x</div> : null}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function Kpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -1068,6 +1155,8 @@ export function PaidAdsIntel({
         ...(hasWeb ? [{ id: "web-insights", label: "Web insights" }] : []),
         ...(data.as_of ? [
           { id: "command", label: "Command" },
+          ...((filter !== "google" && (data.meta_call_sheet?.items.length || data.kpis.meta.spend >= 1))
+            ? [{ id: "meta-call", label: "Meta call" }] : []),
           { id: "intel", label: "This week" },
           { id: "ads-desk", label: "Ads lead" },
           { id: "site-desk", label: "Web team" },
@@ -1254,6 +1343,14 @@ export function PaidAdsIntel({
               <WinLose title="Keep" rows={data.wins} empty="No campaign with spend ≥ $1 and ROAS ≥ 1.5x." />
               <WinLose title="Kill / watch" rows={data.losses} empty="No spend ≥ $1 loser. $0 Meta days are hidden." />
             </div>
+            {filter !== "google" && (data.meta_call_sheet?.items.length || data.kpis.meta.spend >= 1) ? (
+              <div id="meta-call" className="scroll-mt-12">
+                <MetaCallSheetView
+                  sheet={data.meta_call_sheet ?? { as_of: data.as_of, items: [] }}
+                  onError={setMsg}
+                />
+              </div>
+            ) : null}
           </section>
 
           <section id="intel" className="space-y-3 scroll-mt-12">
