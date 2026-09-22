@@ -2,9 +2,9 @@
 
 `/paid-ads` is the Shopify storefront ads desk. **Amazon PPC stays on `/ppc`.**
 
-Primary path: **official API tables** for Google Ads, GA4, and Search Console.
-Meta stays on CSV until `meta_ads_daily` has rows. CSV upload remains a fallback
-(`POST /api/paid-ads/csv`). No demo data.
+Primary path: **official API tables** for Google Ads, GA4, Search Console, and
+Meta (`meta_ads_daily` when Mini `meta-ads-sync` has rows). CSV upload remains a
+fallback (`POST /api/paid-ads/csv`) until OAuth. No demo data.
 Range 7/14/30/90/365/all is relative to the **max metric_date / date in the preferred source**, not today.
 
 | Source | Live read | Fallback |
