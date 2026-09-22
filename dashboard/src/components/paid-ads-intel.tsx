@@ -90,7 +90,11 @@ function PaidAdsCsvHowto({
           </li>
           <li>
             <p className="font-medium">Search Console</p>
-            <p className="text-muted-foreground">Optional fallback — prefer gsc_query_daily / gsc_page_daily API sync.</p>
+            <p className="text-muted-foreground">
+              Optional fallback — prefer Mini{" "}
+              <code>./.venv/bin/python -m src.main gsc-sync</code>
+              {" "}into gsc_query_daily / gsc_page_daily.
+            </p>
             <p>
               tallowbourn.com Performance (Search results) → Last 7 → Export → Download CSV.
               Keep Queries.csv + Pages.csv + Chart.csv + Search Appearance.csv
@@ -1311,7 +1315,7 @@ export function PaidAdsIntel({
               <p className="text-[11px] text-muted-foreground">
                 {data.freshness?.sources.some((s) =>
                   (s.source === "gsc_snapshot" || s.source === "gsc_trend") && s.origin === "api")
-                  ? "Query and page totals from gsc_query_daily / gsc_page_daily (gsc-sync). Daily trend is rolled up from dated queries. Position change is never invented."
+                  ? "Query and page totals from gsc_query_daily / gsc_page_daily. Mini ./.venv/bin/python -m src.main gsc-sync writes those rows. Daily trend is rolled up from dated queries. Position change is never invented."
                   : "Queries.csv, Pages.csv, and Search Appearance.csv are snapshots (no date). Chart.csv is the daily organic trend. Position change is never invented from the snapshot."}
               </p>
               {data.gsc.chart.length > 0 && (

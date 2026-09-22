@@ -300,6 +300,8 @@ describe("page / API invariants", () => {
     assert.doesNotMatch(page, /puppeteer|playwright|ads\.google\.com|business\.facebook\.com/i);
     assert.doesNotMatch(intelUi, /puppeteer|playwright/i);
     assert.doesNotMatch(intelUi, /No OAuth/);
+    assert.match(intelUi, /\.\/\.venv\/bin\/python -m src.main gsc-sync/);
+    assert.match(intelUi, /loadWarning/);
     assert.doesNotMatch(ingest, /puppeteer|playwright|ads\.google\.com/i);
     assert.doesNotMatch(csvIngest, /puppeteer|playwright|ads\.google\.com/i);
   });

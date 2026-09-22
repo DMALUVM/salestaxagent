@@ -42,7 +42,7 @@ export function WebInsightsCard({ insights }: { insights: WebInsights }) {
       <div>
         <h2 className="text-sm font-semibold tracking-tight">Web insights</h2>
         <p className="text-[11px] text-muted-foreground">
-          Site half of Search Console / GA4 / ads warehouse rows. Ads Ops still ranks ad levers below. Same windows as the files — nothing invented.
+          Site half of Search Console / GA4 / ads rows. Ads Ops still ranks ad levers below. Same windows as the loaded rows — nothing invented.
         </p>
       </div>
       <Card>

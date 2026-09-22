@@ -331,6 +331,8 @@ describe("web insights lives on /paid-ads only", () => {
     assert.match(INTEL_UI, /web-insights/);
     assert.match(CARD, /Web insights/);
     assert.match(CARD, /Site half of Search Console/);
+    assert.match(CARD, /Same windows as the loaded rows/);
+    assert.doesNotMatch(CARD, /Same windows as the files/);
     assert.match(CARD, /gsc_page_daily/);
     assert.match(CARD, /gsc_query_daily/);
     assert.doesNotMatch(CARD, /Pages\.csv not uploaded|Queries\.csv not uploaded/);
