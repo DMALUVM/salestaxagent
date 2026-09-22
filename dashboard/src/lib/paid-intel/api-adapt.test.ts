@@ -10,9 +10,12 @@ import {
   adaptMetaAdsDaily,
   bounceFromEngaged,
   gscCtrToPct,
+  gscPerformanceRows,
   pickOriginStats,
   preferApiWhenPresent,
+  rollupGscSnapshot,
   synthesizeGscChart,
+  windowedGscRows,
 } from "./api-adapt";
 
 describe("preferApiWhenPresent", () => {
@@ -185,6 +188,57 @@ describe("gsc adapters", () => {
     assert.equal(p!.ctr, 2.5);
   });
 
+  test("rolls dated API days into one snapshot row per query", () => {
+    const rolled = rollupGscSnapshot([
+      {
+        kind: "query", date: "2026-09-13", query: "tallow balm",
+        clicks: 0, impressions: 90, ctr: 0, position: 17,
+      },
+      {
+        kind: "query", date: "2026-09-19", query: "tallow balm",
+        clicks: 0, impressions: 80, ctr: 0, position: 16,
+      },
+      {
+        kind: "page", date: "2026-09-19", query: "https://tallowbourn.com/products/tallow-balm",
+        clicks: 2, impressions: 200, ctr: 1, position: 12,
+      },
+    ]);
+    const q = rolled.find((r) => r.kind === "query" && r.query === "tallow balm");
+    const p = rolled.find((r) => r.kind === "page");
+    assert.ok(q);
+    assert.equal(q!.clicks, 0);
+    assert.equal(q!.impressions, 170);
+    assert.equal(q!.date, "2026-09-19");
+    assert.ok(q!.position != null && q!.position > 16 && q!.position < 17);
+    assert.equal(p!.impressions, 200);
+  });
+
+  test("windows GSC against its own max, not a newer Ads as-of", () => {
+    const rows = [
+      {
+        kind: "query" as const, date: "2026-09-10", query: "old",
+        clicks: 1, impressions: 10, ctr: 10, position: 4,
+      },
+      {
+        kind: "query" as const, date: "2026-09-19", query: "new",
+        clicks: 2, impressions: 20, ctr: 10, position: 5,
+      },
+    ];
+    const win = windowedGscRows(rows, 7);
+    assert.deepEqual(win.map((r) => r.query), ["new"]);
+  });
+
+  test("gscPerformanceRows leaves undated CSV snapshots alone", () => {
+    const csv = [{
+      kind: "query" as const, date: "", query: "tallow deodorant",
+      clicks: 3, impressions: 500, ctr: 0.6, position: 6,
+    }];
+    const out = gscPerformanceRows(csv, 7);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].date, "");
+    assert.equal(out[0].impressions, 500);
+  });
+
   test("synthesizes Chart.csv-shaped daily totals from dated queries", () => {
     const chart = synthesizeGscChart([
       {
@@ -285,6 +339,65 @@ describe("buildIntel from API-shaped rows after the CSV cutoff", () => {
     assert.equal(gsc.origin, "api");
     assert.equal(gsc.dated, true);
     assert.equal(gsc.max_date, "2026-09-19");
+  });
+
+  test("dated API days roll up so web-insights / site cards do not look CSV-empty", () => {
+    const days = ["2026-09-13", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18", "2026-09-19"];
+    const queries = days.flatMap((date) => [
+      {
+        kind: "query" as const,
+        date,
+        query: "tallow deodorant",
+        clicks: 0,
+        impressions: 80,
+        ctr: 0,
+        position: 6.2,
+      },
+      {
+        kind: "page" as const,
+        date,
+        query: "https://tallowbourn.com/products/tallow-balm",
+        clicks: 1,
+        impressions: 200,
+        ctr: 0.5,
+        position: 11,
+      },
+    ]);
+    const intel = buildIntel({
+      campaigns: [
+        adaptGoogleAdsDaily({
+          metric_date: "2026-09-20",
+          campaign_name: "TALLOWBOURN- PMAX - Max Conversions - Campaign V4",
+          spend: 37.65, clicks: 32, impressions: 5074, conversions: 3, conversion_value: 100.94,
+        })!,
+      ],
+      queries: [...queries, ...synthesizeGscChart(queries.filter((q) => q.kind === "query"))],
+      ga: [],
+      range: 7,
+      filter: "all",
+      today: "2026-09-22",
+      stats: {
+        gsc_snapshot: {
+          rows: 14, min_date: "2026-09-13", max_date: "2026-09-19",
+          origin: "api", fetched_at: "2026-09-21T11:25:00Z",
+        },
+        gsc_trend: {
+          rows: 7, min_date: "2026-09-13", max_date: "2026-09-19",
+          origin: "api", fetched_at: "2026-09-21T11:25:00Z",
+        },
+      },
+    });
+    assert.equal(intel.web_insights.present, true);
+    assert.ok(!intel.web_insights.gaps.some((g) => /csv not uploaded/i.test(g)));
+    assert.ok(intel.web_insights.windows.gsc_queries);
+    assert.ok(intel.web_insights.windows.gsc_pages);
+    const q = intel.gsc.queries.find((r) => r.query === "tallow deodorant");
+    const p = intel.gsc.pages.find((r) => /tallow-balm/.test(r.query));
+    assert.ok(q && q.impressions >= 400 && (q.ctr ?? 100) < 1);
+    assert.ok(p && p.impressions >= 400 && (p.ctr ?? 100) < 1);
+    assert.ok(intel.cards.some((c) => c.id === "gsc-title-trap"));
+    assert.ok(intel.web_insights.low_ctr_pages.some((r) => /tallow-balm/.test(r.path)));
+    assert.ok(intel.web_insights.money_queries.length === 0 || intel.web_insights.windows.gsc_queries);
   });
 
   test("Meta CSV rows still score when meta_ads_daily is empty", () => {

@@ -42,7 +42,7 @@ export function WebInsightsCard({ insights }: { insights: WebInsights }) {
       <div>
         <h2 className="text-sm font-semibold tracking-tight">Web insights</h2>
         <p className="text-[11px] text-muted-foreground">
-          Site half of this upload. Ads Ops still ranks ad levers below. Same windows as the files — nothing invented.
+          Site half of Search Console / GA4 / ads warehouse rows. Ads Ops still ranks ad levers below. Same windows as the files — nothing invented.
         </p>
       </div>
       <Card>
@@ -79,7 +79,7 @@ export function WebInsightsCard({ insights }: { insights: WebInsights }) {
             {insights.low_ctr_pages.length === 0 ? (
               <EmptyBlock text={insights.windows.gsc_pages
                 ? "No page in this snapshot has high impressions and CTR under 1%."
-                : "GSC Pages.csv not uploaded — high-impression / low-CTR URLs are a gap."} />
+                : "GSC pages missing from gsc_page_daily — high-impression / low-CTR URLs are a gap."} />
             ) : (
               <Table>
                 <TableHeader>
@@ -116,13 +116,13 @@ export function WebInsightsCard({ insights }: { insights: WebInsights }) {
             ) : insights.windows.gsc_queries ? (
               <p className="text-[11px] text-muted-foreground">
                 Queries {insights.windows.gsc_queries.label}.
-                {insights.windows.gsc_queries.start ? "" : " Chart.csv not in this upload."}
+                {insights.windows.gsc_queries.start ? "" : " Daily GSC trend is not in this window."}
               </p>
             ) : null}
             {insights.money_queries.length === 0 ? (
               <EmptyBlock text={insights.windows.gsc_queries
                 ? "No money term off page 1 and no branded pos-1 with 0 clicks in this snapshot."
-                : "GSC Queries.csv not uploaded — money-term ranks are a gap."} />
+                : "GSC queries missing from gsc_query_daily — money-term ranks are a gap."} />
             ) : (
               <Table>
                 <TableHeader>

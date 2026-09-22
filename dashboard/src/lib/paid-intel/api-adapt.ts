@@ -12,6 +12,7 @@
  * has no session default channel group and no last-click revenue.
  */
 
+import { shiftDays } from "../as-of";
 import {
   audienceOf, campaignTypeOf, isBrandCampaign, productOf,
 } from "./classify";
@@ -183,6 +184,92 @@ export function adaptGscPageDaily(row: Record<string, unknown>): SearchQueryDail
     ctr: gscCtrToPct(row.ctr),
     position: row.position == null ? null : num(row.position),
   };
+}
+
+/**
+ * Keep the last `days` of GSC's own calendar (not Ads as-of).
+ * GSC trails ~2 days; do not drop those rows because Google Ads is newer.
+ * `days === 0` keeps the full dated span (intel "All").
+ */
+export function windowedGscRows(rows: SearchQueryDaily[], days: number): SearchQueryDaily[] {
+  const dated = rows.filter((r) => r.date);
+  if (!days) return dated.length ? dated : rows;
+  let max = "";
+  for (const r of dated) {
+    if (r.date > max) max = r.date;
+  }
+  if (!max) return dated;
+  const start = shiftDays(max, -(days - 1));
+  return dated.filter((r) => r.date >= start && r.date <= max);
+}
+
+/**
+ * Collapse dated API query/page days into one snapshot row per key.
+ * CSV Queries.csv / Pages.csv were already a last-7 aggregate; daily
+ * gsc_*_daily rows under-fire HIGH_IMPR / money-term detectors.
+ */
+export function rollupGscSnapshot(rows: SearchQueryDaily[]): SearchQueryDaily[] {
+  const by = new Map<string, {
+    kind: SearchQueryDaily["kind"];
+    query: string;
+    clicks: number;
+    impressions: number;
+    posNum: number;
+    posDen: number;
+    maxDate: string;
+  }>();
+  for (const row of rows) {
+    if (row.kind !== "query" && row.kind !== "page") continue;
+    const key = `${row.kind}\0${row.query}`;
+    const cur = by.get(key) ?? {
+      kind: row.kind,
+      query: row.query,
+      clicks: 0,
+      impressions: 0,
+      posNum: 0,
+      posDen: 0,
+      maxDate: "",
+    };
+    cur.clicks += row.clicks;
+    cur.impressions += row.impressions;
+    if (row.position != null && row.impressions > 0) {
+      cur.posNum += row.position * row.impressions;
+      cur.posDen += row.impressions;
+    }
+    if (row.date && row.date > cur.maxDate) cur.maxDate = row.date;
+    by.set(key, cur);
+  }
+  return [...by.values()]
+    .map((v) => ({
+      kind: v.kind,
+      date: v.maxDate,
+      query: v.query,
+      clicks: v.clicks,
+      impressions: v.impressions,
+      ctr: v.impressions ? (v.clicks / v.impressions) * 100 : null,
+      position: v.posDen ? v.posNum / v.posDen : null,
+    }))
+    .sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions);
+}
+
+/**
+ * API SoT: roll dated query/page rows over GSC's own last-N days.
+ * Undated CSV snapshots pass through. Chart / appearance are unchanged.
+ */
+export function gscPerformanceRows(
+  rows: SearchQueryDaily[],
+  days: number,
+): SearchQueryDaily[] {
+  const queries = rows.filter((r) => r.kind === "query");
+  const pages = rows.filter((r) => r.kind === "page");
+  const rest = rows.filter((r) => r.kind !== "query" && r.kind !== "page");
+  const roll = (part: SearchQueryDaily[]) => {
+    const dated = part.filter((r) => r.date);
+    const undated = part.filter((r) => !r.date);
+    if (!dated.length) return undated;
+    return [...undated, ...rollupGscSnapshot(windowedGscRows(dated, days))];
+  };
+  return [...roll(queries), ...roll(pages), ...rest];
 }
 
 /** Daily site totals from dated GSC query rows — stands in for Chart.csv. */

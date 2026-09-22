@@ -1,4 +1,4 @@
-/** Site half of a /paid-ads upload. Reads only paid_ga_daily / paid_search_query_daily / paid_campaign_daily columns. */
+/** Site half of /paid-ads. Prefer gsc_*_daily / ga4_landing_daily / ads API rows; CSV remains fallback. */
 
 import { productOf, productOfPath } from "./classify";
 import type {
@@ -7,7 +7,7 @@ import type {
   WebInsightsLanding, WebInsightsWindow,
 } from "./types";
 
-/** GSC Pages.csv: "high impressions" that still fail to earn the click. 836 in the lock upload qualifies. */
+/** High-impression GSC pages that still fail to earn the click (7-day snapshot or rolled-up API days). */
 const HIGH_IMPR = 400;
 /** CTR is stored 0–100, same as Queries.csv / Pages.csv. */
 const LOW_CTR_PCT = 1;
@@ -244,10 +244,10 @@ export function buildWebInsights(opts: {
     gaps.push("GA4 Explore not uploaded — converting landings and Paid Search / Paid Social sessions are a gap.");
   }
   if (!pages.length) {
-    gaps.push("GSC Pages.csv not uploaded — high-impression / low-CTR URLs are a gap.");
+    gaps.push("GSC pages missing from gsc_page_daily — high-impression / low-CTR URLs are a gap.");
   }
   if (!queryRows.length) {
-    gaps.push("GSC Queries.csv not uploaded — money-term ranks are a gap.");
+    gaps.push("GSC queries missing from gsc_query_daily — money-term ranks are a gap.");
   }
   if (!campaigns.length) {
     gaps.push("Google/Meta campaign days not uploaded — ad spend for the channel gap is a gap.");
