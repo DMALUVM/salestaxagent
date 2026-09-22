@@ -1,13 +1,15 @@
-"""Phase 2 official-API sync — GA4 + Search Console + Google Ads live; Meta stub.
+"""Phase 2 official-API sync — GA4 + Search Console + Google Ads + Meta.
 
-GA4 Data API, Search Console API, and Google Ads API are one-shot REST pulls
-(refresh token, then runReport / searchAnalytics.query / googleAds:searchStream).
-No report wait-loop, no Ads poll, no sleep. Missing credentials → a clear
-"needs OAuth" result and zero rows. A metric the API omitted stays NULL.
-Zero is a real measurement. Never invent a session, click, or conversion.
+GA4 Data API, Search Console API, Google Ads API, and Meta Marketing API
+are one-shot REST pulls (refresh token or system-user token, then
+runReport / searchAnalytics.query / googleAds:searchStream /
+act_…/insights). No report wait-loop, no Ads poll, no sleep. Missing
+credentials → a clear "needs OAuth" result and zero rows. A metric the
+API omitted stays NULL. Zero is a real measurement. Never invent a
+session, click, or conversion.
 
 Google Ads is read-only usage despite the adwords scope — never mutate.
-Meta stays a scaffold stub.
+Meta is ads_read only — never ads_management.
 
 Secrets live in Vercel env (same pattern as AI_GATEWAY_API_KEY) and, when
 Dana wires Mini, the same names in Mini `.env` from 1Password. Do not
@@ -17,6 +19,8 @@ Nothing here writes nexus, Pulse sales, or contribution P&L.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import os
 from datetime import date, datetime, timedelta, timezone
@@ -124,6 +128,22 @@ GOOGLE_ADS_API_VERSION = "v25"
 GOOGLE_ADS_SEARCH_STREAM_URL = (
     "https://googleads.googleapis.com/{version}/customers/{customer_id}/googleAds:searchStream"
 )
+# Marketing API latest as of 2026-09 changelog (v25.0 introduced 2026-02-18).
+# GET /{act_…}/insights — one shot, never POST an async report_run.
+META_GRAPH_VERSION = "v25.0"
+META_INSIGHTS_URL = (
+    "https://graph.facebook.com/{version}/{account_id}/insights"
+)
+META_INSIGHTS_FIELDS = (
+    "campaign_id,campaign_name,spend,clicks,impressions,"
+    "actions,action_values,date_start,date_stop"
+)
+# First match only — purchase + omni_purchase would double-count.
+META_PURCHASE_ACTIONS = (
+    "purchase",
+    "omni_purchase",
+    "offsite_conversion.fb_pixel_purchase",
+)
 
 DEFAULT_LOOKBACK_DAYS = 7
 MAX_LOOKBACK_DAYS = 90
@@ -173,7 +193,8 @@ def needs_oauth_message(connector: str, missing: Iterable[str]) -> str:
         f"Set them on Vercel → project dashboard → Settings → "
         f"Environment Variables (same page as AI_GATEWAY_API_KEY). "
         f"Mini `.env` needs the same GOOGLE_* names for ga4-sync / "
-        f"gsc-sync / google-ads-sync to pull. Never chat-paste. "
+        f"gsc-sync / google-ads-sync, and META_* for meta-ads-sync, to pull. "
+        f"Never chat-paste. "
         f"See docs/oauth-phase2.md. "
         f"Wrote 0 rows. Never invent metrics."
     )
@@ -256,6 +277,12 @@ def _http_post(url: str, *, headers: dict | None = None, data: Any = None,
                json: Any = None, timeout: float = HTTP_TIMEOUT) -> httpx.Response:
     """Single official-API POST. No retry sleep, no wait-loop."""
     return httpx.post(url, headers=headers, data=data, json=json, timeout=timeout)
+
+
+def _http_get(url: str, *, headers: dict | None = None, params: dict | None = None,
+              timeout: float = HTTP_TIMEOUT) -> httpx.Response:
+    """Single official-API GET. No retry sleep, no wait-loop."""
+    return httpx.get(url, headers=headers, params=params, timeout=timeout)
 
 
 def _google_error(resp: httpx.Response) -> str:
@@ -1370,5 +1397,274 @@ def google_ads_sync(*, dry_run: bool = False, environ: dict | None = None,
     return out
 
 
-def meta_ads_sync(*, dry_run: bool = False, environ: dict | None = None) -> dict:
-    return sync_stub("meta_ads", dry_run=dry_run, environ=environ)
+def _meta_account_id(raw: str) -> str:
+    """Normalize to act_<digits>. Accepts act_123, act=123 (Ads Manager URL), or 123."""
+    s = str(raw or "").strip()
+    if s.startswith("act="):
+        s = s[4:]
+    elif s.startswith("act_"):
+        s = s[4:]
+    s = s.replace("-", "").replace(" ", "")
+    return f"act_{s}" if s.isdigit() else ""
+
+
+def _appsecret_proof(token: str, app_secret: str) -> str:
+    """HMAC-SHA256(access_token, app_secret). Never log token or secret."""
+    return hmac.new(
+        app_secret.encode("utf-8"),
+        token.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _date_chunks(start: date, end: date, size: int) -> list[tuple[date, date]]:
+    """Inclusive [start, end] slices of at most `size` days."""
+    if size < 1:
+        raise ValueError("chunk size must be >= 1")
+    out: list[tuple[date, date]] = []
+    cur = start
+    while cur <= end:
+        chunk_end = min(cur + timedelta(days=size - 1), end)
+        out.append((cur, chunk_end))
+        cur = chunk_end + timedelta(days=1)
+    return out
+
+
+def _meta_action_value(actions: Any, types: tuple[str, ...]) -> float | None:
+    """First matching action_type value. Never sum types (double-count). Never invent."""
+    if not isinstance(actions, list):
+        return None
+    by_type: dict[str, float | None] = {}
+    for item in actions:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("action_type") or "").strip()
+        if not name or "value" not in item:
+            continue
+        by_type[name] = _api_float(item.get("value"))
+    for name in types:
+        if name in by_type:
+            return by_type[name]
+    return None
+
+
+def meta_ads_insights(
+    token: str,
+    account_id: str,
+    start: date,
+    end: date,
+    *,
+    app_secret: str = "",
+) -> dict:
+    """Ad-account campaign insights. GET pages only — no report_run poll."""
+    url = META_INSIGHTS_URL.format(
+        version=META_GRAPH_VERSION, account_id=account_id,
+    )
+    params: dict[str, Any] | None = {
+        "fields": META_INSIGHTS_FIELDS,
+        "level": "campaign",
+        "time_increment": 1,
+        "time_range": (
+            f'{{"since":"{start.isoformat()}","until":"{end.isoformat()}"}}'
+        ),
+        "limit": 500,
+        "access_token": token,
+    }
+    if app_secret:
+        params["appsecret_proof"] = _appsecret_proof(token, app_secret)
+
+    rows: list[dict] = []
+    next_url = url
+    next_params = params
+    for _page in range(MAX_PAGES):
+        try:
+            resp = _http_get(next_url, params=next_params)
+        except httpx.HTTPError as e:
+            return {"error": f"Meta insights failed: {e}"[:400], "rows": []}
+        if resp.status_code >= 400:
+            return {"error": _google_error(resp), "rows": []}
+        try:
+            data = resp.json()
+        except Exception:
+            return {"error": "Meta insights response was not JSON", "rows": []}
+        if not isinstance(data, dict):
+            return {"error": "Meta insights response was not an object", "rows": []}
+        if data.get("error"):
+            return {"error": _google_error(resp), "rows": []}
+        # Async jobs are a wait-loop. Fail closed — never poll report_run_id.
+        if data.get("report_run_id") and not (data.get("data") or []):
+            return {
+                "error": (
+                    "Insights returned an async report_run_id. "
+                    "No wait-loop. Wrote 0 rows. Never invent metrics."
+                ),
+                "rows": [],
+            }
+        batch = data.get("data") or []
+        if not isinstance(batch, list):
+            return {"error": "Meta insights data was not a list", "rows": []}
+        rows.extend(r for r in batch if isinstance(r, dict))
+        paging = data.get("paging")
+        nxt = ""
+        if isinstance(paging, dict):
+            nxt = str(paging.get("next") or "").strip()
+        if not nxt:
+            break
+        next_url = nxt
+        next_params = None
+    return {"rows": rows}
+
+
+def pull_meta_ads_rows(
+    token: str,
+    account_id: str,
+    start: date,
+    end: date,
+    fetched_at: str,
+    *,
+    app_secret: str = "",
+) -> dict:
+    """Campaign × day grain. metric_date is date_start — never substituted."""
+    from src.rules import ADS_MAX_CHUNK_DAYS
+
+    errors: list[str] = []
+    out: dict[tuple[str, str], dict] = {}
+    for chunk_start, chunk_end in _date_chunks(start, end, ADS_MAX_CHUNK_DAYS):
+        result = meta_ads_insights(
+            token, account_id, chunk_start, chunk_end, app_secret=app_secret,
+        )
+        if result.get("error"):
+            errors.append(result["error"])
+            continue
+        for raw in result.get("rows") or []:
+            day = _ga4_date(raw.get("date_start") or raw.get("date_stop"))
+            if not day or not _in_window(day, start, end):
+                continue
+            cid = raw.get("campaign_id")
+            if cid is None or cid == "":
+                continue
+            cid = str(cid).strip()
+            if not cid:
+                continue
+            row: dict[str, Any] = {
+                "metric_date": day,
+                "campaign_id": cid,
+                "source": "meta_marketing_api",
+                "fetched_at": fetched_at,
+            }
+            if "campaign_name" in raw and raw.get("campaign_name") is not None:
+                row["campaign_name"] = str(raw.get("campaign_name"))
+            if "spend" in raw:
+                spend = _api_float(raw.get("spend"))
+                row["spend"] = None if spend is None else round(spend, 2)
+            if "clicks" in raw:
+                row["clicks"] = _api_int(raw.get("clicks"))
+            if "impressions" in raw:
+                row["impressions"] = _api_int(raw.get("impressions"))
+            if "actions" in raw:
+                row["conversions"] = _meta_action_value(
+                    raw.get("actions"), META_PURCHASE_ACTIONS,
+                )
+            if "action_values" in raw:
+                val = _meta_action_value(
+                    raw.get("action_values"), META_PURCHASE_ACTIONS,
+                )
+                row["conversion_value"] = None if val is None else round(val, 2)
+            out[(day, cid)] = row
+    return {"rows": list(out.values()), "errors": errors}
+
+
+def meta_ads_sync(*, dry_run: bool = False, environ: dict | None = None,
+                  as_of: str | date | None = None,
+                  days: int = DEFAULT_LOOKBACK_DAYS,
+                  now: datetime | None = None) -> dict:
+    """Pull Meta Marketing API → upsert meta_ads_daily. Official API only.
+
+    ads_read insights GET. Never ads_management. Never mutate campaigns.
+    """
+    missing = missing_oauth_env("meta_ads", environ)
+    out = _blank_result("meta_ads", dry_run=dry_run, missing=missing)
+    if missing:
+        out["error"] = needs_oauth_message("meta_ads", missing)
+        out["message"] = out["error"]
+        return out
+
+    window = _resolve_window(days, as_of, now)
+    if isinstance(window, dict):
+        out["error"] = window["error"]
+        out["message"] = window["error"]
+        return out
+    start, end = window
+    out["start_date"] = start.isoformat()
+    out["end_date"] = end.isoformat()
+    out["metric_date"] = end.isoformat()
+
+    account_id = _meta_account_id(_env_get(environ, "META_ADS_ACCOUNT_ID"))
+    if not account_id:
+        out["error"] = (
+            "META_ADS_ACCOUNT_ID must be act_<digits> "
+            "(Ads Manager URL act=123 → act_123). "
+            "Wrote 0 rows. Never invent metrics."
+        )
+        out["message"] = out["error"]
+        return out
+    token = _env_get(environ, "META_ADS_ACCESS_TOKEN")
+    app_secret = _env_get(environ, "META_APP_SECRET")
+    out["account_id"] = account_id
+
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    pulled = pull_meta_ads_rows(
+        token, account_id, start, end, fetched_at, app_secret=app_secret,
+    )
+    rows = pulled.get("rows") or []
+    errors = list(pulled.get("errors") or [])
+    out["errors"] = errors
+    out["fetched"] = {"campaigns": len(rows)}
+
+    if dry_run:
+        n = len(rows)
+        out["rows"] = n
+        out["ok"] = not errors or n > 0
+        out["message"] = (
+            f"Meta Marketing API dry-run {start.isoformat()}…{end.isoformat()} "
+            f"{account_id}/insights → {n} meta_ads_daily. No upsert. "
+            f"ads_read only. Never invent metrics."
+        )
+        if errors and n == 0:
+            out["error"] = errors[0]
+            out["ok"] = False
+        return out
+
+    written = 0
+    try:
+        from src.db import upsert_rows
+    except Exception as e:
+        out["error"] = f"Supabase client unavailable: {e}"[:400]
+        out["message"] = out["error"]
+        return out
+
+    try:
+        written += _upsert(
+            "meta_ads_daily", rows, "metric_date,campaign_id", upsert_rows,
+        )
+    except Exception as e:
+        errors.append(f"meta_ads_daily: {e}"[:240])
+
+    n = len(rows)
+    out["rows"] = n
+    out["upserted"] = written
+    out["errors"] = errors
+    out["ok"] = n > 0 or not errors
+    if errors and n == 0:
+        out["error"] = errors[0]
+        out["message"] = out["error"]
+        return out
+    out["message"] = (
+        f"Meta Marketing API {start.isoformat()}…{end.isoformat()} "
+        f"upserted {n} meta_ads_daily. ads_read only. Never invent metrics."
+    )
+    if errors:
+        out["error"] = errors[0]
+        out["ok"] = True
+        out["partial"] = True
+    return out

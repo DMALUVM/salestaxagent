@@ -171,7 +171,7 @@ function asQty(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Locked-day Google Ads campaign facts. Null when that day has no rows. */
+/** Locked-day Google / Meta Ads campaign facts. Null when that day has no rows. */
 export function adsCampaigns(
   rows: Array<Record<string, unknown>>,
   date: string,
@@ -262,7 +262,7 @@ export function phase2FromLockedDay(
   return {
     landing_drops: topLandingDrops(ga4, date),
     seo: seoSection(gscQueries, gscPages, date, gscDims),
-    ads: adsCampaigns(googleAds, date),
+    ads: adsCampaigns([...googleAds, ...metaAds], date),
     connectors: {
       ga4: hasDate(ga4, date),
       gsc: hasDate(gscQueries, date) || hasDate(gscPages, date) || hasDate(gscDims, date),

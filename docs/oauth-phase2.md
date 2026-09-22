@@ -1,6 +1,6 @@
 # Phase 2 — Dave click checklists + Iris pipeline
 
-Hand this to Dave. One Google OAuth dance covers GA4 + Google Ads + Search Console. Meta is a separate Business app. Dave pastes secrets **only** on Vercel project `dashboard`. Dana mirrors the same `GOOGLE_*` names into Mini `.env` from 1Password so `ga4-sync` / `gsc-sync` / `google-ads-sync` can run. Never chat-paste keys.
+Hand this to Dave. One Google OAuth dance covers GA4 + Google Ads + Search Console. Meta is a separate Business app. Dave pastes secrets **only** on Vercel project `dashboard`. Dana mirrors the same `GOOGLE_*` / `META_*` names into Mini `.env` from 1Password so `ga4-sync` / `gsc-sync` / `google-ads-sync` / `meta-ads-sync` can run. Never chat-paste keys.
 
 Production site: `https://www.ecommdashboard.com`
 Vercel env page: `https://vercel.com/dave-maloneys-projects/dashboard/settings/environment-variables`
@@ -10,7 +10,7 @@ Vercel env page: `https://vercel.com/dave-maloneys-projects/dashboard/settings/e
 ## Daily pipeline (Iris) — one path, Jev is not an orphan
 
 1. **Mini** `python -m src.main shopify-funnel-sync` writes `shopify_funnel_*` + abandons (already scheduled 07:15 ET).
-2. **Mini** `ga4-sync` (07:20 ET), `gsc-sync` (07:25 ET), and `google-ads-sync` (07:30 ET) pull the official GA4 Data API / Search Console API / Google Ads API for the prior `America/New_York` day (7d lookback). Scheduled only when Mini `.env` has the same `GOOGLE_*` names as Vercel. `metric_date` is the API day — never an older substitute. GSC final data lags ~2 days → `phase2.seo` stays null until that locked day exists. Do not add poll agents. Meta stays a stub.
+2. **Mini** `ga4-sync` (07:20 ET), `gsc-sync` (07:25 ET), `google-ads-sync` (07:30 ET), and optional `meta-ads-sync` (07:35 ET) pull the official GA4 Data API / Search Console API / Google Ads API / Meta Marketing API for the prior `America/New_York` day (7d lookback). Scheduled only when Mini `.env` has the same `GOOGLE_*` / `META_*` names as Vercel. `metric_date` is the API day — never an older substitute. GSC final data lags ~2 days → `phase2.seo` stays null until that locked day exists. Do not add poll agents. Meta stays unscheduled until `META_*` is present.
 3. **Vercel** `GET`/`POST /api/shopify-funnel/jev-triage` (landed #153, sibling `bc-74a886b6`) evaluates leaks with `AI_GATEWAY_API_KEY` already on Vercel and writes `shopify_funnel_status.last_stats.jev`. Fail closed → `hold_for_review` / empty pursue. Does **not** call Mini.
 4. **Iris** `GET /api/conversion-digest` (landed #154/#155) reads the prior-day `America/New_York` Shopify funnel snapshot and runs landed Jev. Missing day → GAP. Never substitutes an older day. `improvements` are ranked as_of actions (Shopify leak + GA4/GSC/Ads when material). `phase2.landing_drops` / `seo` / `ads` stay **null** until official-API rows exist for that day. OAuth is **not** required to read the Iris fields.
 
@@ -261,7 +261,18 @@ curl -s -u "$DASHBOARD_USER:$DASHBOARD_PASSWORD" \
 
 Success: `connectors.meta_ads.configured` is `true`.
 
-**You’re done when:** all four `META_*` names are on Vercel and the system user can see the Tallowbourn ad account.
+Mini `.env` also needs the same four names (Dana mirrors from 1Password — never chat-paste):
+
+```
+META_APP_ID
+META_APP_SECRET
+META_ADS_ACCESS_TOKEN
+META_ADS_ACCOUNT_ID=act_1234567890
+```
+
+Then `python -m src.main meta-ads-sync` GETs `graph.facebook.com/v25.0/{act_…}/insights` (`level=campaign`, `time_increment=1`) and upserts `meta_ads_daily`. Missing Mini env → `needs OAuth` / `Wrote 0 rows` (fail closed). `--dry-run` documents the path and does not upsert. `ads_read` only — never `ads_management`. Mini schedules `meta_ads_sync` at 07:35 ET only after these names are present.
+
+**You’re done when:** all four `META_*` names are on Vercel, Mini `.env` has the same names, and a pull upserts the locked day (or 0 rows if the API returned none).
 
 **Fail modes:** granted `ads_management`; token from Graph API Explorer (expires ~60 days) instead of a system user; copied the App ID into `META_ADS_ACCOUNT_ID`; assigned the system user to the wrong ad account; app in a different Business than the ad account.
 

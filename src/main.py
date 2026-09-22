@@ -2766,10 +2766,17 @@ def _phase2_sync_cmd(name, dry_run):
 
 
 def _phase2_live_cmd(name, dry_run, as_of, days):
-    """GA4 / GSC / Google Ads official-API pull. One shot — no wait-loop."""
-    from src.phase2_connectors import ga4_sync, google_ads_sync, gsc_sync
+    """GA4 / GSC / Google Ads / Meta official-API pull. One shot — no wait-loop."""
+    from src.phase2_connectors import (
+        ga4_sync, google_ads_sync, gsc_sync, meta_ads_sync,
+    )
 
-    fn = {"ga4": ga4_sync, "gsc": gsc_sync, "google_ads": google_ads_sync}[name]
+    fn = {
+        "ga4": ga4_sync,
+        "gsc": gsc_sync,
+        "google_ads": google_ads_sync,
+        "meta_ads": meta_ads_sync,
+    }[name]
     r = fn(dry_run=dry_run, as_of=as_of, days=days)
     click.echo(r.get("message") or r.get("error"))
     if r.get("errors"):
@@ -2819,16 +2826,23 @@ def google_ads_sync_cmd(as_of, days, dry_run):
 
 
 @cli.command("meta-ads-sync")
+@click.option("--date", "as_of", default=None,
+              help="End date YYYY-MM-DD (default: prior America/New_York day)")
+@click.option("--days", default=7, show_default=True, type=int,
+              help="Lookback ending at --date (1–90). Covers late-arriving days.")
 @click.option("--dry-run", is_flag=True,
-              help="Check credentials only; never write rows")
-def meta_ads_sync_cmd(dry_run):
-    """Meta Marketing API daily spend / clicks / conversions (scaffold).
+              help="Pull official API; never write rows")
+def meta_ads_sync_cmd(as_of, days, dry_run):
+    """Meta Marketing API daily spend / clicks / conversions.
 
-    Official Marketing API only. ads_read — no ads_management.
-    Missing env → needs OAuth, 0 rows. Never invent metrics. One shot.
+    Official Marketing API insights GET only. ads_read — no ads_management.
+    Missing Vercel/Mini env → needs OAuth, 0 rows. Never invent metrics.
+    One shot, no report wait-loop. metric_date is the API day.
+    Mini `.env` needs META_APP_ID / META_APP_SECRET /
+    META_ADS_ACCESS_TOKEN / META_ADS_ACCOUNT_ID (act_…).
     See docs/oauth-phase2.md.
     """
-    _phase2_sync_cmd("meta_ads", dry_run)
+    _phase2_live_cmd("meta_ads", dry_run, as_of, days)
 
 
 @cli.command("gsc-sync")
@@ -5745,7 +5759,7 @@ def run():
 
         # Phase 2 official APIs — only when Mini `.env` has the same names
         # as Vercel. Missing env stays unscheduled so mornings do not fail.
-        # Meta stays a stub (no poll agents).
+        # Meta is optional: schedule only after META_* is present.
         from src.phase2_connectors import connector_env_ready
         if connector_env_ready("ga4"):
             scheduler.add_job(
@@ -5789,6 +5803,20 @@ def run():
             click.echo("[Scheduler] Google Ads API daily at 07:30 "
                        "(prior America/New_York day + 7d lookback; "
                        "searchStream one shot; never mutate)")
+        if connector_env_ready("meta_ads"):
+            scheduler.add_job(
+                _run_meta_ads_sync,
+                "cron",
+                hour=7,
+                minute=35,
+                id="meta_ads_sync",
+                misfire_grace_time=3600,
+                coalesce=True,
+                max_instances=1,
+            )
+            click.echo("[Scheduler] Meta Marketing API daily at 07:35 "
+                       "(prior America/New_York day + 7d lookback; "
+                       "insights GET one shot; ads_read only)")
 
         # Safe ff-only pull of origin/main. One job inside this scheduler —
         # not a second launchd agent — so it cannot race the running process.
@@ -6079,6 +6107,35 @@ def _run_google_ads_sync():
     except Exception as e:
         job_finish(run_id, "fail", str(e)[:500])
         print(f"[Google Ads] FAILED: {e}")
+
+
+def _run_meta_ads_sync():
+    """Daily Meta Marketing API. Prior NY day + 7d lookback. One shot, ads_read."""
+    from src.db import job_start, job_finish
+    from src.phase2_connectors import meta_ads_sync
+
+    run_id = job_start("meta_ads_sync")
+    try:
+        r = meta_ads_sync()
+        if r.get("error") and not r.get("ok"):
+            job_finish(run_id, "fail", r["error"][:500], {
+                "rows": r.get("rows"),
+                "start_date": r.get("start_date"),
+                "end_date": r.get("end_date"),
+            })
+            print(f"[Meta Ads] FAILED: {r['error'][:200]}")
+            return
+        status = "partial" if r.get("partial") or r.get("errors") else "success"
+        msg = r.get("message") or "ok"
+        print(f"[Meta Ads] {msg}")
+        job_finish(run_id, status, msg, {
+            "rows": r.get("rows"),
+            "start_date": r.get("start_date"),
+            "end_date": r.get("end_date"),
+        })
+    except Exception as e:
+        job_finish(run_id, "fail", str(e)[:500])
+        print(f"[Meta Ads] FAILED: {e}")
 
 
 def _run_shopify_funnel_sync():

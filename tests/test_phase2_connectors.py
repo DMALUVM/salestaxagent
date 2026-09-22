@@ -16,6 +16,7 @@ from src.phase2_connectors import (
     GSC_APPEARANCE_KIND,
     GSC_PDP_INSPECT_ALLOWLIST,
     GSC_SITE_DIMS,
+    META_GRAPH_VERSION,
     NEEDS_OAUTH,
     ga4_sync,
     google_ads_campaign_query,
@@ -56,6 +57,24 @@ def _google_env(**extra):
 
 def _ads_stream(results):
     return [{"results": results}]
+
+
+def _meta_env(**extra):
+    env = {
+        "META_APP_ID": "app123",
+        "META_APP_SECRET": "secret",
+        "META_ADS_ACCESS_TOKEN": "token",
+        "META_ADS_ACCOUNT_ID": "act_156983680801147",
+    }
+    env.update(extra)
+    return env
+
+
+def _meta_insights(rows, paging=None):
+    body = {"data": rows}
+    if paging:
+        body["paging"] = paging
+    return body
 
 
 class _Resp:
@@ -232,6 +251,27 @@ def _route_google(url, json=None, **_kwargs):
     raise AssertionError(f"unexpected URL {url}")
 
 
+def _route_meta(url, params=None, **_kwargs):
+    if "graph.facebook.com" in url and "/insights" in url:
+        return _Resp(_meta_insights([{
+            "campaign_id": "1203301",
+            "campaign_name": "UGC | Tallow Balm | CBO",
+            "date_start": "2026-09-19",
+            "date_stop": "2026-09-19",
+            "spend": "12.50",
+            "clicks": "8",
+            "impressions": "200",
+            "actions": [
+                {"action_type": "link_click", "value": "8"},
+                {"action_type": "purchase", "value": "1"},
+            ],
+            "action_values": [
+                {"action_type": "purchase", "value": "28.00"},
+            ],
+        }]))
+    raise AssertionError(f"unexpected URL {url}")
+
+
 def test_missing_oauth_lists_required_vercel_names(monkeypatch):
     _clear(monkeypatch)
     missing = missing_oauth_env("ga4")
@@ -304,22 +344,11 @@ def test_each_connector_needs_oauth_and_writes_zero(monkeypatch):
         assert "docs/oauth-phase2.md" in r["error"]
 
 
-def test_meta_credentials_present_still_write_zero_rows():
-    env = {
-        "META_APP_ID": "app",
-        "META_APP_SECRET": "secret",
-        "META_ADS_ACCESS_TOKEN": "token",
-        "META_ADS_ACCOUNT_ID": "act_1",
-    }
-    r = meta_ads_sync(environ=env)
-    assert r["needs_oauth"] is False
-    assert r["rows"] == 0
-    assert r["ok"] is False
-    assert r["scaffold"] is True
-    assert "Never invent metrics" in r["message"]
-    stub = sync_stub("meta_ads", environ=env)
+def test_sync_stub_still_writes_zero_for_leftover():
+    stub = sync_stub("meta_ads", environ=_meta_env())
     assert stub["scaffold"] is True
     assert stub["rows"] == 0
+    assert stub["ok"] is False
 
 
 def test_prior_ny_day_is_america_new_york():
@@ -867,6 +896,234 @@ def test_google_ads_query_is_select_only():
     assert "SET " not in q
 
 
+def test_meta_ads_success_mocked_http_upserts_locked_day(monkeypatch):
+    import hashlib
+    import hmac
+
+    upserts: list[tuple] = []
+    seen: list[tuple] = []
+
+    def capture(url, params=None, **kwargs):
+        seen.append((url, dict(params or {})))
+        return _route_meta(url, params=params, **kwargs)
+
+    def fake_upsert(table, rows, on_conflict=None):
+        upserts.append((table, list(rows), on_conflict))
+        return len(rows)
+
+    monkeypatch.setattr("src.phase2_connectors._http_get", capture)
+    monkeypatch.setattr("src.db.upsert_rows", fake_upsert)
+
+    r = meta_ads_sync(environ=_meta_env(), as_of="2026-09-19", days=1)
+    assert r["needs_oauth"] is False
+    assert r["ok"] is True
+    assert r["rows"] == 1
+    assert r["start_date"] == r["end_date"] == "2026-09-19"
+    assert r.get("scaffold") is not True
+    assert r["account_id"] == "act_156983680801147"
+    assert upserts[0][0] == "meta_ads_daily"
+    assert upserts[0][2] == "metric_date,campaign_id"
+    row = upserts[0][1][0]
+    assert row["metric_date"] == "2026-09-19"
+    assert row["campaign_id"] == "1203301"
+    assert row["campaign_name"] == "UGC | Tallow Balm | CBO"
+    assert row["spend"] == 12.50
+    assert row["clicks"] == 8
+    assert row["impressions"] == 200
+    assert row["conversions"] == 1.0
+    assert row["conversion_value"] == 28.0
+    assert row["source"] == "meta_marketing_api"
+
+    url, params = seen[0]
+    assert f"graph.facebook.com/{META_GRAPH_VERSION}/act_156983680801147/insights" in url
+    assert params["level"] == "campaign"
+    assert params["time_increment"] == 1
+    assert params["access_token"] == "token"
+    expected_proof = hmac.new(b"secret", b"token", hashlib.sha256).hexdigest()
+    assert params["appsecret_proof"] == expected_proof
+    assert "ads_management" not in url
+    assert "mutate" not in url
+
+
+def test_meta_ads_omitted_metric_stays_null(monkeypatch):
+    def partial(url, params=None, **kwargs):
+        return _Resp(_meta_insights([{
+            "campaign_id": "222",
+            "campaign_name": "Prospect",
+            "date_start": "2026-09-19",
+            "clicks": "3",
+        }]))
+
+    upserts = []
+    monkeypatch.setattr("src.phase2_connectors._http_get", partial)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda t, rows, on_conflict=None: upserts.append((t, rows)) or len(rows),
+    )
+    meta_ads_sync(environ=_meta_env(), as_of="2026-09-19", days=1)
+    rows = next(r for t, r in upserts if t == "meta_ads_daily")
+    assert rows[0]["clicks"] == 3
+    assert "spend" not in rows[0]
+    assert "impressions" not in rows[0]
+    assert "conversions" not in rows[0]
+    assert "conversion_value" not in rows[0]
+
+
+def test_meta_ads_empty_day_is_success_zero_rows(monkeypatch):
+    def empty(url, params=None, **kwargs):
+        return _Resp({"data": []})
+
+    called = []
+    monkeypatch.setattr("src.phase2_connectors._http_get", empty)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda *a, **k: called.append(1) or 0,
+    )
+    r = meta_ads_sync(environ=_meta_env(), as_of="2026-09-19", days=1)
+    assert r["ok"] is True
+    assert r["rows"] == 0
+    assert called == []
+
+
+def test_meta_ads_dry_run_documents_path_without_upsert(monkeypatch):
+    monkeypatch.setattr("src.phase2_connectors._http_get", _route_meta)
+
+    def boom(*_a, **_k):
+        raise AssertionError("dry-run must not upsert")
+
+    monkeypatch.setattr("src.db.upsert_rows", boom)
+    r = meta_ads_sync(environ=_meta_env(), as_of="2026-09-19", days=1,
+                      dry_run=True)
+    assert r["ok"] is True
+    assert r["dry_run"] is True
+    assert r["rows"] == 1
+    assert "No upsert" in r["message"]
+    assert "insights" in r["message"]
+    assert "ads_read only" in r["message"]
+
+
+def test_meta_ads_skips_dates_outside_requested_window(monkeypatch):
+    def weird(url, params=None, **kwargs):
+        return _Resp(_meta_insights([
+            {
+                "campaign_id": "1",
+                "campaign_name": "old",
+                "date_start": "2026-09-10",
+                "spend": "9.00",
+                "clicks": "9",
+            },
+            {
+                "campaign_id": "2",
+                "campaign_name": "locked",
+                "date_start": "2026-09-19",
+                "spend": "1.00",
+                "clicks": "1",
+            },
+        ]))
+
+    upserts = []
+    monkeypatch.setattr("src.phase2_connectors._http_get", weird)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda t, rows, on_conflict=None: upserts.append(rows) or len(rows),
+    )
+    meta_ads_sync(environ=_meta_env(), as_of="2026-09-19", days=1)
+    rows = upserts[0]
+    assert all(row["metric_date"] == "2026-09-19" for row in rows)
+    assert not any(row["metric_date"] == "2026-09-10" for row in rows)
+    assert rows[0]["campaign_name"] == "locked"
+
+
+def test_meta_ads_rejects_non_digit_account_id(monkeypatch):
+    monkeypatch.setattr(
+        "src.phase2_connectors._http_get",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not call Graph")),
+    )
+    r = meta_ads_sync(
+        environ=_meta_env(META_ADS_ACCOUNT_ID="not-an-id"),
+        as_of="2026-09-19", days=1,
+    )
+    assert r["ok"] is False
+    assert r["rows"] == 0
+    assert "act_" in r["error"]
+
+
+def test_meta_ads_normalizes_account_id_from_url_or_digits(monkeypatch):
+    seen = []
+
+    def capture(url, params=None, **kwargs):
+        seen.append(url)
+        return _route_meta(url, params=params, **kwargs)
+
+    monkeypatch.setattr("src.phase2_connectors._http_get", capture)
+    monkeypatch.setattr("src.db.upsert_rows", lambda *a, **k: 1)
+    for raw in ("156983680801147", "act=156983680801147", "act_156983680801147"):
+        seen.clear()
+        r = meta_ads_sync(
+            environ=_meta_env(META_ADS_ACCOUNT_ID=raw),
+            as_of="2026-09-19", days=1,
+        )
+        assert r["ok"] is True
+        assert r["account_id"] == "act_156983680801147"
+        assert "/act_156983680801147/insights" in seen[0]
+
+
+def test_meta_ads_api_error_fails_closed_zero_rows(monkeypatch):
+    def boom(url, params=None, **kwargs):
+        return _Resp(
+            {"error": {"message": "Invalid OAuth access token",
+                       "type": "OAuthException", "code": 190}},
+            status=400,
+            text="denied",
+        )
+
+    called = []
+    monkeypatch.setattr("src.phase2_connectors._http_get", boom)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda *a, **k: called.append(1) or 0,
+    )
+    r = meta_ads_sync(environ=_meta_env(), as_of="2026-09-19", days=1)
+    assert r["ok"] is False
+    assert r["rows"] == 0
+    assert "190" in r["error"] or "OAuth" in r["error"] or "400" in r["error"]
+    assert called == []
+
+
+def test_meta_ads_async_report_run_fails_closed(monkeypatch):
+    def async_job(url, params=None, **kwargs):
+        return _Resp({"report_run_id": "999", "async_status": "Job Running"})
+
+    called = []
+    monkeypatch.setattr("src.phase2_connectors._http_get", async_job)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda *a, **k: called.append(1) or 0,
+    )
+    r = meta_ads_sync(environ=_meta_env(), as_of="2026-09-19", days=1)
+    assert r["ok"] is False
+    assert r["rows"] == 0
+    assert "report_run_id" in r["error"]
+    assert "wait-loop" in r["error"]
+    assert called == []
+
+
+def test_meta_ads_chunks_lookback_over_30_days(monkeypatch):
+    ranges = []
+
+    def capture(url, params=None, **kwargs):
+        ranges.append((params or {}).get("time_range"))
+        return _Resp({"data": []})
+
+    monkeypatch.setattr("src.phase2_connectors._http_get", capture)
+    monkeypatch.setattr("src.db.upsert_rows", lambda *a, **k: 0)
+    r = meta_ads_sync(environ=_meta_env(), as_of="2026-09-19", days=45)
+    assert r["ok"] is True
+    assert len(ranges) == 2
+    assert ranges[0] == '{"since":"2026-08-06","until":"2026-09-04"}'
+    assert ranges[1] == '{"since":"2026-09-05","until":"2026-09-19"}'
+
+
 def test_cli_ga4_gsc_and_ads_success_mocked(monkeypatch):
     monkeypatch.setattr("src.phase2_connectors._http_post", _route_google)
     monkeypatch.setattr("src.db.upsert_rows", lambda *a, **k: 1)
@@ -887,6 +1144,20 @@ def test_cli_ga4_gsc_and_ads_success_mocked(monkeypatch):
     assert "Never mutate" in ads.output
 
 
+def test_cli_meta_ads_success_mocked(monkeypatch):
+    monkeypatch.setattr("src.phase2_connectors._http_get", _route_meta)
+    monkeypatch.setattr("src.db.upsert_rows", lambda *a, **k: 1)
+    for key, val in _meta_env().items():
+        monkeypatch.setenv(key, val)
+    from src.main import cli
+
+    runner = CliRunner()
+    meta = runner.invoke(cli, ["meta-ads-sync", "--date", "2026-09-19", "--days", "1"])
+    assert meta.exit_code == 0, meta.output
+    assert "meta_ads_daily" in meta.output
+    assert "ads_read only" in meta.output
+
+
 def test_cli_registered_and_read_only():
     src = Path("src/main.py").read_text()
     for cmd in ("ga4-sync", "google-ads-sync", "meta-ads-sync", "gsc-sync"):
@@ -897,16 +1168,17 @@ def test_cli_registered_and_read_only():
     sched = src[src.find("def run():"):]
     assert "BlockingScheduler" in sched
     assert "shopify_funnel_sync" in sched  # Phase 1 stays scheduled
-    # Live GA4/GSC/Ads only when Mini env is present. Meta stays unscheduled.
+    # Live GA4/GSC/Ads/Meta only when Mini env is present.
     assert "connector_env_ready" in sched
     assert "_run_ga4_sync" in sched
     assert "_run_gsc_sync" in sched
     assert "_run_google_ads_sync" in sched
+    assert "_run_meta_ads_sync" in sched
     assert "ga4_sync" in sched
     assert "gsc_sync" in sched
     assert "google_ads_sync" in sched
+    assert "meta_ads_sync" in sched
     assert "meta-ads-sync" not in sched
-    assert "_run_meta_ads" not in sched
 
 
 def test_gsc_sync_hard_fail_uses_job_fail_not_all_good():
@@ -944,6 +1216,10 @@ def test_live_connectors_have_no_wait_loop_or_mutate():
     assert "never mutate" in src.lower()
     assert "googleAds:mutate" not in src
     assert "GOOGLE_ADS" in src
+    assert "graph.facebook.com" in src
+    assert "/insights" in src
+    assert "ads_management" not in src.lower() or "never ads_management" in src.lower()
+    assert "report_run_id" in src
 
 
 def test_scopes_are_read_minima():
@@ -1007,6 +1283,8 @@ def test_docs_and_snapshot_list_the_tables():
     assert "bc-74a886b6" in docs
     assert "googleAds:searchStream" in docs
     assert "Never mutate" in docs or "never mutate" in docs
+    assert "/insights" in docs
+    assert "act_" in docs
     assert "Do not add a second Jev job on Mini" in docs
     assert "ecommdashboard.com" in docs
     assert "Mini `.env`" in docs

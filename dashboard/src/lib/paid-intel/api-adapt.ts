@@ -5,8 +5,7 @@
  * Prefer google_ads_daily / ga4_landing_daily / gsc_*_daily / meta_ads_daily
  * when they have rows. Fall back to the CSV tables (paid_campaign_daily,
  * paid_ga_daily, paid_search_query_daily) when the API table is empty —
- * Meta Marketing API is still pending, so Meta stays on CSV until
- * meta_ads_daily is populated.
+ * Meta stays on CSV until Mini `meta-ads-sync` populates meta_ads_daily.
  *
  * Never invent spend, conversions, revenue, or channel groups. API GA4
  * has no session default channel group and no last-click revenue.
