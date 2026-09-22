@@ -87,9 +87,9 @@ See `dashboard/PAID_ADS.md`.
 Iris conversion digest. **Official APIs only** — not the CSV intel
 tables above. Dave sets these on Vercel the same way as
 `AI_GATEWAY_API_KEY`. Dana mirrors the same `GOOGLE_*` names into Mini
-`.env` from 1Password so `ga4-sync` / `gsc-sync` / `google-ads-sync`
-can pull. Never chat-paste keys. Meta stays a stub until those tokens
-exist (`docs/oauth-phase2.md`).
+`.env` from 1Password so `ga4-sync` / `gsc-sync` / `google-ads-sync` /
+`meta-ads-sync` can pull. Never chat-paste keys. Meta stays unscheduled
+until those tokens exist (`docs/oauth-phase2.md`).
 
 | Variable | Required to *read* digest | Used by |
 |---|---|---|
@@ -101,10 +101,10 @@ exist (`docs/oauth-phase2.md`).
 | `GOOGLE_ADS_CUSTOMER_ID` | no | Mini `google-ads-sync` (Tallowbourn client) |
 | `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | no | Mini `google-ads-sync` (MCC, optional) |
 | `GSC_SITE_URL` | no | Mini `gsc-sync` |
-| `META_APP_ID` | no | `meta-ads-sync` (scaffold) |
-| `META_APP_SECRET` | no | `meta-ads-sync` (scaffold) |
-| `META_ADS_ACCESS_TOKEN` | no | `meta-ads-sync` (scaffold) |
-| `META_ADS_ACCOUNT_ID` | no | `meta-ads-sync` (scaffold) |
+| `META_APP_ID` | no | Mini `meta-ads-sync` |
+| `META_APP_SECRET` | no | Mini `meta-ads-sync` (appsecret_proof) |
+| `META_ADS_ACCESS_TOKEN` | no | Mini `meta-ads-sync` |
+| `META_ADS_ACCOUNT_ID` | no | Mini `meta-ads-sync` (`act_…`) |
 
 Search Console API here is **performance + cheap dims** (`searchAnalytics.query` → `gsc_query_daily` / `gsc_page_daily` totals SoT, plus `gsc_query_device_daily` / `gsc_page_device_daily` / `gsc_dim_daily` for device, country, searchAppearance). URL Inspection writes latest verdicts for a tiny hardcoded PDP allowlist to `gsc_url_inspection` (fail closed; no Telegram). Merchant listings / structured-data / rich-result *issue lists* are **not** available via the Search Console API. Ellis owns GSC mail as the interim alert door. Do not add an issues poll.
 

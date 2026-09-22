@@ -21,6 +21,7 @@ describe("Phase 2 extras are null until OAuth rows exist", () => {
     assert.equal(e.connectors.ga4, false);
     assert.equal(e.connectors.gsc, false);
     assert.equal(e.connectors.google_ads, false);
+    assert.equal(e.connectors.meta_ads, false);
   });
 
   test("older GA4 / GSC days are not substituted", () => {
@@ -122,6 +123,24 @@ describe("Phase 2 extras are null until OAuth rows exist", () => {
     assert.equal(extras.connectors.google_ads, true);
   });
 
+  test("locked-day meta_ads_daily rows feed ads when present", () => {
+    const extras = phase2FromLockedDay("2026-09-19", {
+      metaAds: [{
+        metric_date: "2026-09-19", campaign_id: "120", campaign_name: "UGC Balm",
+        spend: 12, clicks: 8, conversions: 1,
+      }],
+      googleAds: [{
+        metric_date: "2026-09-18", campaign_id: "99", campaign_name: "Old Google",
+        spend: 40, clicks: 12, conversions: 0,
+      }],
+    });
+    assert.equal(extras.connectors.meta_ads, true);
+    assert.equal(extras.connectors.google_ads, false);
+    assert.equal(extras.ads?.length, 1);
+    assert.equal(extras.ads?.[0].campaign_name, "UGC Balm");
+    assert.equal(extras.ads?.[0].spend, 12);
+  });
+
   test("ads waste and GSC opportunities fail closed without inventing", () => {
     assert.deepEqual(adsWaste(null), []);
     assert.deepEqual(adsWaste([]), []);
@@ -163,5 +182,6 @@ describe("wiring — extras hang on the landed digest", () => {
     assert.doesNotMatch(lib, /ga4_landing_daily|gsc_query_daily/);
     assert.doesNotMatch(route, /paid_ga_daily|ryze/i);
     assert.match(route, /gsc_dim_daily/);
+    assert.match(route, /meta_ads_daily/);
   });
 });
