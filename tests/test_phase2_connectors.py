@@ -684,6 +684,22 @@ def test_cli_registered_and_read_only():
     assert "_run_meta_ads" not in sched
 
 
+def test_gsc_sync_hard_fail_uses_job_fail_not_all_good():
+    src = Path("src/main.py").read_text()
+    start = src.find("def _gsc_job_fail")
+    end = src.find("def _run_google_ads_sync")
+    block = src[start:end]
+    assert 'topic="job_fail"' in block
+    assert "_gsc_job_fail" in src[src.find("def _run_gsc_sync"):end]
+    assert "all-good" in block
+    docs = Path("docs/oauth-phase2.md").read_text()
+    env = Path("dashboard/ENV.md").read_text()
+    for text in (docs, env):
+        assert "issue lists" in text
+        assert "Ellis" in text
+        assert "URL Inspection" in text
+
+
 def test_live_connectors_have_no_wait_loop_or_mutate():
     src = Path("src/phase2_connectors.py").read_text()
     assert "time.sleep" not in src

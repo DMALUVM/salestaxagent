@@ -881,7 +881,13 @@ def ga4_sync(*, dry_run: bool = False, environ: dict | None = None,
 def gsc_sync(*, dry_run: bool = False, environ: dict | None = None,
              as_of: str | date | None = None, days: int = DEFAULT_LOOKBACK_DAYS,
              now: datetime | None = None) -> dict:
-    """Pull Search Console API → upsert gsc_*_daily. Official API only."""
+    """Pull Search Console API → upsert gsc_*_daily. Official API only.
+
+    Performance (`searchAnalytics.query`) only. Merchant / structured-data /
+    rich-result issue lists are not in this API — Ellis mail owns those.
+    TODO: URL Inspection for a tiny hardcoded PDP allowlist if it stays
+    one small read-only table. Do not invent an issues poll.
+    """
     missing = missing_oauth_env("gsc", environ)
     out = _blank_result("gsc", dry_run=dry_run, missing=missing)
     if missing:

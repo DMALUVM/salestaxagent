@@ -6004,6 +6004,18 @@ def _run_ga4_sync():
         print(f"[GA4] FAILED: {e}")
 
 
+def _gsc_job_fail(detail: str) -> None:
+    """Quiet Telegram on gsc_sync hard fail only — never an all-good ping."""
+    try:
+        from src.alerts.telegram import send_telegram
+        send_telegram(
+            f"⚠️ <b>gsc_sync failed</b>\n\n{detail[:600]}",
+            topic="job_fail",
+        )
+    except Exception as e:
+        print(f"[GSC] Telegram alert failed: {e}")
+
+
 def _run_gsc_sync():
     """Daily Search Console API. Prior NY day + 7d lookback. One shot."""
     from src.db import job_start, job_finish
@@ -6019,6 +6031,7 @@ def _run_gsc_sync():
                 "end_date": r.get("end_date"),
             })
             print(f"[GSC] FAILED: {r['error'][:200]}")
+            _gsc_job_fail(str(r["error"]))
             return
         status = "partial" if r.get("partial") or r.get("errors") else "success"
         msg = r.get("message") or "ok"
@@ -6031,6 +6044,7 @@ def _run_gsc_sync():
     except Exception as e:
         job_finish(run_id, "fail", str(e)[:500])
         print(f"[GSC] FAILED: {e}")
+        _gsc_job_fail(str(e))
 
 
 def _run_google_ads_sync():
