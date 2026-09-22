@@ -77,7 +77,7 @@ function PaidAdsCsvHowto({
             <p className="text-muted-foreground">
               Optional fallback — prefer Mini{" "}
               <code>./.venv/bin/python -m src.main meta-ads-sync</code>
-              {" "}into meta_ads_daily (07:35 ET when META_* is on Mini).
+              {" "}into meta_ads_daily when META_* is on Mini.
             </p>
             <p>
               Ads Manager reporting (act=156983680801147, business_id=1028304628604309):{" "}
@@ -121,8 +121,8 @@ function PaidAdsCsvHowto({
           </li>
         </ol>
         <p className="text-[13px] leading-snug">
-          Mini meta-ads-sync writes meta_ads_daily. On Dashboard, Upload is CSV fallback:
-          select ALL files at once (Google + Meta + Queries + Pages + Chart + Search Appearance + GA4;
+          Mini meta-ads-sync writes meta_ads_daily. Then on Dashboard: /paid-ads → Upload is CSV fallback.
+          Optional: select ALL files at once (Google + Meta + Queries + Pages + Chart + Search Appearance + GA4;
           parser IDs by header). Matching days overwrite; older days stay.
         </p>
       </DialogContent>
