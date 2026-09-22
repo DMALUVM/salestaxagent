@@ -5,7 +5,8 @@
  * Prefer google_ads_daily / ga4_landing_daily / gsc_*_daily / meta_ads_daily
  * when they have rows. Fall back to the CSV tables (paid_campaign_daily,
  * paid_ga_daily, paid_search_query_daily) when the API table is empty —
- * Meta stays on CSV until Mini `meta-ads-sync` populates meta_ads_daily.
+ * except Meta: the API table is SoT whenever it exists. Meta CSV is
+ * legacy emergency only.
  *
  * Never invent spend, conversions, revenue, or channel groups. API GA4
  * has no session default channel group and no last-click revenue.
@@ -16,7 +17,7 @@ import {
   audienceOf, campaignTypeOf, isBrandCampaign, productOf,
 } from "./classify";
 import type {
-  CampaignDaily, GaDaily, SearchQueryDaily, WarehouseOrigin,
+  CampaignDaily, GaDaily, MetaGrainRow, SearchQueryDaily, WarehouseOrigin,
 } from "./types";
 
 export interface ApiTableStats {
@@ -65,6 +66,11 @@ export function preferApiWhenPresent(api: ApiTableStats): WarehouseOrigin {
   return !api.missing && api.rows > 0 ? "api" : "csv";
 }
 
+/** Meta API table is SoT whenever it exists — even 0 rows. CSV is legacy only. */
+export function preferMetaApi(api: ApiTableStats): WarehouseOrigin {
+  return !api.missing ? "api" : "csv";
+}
+
 export function pickOriginStats(
   origin: WarehouseOrigin,
   api: ApiTableStats,
@@ -99,7 +105,68 @@ export function adaptGoogleAdsDaily(row: Record<string, unknown>): CampaignDaily
 }
 
 export function adaptMetaAdsDaily(row: Record<string, unknown>): CampaignDaily | null {
-  return adaptAdsApiRow(row, "meta");
+  const adapted = adaptAdsApiRow(row, "meta");
+  if (!adapted) return null;
+  if (row.frequency != null && row.frequency !== "") {
+    adapted.frequency = num(row.frequency);
+  }
+  return adapted;
+}
+
+/** Worst ad-set frequency that day, for the meta-freq card. Never invent. */
+export function applyAdsetFrequencyPeaks(
+  campaigns: CampaignDaily[],
+  adsets: Array<Record<string, unknown>>,
+): CampaignDaily[] {
+  const peak = new Map<string, number>();
+  for (const row of adsets) {
+    const date = isoDate(row.metric_date);
+    const name = String(row.campaign_name ?? "").trim();
+    if (!date || !name || row.frequency == null || row.frequency === "") continue;
+    const freq = num(row.frequency);
+    if (!(freq > 0)) continue;
+    const key = `${date}|${name}`;
+    peak.set(key, Math.max(peak.get(key) ?? 0, freq));
+  }
+  if (!peak.size) return campaigns;
+  return campaigns.map((c) => {
+    if (c.platform !== "meta") return c;
+    const next = peak.get(`${c.date}|${c.campaign_name}`);
+    return next == null ? c : { ...c, frequency_peak: next };
+  });
+}
+
+function optionalNum(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = num(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function adaptMetaGrain(
+  row: Record<string, unknown>,
+  grain: MetaGrainRow["grain"],
+  entityName: string,
+): MetaGrainRow | null {
+  const date = isoDate(row.metric_date);
+  const campaign_name = String(row.campaign_name ?? "").trim();
+  const entity_name = entityName.trim();
+  if (!date || !campaign_name || !entity_name) return null;
+  return {
+    grain,
+    date,
+    campaign_name,
+    entity_name,
+    spend: num(row.spend),
+    conv_value: num(row.conversion_value),
+    clicks: num(row.clicks),
+    impressions: num(row.impressions),
+    conversions: num(row.conversions),
+    frequency: optionalNum(row.frequency),
+    reach: optionalNum(row.reach),
+    ctr: optionalNum(row.ctr),
+    add_to_cart: optionalNum(row.add_to_cart),
+    initiate_checkout: optionalNum(row.initiate_checkout),
+  };
 }
 
 function adaptAdsApiRow(

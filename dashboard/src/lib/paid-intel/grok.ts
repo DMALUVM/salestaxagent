@@ -1,7 +1,7 @@
 import { deriveRoas } from "./csv";
 import type {
-  CampaignAgg, GrokSnapshot, IntelBrief, IntelCard, IntelRangeDays, PlatformKpis,
-  ProductAgg, SearchQueryDaily,
+  CampaignAgg, GrokSnapshot, IntelBrief, IntelCard, IntelRangeDays, MetaCallSheet,
+  PlatformKpis, ProductAgg, SearchQueryDaily,
 } from "./types";
 
 function money(n: number): string {
@@ -174,6 +174,7 @@ export function buildGrok(opts: {
     landings: Array<{ page: string; sessions: number; revenue: number; bounce: number | null; key_events: number }>;
     paid_revenue: number;
   };
+  callSheet?: MetaCallSheet;
 }): { markdown: string; snapshot: GrokSnapshot; adsDesk: string; siteDesk: string } {
   const spend = opts.google.spend + opts.meta.spend;
   const snapshot: GrokSnapshot = {
@@ -229,6 +230,14 @@ export function buildGrok(opts: {
   if (opts.brief?.headline) {
     lines.push("", "## This week", opts.brief.headline, "", opts.brief.ads, opts.brief.site);
   }
+  if (opts.callSheet?.items.length) {
+    lines.push("", "## Meta ads-manager call");
+    for (const item of opts.callSheet.items) {
+      lines.push(`${item.rank}. [${item.action.toUpperCase()}] ${item.say}`);
+      lines.push(`   ${item.why} · ${money(item.spend)} · ${item.roas.toFixed(2)}x`);
+    }
+    lines.push("Never move Meta budget onto Brand Search.");
+  }
   const site = opts.cards.filter((c) => c.owner === "site");
   const ads = opts.cards.filter((c) => c.owner !== "site");
   function dump(title: string, list: IntelCard[], start: number) {
@@ -249,9 +258,13 @@ export function buildGrok(opts: {
   }
   const next = dump("Paid media — ads lead (ranked by $ at stake)", ads, 1);
   dump("Site & conversion — web team (ranked by $ at stake)", site, next);
-  if (!opts.cards.length) lines.push("", "1. No keep/kill cards — upload a Google or Meta CSV.");
+  if (!opts.cards.length) {
+    lines.push("", "1. No keep/kill cards — wait for Mini API sync (google-ads-sync / meta-ads-sync).");
+  }
   const adsYield = formatUploadYield("ads", opts);
   const siteYield = formatUploadYield("site", opts);
+  const adsCall = formatMetaCallSheet(opts.callSheet);
+  const adsExtra = [adsCall, adsYield].filter(Boolean).join("\n\n");
   if (adsYield) lines.push("", adsYield);
   lines.push("", "## JSON snapshot", "```json", JSON.stringify(snapshot, null, 2), "```", "");
   const ctx: PromptContext = {
@@ -261,9 +274,23 @@ export function buildGrok(opts: {
   return {
     markdown: lines.join("\n"),
     snapshot,
-    adsDesk: buildDeskPrompt("ads", ads, ctx, opts.brief?.adsHeadline || opts.brief?.headline, adsYield),
+    adsDesk: buildDeskPrompt("ads", ads, ctx, opts.brief?.adsHeadline || opts.brief?.headline, adsExtra || undefined),
     siteDesk: buildDeskPrompt("site", site, ctx, opts.brief?.siteHeadline, siteYield),
   };
+}
+
+function formatMetaCallSheet(sheet?: MetaCallSheet): string {
+  if (!sheet?.items.length) return "";
+  const lines = [
+    "## Meta ads-manager call",
+    "Say these on the weekly call. Numbers are last-7 from meta_ads_* — never invented.",
+  ];
+  for (const item of sheet.items) {
+    lines.push(`${item.rank}. [${item.action.toUpperCase()}] ${item.say}`);
+    lines.push(`   ${item.why}`);
+  }
+  lines.push("Never move Meta budget onto Brand Search.");
+  return lines.join("\n");
 }
 
 function formatUploadYield(

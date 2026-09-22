@@ -8,10 +8,11 @@ import { buildCardPrompt, buildGrok, type SitePromptContext } from "./grok";
 import { gradeOutcome, measureCheck, type MeasureContext } from "./outcome";
 import { gscPerformanceRows } from "./api-adapt";
 import { buildWebInsights } from "./web-insights";
+import { buildMetaCallSheet } from "./meta-call";
 import type {
   CampaignAgg, CampaignDaily, DecisionStatus, GaDaily, IntelBrief, IntelBundle,
   IntelCard, IntelCheck, IntelDecision, IntelFilter, IntelOwner, IntelRangeDays,
-  PlatformKpis, SearchQueryDaily, WinLoseRow,
+  MetaDetail, PlatformKpis, SearchQueryDaily, WinLoseRow,
 } from "./types";
 
 const PAID_GA = /^(paid search|paid social|cross-network|display|paid other)$/i;
@@ -306,10 +307,10 @@ function detectFrequency(camps: CampaignAgg[]): IntelCard | null {
     title: `Meta frequency ${freqOf(top).toFixed(2)} on ${top.campaign_name}`,
     body: hasPeak
       ? `The worst ad set inside ${top.campaign_name} is at ${freqOf(top).toFixed(2)}. That is fatigue, not reach. Refresh or tighten before adding budget.`
-      : `Campaign-weighted frequency is ${freqOf(top).toFixed(2)} and climbing. This export is campaign level, so a single burnt ad set is averaged away — the real number is higher. Export ad sets to see it.`,
+      : `Campaign-weighted frequency is ${freqOf(top).toFixed(2)} and climbing. Ad-set peak is missing from meta_ads_adset_daily — Mini meta-ads-sync should fill it. A single burnt ad set is averaged away at campaign level.`,
     doThis: hasPeak
       ? `7-day test: new creative on the worst ad set in ${top.campaign_name}, or cut the audience overlap. Do not raise spend until it is ≤ 2.2.`
-      : `7-day test: pull the Ads Manager export at ad-set level and upload it, then refresh creative on whichever ad set is above 2.4. Do not raise ${top.campaign_name} spend meanwhile.`,
+      : `7-day test: wait for meta_ads_adset_daily (meta-ads-sync), then refresh creative on whichever ad set is above 2.4. Do not raise ${top.campaign_name} spend meanwhile. Do not upload a Meta CSV.`,
     ifItWorks: "Frequency falls toward 2.0 and CPA stops sliding on the same spend.",
     evidence: hot.map((c) => `${c.campaign_name} ${level} freq ${freqOf(c).toFixed(2)} on ${money(c.spend)}`).join("; "),
     stake: round2(hot.reduce((s, c) => s + c.spend, 0) * 0.25),
@@ -948,6 +949,7 @@ export function buildIntel(opts: {
   decisions?: IntelDecision[];
   today?: string;
   stats?: SourceStats;
+  meta_detail?: MetaDetail;
 }): IntelBundle {
   const freshness = buildFreshness({
     campaigns: opts.campaigns,
@@ -988,6 +990,8 @@ export function buildIntel(opts: {
         asOf: null,
       }),
       sources: { campaigns: 0, queries: opts.queries.length, ga: opts.ga.length },
+      meta_detail: opts.meta_detail,
+      meta_call_sheet: { as_of: null, items: [] },
     };
   }
 
@@ -1108,9 +1112,16 @@ export function buildIntel(opts: {
     asOf, google, meta, blended, wow, cards: adsCards, siteCards, site: siteCtx,
   });
 
+  const metaCallSheet = buildMetaCallSheet({
+    campaigns: opts.campaigns,
+    adsets: opts.meta_detail?.adsets,
+    ads: opts.meta_detail?.ads,
+    asOf,
+  });
   const grok = buildGrok({
     asOf, range, google, meta, blended, wow, camps, products, cards, brief,
     site: siteCtx, queries, pages, appearance, paidLanders: paidLandersOf(ga), ga4,
+    callSheet: metaCallSheet,
   });
   const chartRows = opts.campaigns.filter((r) => filter === "all" || r.platform === filter);
 
@@ -1144,6 +1155,8 @@ export function buildIntel(opts: {
       queries: opts.queries.length,
       ga: opts.ga.length,
     },
+    meta_detail: opts.meta_detail,
+    meta_call_sheet: metaCallSheet,
   };
 }
 

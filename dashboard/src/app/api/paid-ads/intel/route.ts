@@ -3,7 +3,8 @@ import {
   DECISION_STATUSES, INTEL_FILTERS, INTEL_RANGES, buildIntel,
   adaptGa4LandingDaily, adaptGoogleAdsDaily, adaptGscAppearanceDaily,
   adaptGscPageDaily, adaptGscQueryDaily,
-  adaptMetaAdsDaily, isoDate, pickOriginStats, preferApiWhenPresent,
+  adaptMetaAdsDaily, adaptMetaGrain, applyAdsetFrequencyPeaks, isoDate,
+  pickOriginStats, preferApiWhenPresent, preferMetaApi,
   synthesizeGscChart,
   type ApiTableStats, type CampaignDaily, type DecisionStatus, type GaDaily,
   type IntelDecision, type IntelFilter, type IntelRangeDays, type SearchQueryDaily,
@@ -200,8 +201,9 @@ function maxDate(...dates: Array<string | null | undefined>): string | null {
 /**
  * GET /api/paid-ads/intel?range=7&filter=all
  * Range is relative to max metric_date / date in the preferred warehouse, not today.
- * Google Ads, GA4, and GSC prefer official API tables. Meta prefers
- * meta_ads_daily when it has rows, otherwise paid_campaign_daily (CSV).
+ * Google Ads, GA4, and GSC prefer official API tables. Meta uses
+ * meta_ads_daily whenever that table exists (API is SoT). CSV is
+ * legacy emergency only and never blocks the page.
  */
 export async function GET(request: Request) {
   try {
@@ -234,7 +236,7 @@ export async function GET(request: Request) {
     ]);
 
     const googleOrigin: WarehouseOrigin = preferApiWhenPresent(sGoogleApi);
-    const metaOrigin: WarehouseOrigin = preferApiWhenPresent(sMetaApi);
+    const metaOrigin: WarehouseOrigin = preferMetaApi(sMetaApi);
     const gaOrigin: WarehouseOrigin = preferApiWhenPresent(sGaApi);
     const gscOrigin: WarehouseOrigin = preferApiWhenPresent({
       rows: sGscQ.rows + sGscP.rows,
@@ -287,21 +289,36 @@ export async function GET(request: Request) {
       : null;
 
     const needCsvCampaigns = googleOrigin === "csv" || metaOrigin === "csv";
+    const metaGrainOpts = { sinceDate: since, dateCol: "metric_date" as const };
+    const emptyRes = { rows: [] as Record<string, unknown>[], missing: false, error: null };
     const [
       googleApiRes, metaApiRes, csvCampRes,
+      metaAdsetRes, metaAdRes, metaPlatRes, metaDemoRes,
       gaApiRes, gaCsvRes,
       gscQueryRes, gscPageRes, gscAppearApiRes, csvChartRes, csvSnapRes,
       dRes,
     ] = await Promise.all([
       googleOrigin === "api"
         ? selectRows("google_ads_daily", { sinceDate: since, dateCol: "metric_date" })
-        : Promise.resolve({ rows: [], missing: false, error: null }),
+        : Promise.resolve(emptyRes),
       metaOrigin === "api"
         ? selectRows("meta_ads_daily", { sinceDate: since, dateCol: "metric_date" })
-        : Promise.resolve({ rows: [], missing: false, error: null }),
+        : Promise.resolve(emptyRes),
       needCsvCampaigns
         ? selectRows("paid_campaign_daily", { sinceDate: since })
-        : Promise.resolve({ rows: [], missing: false, error: null }),
+        : Promise.resolve(emptyRes),
+      metaOrigin === "api"
+        ? selectRows("meta_ads_adset_daily", metaGrainOpts)
+        : Promise.resolve(emptyRes),
+      metaOrigin === "api"
+        ? selectRows("meta_ads_ad_daily", metaGrainOpts)
+        : Promise.resolve(emptyRes),
+      metaOrigin === "api"
+        ? selectRows("meta_ads_platform_daily", metaGrainOpts)
+        : Promise.resolve(emptyRes),
+      metaOrigin === "api"
+        ? selectRows("meta_ads_demo_daily", metaGrainOpts)
+        : Promise.resolve(emptyRes),
       gaOrigin === "api"
         ? selectRows("ga4_landing_daily", { sinceDate: since, dateCol: "metric_date" })
         : Promise.resolve({ rows: [], missing: false, error: null }),
@@ -333,9 +350,26 @@ export async function GET(request: Request) {
     const googleCamps = googleOrigin === "api"
       ? googleApiRes.rows.map(adaptGoogleAdsDaily).filter((r): r is CampaignDaily => Boolean(r))
       : csvCamps.filter((r) => r.platform === "google");
-    const metaCamps = metaOrigin === "api"
+    const metaCampsRaw = metaOrigin === "api"
       ? metaApiRes.rows.map(adaptMetaAdsDaily).filter((r): r is CampaignDaily => Boolean(r))
       : csvCamps.filter((r) => r.platform === "meta");
+    const metaCamps = metaOrigin === "api"
+      ? applyAdsetFrequencyPeaks(metaCampsRaw, metaAdsetRes.rows)
+      : metaCampsRaw;
+    const metaDetail = {
+      adsets: metaAdsetRes.rows
+        .map((r) => adaptMetaGrain(r, "adset", String(r.adset_name ?? r.adset_id ?? "")))
+        .filter((r): r is NonNullable<typeof r> => Boolean(r)),
+      ads: metaAdRes.rows
+        .map((r) => adaptMetaGrain(r, "ad", String(r.ad_name ?? r.ad_id ?? "")))
+        .filter((r): r is NonNullable<typeof r> => Boolean(r)),
+      platforms: metaPlatRes.rows
+        .map((r) => adaptMetaGrain(r, "platform", String(r.publisher_platform ?? "")))
+        .filter((r): r is NonNullable<typeof r> => Boolean(r)),
+      demos: metaDemoRes.rows
+        .map((r) => adaptMetaGrain(r, "demo", `${r.age ?? ""} ${r.gender ?? ""}`))
+        .filter((r): r is NonNullable<typeof r> => Boolean(r)),
+    };
 
     const ga = gaOrigin === "api"
       ? gaApiRes.rows.map(adaptGa4LandingDaily).filter((r): r is GaDaily => Boolean(r))
@@ -362,6 +396,7 @@ export async function GET(request: Request) {
       && csvCampRes.missing && csvSnapRes.missing && gaCsvRes.missing;
     const loadErrors = [
       googleApiRes.error, metaApiRes.error, csvCampRes.error,
+      metaAdsetRes.error, metaAdRes.error, metaPlatRes.error, metaDemoRes.error,
       gaApiRes.error, gaCsvRes.error,
       gscQueryRes.error, gscPageRes.error, gscAppearApiRes.error,
       csvChartRes.error, csvSnapRes.error, dRes.error,
@@ -375,10 +410,12 @@ export async function GET(request: Request) {
       range,
       filter,
       stats,
+      meta_detail: metaDetail,
     });
 
     return Response.json({
       ...bundle,
+      meta_detail: metaDetail,
       origins: {
         google: googleOrigin,
         meta: metaOrigin,

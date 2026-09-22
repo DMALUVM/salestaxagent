@@ -33,7 +33,7 @@ surfaces in the card as a visible failure state, not a blank panel.
 | `/api/ppc` | Supabase server creds | Load-failure card |
 | `/api/paid-ads` | Supabase server creds + `paid_ads_snapshots` / `paid_ads_campaigns_window` | Empty Google/Meta cards + optional migration hint |
 | `/api/paid-ads/csv` | Supabase server creds (POST) | 400 if no recognisable Google/Meta/GSC/GA4 rows; upserts `paid_*_daily` |
-| `/api/paid-ads/intel` | Supabase server creds. Prefers `google_ads_daily` / `ga4_landing_daily` / `gsc_query_daily` / `gsc_page_daily` / `gsc_dim_daily` (search_appearance); Meta uses `meta_ads_daily` when populated else `paid_campaign_daily` | Empty intel + Meta CSV prompt when no preferred rows exist |
+| `/api/paid-ads/intel` | Supabase server creds. Prefers `google_ads_daily` / `ga4_landing_daily` / `gsc_query_daily` / `gsc_page_daily` / `gsc_dim_daily` (search_appearance) / `meta_ads_daily` (+ adset/ad/platform/demo grains). Builds `meta_call_sheet` from those grains. Meta CSV is retired. | Empty intel when no preferred API rows exist — never blocks on Meta CSV |
 | `/api/paid-ads/decision` | Supabase server creds + `paid_intel_decisions` | 409 naming the migration if the table is missing |
 | `/api/paid-ads/ingest` | Supabase server creds (POST, Basic Auth) | 400 on bad payload; upserts those two tables on their production uniques |
 | `/api/data-freshness` | Supabase server creds | Layout strip hidden (fail-soft) |
@@ -75,9 +75,10 @@ That is intentional.
 
 ## Paid Ads (Shopify) ingest
 
-`/paid-ads` is fed by **CSV uploads** (Google Ads Daily, Meta campaign
-export, GSC Queries/Chart/Pages, GA4 Explore) into `paid_campaign_daily`,
-`paid_search_query_daily`, and `paid_ga_daily`. POST `/api/paid-ads/csv`.
+`/paid-ads` is fed by **official API tables** (`google_ads_daily`,
+`meta_ads_daily` + adset/ad/platform/demo grains, `ga4_landing_daily`,
+`gsc_*_daily`). Meta CSV is retired. Legacy `POST /api/paid-ads/csv` remains
+an emergency fallback into `paid_*_daily` and never blocks the page.
 The older Ads Ops JSON path (`POST /api/paid-ads/ingest` →
 `paid_ads_snapshots`) still works. Neither path scrapes Ads Manager.
 See `dashboard/PAID_ADS.md`.
@@ -88,8 +89,8 @@ Iris conversion digest. **Official APIs only** — not the CSV intel
 tables above. Dave sets these on Vercel the same way as
 `AI_GATEWAY_API_KEY`. Dana mirrors the same `GOOGLE_*` names into Mini
 `.env` from 1Password so `ga4-sync` / `gsc-sync` / `google-ads-sync` /
-`meta-ads-sync` can pull. Never chat-paste keys. Meta stays unscheduled
-until those tokens exist (`docs/oauth-phase2.md`).
+`meta-ads-sync` can pull. Never chat-paste keys. Mini schedules
+`meta_ads_sync` at 07:35 ET when `META_*` is present (`docs/oauth-phase2.md`).
 
 | Variable | Required to *read* digest | Used by |
 |---|---|---|

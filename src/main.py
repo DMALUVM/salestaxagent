@@ -2829,15 +2829,18 @@ def google_ads_sync_cmd(as_of, days, dry_run):
 @click.option("--date", "as_of", default=None,
               help="End date YYYY-MM-DD (default: prior America/New_York day)")
 @click.option("--days", default=7, show_default=True, type=int,
-              help="Lookback ending at --date (1–90). Covers late-arriving days.")
+              help="Lookback ending at --date (1–90). Daily job stays 7. "
+                   "Catch-up / one-shot backfill: --days 90.")
 @click.option("--dry-run", is_flag=True,
               help="Pull official API; never write rows")
 def meta_ads_sync_cmd(as_of, days, dry_run):
-    """Meta Marketing API daily spend / clicks / conversions.
+    """Meta Marketing API campaign / ad set / ad / placement / demo.
 
     Official Marketing API insights GET only. ads_read — no ads_management.
-    Missing Vercel/Mini env → needs OAuth, 0 rows. Never invent metrics.
-    One shot, no report wait-loop. metric_date is the API day.
+    Campaign SoT plus adset/ad grains and publisher_platform + age×gender
+    breakdowns (separate tables). Missing Vercel/Mini env → needs OAuth,
+    0 rows. Never invent metrics. One shot, no report wait-loop.
+    metric_date is the API day. Catch-up: --days 90.
     Mini `.env` needs META_APP_ID / META_APP_SECRET /
     META_ADS_ACCESS_TOKEN / META_ADS_ACCOUNT_ID (act_…).
     See docs/oauth-phase2.md.
@@ -5816,7 +5819,8 @@ def run():
             )
             click.echo("[Scheduler] Meta Marketing API daily at 07:35 "
                        "(prior America/New_York day + 7d lookback; "
-                       "insights GET one shot; ads_read only)")
+                       "campaign/adset/ad + platform/demo insights GET; "
+                       "ads_read only)")
 
         # Safe ff-only pull of origin/main. One job inside this scheduler —
         # not a second launchd agent — so it cannot race the running process.

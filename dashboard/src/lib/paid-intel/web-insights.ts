@@ -250,7 +250,7 @@ export function buildWebInsights(opts: {
     gaps.push("GSC queries missing from gsc_query_daily — money-term ranks are a gap.");
   }
   if (!campaigns.length) {
-    gaps.push("Google/Meta campaign days not uploaded — ad spend for the channel gap is a gap.");
+    gaps.push("Google/Meta campaign days missing from google_ads_daily / meta_ads_daily — ad spend for the channel gap is a gap.");
   }
 
   const converting_landings = ga.length

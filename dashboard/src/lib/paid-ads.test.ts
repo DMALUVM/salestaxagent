@@ -293,7 +293,9 @@ describe("page / API invariants", () => {
     assert.match(intelUi, /Tallowbourn ads Intel/);
     assert.match(intelUi, /newest date/);
     assert.match(intelUi, /API sync/);
-    assert.match(intelUi, /Upload Meta CSV/);
+    assert.match(intelUi, /Legacy CSV/);
+    assert.doesNotMatch(intelUi, /Upload Meta CSV/);
+    assert.match(intelUi, /Dashboard never writes Meta/);
     assert.match(intelUi, /\.\/\.venv\/bin\/python -m src.main meta-ads-sync/);
     assert.doesNotMatch(intelUi, /Meta still uses CSV/);
     assert.doesNotMatch(intelUi, /Meta stays on CSV/);
@@ -312,11 +314,11 @@ describe("page / API invariants", () => {
     assert.doesNotMatch(csvIngest, /puppeteer|playwright|ads\.google\.com/i);
   });
 
-  test("DataStatus How-to stays for Meta CSV; API lag is not a re-export", () => {
+  test("DataStatus How-to stays for legacy CSV; API lag is not a re-export", () => {
     const status = intelUi.slice(intelUi.indexOf("function DataStatus("));
     assert.match(status, /What data is loaded/);
     assert.match(status, /PaidAdsCsvHowto/);
-    assert.match(intelUi, /How-to: pull CSVs/);
+    assert.match(intelUi, /Legacy CSV \(emergency\)/);
     assert.match(status, /setHowtoOpen\(true\)/);
     assert.match(status, /API lag/);
     assert.match(status, /\{s\.days_behind\}d — re-export/);
@@ -336,7 +338,20 @@ describe("page / API invariants", () => {
     assert.match(intelRead, /gsc_dim_daily/);
     assert.match(intelRead, /adaptGscAppearanceDaily/);
     assert.match(intelRead, /meta_ads_daily/);
+    assert.match(intelRead, /meta_ads_adset_daily/);
+    assert.match(intelRead, /preferMetaApi/);
+    assert.match(intelRead, /applyAdsetFrequencyPeaks/);
     assert.match(intelRead, /preferApiWhenPresent/);
+    assert.match(intelUi, /meta_ads_adset_daily/);
+    assert.match(intelUi, /meta_ads_platform_daily/);
+    assert.match(intelUi, /Meta call sheet/);
+    assert.match(intelUi, /never move Meta onto Brand Search/);
+    const command = intelUi.indexOf('id="command"');
+    const call = intelUi.indexOf("MetaCallSheetView", command);
+    const googleKpi = intelUi.indexOf('label="Google spend"', command);
+    assert.ok(command >= 0 && call > command && googleKpi > call,
+      "Meta call sheet sits at the top of Command, before KPI charts");
+    assert.match(intelRead, /meta_detail: metaDetail/);
     assert.match(intelRead, /metric_date/);
     assert.match(intelRead, /fetched_at/);
     assert.match(intelRead, /paid_campaign_daily/);
@@ -426,7 +441,7 @@ describe("page / API invariants", () => {
       intelUi.indexOf("async function copyText("),
     );
     assert.match(howto, /Dashboard/);
-    assert.match(howto, /\/paid-ads → Upload/);
+    assert.match(howto, /\/paid-ads → Legacy CSV/);
     assert.match(howto, /select ALL files at once/);
     assert.doesNotMatch(howto, /warehouse/i);
     assert.doesNotMatch(howto, /schedule/i);

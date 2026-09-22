@@ -9,11 +9,14 @@ import {
   adaptGscPageDaily,
   adaptGscQueryDaily,
   adaptMetaAdsDaily,
+  adaptMetaGrain,
+  applyAdsetFrequencyPeaks,
   bounceFromEngaged,
   gscCtrToPct,
   gscPerformanceRows,
   pickOriginStats,
   preferApiWhenPresent,
+  preferMetaApi,
   rollupGscSnapshot,
   synthesizeGscChart,
   windowedGscRows,
@@ -27,9 +30,22 @@ describe("preferApiWhenPresent", () => {
     }), "api");
   });
 
-  test("falls back to CSV when API is empty (Meta pending)", () => {
+  test("falls back to CSV when API is empty (Google / GA4 / GSC)", () => {
     assert.equal(preferApiWhenPresent({
       rows: 0, min_date: null, max_date: null, fetched_at: null, missing: false,
+    }), "csv");
+  });
+
+  test("Meta API table is SoT even when empty — CSV is legacy only", () => {
+    assert.equal(preferMetaApi({
+      rows: 0, min_date: null, max_date: null, fetched_at: null, missing: false,
+    }), "api");
+    assert.equal(preferMetaApi({
+      rows: 27, min_date: "2026-09-15", max_date: "2026-09-21",
+      fetched_at: "2026-09-22T11:35:00Z", missing: false,
+    }), "api");
+    assert.equal(preferMetaApi({
+      rows: 0, min_date: null, max_date: null, fetched_at: null, missing: true,
     }), "csv");
   });
 
@@ -112,6 +128,58 @@ describe("adaptMetaAdsDaily", () => {
     assert.equal(row!.platform, "meta");
     assert.equal(row!.product, "balm");
     assert.equal(row!.audience, "prospect");
+    assert.equal(row!.frequency, null);
+  });
+
+  test("maps Graph frequency and never invents a peak", () => {
+    const row = adaptMetaAdsDaily({
+      metric_date: "2026-09-20",
+      campaign_name: "UGC | Tallow Balm | CBO",
+      spend: 12, clicks: 8, impressions: 200, conversions: 1, conversion_value: 28,
+      frequency: "2.4",
+    });
+    assert.ok(row);
+    assert.equal(row!.frequency, 2.4);
+    assert.equal(row!.frequency_peak, null);
+  });
+});
+
+describe("applyAdsetFrequencyPeaks", () => {
+  test("takes the worst ad-set frequency that day", () => {
+    const camps = [adaptMetaAdsDaily({
+      metric_date: "2026-09-20",
+      campaign_name: "UGC | Tallow Balm | CBO",
+      spend: 12, clicks: 8, impressions: 200, conversions: 1, conversion_value: 28,
+      frequency: "1.8",
+    })!];
+    const out = applyAdsetFrequencyPeaks(camps, [
+      { metric_date: "2026-09-20", campaign_name: "UGC | Tallow Balm | CBO", frequency: "1.2" },
+      { metric_date: "2026-09-20", campaign_name: "UGC | Tallow Balm | CBO", frequency: "3.1" },
+    ]);
+    assert.equal(out[0].frequency, 1.8);
+    assert.equal(out[0].frequency_peak, 3.1);
+  });
+});
+
+describe("adaptMetaGrain", () => {
+  test("maps ad-set / platform / demo without inventing conversions", () => {
+    const adset = adaptMetaGrain({
+      metric_date: "2026-09-20", campaign_name: "UGC | Tallow Balm | CBO",
+      adset_name: "Prospect | Broad", spend: 8, conversion_value: 20,
+      clicks: 4, impressions: 100, conversions: 1, frequency: 3.1, reach: 80,
+      add_to_cart: 2, initiate_checkout: 1,
+    }, "adset", "Prospect | Broad");
+    assert.ok(adset);
+    assert.equal(adset!.grain, "adset");
+    assert.equal(adset!.entity_name, "Prospect | Broad");
+    assert.equal(adset!.add_to_cart, 2);
+    const demo = adaptMetaGrain({
+      metric_date: "2026-09-20", campaign_name: "UGC | Tallow Balm | CBO",
+      spend: 4, clicks: 1, impressions: 40,
+    }, "demo", "25-34 female");
+    assert.ok(demo);
+    assert.equal(demo!.conversions, 0);
+    assert.equal(demo!.add_to_cart, null);
   });
 });
 
