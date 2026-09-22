@@ -40,7 +40,7 @@ function HowtoLink({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-/** Manual CSV pull steps for /paid-ads. Meta is the live upload. Google/GA4/GSC are optional fallback. */
+/** Manual CSV pull steps for /paid-ads. All four sources prefer API; CSV is fallback. */
 function PaidAdsCsvHowto({
   open, onOpenChange,
 }: {
@@ -53,8 +53,9 @@ function PaidAdsCsvHowto({
         <DialogHeader>
           <DialogTitle>How-to: pull CSVs</DialogTitle>
           <DialogDescription>
-            Google Ads, GA4, and Search Console load from official API sync. Upload Meta CSV until
-            meta_ads_daily has rows. Google / GA4 / GSC CSVs are optional fallback only.
+            Google Ads, GA4, Search Console, and Meta prefer official API sync. Meta CSV is
+            fallback until Mini <code>./.venv/bin/python -m src.main meta-ads-sync</code> writes
+            meta_ads_daily. Google / GA4 / GSC / Meta CSVs are optional fallback.
           </DialogDescription>
         </DialogHeader>
         <ol className="list-decimal space-y-3 pl-4 text-[13px] leading-snug">
@@ -73,6 +74,11 @@ function PaidAdsCsvHowto({
           </li>
           <li>
             <p className="font-medium">Meta</p>
+            <p className="text-muted-foreground">
+              Optional fallback — prefer Mini{" "}
+              <code>./.venv/bin/python -m src.main meta-ads-sync</code>
+              {" "}into meta_ads_daily (07:35 ET when META_* is on Mini).
+            </p>
             <p>
               Ads Manager reporting (act=156983680801147, business_id=1028304628604309):{" "}
               <HowtoLink href={META_ADS_CSV_URL}>{META_ADS_CSV_URL}</HowtoLink>
@@ -115,8 +121,8 @@ function PaidAdsCsvHowto({
           </li>
         </ol>
         <p className="text-[13px] leading-snug">
-          Then on Dashboard: /paid-ads → Upload → Meta Ads Manager export. Optional fallback: select ALL files at once
-          (Google + Meta + Queries + Pages + Chart + Search Appearance + GA4;
+          Mini meta-ads-sync writes meta_ads_daily. On Dashboard, Upload is CSV fallback:
+          select ALL files at once (Google + Meta + Queries + Pages + Chart + Search Appearance + GA4;
           parser IDs by header). Matching days overwrite; older days stay.
         </p>
       </DialogContent>
@@ -796,8 +802,8 @@ function DataStatus({
         </Table>
         <div className="space-y-1 border-t p-3">
           <p className="text-[11px] text-muted-foreground">
-            Google Ads, GA4, and Search Console prefer official API tables (max metric_date + fetched_at).
-            Meta stays on CSV until meta_ads_daily has rows. Optional CSV fallback still overwrites matching days.
+            Google Ads, GA4, Search Console, and Meta prefer official API tables (max metric_date + fetched_at).
+            Meta CSV is fallback until Mini meta-ads-sync writes meta_ads_daily. Optional CSV fallback still overwrites matching days.
           </p>
           {thin.length > 0 && (
             <p className="text-[11px] text-amber-700 dark:text-amber-400">
@@ -1047,8 +1053,8 @@ export function PaidAdsIntel({
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Paid Ads (Shopify)</h1>
           <p className="text-sm text-muted-foreground">
-            Tallowbourn ads Intel from Google Ads / GA4 / Search Console API sync. Meta still uses CSV until
-            meta_ads_daily has rows. Range is relative to the newest date <em>in the loaded sources</em>
+            Tallowbourn ads Intel from Google Ads / GA4 / Search Console / Meta API sync. Meta CSV is fallback until
+            Mini meta-ads-sync writes meta_ads_daily. Range is relative to the newest date <em>in the loaded sources</em>
             {data.as_of ? ` (${data.as_of})` : ""}, not today.
           </p>
         </div>
@@ -1063,7 +1069,7 @@ export function PaidAdsIntel({
             multiple
             accept=".csv,.zip,text/csv,application/zip"
             className="hidden"
-            aria-label="Upload Meta CSV; Google, GSC, or GA4 CSVs remain optional fallback"
+            aria-label="Upload CSV fallback; Meta prefers Mini meta-ads-sync into meta_ads_daily"
             onChange={(e) => onFiles(e.target.files)}
           />
           <Button variant="outline" size="sm" onClick={copyGrok} disabled={empty}>
@@ -1133,11 +1139,12 @@ export function PaidAdsIntel({
           <CardContent className="py-12 text-center">
             <Megaphone className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">
-              Google Ads, GA4, and Search Console load from API sync. Drop a Meta Ads Manager campaign export
-              until meta_ads_daily has rows.
+              Google Ads, GA4, Search Console, and Meta load from API sync. Mini{" "}
+              <code>./.venv/bin/python -m src.main meta-ads-sync</code> writes meta_ads_daily.
+              Drop a Meta Ads Manager campaign export as fallback until those rows exist.
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Google / GA4 / GSC CSVs remain an optional fallback — the parser still identifies each file by its header.
+              Google / GA4 / GSC / Meta CSVs remain an optional fallback — the parser still identifies each file by its header.
               A missing source omits that channel; it does not crash. Matching days overwrite; older days stay.
             </p>
           </CardContent>

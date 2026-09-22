@@ -294,6 +294,9 @@ describe("page / API invariants", () => {
     assert.match(intelUi, /newest date/);
     assert.match(intelUi, /API sync/);
     assert.match(intelUi, /Upload Meta CSV/);
+    assert.match(intelUi, /\.\/\.venv\/bin\/python -m src.main meta-ads-sync/);
+    assert.doesNotMatch(intelUi, /Meta still uses CSV/);
+    assert.doesNotMatch(intelUi, /Meta stays on CSV/);
     assert.match(intelUi, /Copy for Grok/);
     assert.match(intelUi, /EMPTY_BRIEF|brief \?\?/);
     assert.equal(PAID_ADS_ATTRIBUTION.includes("not a live"), true);
