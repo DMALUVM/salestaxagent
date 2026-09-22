@@ -337,6 +337,11 @@ describe("page / API invariants", () => {
     assert.match(intelUi, /meta_ads_platform_daily/);
     assert.match(intelUi, /Meta call sheet/);
     assert.match(intelUi, /never move Meta onto Brand Search/);
+    const command = intelUi.indexOf('id="command"');
+    const call = intelUi.indexOf("MetaCallSheetView", command);
+    const googleKpi = intelUi.indexOf('label="Google spend"', command);
+    assert.ok(command >= 0 && call > command && googleKpi > call,
+      "Meta call sheet sits at the top of Command, before KPI charts");
     assert.match(intelRead, /meta_detail: metaDetail/);
     assert.match(intelRead, /metric_date/);
     assert.match(intelRead, /fetched_at/);

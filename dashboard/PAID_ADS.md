@@ -49,7 +49,7 @@ lead and **Site & conversion** for the web team. Every card is a 7-day test with
 a keep/kill metric. Never move Meta/PMax onto Brand Search. Win/lose tables
 require spend ≥ $1.
 
-**Meta call sheet** on `/paid-ads` (Command) is the weekly Ads Manager list:
+**Meta call sheet** on `/paid-ads` sits at the top of Command — the weekly Ads Manager list:
 ranked pause / cut 30% / creative refresh / scale / keep from `meta_ads_daily`
 + adset/ad grains, last-7 vs prior-7, spend ≥ $1. Each line is one spoken ask
 with spend, ROAS/CPA, and prior-week trend. Conversion-digest `phase2.meta_actions`

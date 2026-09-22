@@ -187,7 +187,12 @@ function MetaCallSheetView({
   onError: (msg: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const lines = sheet.items.map((item) => `${item.rank}. ${item.say} (${item.why})`).join("\n");
+  const lines = sheet.items.map((item) => {
+    const prior = item.prior_spend != null
+      ? ` · prior ${money(item.prior_spend)}${item.prior_roas != null ? ` ${item.prior_roas.toFixed(2)}x` : ""}`
+      : "";
+    return `${item.rank}. ${item.say} (${item.why}${prior})`;
+  }).join("\n");
 
   async function copySheet() {
     if (!lines) {
@@ -244,7 +249,14 @@ function MetaCallSheetView({
                     <div className="shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
                       <div>{money(item.spend)} · {item.roas.toFixed(2)}x</div>
                       {item.cpa != null ? <div>CPA {money(item.cpa)}</div> : null}
-                      {item.prior_roas != null ? <div>prior {item.prior_roas.toFixed(2)}x</div> : null}
+                      {item.prior_spend != null ? (
+                        <div>
+                          prior {money(item.prior_spend)}
+                          {item.prior_roas != null ? ` · ${item.prior_roas.toFixed(2)}x` : ""}
+                        </div>
+                      ) : item.prior_roas != null ? (
+                        <div>prior {item.prior_roas.toFixed(2)}x</div>
+                      ) : null}
                     </div>
                   </div>
                 </li>
@@ -1296,6 +1308,14 @@ export function PaidAdsIntel({
               <h2 className="text-sm font-semibold tracking-tight">Command</h2>
               <span className="text-[10px] text-muted-foreground">Google vs Meta · ads conversion value, not GA4 revenue</span>
             </div>
+            {filter !== "google" && (data.meta_call_sheet?.items.length || data.kpis.meta.spend >= 1) ? (
+              <div id="meta-call" className="scroll-mt-12">
+                <MetaCallSheetView
+                  sheet={data.meta_call_sheet ?? { as_of: data.as_of, items: [] }}
+                  onError={setMsg}
+                />
+              </div>
+            ) : null}
             <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
               <Kpi label="Google spend" value={money(g.spend)} hint={`${roasHint(g)} · ${platLabel(g)}${googleWins ? " · winner" : ""}`} />
               <Kpi label="Google conv. value" value={money(g.conv_value)} hint={roasHint(g)} />
@@ -1343,14 +1363,6 @@ export function PaidAdsIntel({
               <WinLose title="Keep" rows={data.wins} empty="No campaign with spend ≥ $1 and ROAS ≥ 1.5x." />
               <WinLose title="Kill / watch" rows={data.losses} empty="No spend ≥ $1 loser. $0 Meta days are hidden." />
             </div>
-            {filter !== "google" && (data.meta_call_sheet?.items.length || data.kpis.meta.spend >= 1) ? (
-              <div id="meta-call" className="scroll-mt-12">
-                <MetaCallSheetView
-                  sheet={data.meta_call_sheet ?? { as_of: data.as_of, items: [] }}
-                  onError={setMsg}
-                />
-              </div>
-            ) : null}
           </section>
 
           <section id="intel" className="space-y-3 scroll-mt-12">
