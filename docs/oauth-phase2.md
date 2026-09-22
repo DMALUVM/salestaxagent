@@ -10,7 +10,7 @@ Vercel env page: `https://vercel.com/dave-maloneys-projects/dashboard/settings/e
 ## Daily pipeline (Iris) — one path, Jev is not an orphan
 
 1. **Mini** `python -m src.main shopify-funnel-sync` writes `shopify_funnel_*` + abandons (already scheduled 07:15 ET).
-2. **Mini** `ga4-sync` (07:20 ET), `gsc-sync` (07:25 ET), `google-ads-sync` (07:30 ET), and optional `meta-ads-sync` (07:35 ET) pull the official GA4 Data API / Search Console API / Google Ads API / Meta Marketing API for the prior `America/New_York` day (7d lookback). Scheduled only when Mini `.env` has the same `GOOGLE_*` / `META_*` names as Vercel. `metric_date` is the API day — never an older substitute. GSC final data lags ~2 days → `phase2.seo` stays null until that locked day exists. Do not add poll agents. Meta stays unscheduled until `META_*` is present.
+2. **Mini** `ga4-sync` (07:20 ET), `gsc-sync` (07:25 ET), `google-ads-sync` (07:30 ET), and `meta-ads-sync` (07:35 ET) pull the official GA4 Data API / Search Console API / Google Ads API / Meta Marketing API for the prior `America/New_York` day (7d lookback). Scheduled only when Mini `.env` has the same `GOOGLE_*` / `META_*` names as Vercel. `metric_date` is the API day — never an older substitute. GSC final data lags ~2 days → `phase2.seo` stays null until that locked day exists. Do not add poll agents. Meta CSV is retired — API is SoT. Catch-up: `python -m src.main meta-ads-sync --days 90`.
 3. **Vercel** `GET`/`POST /api/shopify-funnel/jev-triage` (landed #153, sibling `bc-74a886b6`) evaluates leaks with `AI_GATEWAY_API_KEY` already on Vercel and writes `shopify_funnel_status.last_stats.jev`. Fail closed → `hold_for_review` / empty pursue. Does **not** call Mini.
 4. **Iris** `GET /api/conversion-digest` (landed #154/#155) reads the prior-day `America/New_York` Shopify funnel snapshot and runs landed Jev. Missing day → GAP. Never substitutes an older day. `improvements` are ranked as_of actions (Shopify leak + GA4/GSC/Ads when material). `phase2.landing_drops` / `seo` / `ads` stay **null** until official-API rows exist for that day. OAuth is **not** required to read the Iris fields.
 
@@ -270,9 +270,19 @@ META_ADS_ACCESS_TOKEN
 META_ADS_ACCOUNT_ID=act_1234567890
 ```
 
-Then `python -m src.main meta-ads-sync` GETs `graph.facebook.com/v25.0/{act_…}/insights` (`level=campaign`, `time_increment=1`) and upserts `meta_ads_daily`. Missing Mini env → `needs OAuth` / `Wrote 0 rows` (fail closed). `--dry-run` documents the path and does not upsert. `ads_read` only — never `ads_management`. Mini schedules `meta_ads_sync` at 07:35 ET only after these names are present.
+Then `python -m src.main meta-ads-sync` GETs `graph.facebook.com/v25.0/{act_…}/insights` (`time_increment=1`, ads_read only) at:
 
-**You’re done when:** all four `META_*` names are on Vercel, Mini `.env` has the same names, and a pull upserts the locked day (or 0 rows if the API returned none).
+| Table | Graph | Why kept |
+|---|---|---|
+| `meta_ads_daily` | `level=campaign` | Campaign SoT for KPIs / keep-kill / freshness / Meta call sheet |
+| `meta_ads_adset_daily` | `level=adset` | Fatigue / `frequency_peak` |
+| `meta_ads_ad_daily` | `level=ad` | Creative keep/kill |
+| `meta_ads_platform_daily` | campaign + `breakdowns=publisher_platform` | Placement waste (IG vs FB vs Audience Network) |
+| `meta_ads_demo_daily` | campaign + `breakdowns=age,gender` | Audience waste. Not crossed with platform |
+
+Fields: spend, clicks, impressions, reach, frequency, ctr, cpc, cpm, inline_link_clicks, unique_clicks / unique_inline_link_clicks (level pulls only), plus `actions` / `action_values` parsed first-match for purchase / add_to_cart / initiate_checkout (never sum types). Daily job stays prior NY day + 7d. Catch-up: `--days 90` (chunked ≤30d). Missing Mini env → `needs OAuth` / `Wrote 0 rows` (fail closed). `--dry-run` documents the path and does not upsert. `ads_read` only — never `ads_management`. Mini schedules `meta_ads_sync` at 07:35 ET only after these names are present. Apply `supabase/migration_meta_ads_enrichment.sql` once (additive; RLS on; no lockdown file). Meta CSV on `/paid-ads` is retired. `/paid-ads` ranks a Meta call sheet (pause / cut / refresh / scale / keep) from these tables; conversion-digest `phase2.meta_actions` is the locked-day pause subset.
+
+**You’re done when:** all four `META_*` names are on Vercel, Mini `.env` has the same names, Dana applied the enrichment SQL, and a pull upserts the locked day (or 0 rows if the API returned none).
 
 **Fail modes:** granted `ads_management`; token from Graph API Explorer (expires ~60 days) instead of a system user; copied the App ID into `META_ADS_ACCOUNT_ID`; assigned the system user to the wrong ad account; app in a different Business than the ad account.
 
@@ -362,6 +372,8 @@ Success: HTTP 200, `"as_of"` is prior-day ET, `"improvements"` empty or at most 
 In Supabase SQL editor run `supabase/migration_conversion_phase2.sql`. RLS on, no anon policies. Tables start empty. They never feed nexus or P&L.
 
 For GSC device / country / searchAppearance + PDP inspect, also run `supabase/migration_gsc_analysis_dims.sql` (additive). Query/page totals stay on the Phase 2 tables.
+
+For Meta ad set / ad / publisher_platform / age×gender, also run `supabase/migration_meta_ads_enrichment.sql` (additive; alters `meta_ads_daily` columns only). Campaign totals stay on `meta_ads_daily`.
 
 ---
 

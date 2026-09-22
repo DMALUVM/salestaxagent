@@ -11,6 +11,7 @@
  * an older day. Does not feed nexus or P&L.
  */
 import { asInt } from "./shopify-funnel";
+import { metaDigestActions } from "./paid-intel/meta-call";
 
 export type LandingDrop = {
   path: string;
@@ -46,10 +47,20 @@ export type AdsCampaign = {
   conversions: number | null;
 };
 
+/** Locked-day Meta pause lines. Null when that day has no meta_ads_daily rows. */
+export type MetaDigestAction = {
+  campaign_name: string;
+  spend: number;
+  conversions: number | null;
+  say: string;
+};
+
 export type Phase2Digest = {
   landing_drops: LandingDrop[] | null;
   seo: SeoSection | null;
   ads: AdsCampaign[] | null;
+  /** Locked-day Meta pause asks. Not mixed into Iris improvements (those stay Google/Blake). */
+  meta_actions: MetaDigestAction[] | null;
   connectors: {
     ga4: boolean;
     gsc: boolean;
@@ -63,6 +74,7 @@ export function emptyPhase2(): Phase2Digest {
     landing_drops: null,
     seo: null,
     ads: null,
+    meta_actions: null,
     connectors: { ga4: false, gsc: false, google_ads: false, meta_ads: false },
   };
 }
@@ -263,6 +275,7 @@ export function phase2FromLockedDay(
     landing_drops: topLandingDrops(ga4, date),
     seo: seoSection(gscQueries, gscPages, date, gscDims),
     ads: adsCampaigns([...googleAds, ...metaAds], date),
+    meta_actions: hasDate(metaAds, date) ? metaDigestActions(metaAds, date) : null,
     connectors: {
       ga4: hasDate(ga4, date),
       gsc: hasDate(gscQueries, date) || hasDate(gscPages, date) || hasDate(gscDims, date),

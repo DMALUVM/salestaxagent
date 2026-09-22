@@ -1,8 +1,9 @@
-"""Paid-ads / GSC freshness nudge.
+"""Paid-ads / GSC / Meta freshness nudge.
 
-Google / Meta / GA4 CSV age still uses the Monday /paid-ads upload path.
 Search Console prefers official API tables (`gsc_query_daily` /
-`gsc_page_daily` from daily `gsc-sync`). Stale/fail only — never an
+`gsc_page_daily` from daily `gsc-sync`). Meta prefers `meta_ads_daily`
+from daily `meta-ads-sync`. Google / GA4 CSV age still uses the
+legacy /paid-ads upload path as fallback. Stale/fail only — never an
 all-good Telegram.
 
 Read-only. Never writes warehouse rows.
@@ -23,13 +24,12 @@ STALE_AFTER_DAYS = 7
 # this many calendar days behind the America/New_York prior day.
 GSC_STALE_BEHIND_PRIOR_DAY = 4
 GSC_API_FILE = "gsc-sync → gsc_query_daily + gsc_page_daily"
+META_API_FILE = "meta-ads-sync → meta_ads_daily"
 
-# CSV sources only. Search Console is resolved separately (API first).
+# CSV sources only. Search Console and Meta are resolved separately (API first).
 SOURCES: list[tuple[str, str, str, dict]] = [
     ("Google Ads", "Google Ads Daily (Campaign x Day)",
      "paid_campaign_daily", {"platform": "google"}),
-    ("Meta Ads", "Ads Manager campaign export",
-     "paid_campaign_daily", {"platform": "meta"}),
     ("GA4", "GA4 Explore (Free form)", "paid_ga_daily", {}),
 ]
 
@@ -84,6 +84,33 @@ def _newer(*dates: str | None) -> str | None:
     return max(present) if present else None
 
 
+def meta_freshness_source(today: date, *,
+                          api_max: str | None,
+                          csv_max: str | None) -> dict:
+    """Prefer meta_ads_daily. CSV is legacy emergency when API has no dates."""
+    if api_max:
+        behind = _days_behind(api_max, today)
+        return {
+            "label": "Meta Ads",
+            "file": META_API_FILE,
+            "max_date": api_max,
+            "days_behind": behind,
+            "stale": behind is not None and behind >= STALE_AFTER_DAYS,
+            "missing": False,
+            "origin": "api",
+        }
+    behind = _days_behind(csv_max, today) if csv_max else None
+    return {
+        "label": "Meta Ads",
+        "file": "Ads Manager campaign export (legacy)",
+        "max_date": csv_max,
+        "days_behind": behind,
+        "stale": behind is not None and behind >= STALE_AFTER_DAYS,
+        "missing": csv_max is None,
+        "origin": "csv",
+    }
+
+
 def gsc_freshness_source(today: date, *,
                          api_max: str | None,
                          csv_max: str | None) -> dict:
@@ -132,6 +159,11 @@ def check_paid_ads_freshness(today: date | None = None) -> dict:
             "missing": newest is None,
             "origin": "csv",
         })
+    sources.append(meta_freshness_source(
+        today,
+        api_max=_max_date("meta_ads_daily", date_col="metric_date"),
+        csv_max=_max_date("paid_campaign_daily", {"platform": "meta"}),
+    ))
     api_max = _newer(
         _max_date("gsc_query_daily", date_col="metric_date"),
         _max_date("gsc_page_daily", date_col="metric_date"),
@@ -155,21 +187,35 @@ def build_message(result: dict) -> str | None:
     api_stale = [s for s in stale if s.get("origin") == "api"]
     csv_stale = [s for s in stale if s.get("origin") != "api"]
     if api_stale and not csv_stale:
-        lines = [
-            "<b>Search Console data is stale</b>",
-            "gsc-sync / gsc_*_daily is behind expected lag. Not an all-good ping.",
-            "",
-        ]
+        labels = {s.get("label") for s in api_stale}
+        if labels == {"Search Console"}:
+            lines = [
+                "<b>Search Console data is stale</b>",
+                "gsc-sync / gsc_*_daily is behind expected lag. Not an all-good ping.",
+                "",
+            ]
+        elif labels == {"Meta Ads"}:
+            lines = [
+                "<b>Meta Marketing API data is stale</b>",
+                "meta-ads-sync / meta_ads_daily is behind. Not an all-good ping.",
+                "",
+            ]
+        else:
+            lines = [
+                "<b>Paid Ads API data is stale</b>",
+                "Check Mini meta-ads-sync / gsc-sync. Not an all-good ping.",
+                "",
+            ]
     elif api_stale:
         lines = [
             "<b>Paid Ads data is stale</b>",
-            "Upload a fresh export at /paid-ads, or check Mini gsc-sync if Search Console is listed.",
+            "Check Mini API sync, or a legacy CSV at /paid-ads if an API table is missing.",
             "",
         ]
     else:
         lines = [
             "<b>Paid Ads data is stale</b>",
-            "Upload a fresh export at /paid-ads — the intel below is dated.",
+            "A legacy CSV source is dated. Official API tables are SoT — do not upload Meta CSV.",
             "",
         ]
     for s in sorted(stale, key=lambda x: -(x["days_behind"] or 0)):
