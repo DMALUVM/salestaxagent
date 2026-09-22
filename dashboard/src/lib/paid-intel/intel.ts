@@ -1062,7 +1062,7 @@ export function buildIntel(opts: {
   const measureCtx: MeasureContext = {
     camps: last7Camps,
     ga: ga7,
-    queries: opts.queries,
+    queries: gscPerf,
     google: kpisOf(last7, "google"),
     meta: kpisOf(last7, "meta"),
     blended: kpisOf(last7, "blended"),

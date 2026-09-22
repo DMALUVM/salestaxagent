@@ -36,14 +36,21 @@ SOURCES: list[tuple[str, str, str, dict]] = [
 
 def _max_date(table: str, filters: dict | None = None,
               date_col: str = "date") -> str | None:
-    """Newest date column in a table, or None when empty / table absent."""
+    """Newest date column in a table, or None when empty / table absent.
+
+    CSV intel tables store `date` as text and may have "" snapshot rows —
+    those need ``neq(date, "")``. Official API tables use a date-typed
+    ``metric_date``; PostgREST rejects comparing that to "".
+    """
     try:
         query = get_client().table(table).select(date_col)
         for key, value in (filters or {}).items():
             query = query.eq(key, value)
+        # Date-typed API columns: omit the empty-string filter.
+        if date_col == "date":
+            query = query.neq(date_col, "")
         result = (
-            query.neq(date_col, "")
-            .order(date_col, desc=True)
+            query.order(date_col, desc=True)
             .limit(1)
             .execute()
         )

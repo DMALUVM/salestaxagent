@@ -216,7 +216,6 @@ export function rollupGscSnapshot(rows: SearchQueryDaily[]): SearchQueryDaily[] 
     impressions: number;
     posNum: number;
     posDen: number;
-    maxDate: string;
   }>();
   for (const row of rows) {
     if (row.kind !== "query" && row.kind !== "page") continue;
@@ -228,7 +227,6 @@ export function rollupGscSnapshot(rows: SearchQueryDaily[]): SearchQueryDaily[] 
       impressions: 0,
       posNum: 0,
       posDen: 0,
-      maxDate: "",
     };
     cur.clicks += row.clicks;
     cur.impressions += row.impressions;
@@ -236,13 +234,14 @@ export function rollupGscSnapshot(rows: SearchQueryDaily[]): SearchQueryDaily[] 
       cur.posNum += row.position * row.impressions;
       cur.posDen += row.impressions;
     }
-    if (row.date && row.date > cur.maxDate) cur.maxDate = row.date;
     by.set(key, cur);
   }
   return [...by.values()]
     .map((v) => ({
       kind: v.kind,
-      date: v.maxDate,
+      // Empty date = last-N aggregate, same as Queries.csv / Pages.csv.
+      // Stamping maxDate made snapshotWindow claim a one-day window.
+      date: "",
       query: v.query,
       clicks: v.clicks,
       impressions: v.impressions,

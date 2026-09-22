@@ -208,7 +208,7 @@ describe("gsc adapters", () => {
     assert.ok(q);
     assert.equal(q!.clicks, 0);
     assert.equal(q!.impressions, 170);
-    assert.equal(q!.date, "2026-09-19");
+    assert.equal(q!.date, "");
     assert.ok(q!.position != null && q!.position > 16 && q!.position < 17);
     assert.equal(p!.impressions, 200);
   });
@@ -343,14 +343,16 @@ describe("buildIntel from API-shaped rows after the CSV cutoff", () => {
 
   test("dated API days roll up so web-insights / site cards do not look CSV-empty", () => {
     const days = ["2026-09-13", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18", "2026-09-19"];
-    const queries = days.flatMap((date) => [
+    const queries = days.flatMap((date, i) => [
       {
         kind: "query" as const,
         date,
         query: "tallow deodorant",
-        clicks: 0,
+        // First day is a high-CTR daily row. Rollup CTR stays under 1%.
+        // measureCheck must grade the rollup, not find() this 5% day.
+        clicks: i === 0 ? 4 : 0,
         impressions: 80,
-        ctr: 0,
+        ctr: i === 0 ? 5 : 0,
         position: 6.2,
       },
       {
@@ -389,13 +391,18 @@ describe("buildIntel from API-shaped rows after the CSV cutoff", () => {
     });
     assert.equal(intel.web_insights.present, true);
     assert.ok(!intel.web_insights.gaps.some((g) => /csv not uploaded/i.test(g)));
-    assert.ok(intel.web_insights.windows.gsc_queries);
-    assert.ok(intel.web_insights.windows.gsc_pages);
+    assert.equal(intel.web_insights.windows.gsc_queries?.label, "Last-7 undated");
+    assert.equal(intel.web_insights.windows.gsc_pages?.label, "Last-7 undated");
     const q = intel.gsc.queries.find((r) => r.query === "tallow deodorant");
     const p = intel.gsc.pages.find((r) => /tallow-balm/.test(r.query));
     assert.ok(q && q.impressions >= 400 && (q.ctr ?? 100) < 1);
     assert.ok(p && p.impressions >= 400 && (p.ctr ?? 100) < 1);
-    assert.ok(intel.cards.some((c) => c.id === "gsc-title-trap"));
+    assert.equal(q!.date, "");
+    const trap = intel.cards.find((c) => c.id === "gsc-title-trap");
+    assert.ok(trap);
+    assert.ok(trap!.check_value != null && trap!.check_value < 1);
+    assert.ok(trap!.check_value > 0.5 && trap!.check_value < 0.8,
+      `rolled CTR should be ~0.71, not first-day 5; got ${trap!.check_value}`);
     assert.ok(intel.web_insights.low_ctr_pages.some((r) => /tallow-balm/.test(r.path)));
     assert.ok(intel.web_insights.money_queries.length === 0 || intel.web_insights.windows.gsc_queries);
   });
