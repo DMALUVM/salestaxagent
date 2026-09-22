@@ -923,7 +923,7 @@ def _print_search_term_coverage() -> None:
         max_d = (hi.data or [{}])[0].get("date")
         rows = getattr(n, "count", None)
         click.echo(f"  ads_search_terms_daily: min={min_d} max={max_d} rows={rows} "
-                   f"(SP-only SUMMARY dates; not padded)")
+                   f"(SP-only calendar dates; not account spend)")
     except Exception as e:
         click.echo(f"  ads_search_terms_daily coverage lookup failed: {e}")
 
@@ -1021,6 +1021,78 @@ def ads_search_terms_backfill_cmd(days, chunk_days, cancel_report_id,
     _print_search_term_coverage()
     click.echo("Proof SQL: select min(date), max(date), count(*), count(distinct date) "
                "from ads_search_terms_daily;")
+
+
+@cli.command("ads-search-terms-rebuild")
+@click.option("--days", default=90, show_default=True,
+              help="Closed Amazon days to delete and re-pull (default 90).")
+@click.option("--chunk-days", default=7, show_default=True,
+              help="DAILY search-term chunk size (max 30).")
+def ads_search_terms_rebuild_cmd(days, chunk_days):
+    """One-shot: replace SUMMARY-stamped search-term spend with calendar days.
+
+    Multi-day timeUnit=SUMMARY wrote the whole window onto the chunk-end
+    date, so SUM(ads_search_terms_daily.spend) ran about 5× SP campaign
+    spend. This fetches timeUnit=DAILY first, deletes that chunk's dates
+    only after rows return, then upserts. ads_campaigns_daily is not
+    touched and stays the spend source of truth for account daily totals.
+
+    Do not use ads-search-terms-backfill for this repair — it skips any
+    week that already has a row. HTTP 425 or another ads pull: STOP.
+    Re-run later for chunks that did not finish. No retry loop.
+    """
+    from src.config import settings
+    if not settings.amazon_ads_enabled:
+        click.echo("Amazon Ads not configured. Set AMAZON_ADS_* in .env")
+        return
+    from src.amazon_ads.reports import AdsSyncBusy, sync_search_terms_rebuild
+    from src.amazon_ads.sync_lock import install_ads_lease_exit_hooks
+    from src.db import job_start, job_finish
+
+    install_ads_lease_exit_hooks()
+    click.echo(f"Search-term rebuild: last {days}d, {chunk_days}d DAILY chunks, "
+               f"newest first. Deletes a chunk's dates only after that report "
+               f"returns rows. ads_campaigns_daily is not modified.")
+    _print_search_term_coverage()
+    run_id = job_start("ads_search_terms_rebuild")
+    try:
+        result = sync_search_terms_rebuild(
+            days=days, chunk_days=chunk_days, on_progress=click.echo)
+    except AdsSyncBusy as e:
+        job_finish(run_id, "skipped", str(e)[:500])
+        click.echo(f"STOP: {e}")
+        click.echo("Do not start a second ads pull. Wait until the slot is free.")
+        return
+    except Exception as e:
+        job_finish(run_id, "fail", str(e)[:500])
+        click.echo(f"STOP: {e}")
+        return
+
+    st = result.get("search_terms") or {}
+    if isinstance(st, dict) and st.get("stopped"):
+        click.echo(f"STOP: search-term rebuild halted ({st['stopped']}). "
+                   f"Chunks already replaced were kept. Do not retry in a loop.")
+    if isinstance(st, dict):
+        click.echo(f"  search_terms: {st.get('rows', 0)} rows, "
+                   f"{st.get('inserted', 0)} inserted, "
+                   f"{st.get('deleted', 0)} deleted, "
+                   f"{len(st.get('replaced') or [])} chunk(s) replaced, "
+                   f"{len(st.get('errors') or [])} error(s)")
+        for err in (st.get("errors") or [])[:5]:
+            click.echo(f"    ⚠ {err}")
+    status, message = _ads_sync_outcome(result, days)
+    job_finish(run_id, status, message,
+               stats=st if isinstance(st, dict) else None)
+    click.echo(f"  Job ads_search_terms_rebuild: {status} — {message}")
+    _print_search_term_coverage()
+    click.echo("Check one closed day (ST spend should be near SP campaigns, "
+               "not 5–7×). ads_campaigns_daily remains account spend SoT:")
+    click.echo("  select s.date, s.st, c.sp")
+    click.echo("  from (select date, sum(spend) st from ads_search_terms_daily")
+    click.echo("        where date = 'YYYY-MM-DD' group by date) s")
+    click.echo("  join (select date, sum(spend) sp from ads_campaigns_daily")
+    click.echo("        where date = 'YYYY-MM-DD' and campaign_type = 'SP'")
+    click.echo("        group by date) c using (date);")
 
 
 def _ads_sync_outcome(result: dict, days: int) -> tuple[str, str]:

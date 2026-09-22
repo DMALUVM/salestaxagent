@@ -39,6 +39,7 @@ ADS_PULL_JOBS = frozenset({
     "ads_search_terms_sync",
     "ads_search_terms_backfill",
     "ads_search_terms_gap_fill",
+    "ads_search_terms_rebuild",
     "ads_placements_sync",
     "ads_campaigns_backfill",
     "ads_sb_sd_heal",

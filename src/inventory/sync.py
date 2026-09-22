@@ -51,6 +51,26 @@ INVENTORY_SYNC_STEPS: tuple[str, ...] = (
 RESTOCK_REPORT = "GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT"
 PLANNING_REPORT = "GET_FBA_INVENTORY_PLANNING_DATA"
 
+# GET_RESTOCK_INVENTORY_RECOMMENDATIONS_REPORT headers (US). The short
+# names `alert` / `days-of-supply` are not what this report sends.
+# Recommended action is the live signal ("No action required", …).
+# Days of supply is the AFN column, then Total (open shipments included).
+_RESTOCK_DOS_HEADERS = (
+    "days-of-supply-at-amazon-fulfillment-network",
+    "total-days-of-supply-(including-units-from-open-shipments)",
+    "total-days-of-supply",
+    "days-of-supply",
+    "estimated-days-of-supply",
+    "days-of-supply-at-merchant",
+)
+_RESTOCK_NO_ACTION = frozenset({
+    "no action required",
+    "no action",
+    "none",
+    "n/a",
+    "na",
+})
+
 
 # ---------------------------------------------------------------------------
 # Restock recommendations
@@ -72,8 +92,11 @@ def fetch_restock(dry_run: bool = False, on_poll=None) -> dict:
         result.update(skip_empty("amazon returned 0 restock rows"))
 
     if not dry_run and rows:
+        # alert=None must be written. Default upsert drops nulls, which
+        # left stale out_of_stock after Amazon cleared the recommendation.
         result["rows_inserted"] = upsert_rows(
             "inventory_restock", rows, on_conflict="sku",
+            keep_null_columns=frozenset({"alert"}),
         )
         log_ingestion(
             filename="restock_recommendations",
@@ -83,6 +106,49 @@ def fetch_restock(dry_run: bool = False, on_poll=None) -> dict:
         )
 
     return result
+
+
+def _restock_days_of_supply(row: dict, header_lookup: dict[str, str]) -> str:
+    """AFN days of supply, then Total, then the short legacy names.
+
+    A present-but-blank AFN cell must not hide Total. `_get` returns ""
+    for both a missing header and an empty cell, so each name is tried
+    on its own.
+    """
+    from src.amazon_sp.reports import _get
+
+    for name in _RESTOCK_DOS_HEADERS:
+        val = _get(row, header_lookup, name)
+        if val:
+            return val
+    for needle in (
+        "days-of-supply-at-amazon",
+        "total-days-of-supply",
+    ):
+        for key in header_lookup:
+            if key.startswith(needle):
+                val = _get(row, header_lookup, key)
+                if val:
+                    return val
+    return ""
+
+
+def _restock_alert(action: str, legacy: str) -> str | None:
+    """Map Recommended action onto inventory_restock.alert.
+
+    "No action required" and a blank action clear the column (None).
+    A blank file used to omit alert on upsert, so a prior out_of_stock
+    stayed after Amazon had stock on hand and no action.
+    """
+    text = (action or "").strip()
+    if text:
+        if text.casefold() in _RESTOCK_NO_ACTION:
+            return None
+        return text
+    old = (legacy or "").strip()
+    if not old or old.casefold() in _RESTOCK_NO_ACTION:
+        return None
+    return old
 
 
 def _parse_restock(content: str) -> list[dict]:
@@ -115,9 +181,7 @@ def _parse_restock(content: str) -> list[dict]:
         rec_ship = _get(row, H, "recommended-ship-date",
                         "recommended-action-date") or None
 
-        dos_str = _get(row, H, "days-of-supply", "estimated-days-of-supply",
-                       "days-of-supply-at-merchant")
-        dos = _safe_float(dos_str)
+        dos = _safe_float(_restock_days_of_supply(row, H))
 
         sold30 = _safe_int(_get(row, H, "units-sold-last-30-days",
                                 "sold-last-30-days", "units-sold-30"))
@@ -126,7 +190,10 @@ def _parse_restock(content: str) -> list[dict]:
         inbound = _safe_int(_get(row, H, "inbound", "inbound-quantity",
                                  "inbound-units", "inbound-working",
                                  "total-inbound"))
-        alert = _get(row, H, "alert", "recommendation-alert") or None
+        alert = _restock_alert(
+            _get(row, H, "recommended-action"),
+            _get(row, H, "alert", "recommendation-alert"),
+        )
 
         rows.append({
             "sku": sku,

@@ -419,32 +419,134 @@ def fetch_placements(start: date, end: date) -> dict:
     }
 
 
-def _fetch_search_terms_chunk(start: date, end: date) -> list[dict]:
-    """Fetch SP search term report for a ≤30-day range.
+# spSearchTerm columns that this account already accepts. DAILY adds `date`
+# (required by Reporting v3 when timeUnit=DAILY; invalid on SUMMARY).
+# `spend` stays — that is the column the working SUMMARY pull used. `cost`
+# is accepted on the row if Amazon returns it instead (see _metrics).
+_SEARCH_TERM_COLUMNS = [
+    "searchTerm",
+    "campaignName", "campaignId",
+    "adGroupName", "adGroupId",
+    "keyword", "keywordId", "matchType",
+    "impressions", "clicks", "spend",
+    "sales14d", "purchases14d",
+]
 
-    Uses SEARCH_TERM_TIMEOUT (90 min) — these reports are much larger
-    than campaign reports and routinely exceed 30 minutes.
-    """
-    config = {
+
+def _search_term_report_config(start: date, end: date, time_unit: str) -> dict:
+    columns = list(_SEARCH_TERM_COLUMNS)
+    if time_unit == "DAILY":
+        columns = ["date", *columns]
+    return {
         "startDate": start.isoformat(),
         "endDate": end.isoformat(),
         "configuration": {
             "adProduct": "SPONSORED_PRODUCTS",
             "groupBy": ["searchTerm"],
-            "columns": [
-                "searchTerm",
-                "campaignName", "campaignId",
-                "adGroupName", "adGroupId",
-                "keyword", "keywordId", "matchType",
-                "impressions", "clicks", "spend",
-                "sales14d", "purchases14d",
-            ],
+            "columns": columns,
             "reportTypeId": "spSearchTerm",
-            "timeUnit": "SUMMARY",
+            "timeUnit": time_unit,
             "format": "GZIP_JSON",
         },
     }
-    return _fetch_report_with_backoff(config, timeout=SEARCH_TERM_TIMEOUT)
+
+
+def _is_report_config_rejected(exc: Exception) -> bool:
+    """400/422 on create — column or timeUnit rejected, not a slot wait."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in {400, 422}
+    msg = str(exc)
+    return "400" in msg or "422" in msg
+
+
+def _fetch_search_terms_chunk(start: date, end: date,
+                              *, time_unit: str = "DAILY") -> list[dict]:
+    """Fetch one SP search-term report.
+
+    Reporting v3 spSearchTerm supports timeUnit=DAILY (each row has `date`)
+    and SUMMARY. DAILY is the calendar-day grain. A multi-day SUMMARY has
+    no date and must not be stored — that stamped the whole window on the
+    chunk-end day and inflated ads_search_terms_daily spend about 5×.
+
+    If Amazon rejects DAILY (400/422), fall back once to 1-day SUMMARY
+    for this window. A 1-day SUMMARY is that Amazon day. No sleep, no
+    second DAILY attempt. 425 and timeout propagate — do not walk the
+    days after the slot is busy.
+    """
+    try:
+        return _fetch_report_with_backoff(
+            _search_term_report_config(start, end, time_unit),
+            timeout=SEARCH_TERM_TIMEOUT)
+    except AdsReportSlotBusy:
+        raise
+    except TimeoutError:
+        raise
+    except Exception as e:
+        if (time_unit == "DAILY" and start != end
+                and _is_report_config_rejected(e)):
+            log.warning(
+                "spSearchTerm timeUnit=DAILY rejected for %s→%s (%s) — "
+                "one-day SUMMARY fallback",
+                start, end, str(e)[:160])
+            rows: list[dict] = []
+            for day, _day_end in _date_chunks(start, end, 1):
+                # A 1-day SUMMARY has no date column. That day is the
+                # Amazon calendar day — not a multi-day window stamped
+                # on the chunk end.
+                for row in _fetch_search_terms_chunk(
+                        day, day, time_unit="SUMMARY"):
+                    if not row.get("date"):
+                        row["date"] = day.isoformat()
+                    rows.append(row)
+            return rows
+        raise
+
+
+def _search_term_calendar_day(row: dict, start: date, end: date) -> str | None:
+    """Amazon calendar day for one search-term row. Never invent one.
+
+    DAILY rows carry `date`. A 1-day SUMMARY has no date; the requested
+    day is that calendar day. A multi-day row with no date is dropped.
+    """
+    raw = row.get("date")
+    if raw:
+        day = str(raw)[:10]
+        try:
+            parsed = date.fromisoformat(day)
+        except ValueError:
+            return None
+        if start <= parsed <= end:
+            return parsed.isoformat()
+        return None
+    if start == end:
+        return start.isoformat()
+    return None
+
+
+def _parse_search_term_rows(rows: list[dict], start: date,
+                            end: date) -> tuple[list[dict], int]:
+    """Map report rows onto ads_search_terms_daily. Drop undated multi-day."""
+    parsed: list[dict] = []
+    dropped = 0
+    for r in rows:
+        day = _search_term_calendar_day(r, start, end)
+        if not day:
+            dropped += 1
+            continue
+        metrics = _metrics(_normalise_metric_keys(r))
+        parsed.append({
+            "date": day,
+            "search_term": r.get("searchTerm", ""),
+            "campaign_id": str(r.get("campaignId", "")),
+            "campaign_name": r.get("campaignName", ""),
+            "ad_group_id": str(r.get("adGroupId", "")),
+            "ad_group_name": r.get("adGroupName", ""),
+            "keyword": r.get("keyword", ""),
+            "keyword_id": str(r.get("keywordId", "")),
+            "match_type": r.get("matchType", ""),
+            **metrics,
+        })
+    return parsed, dropped
 
 
 # ── Chunked fetchers ──
@@ -639,13 +741,13 @@ def fetch_prior_day_campaigns(as_of: date | None = None,
 
 
 def _search_term_chunk_present(end: date, start: date | None = None) -> bool:
-    """True when ads_search_terms_daily already has a SUMMARY date in the chunk.
+    """True when ads_search_terms_daily already has a date in the chunk.
 
-    Search-term rows use timeUnit=SUMMARY and stamp the chunk END. Nightly 7d
-    and a shifted 90d lookback land different ENDs for the same closed week,
-    so an exact-`end` match incorrectly treats a covered week as a gap and
-    re-requests Amazon. Any stored date in [start, end] means the week is
-    already stored — do not re-pull.
+    Any stored date in [start, end] means the chunk was written — a DAILY
+    row or a pre-rebuild SUMMARY stamp on the chunk end. An exact-`end`
+    match misses a shifted week and re-requests Amazon. Do not re-pull
+    when skip_existing is set. Inflated SUMMARY spend is not repaired
+    here; ads-search-terms-rebuild deletes those dates and re-pulls DAILY.
 
     When `start` is omitted, keep the exact-`end` lookup (callers that only
     know the stamp).
@@ -700,14 +802,16 @@ def missing_search_term_days(
 
     Pure. A day is a gap when it has no search-term row and either:
     - an interior hole: some stored ST date before it and some after it
-      (the 2026-09-03 case — neighbors exist, SUMMARY stamped chunk END);
+      (the 2026-09-03 case — neighbors exist, a SUMMARY pull stamped
+      only the chunk END);
     - a trailing miss: after the newest ST date through `end` (failed
       last night). When `spend_dates` is provided, trailing days without
       SP campaign spend are skipped so a no-ads day is not invented.
 
-    A successful 7d SUMMARY that only stamps yesterday is not a cascade:
-    the six earlier days have no ST-before-and-after pair. Covered days
-    (already in `st_dates`) are never returned.
+    A pre-rebuild 7d SUMMARY that only stamps yesterday is not a cascade:
+    the six earlier days have no ST-before-and-after pair. New pulls write
+    timeUnit=DAILY, so a finished chunk has a row on each day Amazon
+    returned. Covered days (already in `st_dates`) are never returned.
     """
     spend_dates = spend_dates or set()
     st_dates = set(st_dates)
@@ -783,7 +887,7 @@ def detect_missing_search_term_days(
 
 
 def fetch_search_term_gap_days(gap_days: list[date]) -> dict:
-    """Pull only the given dates as 1-day SUMMARY chunks. Skip covered.
+    """Pull only the given dates as 1-day chunks. Skip covered.
 
     HTTP 425 / timeout STOP remaining days — schedule a later one-shot,
     do not poll. Covered dates are not requested.
@@ -922,16 +1026,19 @@ def fetch_search_terms(start: date, end: date,
     chunks. Do not continue to the next week — that create would 425
     immediately. 429 / other chunk errors still skip that week only.
 
-    skip_existing: skip a chunk that already has any stored SUMMARY date
-    in [chunk_start, chunk_end] (resume a gaps-only 90d). Weekday 7d must
-    leave this False so the last week still refreshes.
+    skip_existing: skip a chunk that already has any stored date in
+    [chunk_start, chunk_end] (resume a gaps-only 90d). That includes
+    pre-rebuild SUMMARY stamps, so skip_existing will not repair inflated
+    spend — use ads-search-terms-rebuild. Weekday 7d must leave this False
+    so the last week still refreshes.
     newest_first: request recent weeks first so a stop still lands
     freshness. Sunday 90d / one-shot use this; nightly 7d does not care.
 
-    Note: the report is requested with timeUnit=SUMMARY, so each chunk returns
-    one aggregate row per term. `date` is a window label (chunk END), not a
-    daily grain — consumers filter on it then sum metrics. Smaller chunks
-    still mean shorter reports; they are not required for freshness.
+    timeUnit=DAILY: each row's `date` is the Amazon calendar day. Do not
+    stamp a multi-day window onto the chunk end. ads_campaigns_daily
+    remains the spend source of truth for account daily totals until
+    ads_search_terms_daily (SP search-term grain only) is trusted. Do not
+    sum search-term spend as the account total.
     """
     chunks = _date_chunks(start, end, chunk_days or SEARCH_TERM_CHUNK_DAYS)
     if newest_first:
@@ -971,27 +1078,15 @@ def fetch_search_terms(start: date, end: date,
             errors.append(msg)
             continue
 
-        chunk_rows = []
-        for r in rows:
-            m = _metrics(r)
-            chunk_rows.append({
-                # timeUnit=SUMMARY collapses the chunk to one aggregate row.
-                # Stamp chunk END so max(date) is a freshness proxy for the
-                # window (a 7-day chunk ending yesterday would otherwise look
-                # ~6 days stale if we stamped the start). Metrics are unchanged.
-                "date": ce.isoformat(),
-                "search_term": r.get("searchTerm", ""),
-                "campaign_id": str(r.get("campaignId", "")),
-                "campaign_name": r.get("campaignName", ""),
-                "ad_group_id": str(r.get("adGroupId", "")),
-                "ad_group_name": r.get("adGroupName", ""),
-                "keyword": r.get("keyword", ""),
-                "keyword_id": str(r.get("keywordId", "")),
-                "match_type": r.get("matchType", ""),
-                **m,
-            })
+        chunk_rows, dropped = _parse_search_term_rows(rows, cs, ce)
+        if dropped:
+            msg = (f"Chunk {i} ({cs}→{ce}): dropped {dropped} row(s) "
+                   "with no Amazon calendar day")
+            log.warning("Search terms %s", msg)
+            errors.append(msg)
 
         # Commit this week now. Do not wait for the remaining 90d chunks.
+        # ads_campaigns_daily stays the account-level daily spend SoT.
         if chunk_rows:
             seen: dict[tuple, dict] = {}
             for p in chunk_rows:
@@ -1011,12 +1106,174 @@ def fetch_search_terms(start: date, end: date,
     return {
         "rows": len(all_parsed), "inserted": inserted, "chunks": len(chunks),
         "chunk_days": chunk_days or SEARCH_TERM_CHUNK_DAYS,
+        "time_unit": "DAILY",
         "chunks_ok": len(chunks) - len(errors) - len(skipped_existing),
         "chunks_skipped_existing": len(skipped_existing),
         "stopped": stopped,
         "errors": errors,
         "coverage": "SP-only",
     }
+
+
+def delete_search_terms_between(start: date, end: date) -> int:
+    """Delete ads_search_terms_daily rows with date in [start, end].
+
+    PostgREST caps each delete. Loop until a batch is empty, then confirm
+    the window is gone. Does not touch ads_campaigns_daily.
+    """
+    if end < start:
+        return 0
+    from src.db import get_client
+    client = get_client()
+    total = 0
+    for _ in range(500):
+        res = (client.table("ads_search_terms_daily").delete()
+               .gte("date", start.isoformat())
+               .lte("date", end.isoformat())
+               .execute())
+        n = len(res.data or [])
+        total += n
+        if n == 0:
+            break
+    else:
+        raise RuntimeError(
+            f"ads_search_terms_daily delete did not finish for {start}→{end}")
+    if _search_term_chunk_present(end, start=start):
+        raise RuntimeError(
+            f"ads_search_terms_daily still has rows in {start}→{end} after delete")
+    return total
+
+
+def rebuild_search_terms_daily(start: date, end: date,
+                               chunk_days: int | None = None,
+                               newest_first: bool = True) -> dict:
+    """Delete SUMMARY-stamped search-term dates, then write calendar days.
+
+    One chunk at a time: fetch DAILY first. Delete that chunk's dates only
+    after rows come back, then upsert. A failed or empty report leaves the
+    old rows in place. Does not read or write ads_campaigns_daily.
+
+    HTTP 425 / timeout STOP remaining chunks. No retry loop.
+    """
+    chunks = _date_chunks(start, end, chunk_days or SEARCH_TERM_CHUNK_DAYS)
+    if newest_first:
+        chunks = list(reversed(chunks))
+    deleted = 0
+    inserted = 0
+    rows_n = 0
+    errors: list[str] = []
+    stopped: str | None = None
+    replaced: list[str] = []
+
+    for i, (cs, ce) in enumerate(chunks, 1):
+        log.info("Search terms rebuild chunk %d/%d: %s → %s",
+                 i, len(chunks), cs, ce)
+        try:
+            raw = _fetch_search_terms_chunk(cs, ce)
+        except AdsReportSlotBusy as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:160]}"
+            log.error("STOP search-term rebuild: reporting slot busy (HTTP 425). "
+                      "Remaining chunks not requested. Existing rows kept.")
+            errors.append(msg)
+            stopped = "slot_busy"
+            break
+        except TimeoutError as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:160]}"
+            log.error("STOP search-term rebuild: report timed out. "
+                      "Remaining chunks not requested. Existing rows kept.")
+            errors.append(msg)
+            stopped = "timeout"
+            break
+        except Exception as e:
+            msg = f"Chunk {i} ({cs}→{ce}): {str(e)[:120]}"
+            log.warning("Search terms rebuild %s", msg)
+            errors.append(msg)
+            continue
+
+        parsed, dropped = _parse_search_term_rows(raw, cs, ce)
+        if dropped:
+            errors.append(
+                f"Chunk {i} ({cs}→{ce}): dropped {dropped} row(s) "
+                "with no Amazon calendar day")
+        if not parsed:
+            msg = (f"Chunk {i} ({cs}→{ce}): no calendar-day rows — "
+                   "left existing ads_search_terms_daily rows in place")
+            log.warning("Search terms rebuild %s", msg)
+            errors.append(msg)
+            continue
+
+        try:
+            deleted += delete_search_terms_between(cs, ce)
+        except Exception as e:
+            msg = f"Chunk {i} ({cs}→{ce}) delete: {str(e)[:160]}"
+            log.warning("Search terms rebuild %s", msg)
+            errors.append(msg)
+            continue
+
+        seen: dict[tuple, dict] = {}
+        for p in parsed:
+            key = (p["date"], p["search_term"], p["campaign_id"], p["ad_group_id"])
+            seen[key] = p
+        try:
+            inserted += upsert_rows(
+                "ads_search_terms_daily", list(seen.values()),
+                on_conflict="date,search_term,campaign_id,ad_group_id")
+        except Exception as e:
+            msg = f"Chunk {i} ({cs}→{ce}) upsert: {str(e)[:120]}"
+            log.warning("Search terms rebuild %s", msg)
+            errors.append(msg)
+            continue
+        rows_n += len(parsed)
+        replaced.append(f"{cs.isoformat()}→{ce.isoformat()}")
+
+    return {
+        "rows": rows_n,
+        "inserted": inserted,
+        "deleted": deleted,
+        "chunks": len(chunks),
+        "chunk_days": chunk_days or SEARCH_TERM_CHUNK_DAYS,
+        "time_unit": "DAILY",
+        "replaced": replaced,
+        "stopped": stopped,
+        "errors": errors,
+        "coverage": "SP-only",
+    }
+
+
+def sync_search_terms_rebuild(days: int = 90,
+                              chunk_days: int | None = None,
+                              as_of: date | None = None,
+                              on_progress=None) -> dict:
+    """One-shot rebuild under the ads lease. Does not touch campaigns."""
+    end = as_of or amazon_as_of()
+    start = end - timedelta(days=days - 1)
+    acquired = _SYNC_LOCK.acquire(timeout=_SYNC_LOCK_TIMEOUT)
+    if not acquired:
+        raise AdsSyncBusy(
+            "another ads pull is running — skipped so this job does not "
+            "wait hours and page Telegram")
+    try:
+        if not claim_ads_lease("ads_search_terms_rebuild"):
+            raise AdsSyncBusy(
+                "another ads pull is running — skipped so this job does not "
+                "wait hours and page Telegram")
+        try:
+            fail_stale_ads_job_runs()
+            if on_progress:
+                on_progress(
+                    f"search-term rebuild {start} → {end} "
+                    f"({chunk_days or SEARCH_TERM_CHUNK_DAYS}d DAILY chunks)")
+            result = rebuild_search_terms_daily(
+                start, end, chunk_days=chunk_days, newest_first=True)
+            return {
+                "start": start.isoformat(), "end": end.isoformat(),
+                "days": days, "ran": ["search_terms"],
+                "search_terms": result,
+            }
+        finally:
+            release_ads_lease()
+    finally:
+        _SYNC_LOCK.release()
 
 
 # ── Full sync ──
