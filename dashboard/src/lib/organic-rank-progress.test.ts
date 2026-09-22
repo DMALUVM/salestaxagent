@@ -44,6 +44,7 @@ import {
   heatmapSortCaption,
   rankDelta,
   rankHeatTone,
+  selectOrganicCell,
   resolveSfr,
   sortHeatmapRows,
   sparklineGeometry,
@@ -677,9 +678,21 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     });
   });
 
-  test("better child does not replace the Rank Tracker heatmap cell", () => {
-    // moisturizing lip balm 2026-09-21: phrases/v2 cell 71 Assorted,
-    // Sweet Orange variation 63. SoldScope's heatmap matched ~71, not 63.
+  test("parent vs better child: cell, theme, and fill follow the child", () => {
+    // moisturizing lip balm 2026-09-21: phrases/v2 71 Assorted,
+    // Sweet Orange variation 63. The cell is the better child.
+    const picked = selectOrganicCell({
+      phraseRank: 71,
+      phraseAsin: "B0CLHVLG2F",
+      slots: [
+        { asin: "B0CLHVLG2F", theme: "Assorted", rank: 71, amazon_choice: false },
+        { asin: "B0CLHTKY3V", theme: "Sweet Orange", rank: 63, amazon_choice: false },
+      ],
+    });
+    assert.equal(picked.rank, 63);
+    assert.equal(picked.asin, "B0CLHTKY3V");
+    assert.equal(rankHeatTone(picked.rank), "weak");
+
     const progress = buildOrganicRankProgress({
       snapshots: [{
         phrase: "moisturizing lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-21",
@@ -699,18 +712,29 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
       ],
     });
     const row = progress.rows[0];
-    assert.equal(row.positions["2026-09-21"], 71);
-    assert.equal(row.current, 71);
-    assert.equal(row.organic_child_asins["2026-09-21"], "B0CLHVLG2F");
-    assert.equal(winnerChildLabel(row, "2026-09-21"), "Assorted");
-    assert.equal(rankHeatTone(row.positions["2026-09-21"]), "weak");
-    assert.equal(rankHeatTone(63), "weak");
-    assert.notEqual(rankHeatTone(row.positions["2026-09-21"]), rankHeatTone(142));
+    assert.equal(row.positions["2026-09-21"], 63);
+    assert.equal(row.current, 63);
+    assert.equal(row.organic_child_asins["2026-09-21"], "B0CLHTKY3V");
+    assert.equal(winnerChildLabel(row, "2026-09-21"), "Sweet Orange");
+    assert.equal(rankHeatTone(row.positions["2026-09-21"]), rankHeatTone(63));
     const extras = heatmapDayChips(row, "2026-09-21", progress.weeks);
     assert.deepEqual(extras.map((c) => ({ label: c.label, rank: c.rank })), [
-      { label: "Sweet Orange", rank: 63 },
+      { label: "Assorted", rank: 71 },
     ]);
-    assert.equal(extras.some((c) => c.label === "Assorted"), false);
+    assert.equal(extras.some((c) => c.label === "Sweet Orange"), false);
+  });
+
+  test("phrases/v2 stays when it beats every stored child", () => {
+    const picked = selectOrganicCell({
+      phraseRank: 200,
+      phraseAsin: "B0CLHYY3BB",
+      slots: [
+        { asin: "B0CLHYY3BB", theme: "Vanilla", rank: 202, amazon_choice: null },
+      ],
+    });
+    assert.equal(picked.rank, 200);
+    assert.equal(picked.asin, "B0CLHYY3BB");
+    assert.equal(rankHeatTone(picked.rank), "poor");
   });
 
   test("lip balm cell keeps the heatmap rank when the only stored child matches it", () => {
@@ -781,19 +805,19 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
       ],
     });
     const row = progress.rows[0];
-    assert.equal(row.current, 133);
-    assert.equal(row.organic_child_asin, "B0CLHVCPL5");
+    assert.equal(row.current, 88);
+    assert.equal(row.organic_child_asin, "B0CLHVLG2F");
     assert.equal(rowHasThemeCatalog(row), true);
-    assert.equal(winnerChildLabel(row, "2026-09-15"), "Unscented");
+    assert.equal(winnerChildLabel(row, "2026-09-15"), "Assorted");
     const extras = heatmapDayChips(row, "2026-09-15", progress.weeks);
     assert.deepEqual(extras.map((c) => ({ asin: c.asin, label: c.label, rank: c.rank })), [
-      { asin: "B0CLHVLG2F", label: "Assorted", rank: 88 },
+      { asin: "B0CLHVCPL5", label: "Unscented", rank: 126 },
     ]);
-    assert.equal(extras.some((c) => c.asin === "B0CLHVCPL5"), false);
+    assert.equal(extras.some((c) => c.asin === "B0CLHVLG2F"), false);
     const labels = [winnerChildLabel(row, "2026-09-15"), ...extras.map((c) => c.label)];
-    assert.equal(labels.includes("B0CLHVCPL5"), false);
-    assert.equal(labels.includes("CPL5"), false);
-    const ranksForWinner = extras.filter((c) => c.asin === "B0CLHVCPL5").map((c) => c.rank);
+    assert.equal(labels.includes("B0CLHVLG2F"), false);
+    assert.equal(labels.includes("G2F"), false);
+    const ranksForWinner = extras.filter((c) => c.asin === "B0CLHVLG2F").map((c) => c.rank);
     assert.deepEqual(ranksForWinner, []);
   });
 
@@ -854,13 +878,14 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     });
     const row = progress.rows[0];
     const chips = heatmapDayChips(row, "2026-09-15", progress.weeks);
+    assert.equal(row.current, 4);
+    assert.equal(rankHeatTone(row.current), "strong");
+    assert.equal(winnerChildLabel(row, "2026-09-15"), "Unscented");
     assert.deepEqual(chips.map((c) => ({ label: c.label, rank: c.rank })), [
-      { label: "Unscented", rank: 4 },
       { label: "Assorted", rank: 8 },
       { label: "Sweet Orange", rank: 44 },
     ]);
-    assert.equal(winnerChildLabel(row, "2026-09-15"), "Unscented");
-    assert.equal(row.current, 22);
+    assert.equal(chips.some((c) => c.label === "Unscented"), false);
   });
 
   test("matching top-10 winner is not chipped twice when family rank equals variation", () => {

@@ -191,11 +191,10 @@ export function OrganicRankHeatmap() {
               <p className="mt-1 max-w-4xl text-[11px] text-muted-foreground">
                 Keywords × day from SoldScope Rank Tracker daily RT snapshots.
                 SFR is Brand Analytics (`abaSearchFrequencyRank`) — never
-                invented from SoldScope search volume. Each cell is that
-                day's Rank Tracker heatmap rank (greener = better). A
-                theme under the number is the child holding that rank.
-                A better tracked child stays a chip and does not change
-                the number or the fill. Empty is &quot;—&quot;.
+                invented from SoldScope search volume. Each cell is the best stored organic rank for that
+                keyword × day (greener = better). When a tracked child
+                beats the phrases/v2 snapshot, the number, theme, and
+                fill are that child. Empty is &quot;—&quot;.
               </p>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -559,13 +558,12 @@ function Legend() {
         Any 1+ move tints the row; a stronger tint plus the lists means
         meaningful (≥{WOW_MOVE_POSITIONS} positions or crossing top {WOW_TOP_N}).
         Trend is prior → current (lower toward #1 reads as up).
-        Cell # is the SoldScope Rank Tracker heatmap rank for that day.
-        The fill uses that same number. The theme under it is the child
-        holding that rank (SoldScope theme when stored — never an ASIN
-        CHILD pill + theme). A better variation does not replace the
-        cell. Extra theme+#N chips are other tracked children with a
-        stored variation rank that day. Children at organic 1–10 are
-        always listed. Missing children are omitted, never invented.
+        Cell # is the best stored rank for that day. The fill uses that
+        same number. When a tracked child beats phrases/v2, the theme
+        under the number is that child (SoldScope theme when stored —
+        never an ASIN CHILD pill + theme). Other tracked children with
+        a stored rank that day are theme+#N chips. Children at organic
+        1–10 are always listed. Missing ranks stay empty.
       </p>
     </div>
   );

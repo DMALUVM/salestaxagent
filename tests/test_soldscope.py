@@ -1013,6 +1013,109 @@ def test_heatmap_day_rank_wins_over_divergent_organic_position():
     assert lio["raw"]["scrapedOrganicPosition"] == 79
 
 
+def test_variation_current_rank_fills_missing_heatmap_day_only():
+    """Lip balm style: Unscented has no r_2026-09-21 but a current rank.
+
+    A positive r_ day is kept. Rank 0 stays missing. Nested children and
+    variationAsin are stored so a re-pull can populate kids the first
+    page shape used to drop.
+    """
+    rows = syn.variation_rows_from_heatmap(
+        [{
+            "variations": [
+                {
+                    "variationAsin": "b0clhvcpl5",
+                    "theme": "Scent: Unscented",
+                    "organicPosition": 80,
+                    "r_2026-09-20": {"rank": 116},
+                    "r_2026-09-21": {"rank": 0},
+                },
+                {
+                    "asin": "B0CLHTKY3V",
+                    "theme": "Sweet Orange",
+                    "organicPosition": 80,
+                    "r_2026-09-21": {"rank": 142},
+                },
+            ],
+        }],
+        asin="B0CLHTF8YN",
+        marketplace="US",
+        group_id=3537,
+        product_id=6051,
+        phrase_id=126815,
+        phrase="lip balm",
+        pulled_at="now",
+        as_of=date(2026, 9, 21),
+    )
+    by_key = {(r["variation_asin"], r["as_of"]): r["organic_position"] for r in rows}
+    assert by_key[("B0CLHVCPL5", "2026-09-21")] == 80
+    assert by_key[("B0CLHVCPL5", "2026-09-20")] == 116
+    assert by_key[("B0CLHTKY3V", "2026-09-21")] == 142
+    assert ("B0CLHTKY3V", "2026-09-20") not in by_key
+    assert all(r["theme"] for r in rows)
+
+
+def test_variations_heatmap_follows_later_pages(monkeypatch):
+    seen: list[int] = []
+
+    def heat(gid, pid, phrase_id, **kwargs):
+        seen.append(kwargs["page"])
+        if kwargs["page"] == 1:
+            return {
+                "data": [{
+                    "asin": "B0CLHTKY3V",
+                    "theme": "Sweet Orange",
+                    "r_2026-09-21": {"rank": 142},
+                }],
+                "meta": {"last_page": 2, "total": 2},
+            }
+        return {
+            "data": [{
+                "asin": "B0CLHVCPL5",
+                "theme": "Unscented",
+                "organicPosition": 80,
+            }],
+            "meta": {"last_page": 2, "total": 2},
+        }
+
+    monkeypatch.setattr(syn, "get_phrase_variations_heatmap", heat)
+    items = syn.collect_variations_heatmap(
+        3537, 6051, 126815,
+        heatmap_from=date(2026, 9, 21),
+        heatmap_to=date(2026, 9, 21),
+    )
+    assert seen == [1, 2]
+    rows = syn.variation_rows_from_heatmap(
+        items,
+        asin="B0CLHTF8YN",
+        marketplace="US",
+        group_id=3537,
+        product_id=6051,
+        phrase_id=126815,
+        phrase="lip balm",
+        pulled_at="now",
+        as_of=date(2026, 9, 21),
+    )
+    assert {(r["variation_asin"], r["organic_position"]) for r in rows} == {
+        ("B0CLHTKY3V", 142),
+        ("B0CLHVCPL5", 80),
+    }
+    # A short first page plus meta.total must still request the next page.
+    # page * batch_len would stop after page 2 once that page is shorter.
+    assert syn.heatmap_page_has_more(
+        {"data": [{}], "meta": {"total": 3}},
+        page=1, batch_len=1, per_page=100, seen=1,
+    )
+    assert syn.heatmap_page_has_more(
+        {"data": [{}], "meta": {"total": 3}},
+        page=2, batch_len=1, per_page=100, seen=2,
+    )
+    assert not syn.heatmap_page_has_more(
+        {"data": [{}], "meta": {"total": 3}},
+        page=3, batch_len=1, per_page=100, seen=3,
+    )
+
+
 def test_list_product_phrases_sends_heatmap_query(monkeypatch):
     seen: list[dict] = []
 
