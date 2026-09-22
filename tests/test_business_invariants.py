@@ -1309,59 +1309,100 @@ class TestSpapiOrderFreshness:
         assert result["warnings"]
 
 
-# ── 4g. SUMMARY search-term date is a window label, not daily grain ──
+# ── 4g. Search-term spend is the Amazon calendar day (timeUnit=DAILY) ──
 
 
 class TestSearchTermSummaryDateStamp:
-    """timeUnit=SUMMARY collapses each chunk to one row.
+    """spSearchTerm is requested with timeUnit=DAILY.
 
-    Consumers (actions engine, search-term loop, brief, SQL) filter on `date`
-    then SUM metrics — they do not require daily grain. Stamping chunk END
-    makes max(date) a freshness proxy without extra Ads report calls. Do not
-    switch search_term_chunk_days to 1 for this; that would multiply API load
-    and change how many SUMMARY rows a lookback sums.
+    A multi-day SUMMARY used to stamp the whole window on the chunk-end
+    date, so SUM(ads_search_terms_daily.spend) ran about 5× the SP portion
+    of ads_campaigns_daily. Rows keep the report `date`. A multi-day row
+    with no date is dropped — do not invent a day. ads_campaigns_daily
+    remains the account daily spend source of truth.
     """
 
-    def _term_row(self, term="tallow balm"):
-        return {
+    def _term_row(self, term="tallow balm", row_date=None, spend=4.50):
+        row = {
             "searchTerm": term, "campaignId": "camp-1", "campaignName": "SP",
             "adGroupId": "ag-1", "adGroupName": "AG", "keyword": "tallow",
             "keywordId": "kw-1", "matchType": "EXACT",
-            "impressions": 100, "clicks": 10, "spend": 4.50,
+            "impressions": 100, "clicks": 10, "spend": spend,
             "sales14d": 12.00, "purchases14d": 1,
         }
+        if row_date is not None:
+            row["date"] = row_date
+        return row
 
-    def test_summary_rows_use_chunk_end_not_start(self, monkeypatch):
+    def test_daily_rows_keep_amazon_date_and_spend(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        written: list[dict] = []
+
+        def fake_chunk(cs, ce, time_unit="DAILY"):
+            assert time_unit == "DAILY"
+            return [
+                self._term_row(row_date=cs.isoformat(), spend=1.25),
+                self._term_row(term="other", row_date=ce.isoformat(), spend=2.00),
+            ]
+
+        monkeypatch.setattr(reports, "_fetch_search_terms_chunk", fake_chunk)
+        monkeypatch.setattr(reports, "upsert_rows",
+                            lambda t, rows, on_conflict=None: written.extend(rows) or len(rows))
+
+        start, end = date(2026, 8, 15), date(2026, 8, 21)
+        result = reports.fetch_search_terms(start, end, chunk_days=7)
+
+        by_date = {r["date"]: r for r in written}
+        assert set(by_date) == {"2026-08-15", "2026-08-21"}
+        assert by_date["2026-08-15"]["spend"] == 1.25
+        assert by_date["2026-08-21"]["spend"] == 2.00
+        assert by_date["2026-08-15"]["search_term"] == "tallow balm"
+        assert by_date["2026-08-21"]["sales_14d"] == 12.00
+        assert by_date["2026-08-21"]["orders_14d"] == 1
+        assert result["time_unit"] == "DAILY"
+
+    def test_multi_day_row_without_date_is_not_stamped_on_chunk_end(self, monkeypatch):
         import src.amazon_ads.reports as reports
         from datetime import date
 
         written: list[dict] = []
 
         monkeypatch.setattr(reports, "_fetch_search_terms_chunk",
-                            lambda cs, ce: [self._term_row()])
+                            lambda cs, ce: [self._term_row(spend=18.80)])
         monkeypatch.setattr(reports, "upsert_rows",
                             lambda t, rows, on_conflict=None: written.extend(rows) or len(rows))
 
-        start, end = date(2026, 8, 15), date(2026, 8, 21)
-        reports.fetch_search_terms(start, end, chunk_days=7)
+        result = reports.fetch_search_terms(
+            date(2026, 9, 14), date(2026, 9, 20), chunk_days=7)
+        assert written == []
+        assert result["inserted"] == 0
+        assert any("calendar day" in e for e in result["errors"])
 
-        assert len(written) == 1
-        assert written[0]["date"] == "2026-08-21"
-        assert written[0]["date"] != "2026-08-15"
-        assert written[0]["search_term"] == "tallow balm"
-        # Metric math is the SUMMARY totals, not a per-day split.
-        assert written[0]["spend"] == 4.50
-        assert written[0]["sales_14d"] == 12.00
-        assert written[0]["orders_14d"] == 1
+    def test_one_day_window_without_date_is_that_calendar_day(self):
+        import src.amazon_ads.reports as reports
+        from datetime import date
 
-    def test_each_chunk_is_labelled_with_its_own_end(self, monkeypatch):
+        rows, dropped = reports._parse_search_term_rows(
+            [self._term_row(spend=3.0)], date(2026, 9, 18), date(2026, 9, 18))
+        assert dropped == 0
+        assert rows[0]["date"] == "2026-09-18"
+        assert rows[0]["spend"] == 3.0
+
+        wide, dropped_wide = reports._parse_search_term_rows(
+            [self._term_row(spend=18.8)], date(2026, 9, 14), date(2026, 9, 20))
+        assert dropped_wide == 1
+        assert wide == []
+
+    def test_each_chunk_writes_the_dates_amazon_sent(self, monkeypatch):
         import src.amazon_ads.reports as reports
         from datetime import date
 
         written: list[dict] = []
 
         def fake_chunk(cs, ce):
-            return [self._term_row(term=f"{cs.isoformat()}")]
+            return [self._term_row(term=cs.isoformat(), row_date=ce.isoformat())]
 
         monkeypatch.setattr(reports, "_fetch_search_terms_chunk", fake_chunk)
         monkeypatch.setattr(reports, "upsert_rows",
@@ -1383,7 +1424,7 @@ class TestSearchTermSummaryDateStamp:
         def fake_chunk(cs, ce):
             if ce >= date(2026, 8, 21):
                 raise TimeoutError("CLOSE_WAIT ghost lock")
-            return [self._term_row(term="week-one")]
+            return [self._term_row(term="week-one", row_date=ce.isoformat())]
 
         def fake_upsert(table, rows, on_conflict=None):
             assert table == "ads_search_terms_daily"
@@ -1412,7 +1453,7 @@ class TestSearchTermSummaryDateStamp:
         upserts: list[list[str]] = []
 
         def fake_chunk(cs, ce):
-            return [self._term_row(term=ce.isoformat())]
+            return [self._term_row(term=ce.isoformat(), row_date=ce.isoformat())]
 
         def fake_upsert(table, rows, on_conflict=None):
             upserts.append([r["date"] for r in rows])
@@ -1440,14 +1481,17 @@ class TestSearchTermSummaryDateStamp:
 class TestAdsSearchTermSlotStop:
     """425 / timeout must STOP remaining search-term chunks. No wait-loop."""
 
-    def _term_row(self, term="tallow balm"):
-        return {
+    def _term_row(self, term="tallow balm", row_date=None, spend=4.50):
+        row = {
             "searchTerm": term, "campaignId": "camp-1", "campaignName": "SP",
             "adGroupId": "ag-1", "adGroupName": "AG", "keyword": "tallow",
             "keywordId": "kw-1", "matchType": "EXACT",
-            "impressions": 100, "clicks": 10, "spend": 4.50,
+            "impressions": 100, "clicks": 10, "spend": spend,
             "sales14d": 12.00, "purchases14d": 1,
         }
+        if row_date is not None:
+            row["date"] = row_date
+        return row
 
     def test_create_report_425_is_slot_busy(self, monkeypatch):
         import src.amazon_ads.client as client
@@ -1511,7 +1555,7 @@ class TestAdsSearchTermSlotStop:
             calls.append(ce)
             if len(calls) >= 2:
                 raise AdsReportSlotBusy("HTTP 425")
-            return [self._term_row()]
+            return [self._term_row(row_date=ce.isoformat())]
 
         monkeypatch.setattr(reports, "_fetch_search_terms_chunk", fake_chunk)
         monkeypatch.setattr(reports, "upsert_rows",
@@ -1580,6 +1624,215 @@ class TestAdsSearchTermSlotStop:
         assert "AdsSyncBusy" in body
         assert "Do not retry in a loop" in body
         assert "_cancel_ads_reports_cli" in body
+
+    def test_sp_search_term_request_is_daily_with_date_column(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        captured = {}
+
+        def fake_fetch(config, timeout=None, attempts=3, base_sleep=45.0):
+            captured["config"] = config
+            return [{
+                "date": "2026-09-18", "searchTerm": "tallow",
+                "campaignId": "1", "adGroupId": "2", "spend": 1.5,
+                "clicks": 1, "impressions": 4, "sales14d": 0, "purchases14d": 0,
+            }]
+
+        monkeypatch.setattr(reports, "_fetch_report_with_backoff", fake_fetch)
+        rows = reports._fetch_search_terms_chunk(date(2026, 9, 14), date(2026, 9, 20))
+        cfg = captured["config"]["configuration"]
+        assert cfg["reportTypeId"] == "spSearchTerm"
+        assert cfg["timeUnit"] == "DAILY"
+        assert cfg["columns"][0] == "date"
+        assert "spend" in cfg["columns"]
+        assert rows[0]["date"] == "2026-09-18"
+        assert rows[0]["spend"] == 1.5
+
+    def test_daily_rejected_falls_back_to_one_day_summary_once(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        calls = []
+
+        def fake_fetch(config, timeout=None, attempts=3, base_sleep=45.0):
+            unit = config["configuration"]["timeUnit"]
+            calls.append((
+                config["startDate"], config["endDate"], unit,
+                "date" in config["configuration"]["columns"],
+            ))
+            if unit == "DAILY":
+                raise RuntimeError("400 timeUnit DAILY is invalid for this report")
+            return [{
+                "searchTerm": "tallow", "campaignId": "1", "adGroupId": "2",
+                "spend": 1.5, "clicks": 1, "impressions": 4,
+                "sales14d": 0, "purchases14d": 0,
+            }]
+
+        monkeypatch.setattr(reports, "_fetch_report_with_backoff", fake_fetch)
+        rows = reports._fetch_search_terms_chunk(date(2026, 9, 18), date(2026, 9, 19))
+        assert calls[0] == ("2026-09-18", "2026-09-19", "DAILY", True)
+        assert calls[1:] == [
+            ("2026-09-18", "2026-09-18", "SUMMARY", False),
+            ("2026-09-19", "2026-09-19", "SUMMARY", False),
+        ]
+        assert [r["date"] for r in rows] == ["2026-09-18", "2026-09-19"]
+        assert all(r["spend"] == 1.5 for r in rows)
+        parsed, dropped = reports._parse_search_term_rows(
+            rows, date(2026, 9, 18), date(2026, 9, 19))
+        assert dropped == 0
+        assert [r["date"] for r in parsed] == ["2026-09-18", "2026-09-19"]
+
+    def test_campaigns_daily_config_unchanged(self):
+        import inspect
+        from src.amazon_ads.reports import _fetch_campaigns_chunk
+        src = inspect.getsource(_fetch_campaigns_chunk)
+        assert '"timeUnit": "DAILY"' in src
+        assert "spSearchTerm" not in src
+
+
+class TestSearchTermRebuild:
+    """One-shot rebuild deletes a chunk only after DAILY rows come back."""
+
+    def _term_row(self, term="tallow balm", row_date="2026-09-18", spend=1.0):
+        return {
+            "date": row_date, "searchTerm": term, "campaignId": "camp-1",
+            "campaignName": "SP", "adGroupId": "ag-1", "adGroupName": "AG",
+            "keyword": "tallow", "keywordId": "kw-1", "matchType": "EXACT",
+            "impressions": 10, "clicks": 1, "spend": spend,
+            "sales14d": 0, "purchases14d": 0,
+        }
+
+    def test_rebuild_deletes_then_upserts_calendar_days(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        deleted = []
+        written = []
+
+        monkeypatch.setattr(
+            reports, "_fetch_search_terms_chunk",
+            lambda cs, ce, time_unit="DAILY": [
+                self._term_row(row_date=cs.isoformat(), spend=1.25),
+                self._term_row(term="other", row_date=ce.isoformat(), spend=2.5),
+            ])
+        monkeypatch.setattr(
+            reports, "delete_search_terms_between",
+            lambda start, end: deleted.append((start, end)) or 4)
+        monkeypatch.setattr(
+            reports, "upsert_rows",
+            lambda table, rows, on_conflict=None: written.extend(rows) or len(rows))
+
+        result = reports.rebuild_search_terms_daily(
+            date(2026, 9, 14), date(2026, 9, 20), chunk_days=7, newest_first=False)
+        assert deleted == [(date(2026, 9, 14), date(2026, 9, 20))]
+        assert {r["date"]: r["spend"] for r in written} == {
+            "2026-09-14": 1.25, "2026-09-20": 2.5,
+        }
+        assert result["deleted"] == 4
+        assert result["inserted"] == 2
+        assert result["stopped"] is None
+
+    def test_rebuild_timeout_does_not_delete(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        deleted = []
+
+        def fake_chunk(cs, ce, time_unit="DAILY"):
+            raise TimeoutError("timed out")
+
+        monkeypatch.setattr(reports, "_fetch_search_terms_chunk", fake_chunk)
+        monkeypatch.setattr(
+            reports, "delete_search_terms_between",
+            lambda start, end: deleted.append((start, end)) or 1)
+
+        result = reports.rebuild_search_terms_daily(
+            date(2026, 9, 7), date(2026, 9, 20), chunk_days=7, newest_first=True)
+        assert deleted == []
+        assert result["stopped"] == "timeout"
+        assert result["deleted"] == 0
+        assert result["inserted"] == 0
+
+    def test_rebuild_empty_report_leaves_existing_rows(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        deleted = []
+        monkeypatch.setattr(
+            reports, "_fetch_search_terms_chunk",
+            lambda cs, ce, time_unit="DAILY": [])
+        monkeypatch.setattr(
+            reports, "delete_search_terms_between",
+            lambda start, end: deleted.append((start, end)) or 9)
+
+        result = reports.rebuild_search_terms_daily(
+            date(2026, 9, 18), date(2026, 9, 18), chunk_days=1)
+        assert deleted == []
+        assert result["deleted"] == 0
+        assert result["errors"]
+
+    def test_delete_stops_when_a_batch_is_empty(self, monkeypatch):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        batches = [[{"date": "2026-09-18"}], [{"date": "2026-09-18"}], []]
+
+        class Result:
+            def __init__(self, data):
+                self.data = data
+
+        class Query:
+            def delete(self):
+                return self
+
+            def gte(self, *_a, **_k):
+                return self
+
+            def lte(self, *_a, **_k):
+                return self
+
+            def execute(self):
+                return Result(batches.pop(0))
+
+        class Client:
+            def table(self, name):
+                assert name == "ads_search_terms_daily"
+                return Query()
+
+        monkeypatch.setattr("src.db.get_client", lambda: Client())
+        monkeypatch.setattr(
+            reports, "_search_term_chunk_present", lambda end, start=None: False)
+        deleted = reports.delete_search_terms_between(
+            date(2026, 9, 18), date(2026, 9, 18))
+        assert deleted == 2
+        assert batches == []
+
+    def test_cost_column_becomes_spend_on_the_calendar_day(self):
+        import src.amazon_ads.reports as reports
+        from datetime import date
+
+        rows, dropped = reports._parse_search_term_rows(
+            [{
+                "date": "2026-09-18", "searchTerm": "tallow",
+                "campaignId": "1", "adGroupId": "2",
+                "cost": 4.2, "clicks": 2, "impressions": 10,
+            }],
+            date(2026, 9, 18), date(2026, 9, 18))
+        assert dropped == 0
+        assert rows[0]["date"] == "2026-09-18"
+        assert rows[0]["spend"] == 4.2
+
+    def test_cli_rebuild_is_one_shot_and_stops(self):
+        import inspect
+        from src import main as main_mod
+        src = inspect.getsource(main_mod)
+        start = src.index("def ads_search_terms_rebuild_cmd")
+        body = src[start:src.index("def _ads_sync_outcome")]
+        assert "sync_search_terms_rebuild" in body
+        assert "ads_campaigns_daily" in body
+        assert "Do not retry in a loop" in body
+        assert "fetch_campaigns" not in body
 
 
 class TestAdsSearchTermGapsOnly:
