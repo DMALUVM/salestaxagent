@@ -1,6 +1,10 @@
 /**
  * Optional Phase 2 extras on the landed Iris conversion digest.
  *
+ * TODO(Nora): gsc_query_device_daily / gsc_page_device_daily are warehouse-
+ * ready for a money-term mobile CTR card. Not wired here — keep query/page
+ * totals as seo.queries / seo.pages SoT.
+ *
  * Attached by GET /api/conversion-digest as `phase2`. Locked to the
  * same as_of day. Missing tables / no OAuth rows → null sections.
  * Never invents a session, leak, or SEO number. Never substitutes
@@ -28,6 +32,10 @@ export type SeoRow = {
 export type SeoSection = {
   queries: SeoRow[];
   pages: SeoRow[];
+  /** Site-wide gsc_dim_daily. Empty until Mini writes the locked day. */
+  devices?: SeoRow[];
+  countries?: SeoRow[];
+  appearances?: SeoRow[];
 };
 
 export type AdsCampaign = {
@@ -114,15 +122,41 @@ function seoRows(
     .slice(0, limit);
 }
 
+function dimRows(
+  rows: Array<Record<string, unknown>>,
+  date: string,
+  kind: string,
+  limit = 40,
+): SeoRow[] {
+  return rows
+    .filter((r) => String(r.metric_date ?? "") === date && String(r.dim_kind ?? "") === kind)
+    .map((r) => ({
+      key: String(r.dim_value ?? ""),
+      clicks: asInt(r.clicks),
+      impressions: asInt(r.impressions),
+      ctr: r.ctr == null || r.ctr === "" ? null : Number(r.ctr),
+      position: r.position == null || r.position === "" ? null : Number(r.position),
+    }))
+    .filter((r) => r.key)
+    .sort((a, b) => (b.clicks ?? -1) - (a.clicks ?? -1) || (b.impressions ?? 0) - (a.impressions ?? 0))
+    .slice(0, limit);
+}
+
 export function seoSection(
   queries: Array<Record<string, unknown>>,
   pages: Array<Record<string, unknown>>,
   date: string,
+  dims: Array<Record<string, unknown>> = [],
 ): SeoSection | null {
   const q = seoRows(queries, date, "query");
   const p = seoRows(pages, date, "page");
-  if (!q.length && !p.length) return null;
-  return { queries: q, pages: p };
+  const devices = dimRows(dims, date, "device");
+  const countries = dimRows(dims, date, "country");
+  const appearances = dimRows(dims, date, "search_appearance");
+  if (!q.length && !p.length && !devices.length && !countries.length && !appearances.length) {
+    return null;
+  }
+  return { queries: q, pages: p, devices, countries, appearances };
 }
 
 function asMoney(v: unknown): number | null {
@@ -214,6 +248,7 @@ export function phase2FromLockedDay(
     ga4?: Array<Record<string, unknown>>;
     gscQueries?: Array<Record<string, unknown>>;
     gscPages?: Array<Record<string, unknown>>;
+    gscDims?: Array<Record<string, unknown>>;
     googleAds?: Array<Record<string, unknown>>;
     metaAds?: Array<Record<string, unknown>>;
   },
@@ -221,15 +256,16 @@ export function phase2FromLockedDay(
   const ga4 = tables.ga4 ?? [];
   const gscQueries = tables.gscQueries ?? [];
   const gscPages = tables.gscPages ?? [];
+  const gscDims = tables.gscDims ?? [];
   const googleAds = tables.googleAds ?? [];
   const metaAds = tables.metaAds ?? [];
   return {
     landing_drops: topLandingDrops(ga4, date),
-    seo: seoSection(gscQueries, gscPages, date),
+    seo: seoSection(gscQueries, gscPages, date, gscDims),
     ads: adsCampaigns(googleAds, date),
     connectors: {
       ga4: hasDate(ga4, date),
-      gsc: hasDate(gscQueries, date) || hasDate(gscPages, date),
+      gsc: hasDate(gscQueries, date) || hasDate(gscPages, date) || hasDate(gscDims, date),
       google_ads: hasDate(googleAds, date),
       meta_ads: hasDate(metaAds, date),
     },

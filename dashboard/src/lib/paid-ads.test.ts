@@ -325,6 +325,8 @@ describe("page / API invariants", () => {
     assert.match(intelRead, /ga4_landing_daily/);
     assert.match(intelRead, /gsc_query_daily/);
     assert.match(intelRead, /gsc_page_daily/);
+    assert.match(intelRead, /gsc_dim_daily/);
+    assert.match(intelRead, /adaptGscAppearanceDaily/);
     assert.match(intelRead, /meta_ads_daily/);
     assert.match(intelRead, /preferApiWhenPresent/);
     assert.match(intelRead, /metric_date/);

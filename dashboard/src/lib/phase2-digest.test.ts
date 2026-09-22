@@ -70,6 +70,33 @@ describe("Phase 2 extras are null until OAuth rows exist", () => {
     assert.ok(seo);
     assert.equal(seo.queries[0].key, "tallow");
     assert.equal(seo.pages.length, 0);
+    assert.deepEqual(seo.devices, []);
+    assert.deepEqual(seo.countries, []);
+    assert.deepEqual(seo.appearances, []);
+  });
+
+  test("locked-day GSC dims attach device / country / appearance without inventing", () => {
+    const seo = seoSection([], [], "2026-09-19", [
+      { metric_date: "2026-09-19", dim_kind: "device", dim_value: "MOBILE", clicks: 8, impressions: 100, ctr: 0.08, position: 5 },
+      { metric_date: "2026-09-18", dim_kind: "device", dim_value: "DESKTOP", clicks: 99, impressions: 999, ctr: 0.1, position: 2 },
+      { metric_date: "2026-09-19", dim_kind: "country", dim_value: "usa", clicks: 7, impressions: 90, ctr: 0.077, position: 4.8 },
+      { metric_date: "2026-09-19", dim_kind: "search_appearance", dim_value: "PRODUCT_SNIPPETS", clicks: 1, impressions: 50, ctr: 0.02, position: 8.1 },
+    ]);
+    assert.ok(seo);
+    assert.equal(seo.queries.length, 0);
+    assert.equal(seo.devices?.[0].key, "MOBILE");
+    assert.equal(seo.devices?.[0].clicks, 8);
+    assert.ok(!seo.devices?.some((d) => d.key === "DESKTOP"));
+    assert.equal(seo.countries?.[0].key, "usa");
+    assert.equal(seo.appearances?.[0].key, "PRODUCT_SNIPPETS");
+    const extras = phase2FromLockedDay("2026-09-19", {
+      gscDims: [{
+        metric_date: "2026-09-19", dim_kind: "device", dim_value: "MOBILE",
+        clicks: 8, impressions: 100,
+      }],
+    });
+    assert.equal(extras.connectors.gsc, true);
+    assert.equal(extras.seo?.devices?.[0].key, "MOBILE");
   });
 
   test("locked-day ads slice names campaigns; older days stay null", () => {
@@ -135,5 +162,6 @@ describe("wiring — extras hang on the landed digest", () => {
     assert.doesNotMatch(route, /api\/jev-funnel/);
     assert.doesNotMatch(lib, /ga4_landing_daily|gsc_query_daily/);
     assert.doesNotMatch(route, /paid_ga_daily|ryze/i);
+    assert.match(route, /gsc_dim_daily/);
   });
 });

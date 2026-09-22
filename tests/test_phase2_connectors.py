@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from src.config import load_project_dotenv
 from src.phase2_connectors import (
     CONNECTORS,
+    GSC_PDP_INSPECT_ALLOWLIST,
     NEEDS_OAUTH,
     ga4_sync,
     google_ads_campaign_query,
@@ -145,7 +146,60 @@ def _route_google(url, json=None, **_kwargs):
                 "keys": ["2026-09-19", "https://tallowbourn.com/shop"],
                 "clicks": 3, "impressions": 40, "ctr": 0.075, "position": 6.1,
             }]})
+        if dims == ["date", "query", "device"]:
+            return _Resp({"rows": [{
+                "keys": ["2026-09-19", "tallow balm", "MOBILE"],
+                "clicks": 4, "impressions": 60, "ctr": 0.0667, "position": 3.8,
+            }]})
+        if dims == ["date", "page", "device"]:
+            return _Resp({"rows": [{
+                "keys": ["2026-09-19", "https://tallowbourn.com/shop", "MOBILE"],
+                "clicks": 2, "impressions": 30, "ctr": 0.0667, "position": 5.4,
+            }]})
+        if dims == ["date", "device"]:
+            return _Resp({"rows": [{
+                "keys": ["2026-09-19", "MOBILE"],
+                "clicks": 8, "impressions": 100, "ctr": 0.08, "position": 5.0,
+            }]})
+        if dims == ["date", "country"]:
+            return _Resp({"rows": [{
+                "keys": ["2026-09-19", "usa"],
+                "clicks": 7, "impressions": 90, "ctr": 0.0778, "position": 4.8,
+            }]})
+        if dims == ["date", "searchAppearance"]:
+            return _Resp({"rows": [{
+                "keys": ["2026-09-19", "PRODUCT_SNIPPETS"],
+                "clicks": 1, "impressions": 50, "ctr": 0.02, "position": 8.1,
+            }]})
         return _Resp({})
+    if "urlInspection/index:inspect" in url:
+        inspected = str((json or {}).get("inspectionUrl") or "")
+        return _Resp({
+            "inspectionResult": {
+                "inspectionResultLink": "https://search.google.com/search-console/inspect",
+                "indexStatusResult": {
+                    "verdict": "PASS",
+                    "coverageState": "Submitted and indexed",
+                    "robotsTxtState": "ALLOWED",
+                    "indexingState": "INDEXING_ALLOWED",
+                    "lastCrawlTime": "2026-09-18T12:00:00Z",
+                    "pageFetchState": "SUCCESSFUL",
+                    "googleCanonical": inspected,
+                    "userCanonical": inspected,
+                    "crawledAs": "MOBILE",
+                    "referringUrls": ["https://tallowbourn.com/"],
+                },
+                # Issue lists must never be persisted — Ellis owns those.
+                "mobileUsabilityResult": {
+                    "verdict": "PASS",
+                    "issues": [{"issueType": "SKIP_ME"}],
+                },
+                "richResultsResult": {
+                    "verdict": "PASS",
+                    "detectedItems": [{"richResultType": "Product", "items": []}],
+                },
+            },
+        })
     if "googleAds:searchStream" in url:
         return _Resp(_ads_stream([{
             "campaign": {"id": "111", "name": "Tallow Search"},
@@ -363,10 +417,15 @@ def test_gsc_success_mocked_http_upserts_locked_day(monkeypatch):
     r = gsc_sync(environ=_google_env(), as_of="2026-09-19", days=1)
     assert r["ok"] is True
     assert r["needs_oauth"] is False
-    assert r["rows"] == 2
+    assert r["rows"] == 7
     assert r["start_date"] == "2026-09-19"
+    assert r["fetched"]["inspections"] == 3
     tables = {t for t, _, _ in upserts}
-    assert tables == {"gsc_query_daily", "gsc_page_daily"}
+    assert tables == {
+        "gsc_query_daily", "gsc_page_daily",
+        "gsc_query_device_daily", "gsc_page_device_daily",
+        "gsc_dim_daily", "gsc_url_inspection",
+    }
 
     queries = next(rows for t, rows, _ in upserts if t == "gsc_query_daily")
     assert queries[0]["metric_date"] == "2026-09-19"
@@ -380,6 +439,25 @@ def test_gsc_success_mocked_http_upserts_locked_day(monkeypatch):
     assert pages[0]["page"] == "https://tallowbourn.com/shop"
     assert pages[0]["metric_date"] == "2026-09-19"
 
+    qdev = next(rows for t, rows, _ in upserts if t == "gsc_query_device_daily")
+    assert qdev[0]["query"] == "tallow balm"
+    assert qdev[0]["device"] == "MOBILE"
+    assert qdev[0]["clicks"] == 4
+
+    dims = next(rows for t, rows, _ in upserts if t == "gsc_dim_daily")
+    by_kind = {row["dim_kind"]: row for row in dims}
+    assert by_kind["device"]["dim_value"] == "MOBILE"
+    assert by_kind["country"]["dim_value"] == "usa"
+    assert by_kind["search_appearance"]["dim_value"] == "PRODUCT_SNIPPETS"
+
+    inspects = next(rows for t, rows, _ in upserts if t == "gsc_url_inspection")
+    assert len(inspects) == 3
+    assert all(row["verdict"] == "PASS" for row in inspects)
+    raw = inspects[0]["raw"]
+    assert "issues" not in raw
+    assert "detectedItems" not in raw
+    assert raw["mobileUsabilityVerdict"] == "PASS"
+
 
 def test_gsc_empty_final_day_is_success_zero_rows(monkeypatch):
     def empty(url, json=None, **kwargs):
@@ -387,16 +465,19 @@ def test_gsc_empty_final_day_is_success_zero_rows(monkeypatch):
             return _Resp({})
         return _route_google(url, json=json, **kwargs)
 
-    called = []
+    upserts: list[str] = []
     monkeypatch.setattr("src.phase2_connectors._http_post", empty)
     monkeypatch.setattr(
         "src.db.upsert_rows",
-        lambda *a, **k: called.append(1) or 0,
+        lambda t, rows, on_conflict=None: upserts.append(t) or len(rows),
     )
     r = gsc_sync(environ=_google_env(), as_of="2026-09-19", days=1)
     assert r["ok"] is True
     assert r["rows"] == 0
-    assert called == []  # nothing to upsert; do not invent a query
+    # Analytics stay empty — do not invent a query. Inspection is latest-state.
+    assert "gsc_query_daily" not in upserts
+    assert "gsc_page_daily" not in upserts
+    assert "gsc_url_inspection" in upserts
 
 
 def test_gsc_omitted_metric_stays_null(monkeypatch):
@@ -423,6 +504,68 @@ def test_gsc_omitted_metric_stays_null(monkeypatch):
     assert queries[0]["clicks"] == 2
     assert queries[0]["ctr"] is None
     assert queries[0]["position"] is None
+
+
+def test_gsc_dry_run_documents_path_without_upsert(monkeypatch):
+    monkeypatch.setattr("src.phase2_connectors._http_post", _route_google)
+
+    def boom(*_a, **_k):
+        raise AssertionError("dry-run must not upsert")
+
+    monkeypatch.setattr("src.db.upsert_rows", boom)
+    r = gsc_sync(environ=_google_env(), as_of="2026-09-19", days=1, dry_run=True)
+    assert r["ok"] is True
+    assert r["dry_run"] is True
+    assert r["rows"] == 7
+    assert r["fetched"]["inspections"] == 3
+    assert "No upsert" in r["message"]
+    assert "gsc_dim_daily" in r["message"]
+
+
+def test_gsc_inspection_error_is_fail_closed(monkeypatch):
+    """Inspect HTTP errors log + continue. Query/page SoT still writes."""
+    def boom_inspect(url, json=None, **kwargs):
+        if "urlInspection/index:inspect" in url:
+            return _Resp(
+                {"error": {"code": 429, "message": "quota", "status": "RESOURCE_EXHAUSTED"}},
+                status=429,
+                text="quota",
+            )
+        return _route_google(url, json=json, **kwargs)
+
+    upserts: list[str] = []
+    monkeypatch.setattr("src.phase2_connectors._http_post", boom_inspect)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda t, rows, on_conflict=None: upserts.append(t) or len(rows),
+    )
+    r = gsc_sync(environ=_google_env(), as_of="2026-09-19", days=1)
+    assert r["ok"] is True
+    assert r["rows"] == 7
+    assert r.get("partial") is not True
+    assert r.get("inspection_errors")
+    assert "gsc_query_daily" in upserts
+    assert "gsc_url_inspection" not in upserts
+
+
+def test_gsc_never_groups_search_appearance_with_query(monkeypatch):
+    seen: list[list] = []
+
+    def capture(url, json=None, **kwargs):
+        if "searchAnalytics/query" in url:
+            seen.append(list((json or {}).get("dimensions") or []))
+        return _route_google(url, json=json, **kwargs)
+
+    monkeypatch.setattr("src.phase2_connectors._http_post", capture)
+    monkeypatch.setattr("src.db.upsert_rows", lambda *a, **k: 1)
+    gsc_sync(environ=_google_env(), as_of="2026-09-19", days=1)
+    analytics = [d for d in seen if d]
+    assert ["date", "searchAppearance"] in analytics
+    for dims in analytics:
+        if "searchAppearance" in dims:
+            assert dims == ["date", "searchAppearance"]
+    assert all("/products/" in u for u in GSC_PDP_INSPECT_ALLOWLIST)
+    assert len(GSC_PDP_INSPECT_ALLOWLIST) <= 8
 
 
 def test_cli_commands_fail_closed_without_oauth(monkeypatch):
@@ -747,6 +890,14 @@ def test_shopify_funnel_untouched_by_phase2():
     assert "create table if not exists shopify_funnel" not in sql.lower()
     assert "drop table" not in sql.lower()
     assert "alter table shopify_funnel" not in sql.lower()
+    dims_sql = Path("supabase/migration_gsc_analysis_dims.sql").read_text()
+    assert "create table if not exists gsc_dim_daily" in dims_sql
+    assert "create table if not exists gsc_query_device_daily" in dims_sql
+    assert "create table if not exists gsc_url_inspection" in dims_sql
+    assert "drop table" not in dims_sql.lower()
+    assert "gsc_query_daily" not in dims_sql or "alter table gsc_query_daily" not in dims_sql.lower()
+    assert "search_appearance" in dims_sql
+    assert "Ellis" in dims_sql
 
 
 def test_side_tables_never_feed_nexus_or_pnl():
@@ -755,6 +906,8 @@ def test_side_tables_never_feed_nexus_or_pnl():
         for table in (
             "ga4_sessions_daily", "ga4_landing_daily", "google_ads_daily",
             "meta_ads_daily", "gsc_query_daily", "gsc_page_daily",
+            "gsc_query_device_daily", "gsc_page_device_daily",
+            "gsc_dim_daily", "gsc_url_inspection",
             "conversion_digest_status",
         ):
             assert table not in text, f"{rel} must not read {table}"
@@ -782,6 +935,9 @@ def test_docs_and_snapshot_list_the_tables():
         text = Path(rel).read_text()
         assert "ga4_sessions_daily" in text
         assert "conversion_digest_status" in text
+        assert "gsc_dim_daily" in text
+        assert "gsc_url_inspection" in text
+        assert "gsc_query_device_daily" in text
 
 
 def test_settings_loads_when_phase2_google_env_is_set(monkeypatch):

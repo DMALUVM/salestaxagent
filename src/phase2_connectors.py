@@ -71,7 +71,14 @@ CONNECTORS: dict[str, dict] = {
     "gsc": {
         "command": "gsc-sync",
         "label": "Search Console API",
-        "tables": ("gsc_query_daily", "gsc_page_daily"),
+        "tables": (
+            "gsc_query_daily",
+            "gsc_page_daily",
+            "gsc_query_device_daily",
+            "gsc_page_device_daily",
+            "gsc_dim_daily",
+            "gsc_url_inspection",
+        ),
         "env": GOOGLE_OAUTH_ENV + ("GSC_SITE_URL",),
         "scopes": ("https://www.googleapis.com/auth/webmasters.readonly",),
     },
@@ -89,6 +96,24 @@ GA4_REPORT_URL = (
 )
 GSC_QUERY_URL = (
     "https://searchconsole.googleapis.com/webmasters/v3/sites/{site}/searchAnalytics/query"
+)
+# URL Inspection is a separate read-only POST. 2k/day/site — allowlist only.
+GSC_URL_INSPECTION_URL = (
+    "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect"
+)
+# Tiny hardcoded top PDPs. Not a crawl. Add a handle only when it stays a
+# first-class tallowbourn.com SKU. Never invent a product URL.
+GSC_PDP_INSPECT_ALLOWLIST = (
+    "https://tallowbourn.com/products/tallow-balm",
+    "https://tallowbourn.com/products/natural-tallow-deodorant-extra-strength",
+    "https://tallowbourn.com/products/grass-fed-tallow-lip-balm",
+)
+# Site-wide Search Analytics dims. searchAppearance cannot be grouped with
+# query/page (Google forbids it) — keep it site-wide to stay cheap.
+GSC_SITE_DIMS = (
+    ("device", "device"),
+    ("country", "country"),
+    ("searchAppearance", "search_appearance"),
 )
 # Latest stable REST version as of 2026-09 (sunset Aug 2027). SELECT only.
 GOOGLE_ADS_API_VERSION = "v25"
@@ -558,47 +583,223 @@ def pull_ga4_rows(token: str, property_id: str, start: date, end: date,
     }
 
 
+def _gsc_metric_fields(raw: dict, fetched_at: str) -> dict:
+    """Present-or-null Search Analytics metrics. Never invent a click."""
+    return {
+        "clicks": _api_int(raw.get("clicks")),
+        "impressions": _api_int(raw.get("impressions")),
+        "ctr": _api_float(raw.get("ctr")),
+        "position": _api_float(raw.get("position")),
+        "source": "gsc_api",
+        "fetched_at": fetched_at,
+    }
+
+
 def pull_gsc_rows(token: str, site_url: str, start: date, end: date,
                   fetched_at: str) -> dict:
-    """Query + page grains. Date dimension is the API day — never substituted."""
+    """Query + page totals plus cheap device / country / appearance dims.
+
+    gsc_query_daily / gsc_page_daily stay the totals SoT. Extra harvests
+    are additive. searchAppearance is site-wide only (Google will not
+    group it with query/page). Date dimension is the API day.
+    """
     errors: list[str] = []
     queries: list[dict] = []
     pages: list[dict] = []
+    query_device: list[dict] = []
+    page_device: list[dict] = []
+    dims: list[dict] = []
 
-    def harvest(dimension: str, key_field: str, dest: list[dict]) -> None:
+    def harvest(dimensions: list[str], dest: list[dict],
+                build: Callable[[str, list], dict | None]) -> None:
         result = gsc_search_analytics(token, site_url, {
             "startDate": start.isoformat(),
             "endDate": end.isoformat(),
-            "dimensions": ["date", dimension],
+            "dimensions": ["date", *dimensions],
             "dataState": "final",
         })
+        label = "+".join(dimensions)
         if result.get("error"):
-            errors.append(f"{dimension}: {result['error']}")
+            errors.append(f"{label}: {result['error']}")
             return
         for raw in result.get("rows") or []:
+            if not isinstance(raw, dict):
+                continue
             keys = raw.get("keys") or []
-            if not isinstance(keys, list) or len(keys) < 2:
+            if not isinstance(keys, list) or len(keys) < 1 + len(dimensions):
                 continue
             day = _ga4_date(keys[0])
             if not day or not _in_window(day, start, end):
                 continue
-            key = str(keys[1] or "").strip()
-            if not key:
+            row = build(day, [str(k or "").strip() for k in keys[1:]])
+            if not row:
                 continue
-            dest.append({
-                "metric_date": day,
-                key_field: key,
-                "clicks": _api_int(raw.get("clicks")),
-                "impressions": _api_int(raw.get("impressions")),
-                "ctr": _api_float(raw.get("ctr")),
-                "position": _api_float(raw.get("position")),
-                "source": "gsc_api",
-                "fetched_at": fetched_at,
-            })
+            dest.append({**row, **_gsc_metric_fields(raw, fetched_at)})
 
-    harvest("query", "query", queries)
-    harvest("page", "page", pages)
-    return {"queries": queries, "pages": pages, "errors": errors}
+    def one_key(field: str):
+        def build(day: str, keys: list[str]) -> dict | None:
+            if not keys or not keys[0]:
+                return None
+            return {"metric_date": day, field: keys[0]}
+        return build
+
+    def key_device(field: str):
+        def build(day: str, keys: list[str]) -> dict | None:
+            if len(keys) < 2 or not keys[0] or not keys[1]:
+                return None
+            return {"metric_date": day, field: keys[0], "device": keys[1]}
+        return build
+
+    def site_dim(kind: str):
+        def build(day: str, keys: list[str]) -> dict | None:
+            if not keys or not keys[0]:
+                return None
+            return {"metric_date": day, "dim_kind": kind, "dim_value": keys[0]}
+        return build
+
+    harvest(["query"], queries, one_key("query"))
+    harvest(["page"], pages, one_key("page"))
+    harvest(["query", "device"], query_device, key_device("query"))
+    harvest(["page", "device"], page_device, key_device("page"))
+    for api_name, kind in GSC_SITE_DIMS:
+        harvest([api_name], dims, site_dim(kind))
+    return {
+        "queries": queries,
+        "pages": pages,
+        "query_device": query_device,
+        "page_device": page_device,
+        "dims": dims,
+        "errors": errors,
+    }
+
+
+def gsc_inspect_url(token: str, site_url: str, inspection_url: str) -> dict:
+    """One-shot URL Inspection. Read-only. Never crawls. Fail closed."""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    try:
+        resp = _http_post(
+            GSC_URL_INSPECTION_URL,
+            headers=headers,
+            json={
+                "inspectionUrl": inspection_url,
+                "siteUrl": site_url,
+                "languageCode": "en-US",
+            },
+        )
+    except httpx.HTTPError as e:
+        return {"error": f"URL Inspection failed: {e}"[:400]}
+    if resp.status_code >= 400:
+        return {"error": _google_error(resp)}
+    try:
+        data = resp.json()
+    except Exception:
+        return {"error": "URL Inspection response was not JSON"}
+    if not isinstance(data, dict):
+        return {"error": "URL Inspection response was not an object"}
+    return {"payload": data}
+
+
+def _slim_inspection(payload: dict, *, inspection_url: str, site_url: str,
+                     fetched_at: str) -> dict:
+    """Store verdicts + index status. Never persist issue / detectedItems lists."""
+    result = payload.get("inspectionResult") if isinstance(payload, dict) else None
+    if not isinstance(result, dict):
+        result = {}
+    index = result.get("indexStatusResult")
+    if not isinstance(index, dict):
+        index = {}
+    mobile = result.get("mobileUsabilityResult")
+    if not isinstance(mobile, dict):
+        mobile = {}
+    rich = result.get("richResultsResult")
+    if not isinstance(rich, dict):
+        rich = {}
+    refs = index.get("referringUrls")
+    referring: list[str] = []
+    if isinstance(refs, list):
+        for item in refs[:20]:
+            s = str(item or "").strip()
+            if s:
+                referring.append(s)
+    last_crawl = index.get("lastCrawlTime")
+    last_crawl_s = str(last_crawl).strip() if last_crawl else None
+    return {
+        "inspection_url": inspection_url,
+        "site_url": site_url,
+        "inspected_at": fetched_at,
+        "verdict": (str(index["verdict"]).strip() if "verdict" in index else None),
+        "coverage_state": (
+            str(index["coverageState"]).strip() if "coverageState" in index else None
+        ),
+        "robots_txt_state": (
+            str(index["robotsTxtState"]).strip() if "robotsTxtState" in index else None
+        ),
+        "indexing_state": (
+            str(index["indexingState"]).strip() if "indexingState" in index else None
+        ),
+        "last_crawl_time": last_crawl_s or None,
+        "page_fetch_state": (
+            str(index["pageFetchState"]).strip() if "pageFetchState" in index else None
+        ),
+        "google_canonical": (
+            str(index["googleCanonical"]).strip() if "googleCanonical" in index else None
+        ),
+        "user_canonical": (
+            str(index["userCanonical"]).strip() if "userCanonical" in index else None
+        ),
+        "crawled_as": (str(index["crawledAs"]).strip() if "crawledAs" in index else None),
+        "referring_urls": referring or None,
+        "mobile_usability_verdict": (
+            str(mobile["verdict"]).strip() if "verdict" in mobile else None
+        ),
+        "rich_results_verdict": (
+            str(rich["verdict"]).strip() if "verdict" in rich else None
+        ),
+        "inspection_result_link": (
+            str(result["inspectionResultLink"]).strip()
+            if "inspectionResultLink" in result else None
+        ),
+        "raw": {
+            "indexStatusResult": {
+                k: index[k] for k in (
+                    "verdict", "coverageState", "robotsTxtState", "indexingState",
+                    "lastCrawlTime", "pageFetchState", "googleCanonical",
+                    "userCanonical", "crawledAs",
+                ) if k in index
+            },
+            "mobileUsabilityVerdict": mobile.get("verdict"),
+            "richResultsVerdict": rich.get("verdict"),
+            "inspectionResultLink": result.get("inspectionResultLink"),
+        },
+        "error": None,
+        "source": "gsc_url_inspection_api",
+    }
+
+
+def pull_gsc_inspections(token: str, site_url: str, fetched_at: str) -> dict:
+    """Inspect the hardcoded PDP allowlist. Fail closed — log + continue."""
+    rows: list[dict] = []
+    errors: list[str] = []
+    for url in GSC_PDP_INSPECT_ALLOWLIST:
+        result = gsc_inspect_url(token, site_url, url)
+        if result.get("error"):
+            msg = f"{url}: {result['error']}"[:240]
+            errors.append(msg)
+            log.warning("GSC URL Inspection skipped: %s", msg)
+            continue
+        payload = result.get("payload")
+        if not isinstance(payload, dict):
+            msg = f"{url}: empty inspection payload"
+            errors.append(msg)
+            log.warning("GSC URL Inspection skipped: %s", msg)
+            continue
+        rows.append(_slim_inspection(
+            payload, inspection_url=url, site_url=site_url, fetched_at=fetched_at,
+        ))
+    return {"rows": rows, "errors": errors}
 
 
 def _ads_customer_id(raw: str) -> str:
@@ -883,10 +1084,12 @@ def gsc_sync(*, dry_run: bool = False, environ: dict | None = None,
              now: datetime | None = None) -> dict:
     """Pull Search Console API → upsert gsc_*_daily. Official API only.
 
-    Performance (`searchAnalytics.query`) only. Merchant / structured-data /
+    Performance (`searchAnalytics.query`) for query/page totals plus
+    device / country / searchAppearance. Merchant / structured-data /
     rich-result issue lists are not in this API — Ellis mail owns those.
-    TODO: URL Inspection for a tiny hardcoded PDP allowlist if it stays
-    one small read-only table. Do not invent an issues poll.
+    URL Inspection is a tiny hardcoded PDP allowlist (read-only, latest
+    row). Fail closed on inspect errors (log + continue; no Telegram).
+    Do not invent an issues poll.
     """
     missing = missing_oauth_env("gsc", environ)
     out = _blank_result("gsc", dry_run=dry_run, missing=missing)
@@ -917,22 +1120,51 @@ def gsc_sync(*, dry_run: bool = False, environ: dict | None = None,
                            fetched_at)
     query_rows = pulled.get("queries") or []
     page_rows = pulled.get("pages") or []
+    query_device_rows = pulled.get("query_device") or []
+    page_device_rows = pulled.get("page_device") or []
+    dim_rows = pulled.get("dims") or []
     errors = list(pulled.get("errors") or [])
+    inspected = pull_gsc_inspections(
+        token_r["access_token"], site_url, fetched_at,
+    )
+    inspect_rows = inspected.get("rows") or []
+    inspect_errors = list(inspected.get("errors") or [])
     out["errors"] = errors
-    out["fetched"] = {"queries": len(query_rows), "pages": len(page_rows)}
+    out["inspection_errors"] = inspect_errors
+    out["fetched"] = {
+        "queries": len(query_rows),
+        "pages": len(page_rows),
+        "query_device": len(query_device_rows),
+        "page_device": len(page_device_rows),
+        "dims": len(dim_rows),
+        "inspections": len(inspect_rows),
+    }
 
-    if dry_run:
-        n = len(query_rows) + len(page_rows)
-        out["rows"] = n
-        out["ok"] = not errors or n > 0
-        out["message"] = (
-            f"Search Console API dry-run {start.isoformat()}…{end.isoformat()} "
-            f"{site_url} searchAnalytics.query → "
+    n = (
+        len(query_rows) + len(page_rows)
+        + len(query_device_rows) + len(page_device_rows) + len(dim_rows)
+    )
+    out["rows"] = n
+
+    def _gsc_message(*, upserted: bool) -> str:
+        verb = "upserted" if upserted else "searchAnalytics.query →"
+        extra = "No upsert. " if not upserted else ""
+        return (
+            f"Search Console API{' dry-run' if dry_run else ''} "
+            f"{start.isoformat()}…{end.isoformat()} {site_url} {verb} "
             f"{len(query_rows)} gsc_query_daily + "
-            f"{len(page_rows)} gsc_page_daily. No upsert. "
+            f"{len(page_rows)} gsc_page_daily + "
+            f"{len(query_device_rows)} gsc_query_device_daily + "
+            f"{len(page_device_rows)} gsc_page_device_daily + "
+            f"{len(dim_rows)} gsc_dim_daily + "
+            f"{len(inspect_rows)} gsc_url_inspection. {extra}"
             f"GSC final data lags ~2 days (null until the locked day exists). "
             f"Never invent metrics."
         )
+
+    if dry_run:
+        out["ok"] = not errors or n > 0
+        out["message"] = _gsc_message(upserted=False)
         if errors and n == 0:
             out["error"] = errors[0]
             out["ok"] = False
@@ -946,33 +1178,39 @@ def gsc_sync(*, dry_run: bool = False, environ: dict | None = None,
         out["message"] = out["error"]
         return out
 
+    writes = (
+        ("gsc_query_daily", query_rows, "metric_date,query"),
+        ("gsc_page_daily", page_rows, "metric_date,page"),
+        ("gsc_query_device_daily", query_device_rows, "metric_date,query,device"),
+        ("gsc_page_device_daily", page_device_rows, "metric_date,page,device"),
+        ("gsc_dim_daily", dim_rows, "metric_date,dim_kind,dim_value"),
+    )
+    for table, rows, conflict in writes:
+        try:
+            written += _upsert(table, rows, conflict, upsert_rows)
+        except Exception as e:
+            errors.append(f"{table}: {e}"[:240])
     try:
         written += _upsert(
-            "gsc_query_daily", query_rows, "metric_date,query", upsert_rows,
+            "gsc_url_inspection", inspect_rows, "inspection_url", upsert_rows,
         )
     except Exception as e:
-        errors.append(f"gsc_query_daily: {e}"[:240])
-    try:
-        written += _upsert(
-            "gsc_page_daily", page_rows, "metric_date,page", upsert_rows,
-        )
-    except Exception as e:
-        errors.append(f"gsc_page_daily: {e}"[:240])
+        # Inspection is optional. Missing table / write error must not
+        # fail the query/page SoT or page Mini Telegram.
+        msg = f"gsc_url_inspection: {e}"[:240]
+        inspect_errors.append(msg)
+        log.warning("GSC URL Inspection upsert skipped: %s", msg)
 
-    n = len(query_rows) + len(page_rows)
     out["rows"] = n
     out["upserted"] = written
     out["errors"] = errors
+    out["inspection_errors"] = inspect_errors
     out["ok"] = n > 0 or not errors
     if errors and n == 0:
         out["error"] = errors[0]
         out["message"] = out["error"]
         return out
-    out["message"] = (
-        f"Search Console API {start.isoformat()}…{end.isoformat()} "
-        f"upserted {len(query_rows)} gsc_query_daily + "
-        f"{len(page_rows)} gsc_page_daily. Never invent metrics."
-    )
+    out["message"] = _gsc_message(upserted=True)
     if errors:
         out["error"] = errors[0]
         out["ok"] = True

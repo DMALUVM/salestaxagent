@@ -11,7 +11,7 @@ Range 7/14/30/90/365/all is relative to the **max metric_date / date in the pref
 |---|---|---|
 | Google Ads | `google_ads_daily` (`metric_date`, `conversion_value` → intel `date` / `conv_value`) | `paid_campaign_daily` `platform=google` (CSV) |
 | Meta Ads | `meta_ads_daily` when it has rows | `paid_campaign_daily` `platform=meta` (CSV upload) |
-| Search Console | `gsc_query_daily` + `gsc_page_daily` (dated; CTR 0–1 → 0–100) | `paid_search_query_daily` (CSV) |
+| Search Console | `gsc_query_daily` + `gsc_page_daily` (dated; CTR 0–1 → 0–100); `gsc_dim_daily` `search_appearance` | `paid_search_query_daily` (CSV) |
 | GA4 | `ga4_landing_daily` (`purchase` → `key_events`; no invented channel/revenue) | `paid_ga_daily` (CSV Explore) |
 
 HTTP: `POST /api/paid-ads/csv` (multipart files or JSON `{ files: [{ name, content }] }`).
