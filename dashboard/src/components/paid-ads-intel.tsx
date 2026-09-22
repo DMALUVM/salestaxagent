@@ -1315,7 +1315,7 @@ export function PaidAdsIntel({
               <p className="text-[11px] text-muted-foreground">
                 {data.freshness?.sources.some((s) =>
                   (s.source === "gsc_snapshot" || s.source === "gsc_trend") && s.origin === "api")
-                  ? "Query and page totals from gsc_query_daily / gsc_page_daily. Search appearance from gsc_dim_daily (site-wide only — Google will not group it with query/page). Mini ./.venv/bin/python -m src.main gsc-sync writes those rows. Daily trend is rolled up from dated queries. Position change is never invented. No issues poll."
+                  ? "Query and page totals from gsc_query_daily / gsc_page_daily. Search appearance from gsc_dim_daily (site-wide; Google will not group searchAppearance with date or query/page — Mini stamps metric_date from that day's request window). Mini ./.venv/bin/python -m src.main gsc-sync writes those rows. Daily trend is rolled up from dated queries. Position change is never invented. No issues poll."
                   : "Queries.csv, Pages.csv, and Search Appearance.csv are snapshots (no date). Chart.csv is the daily organic trend. Position change is never invented from the snapshot."}
               </p>
               {data.gsc.chart.length > 0 && (
