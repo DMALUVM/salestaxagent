@@ -416,8 +416,8 @@ export function rowHasThemeCatalog(
 }
 
 /**
- * Theme (or last-4 fallback) for the family-winner child on a day.
- * Never returns a rank — the cell primary # is the family phrases/v2 position.
+ * Theme (or last-4 fallback) for the child that holds the heatmap cell.
+ * Never returns a rank — the cell primary # is the Rank Tracker day rank.
  */
 export function winnerChildLabel(
   row: Pick<HeatmapRow, "variation_slots" | "organic_child_asins">,
@@ -475,10 +475,11 @@ export function isTopTenOrganic(rank: number | null | undefined): boolean {
 /**
  * Extra day-cell chips: one identity and one rank per child ASIN.
  *
- * Rank source of truth when phrases/v2 and variations-heatmap disagree
- * for the same ASIN (do not render both numbers — except top-10):
- *   - Cell primary # / fill / sort / spark stay on the family-winner
- *     phrases/v2 `organic_position` (`positions[week]`).
+ * Cell SoT is the SoldScope Rank Tracker heatmap rank for that
+ * keyword × day (`positions[week]`, from phrases/v2 `r_YYYY-MM-DD`).
+ * A tracked child can rank better and must not replace the cell number,
+ * fill, sort, or spark — Rank Tracker's heatmap matched the phrases
+ * day rank on settled days, not the minimum variation.
  *   - Variation snapshot rank is the SoT for a child's chip when a
  *     variation row exists. Theme catalog labels the child (never an
  *     ASIN CHILD pill + theme for the same ASIN).
@@ -488,7 +489,7 @@ export function isTopTenOrganic(rank: number | null | undefined): boolean {
  *     missing or >10 — the cell # + theme already identify them.
  *   - If the winner's variation rank is 1–10, always list theme+#N.
  *     That top-10 child rank must never be hidden behind “winner only”,
- *     even when it differs from the family-winner phrases position.
+ *     even when it differs from the heatmap cell.
  *     When the two ranks match, skip the extra chip (already listed).
  */
 export function heatmapDayChips(
@@ -916,6 +917,22 @@ export function buildOrganicRankProgress(input: {
       amazon_choice: typeof row.amazon_choice === "boolean" ? row.amazon_choice : null,
     });
     cur.variation_slots[asOf] = slots;
+  }
+
+  // Historical heatmap days often have no organic_asin. If exactly one
+  // stored child ranks at the cell number, that child holds the slot.
+  // A better child does not take the cell (see heatmapDayChips).
+  for (const cur of series.values()) {
+    for (const asOf of shownWeeks) {
+      if (asOrganicChild(cur.organic_child_asins[asOf])) continue;
+      const cell = asRank(cur.positions[asOf]);
+      if (cell == null) continue;
+      const matches = (cur.variation_slots[asOf] ?? []).filter(
+        (slot) => asRank(slot.rank) === cell && asOrganicChild(slot.asin),
+      );
+      const asins = [...new Set(matches.map((slot) => slot.asin))];
+      if (asins.length === 1) cur.organic_child_asins[asOf] = asins[0];
+    }
   }
 
   const lastWeek = shownWeeks[shownWeeks.length - 1] ?? null;

@@ -43,6 +43,7 @@ import {
   formatSignedDelta,
   heatmapSortCaption,
   rankDelta,
+  rankHeatTone,
   resolveSfr,
   sortHeatmapRows,
   sparklineGeometry,
@@ -674,6 +675,90 @@ describe("organic rank Δ display + any-move vs meaningful", () => {
     assert.deepEqual(childSlotRank(row), {
       asin: "B0CLHVCPL5", rank: 9, delta: null,
     });
+  });
+
+  test("better child does not replace the Rank Tracker heatmap cell", () => {
+    // moisturizing lip balm 2026-09-21: phrases/v2 cell 71 Assorted,
+    // Sweet Orange variation 63. SoldScope's heatmap matched ~71, not 63.
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "moisturizing lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-21",
+        organic_position: 71, organic_asin: "B0CLHVLG2F",
+      }],
+      variationSnapshots: [
+        {
+          phrase: "moisturizing lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-21",
+          variation_asin: "B0CLHVLG2F", theme: "Assorted",
+          organic_position: 71,
+        },
+        {
+          phrase: "moisturizing lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-21",
+          variation_asin: "B0CLHTKY3V", theme: "Sweet Orange",
+          organic_position: 63,
+        },
+      ],
+    });
+    const row = progress.rows[0];
+    assert.equal(row.positions["2026-09-21"], 71);
+    assert.equal(row.current, 71);
+    assert.equal(row.organic_child_asins["2026-09-21"], "B0CLHVLG2F");
+    assert.equal(winnerChildLabel(row, "2026-09-21"), "Assorted");
+    assert.equal(rankHeatTone(row.positions["2026-09-21"]), "weak");
+    assert.equal(rankHeatTone(63), "weak");
+    assert.notEqual(rankHeatTone(row.positions["2026-09-21"]), rankHeatTone(142));
+    const extras = heatmapDayChips(row, "2026-09-21", progress.weeks);
+    assert.deepEqual(extras.map((c) => ({ label: c.label, rank: c.rank })), [
+      { label: "Sweet Orange", rank: 63 },
+    ]);
+    assert.equal(extras.some((c) => c.label === "Assorted"), false);
+  });
+
+  test("lip balm cell keeps the heatmap rank when the only stored child matches it", () => {
+    // 2026-09-21 warehouse: phrases 142 Sweet Orange, one variation at 142.
+    // No Unscented row — do not invent ~80.
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-21",
+        organic_position: 142, organic_asin: "B0CLHTKY3V",
+      }],
+      variationSnapshots: [{
+        phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-21",
+        variation_asin: "B0CLHTKY3V", theme: "Sweet Orange",
+        organic_position: 142,
+      }],
+    });
+    const row = progress.rows[0];
+    assert.equal(row.positions["2026-09-21"], 142);
+    assert.equal(winnerChildLabel(row, "2026-09-21"), "Sweet Orange");
+    assert.equal(rankHeatTone(row.positions["2026-09-21"]), "poor");
+    assert.deepEqual(heatmapDayChips(row, "2026-09-21", progress.weeks), []);
+  });
+
+  test("heatmap day with no organic asin takes the child whose rank matches the cell", () => {
+    const progress = buildOrganicRankProgress({
+      snapshots: [{
+        phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-13",
+        organic_position: 114,
+      }],
+      variationSnapshots: [
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-13",
+          variation_asin: "B0CLHVCPL5", theme: "Unscented",
+          organic_position: 114,
+        },
+        {
+          phrase: "lip balm", asin: "B0CLHTF8YN", as_of: "2026-09-13",
+          variation_asin: "B0CLHTKY3V", theme: "Sweet Orange",
+          organic_position: 140,
+        },
+      ],
+    });
+    const row = progress.rows[0];
+    assert.equal(row.positions["2026-09-13"], 114);
+    assert.equal(row.organic_child_asins["2026-09-13"], "B0CLHVCPL5");
+    assert.equal(winnerChildLabel(row, "2026-09-13"), "Unscented");
+    const extras = heatmapDayChips(row, "2026-09-13", progress.weeks);
+    assert.deepEqual(extras.map((c) => c.label), ["Sweet Orange"]);
   });
 
   test("same ASIN is one chip — theme label, no conflicting family+variation ranks", () => {

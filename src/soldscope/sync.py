@@ -1117,7 +1117,14 @@ def rank_rows_from_phrases(
     """One warehouse row per phrase × as_of. Heatmap days come from r_YYYY-MM-DD.
 
     Null / missing heatmap ranks are skipped — days are never invented.
-    Today's organicPosition row is always written when the phrase exists.
+    The phrase row for ``as_of`` is always written when the phrase exists.
+
+    Rank Tracker heatmap SoT for a calendar day is ``r_YYYY-MM-DD.rank``.
+    ``organicPosition`` is a separate current scrape (its previous often
+    does not equal yesterday's heatmap cell) and must not replace a
+    positive heatmap rank. It fills the cell only when that day's heatmap
+    rank is missing. A divergent organicAsin is not copied onto a
+    different heatmap rank — that would label the wrong child.
     """
     rows: list[dict] = []
     seen: set[tuple[str, str]] = set()
@@ -1128,17 +1135,32 @@ def rank_rows_from_phrases(
             continue
         heatmap = phrase_heatmap_days(p)
         today_heat = heatmap.get(today_iso) or {}
-        today_pos = phrase_organic_position(p)
-        if today_pos is None:
-            today_pos = today_heat.get("rank")
-        today_child = phrase_organic_asin(p) or today_heat.get("organic_asin")
-        today_choice = phrase_amazon_choice(p)
-        if today_choice is None:
+        scraped_pos = phrase_organic_position(p)
+        heat_rank = today_heat.get("rank")
+        if heat_rank is not None:
+            today_pos = heat_rank
+        else:
+            today_pos = scraped_pos
+        heat_child = today_heat.get("organic_asin")
+        scraped_child = phrase_organic_asin(p)
+        if heat_child:
+            today_child = heat_child
+        elif today_pos is not None and today_pos == scraped_pos:
+            today_child = scraped_child
+        else:
+            today_child = None
+        if heat_rank is not None:
             today_choice = today_heat.get("amazon_choice")
+            if today_choice is None and today_pos == scraped_pos:
+                today_choice = phrase_amazon_choice(p)
+        else:
+            today_choice = phrase_amazon_choice(p)
+            if today_choice is None:
+                today_choice = today_heat.get("amazon_choice")
         today_key = (phrase, today_iso)
         if today_key not in seen:
             seen.add(today_key)
-            rows.append(_phrase_snapshot_row(
+            row = _phrase_snapshot_row(
                 p,
                 asin=asin,
                 marketplace=marketplace,
@@ -1151,7 +1173,12 @@ def rank_rows_from_phrases(
                 amazon_choice=today_choice,
                 pulled_at=pulled_at,
                 current=True,
-            ))
+            )
+            row["raw"]["heatmapRank"] = heat_rank
+            row["raw"]["scrapedOrganicPosition"] = scraped_pos
+            if heat_rank is not None:
+                row["raw"]["heatmap"] = True
+            rows.append(row)
         for day_iso, day in heatmap.items():
             key = (phrase, day_iso)
             if key in seen:
