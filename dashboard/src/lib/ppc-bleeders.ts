@@ -396,7 +396,7 @@ export function buildBleeders(
       notes: [
         `Need ${minWindowDays} inclusive search-term days before 60d bleeder math runs. Stored ${windowStart} → ${windowEnd} is ${windowDays}d (${daysWithRows} days with rows) — not a fake ${minWindowDays}d from ${windowDays}d data.`,
         "Search-term reports are SP-only (spSearchTerm). SB/SD terms will be thin or missing.",
-        "Sunday 03:30 ET 90d search-term backfill (or ads-search-terms-backfill) extends this. Weekday ingest stays 7d. Nothing writes to Amazon.",
+        "Sunday 03:30 ET 90d search-term backfill (or ads-search-terms-backfill) extends weeks with no row. It skips weeks that already have a stamp, including old 7-day SUMMARY dates — repair those with Mini ads-search-terms-rebuild --days 90. Weekday ingest stays 7d DAILY. Nothing writes to Amazon.",
       ],
       rows: [],
     };

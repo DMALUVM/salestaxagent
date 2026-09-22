@@ -909,9 +909,11 @@ function attachOrganicFields<T extends Record<string, unknown>>(
 }
 
 /**
- * ads_search_terms_daily is timeUnit=SUMMARY stamped on chunk END.
- * A 7-day SUMMARY dated yesterday is not L2. Compare that date's ST
- * total to campaign daily (SoT) — ST ≫ campaign daily means multi-day.
+ * ads_search_terms_daily is requested as timeUnit=DAILY (Amazon date =
+ * that calendar day). Leftover 7-day SUMMARY stamps (chunk END) remain
+ * until Mini ads-search-terms-rebuild. A 7-day SUMMARY dated yesterday
+ * is not L2. Compare that date's ST total to campaign daily (SoT) —
+ * ST ≫ campaign daily means multi-day.
  */
 export function stDateLooksDaily(stSpend: number, campaignSpend: number): boolean {
   if (campaignSpend <= 0) return true;
@@ -1824,7 +1826,7 @@ export function gnoPackReadme(input: {
     "Spend source of truth:",
     "- watch_campaigns.csv campaign-level L2/L7 is SoT for spend (ads_campaigns_daily).",
     "- auto_loose / fat_parent / broad_m search-term files are term-level negate/harvest only.",
-    "- ads_search_terms_daily is timeUnit=SUMMARY stamped on chunk END. A 7-day SUMMARY is not L2.",
+    "- ads_search_terms_daily is requested as timeUnit=DAILY (Amazon date = that calendar day). Until Mini ads-search-terms-rebuild --days 90, some dates may still be old 7-day SUMMARY stamps on chunk END. A 7-day SUMMARY is not L2.",
     "- Auto Loose L2 ST rows are omitted unless 1-day ST stamps exist for that window. Do not sum ST $ vs the campaign tile.",
     "",
     "Family BE (config family_break_even_acos, not TACOS):",

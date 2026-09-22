@@ -1461,7 +1461,7 @@ export default function PPCPage() {
                 <CardTitle className="text-sm font-medium">
                   Search terms
                   <span className="ml-2 font-normal text-muted-foreground">
-                    {windowLabel(kpiDays ?? 0)} · SP-only · date is a SUMMARY week-end, not daily grain
+                    {windowLabel(kpiDays ?? 0)} · SP-only · DAILY grain (Amazon date = that calendar day). ads_campaigns_daily is account spend SoT. Old SUMMARY stamps stay until Mini ads-search-terms-rebuild
                   </span>
                 </CardTitle>
               </CardHeader>
@@ -1534,7 +1534,7 @@ export default function PPCPage() {
                                   </p>
                                   <Button variant="ghost" size="sm" className="text-xs"
                                           onClick={(e) => { e.stopPropagation(); setByDay(!byDay); }}>
-                                    {byDay ? "Show by campaign" : "Show by report period"}
+                                    {byDay ? "Show by campaign" : "Show by date"}
                                   </Button>
                                 </div>
 
@@ -1591,16 +1591,20 @@ export default function PPCPage() {
                                 ) : (
                                   <>
                                   <p className="mt-2 text-[10px] text-muted-foreground">
-                                    Search-term reports are pulled with
-                                    <code className="mx-1">timeUnit=SUMMARY</code>
-                                    per chunk, so each row is one reporting period
-                                    stamped with its start date — Amazon does not
-                                    publish true per-day search-term grain here.
+                                    Search-term ingest requests
+                                    <code className="mx-1">timeUnit=DAILY</code>
+                                    — each row&apos;s date is that Amazon calendar day.
+                                    A multi-day row with no date is dropped. Until Mini
+                                    <code className="mx-1">./.venv/bin/python -m src.main ads-search-terms-rebuild --days 90</code>
+                                    some stored dates may still be old 7-day SUMMARY
+                                    stamps on the chunk-end date. Do not treat these
+                                    sums as account daily spend — that stays on
+                                    <code className="mx-1">ads_campaigns_daily</code>.
                                   </p>
                                   <table className="mt-1 w-full text-xs">
                                     <thead>
                                       <tr className="text-left text-muted-foreground">
-                                        <th className="py-1 pr-3">Period start</th>
+                                        <th className="py-1 pr-3">Date</th>
                                         <th className="py-1 pr-3 text-right">Spend</th>
                                         <th className="py-1 pr-3 text-right">Sales</th>
                                         <th className="py-1 pr-3 text-right">Orders</th>

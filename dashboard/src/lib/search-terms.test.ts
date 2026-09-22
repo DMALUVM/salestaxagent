@@ -66,3 +66,16 @@ test("per-period rows are opt-in, never the default view", () => {
   assert.ok(PAGE.includes("useState(false)") && PAGE.includes("byDay"),
     "the by-period expansion must default to off");
 });
+
+test("search-term tab copy is DAILY grain, not leftover SUMMARY-week lies", () => {
+  const start = PAGE.indexOf('tab === "search" &&');
+  const end = PAGE.indexOf('tab === "campaigns"');
+  const searchTab = PAGE.slice(start, end);
+  assert.match(searchTab, /timeUnit=DAILY/);
+  assert.match(searchTab, /ads-search-terms-rebuild --days 90/);
+  assert.match(searchTab, /ads_campaigns_daily/);
+  assert.match(searchTab, /Show by date/);
+  assert.doesNotMatch(searchTab, /not daily grain/);
+  assert.doesNotMatch(searchTab, /does not\s+publish true per-day/);
+  assert.doesNotMatch(searchTab, /Show by report period/);
+});

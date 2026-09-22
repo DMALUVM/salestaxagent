@@ -1544,6 +1544,9 @@ describe("GNO pack — NEW_EXACT TBM shells + SQP week + ST L2 SoT + organic ran
     assert.match(readme, /Brand Analytics SFR/);
     assert.match(readme, /never creates SoldScope Rank Tracker groups/);
     assert.match(readme, /Exact protect/);
+    assert.match(readme, /timeUnit=DAILY/);
+    assert.match(readme, /ads-search-terms-rebuild --days 90/);
+    assert.doesNotMatch(readme, /ads_search_terms_daily is timeUnit=SUMMARY stamped on chunk END/);
 
     const emptyPack = buildGnoPack({
       asOf: "2026-09-10", today: "2026-09-11",

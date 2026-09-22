@@ -243,6 +243,8 @@ describe("buildBleeders — CVR vs lane, not sales=$0-only", () => {
     assert.equal(out.rows.length, 0);
     assert.match(out.notes[0], /Need 60/);
     assert.match(out.notes[0], /not a fake 60d/);
+    assert.match(out.notes.join("\n"), /ads-search-terms-rebuild --days 90/);
+    assert.match(out.notes.join("\n"), /skips weeks that already have a stamp/);
     assert.match(out.window.label, /not 60d/);
   });
 });

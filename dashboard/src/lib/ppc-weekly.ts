@@ -392,8 +392,8 @@ export function emptyWeeklyList(partial?: {
       ]
     : [
         search.days > 0
-          ? `Search terms stored ${search.start} → ${search.end} (${search.days} calendar days, ${search.days_with_rows} days with rows). Not 90d — no execute list. Sunday 03:30 ET 90d search-term backfill must land and Dana's min/max must move first. Weekday ingest stays 7d.`
-          : "No search-term rows stored. Sunday 03:30 ET 90d search-term backfill must land before Blake ranks. Weekday ingest stays 7d.",
+          ? `Search terms stored ${search.start} → ${search.end} (${search.days} calendar days, ${search.days_with_rows} days with rows). Not 90d — no execute list. Sunday 03:30 ET 90d search-term backfill must land and Dana's min/max must move first. Backfill skips weeks that already have a stamp (including old SUMMARY dates); Mini ads-search-terms-rebuild --days 90 repairs those. Weekday ingest stays 7d DAILY.`
+          : "No search-term rows stored. Sunday 03:30 ET 90d search-term backfill must land before Blake ranks. Weekday ingest stays 7d DAILY.",
         "Search-term reports are SP-only. SB/SD terms will be thin or missing. Do not invent 60d or 90d coverage.",
         "Checking Done or Skipped records applied/dismissed on ads_action_decisions. Nothing writes to Amazon.",
       ];
