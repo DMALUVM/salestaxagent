@@ -34,8 +34,20 @@ def _serialize(value: Any) -> Any:
     return value
 
 
-def _clean_row(row: dict) -> dict:
-    return {k: _serialize(v) for k, v in row.items() if v is not None}
+def _clean_row(row: dict, keep_null: frozenset[str] | None = None) -> dict:
+    """Drop nulls so upsert does not wipe columns the caller did not set.
+
+    `keep_null` columns are sent as JSON null and overwrite the stored
+    value. inventory_restock uses this for `alert` — omitting a null
+    leaves a stale out_of_stock in place.
+    """
+    keep = keep_null or frozenset()
+    out: dict = {}
+    for k, v in row.items():
+        if v is None and k not in keep:
+            continue
+        out[k] = None if v is None else _serialize(v)
+    return out
 
 
 def upsert_rows(
@@ -45,15 +57,20 @@ def upsert_rows(
     batch_size: int = 500,
     *,
     drop_columns: frozenset[str] | None = None,
+    keep_null_columns: frozenset[str] | None = None,
 ) -> int:
     if not rows:
         return 0
     client = get_client()
     total = 0
     drop = drop_columns or frozenset()
+    keep_null = keep_null_columns or frozenset()
     for i in range(0, len(rows), batch_size):
         batch = [
-            _clean_row({k: v for k, v in r.items() if k not in drop})
+            _clean_row(
+                {k: v for k, v in r.items() if k not in drop},
+                keep_null,
+            )
             for r in rows[i : i + batch_size]
         ]
         try:
@@ -71,12 +88,14 @@ def upsert_rows(
                 return upsert_rows(
                     table, rows, on_conflict=on_conflict, batch_size=batch_size,
                     drop_columns=drop | frozenset({col}),
+                    keep_null_columns=keep_null,
                 )
             if "PGRST204" in err and "raw" in err.lower() and "raw" not in drop:
                 log.warning("Retrying %s upsert without raw column: %s", table, err[:120])
                 return upsert_rows(
                     table, rows, on_conflict=on_conflict, batch_size=batch_size,
                     drop_columns=drop | frozenset({"raw"}),
+                    keep_null_columns=keep_null,
                 )
             raise
         total += len(result.data) if result.data else 0

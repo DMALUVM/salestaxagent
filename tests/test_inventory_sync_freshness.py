@@ -115,6 +115,115 @@ def test_restock_upsert_payload_includes_fresh_pulled_at():
     assert rows[0]["pulled_at"] == STAMP_ISO
 
 
+def test_restock_maps_recommended_action_and_afn_days_of_supply():
+    """US restock file: Recommended action + AFN/Total DOS, not `alert`."""
+    tsv = (
+        "Merchant SKU\tASIN\tAvailable\t"
+        "Days of Supply at Amazon Fulfillment Network\t"
+        "Total Days of Supply (including units from open shipments)\t"
+        "Recommended action\tRecommended replenishment qty\n"
+        "DDPE0004Shop\tB00TEST\t6678\t45\t120\tNo action required\t0\n"
+    )
+    row = _parse_restock(tsv)[0]
+    assert row["sku"] == "DDPE0004Shop"
+    assert row["available"] == 6678
+    assert row["days_of_supply"] == 45.0
+    assert row["alert"] is None
+    assert row["recommended_qty"] == 0
+
+
+def test_restock_blank_recommended_action_clears_alert():
+    tsv = (
+        "Merchant SKU\tAvailable\tRecommended action\n"
+        "DDPE0004Shop\t6678\t\n"
+    )
+    row = _parse_restock(tsv)[0]
+    assert row["available"] == 6678
+    assert row["alert"] is None
+
+
+def test_restock_keeps_a_real_recommended_action():
+    tsv = (
+        "Merchant SKU\tAvailable\tRecommended action\n"
+        "SKU-B\t0\tCreate shipping plan\n"
+    )
+    assert _parse_restock(tsv)[0]["alert"] == "Create shipping plan"
+
+
+def test_restock_legacy_alert_kept_when_recommended_action_absent():
+    tsv = "merchant-sku\talert\tavailable\nSKU-C\tout_of_stock\t0\n"
+    assert _parse_restock(tsv)[0]["alert"] == "out_of_stock"
+
+
+def test_restock_total_dos_used_when_afn_cell_is_blank():
+    tsv = (
+        "Merchant SKU\tDays of Supply at Amazon Fulfillment Network\t"
+        "Total Days of Supply (including units from open shipments)\n"
+        "SKU-D\t\t88\n"
+    )
+    assert _parse_restock(tsv)[0]["days_of_supply"] == 88.0
+
+
+def test_clean_row_can_keep_a_null_alert():
+    from src.db import _clean_row
+    assert _clean_row({"sku": "A", "alert": None, "days_of_supply": 12.0}) == {
+        "sku": "A", "days_of_supply": 12.0,
+    }
+    assert _clean_row({"sku": "A", "alert": None}, frozenset({"alert"})) == {
+        "sku": "A", "alert": None,
+    }
+
+
+def test_fetch_restock_persists_cleared_alert(monkeypatch):
+    captured = {}
+
+    def fake_upsert(table, rows, on_conflict=None, keep_null_columns=None, **kwargs):
+        captured["table"] = table
+        captured["keep"] = keep_null_columns
+        captured["row"] = rows[0]
+        return 1
+
+    tsv = (
+        "Merchant SKU\tAvailable\tRecommended action\t"
+        "Days of Supply at Amazon Fulfillment Network\n"
+        "DDPE0004Shop\t6678\tNo action required\t45\n"
+    )
+    monkeypatch.setattr(
+        "src.inventory.sync.request_and_download", lambda *a, **k: tsv)
+    monkeypatch.setattr("src.inventory.sync.upsert_rows", fake_upsert)
+    monkeypatch.setattr("src.inventory.sync.log_ingestion", lambda **k: None)
+    from src.inventory.sync import fetch_restock
+    result = fetch_restock()
+    assert result["rows_inserted"] == 1
+    assert captured["table"] == "inventory_restock"
+    assert captured["keep"] == frozenset({"alert"})
+    assert "alert" in captured["row"]
+    assert captured["row"]["alert"] is None
+    assert captured["row"]["days_of_supply"] == 45.0
+    assert captured["row"]["available"] == 6678
+
+
+def test_fetch_planning_does_not_force_null_columns(monkeypatch):
+    captured = {}
+
+    def fake_upsert(table, rows, on_conflict=None, keep_null_columns=None, **kwargs):
+        captured["table"] = table
+        captured["keep"] = keep_null_columns
+        captured["dos"] = rows[0]["days_of_supply"]
+        return 1
+
+    tsv = "sku\tavailable\tweeks-of-cover-t30\nSKU-A\t12\t2.5\n"
+    monkeypatch.setattr(
+        "src.inventory.sync.request_and_download", lambda *a, **k: tsv)
+    monkeypatch.setattr("src.inventory.sync.upsert_rows", fake_upsert)
+    monkeypatch.setattr("src.inventory.sync.log_ingestion", lambda **k: None)
+    from src.inventory.sync import fetch_planning
+    fetch_planning()
+    assert captured["table"] == "inventory_planning"
+    assert captured["keep"] is None
+    assert captured["dos"] == 2.5
+
+
 def test_planning_upsert_payload_includes_fresh_pulled_at():
     tsv = (
         "sku\tasin\tavailable\tweeks-of-cover-t30\n"
