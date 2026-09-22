@@ -292,11 +292,31 @@ Success: `connectors.gsc.configured` is `true`.
 
 Then conversion-digest `"seo": null` until a locked-day GSC row exists. GSC lags ~2 days — that is a **null section**, not a reason to reuse Tuesday’s queries.
 
-Mini `.env` also needs `GSC_SITE_URL=sc-domain:tallowbourn.com` (plus the shared `GOOGLE_OAUTH_*` names). Then `python -m src.main gsc-sync` pulls `searchAnalytics.query` and upserts `gsc_query_daily` / `gsc_page_daily`. Missing Mini env → `needs OAuth` / 0 rows.
+Mini `.env` also needs `GSC_SITE_URL=sc-domain:tallowbourn.com` (plus the shared `GOOGLE_OAUTH_*` names). Then `python -m src.main gsc-sync` pulls `searchAnalytics.query` and upserts:
 
-**Not in the Search Console API:** Merchant listings / structured-data / rich-result *issue lists* are not exposed on `searchAnalytics.query` or any other webmasters.readonly call. Do **not** invent an issues poll. Ellis owns GSC mail as the interim alert door for those.
+| Table | Grain | Notes |
+|---|---|---|
+| `gsc_query_daily` | date × query | Totals SoT for Iris / Nora / paid-ads |
+| `gsc_page_daily` | date × page | Totals SoT |
+| `gsc_query_device_daily` | date × query × device | DESKTOP / MOBILE / TABLET |
+| `gsc_page_device_daily` | date × page × device | same |
+| `gsc_dim_daily` | date × dim_kind × dim_value | Site-wide `device`, `country`, `search_appearance` |
+| `gsc_url_inspection` | latest per allowlisted PDP | URL Inspection API, read-only |
 
-**TODO (skip unless cheap):** URL Inspection API for a tiny hardcoded allowlist of top PDPs, read-only, stored in a new table. Not scheduled this week.
+Missing Mini env → `needs OAuth` / 0 rows. Apply `supabase/migration_gsc_analysis_dims.sql` once (additive; RLS on, no anon policies).
+
+**Pulled now (official API):** query, page, device, country, searchAppearance (site-wide only — Google will not group it with query/page), plus URL Inspection for three hardcoded PDPs (`/products/tallow-balm`, `/products/natural-tallow-deodorant-extra-strength`, `/products/grass-fed-tallow-lip-balm`). Inspection errors log and continue; they do not fail `gsc-sync` or page Telegram.
+
+**Not in the Search Console API:** Merchant listings / structured-data / rich-result *issue lists* are not exposed on `searchAnalytics.query` or URL Inspection verdicts. Do **not** invent an issues poll. Ellis owns GSC mail as the interim alert door for those.
+
+**Skipped (quota / no API / not useful enough):**
+- query×country / page×country / query×searchAppearance — row explosion or Google forbids the grouping
+- `searchType=image|video|discover|googleNews` extra harvests — would multiply every query; web is the money type
+- `hour` dimension — too granular for a 7d lookback
+- Full-site URL Inspection crawl — 2k/day quota; allowlist only
+- Rich-result / mobile-usability *issue arrays* — Ellis mail; we store verdicts only
+
+**Nora / Iris:** `phase2.seo` now includes `devices` / `countries` / `appearances` from `gsc_dim_daily` when the locked day exists. Query × device / page × device tables are warehouse-ready — TODO for Nora if a money-term mobile CTR card is wanted. `/paid-ads` prefers `gsc_dim_daily` (`search_appearance`) over Search Appearance.csv.
 
 **You’re done when:** `GSC_SITE_URL` matches the property type (domain vs URL-prefix), Mini has the same names, and phase2-status shows GSC configured.
 
@@ -329,6 +349,8 @@ Success: HTTP 200, `"as_of"` is prior-day ET, `"improvements"` empty or at most 
 ## Apply the empty warehouse (Dana, once)
 
 In Supabase SQL editor run `supabase/migration_conversion_phase2.sql`. RLS on, no anon policies. Tables start empty. They never feed nexus or P&L.
+
+For GSC device / country / searchAppearance + PDP inspect, also run `supabase/migration_gsc_analysis_dims.sql` (additive). Query/page totals stay on the Phase 2 tables.
 
 ---
 

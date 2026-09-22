@@ -33,7 +33,7 @@ surfaces in the card as a visible failure state, not a blank panel.
 | `/api/ppc` | Supabase server creds | Load-failure card |
 | `/api/paid-ads` | Supabase server creds + `paid_ads_snapshots` / `paid_ads_campaigns_window` | Empty Google/Meta cards + optional migration hint |
 | `/api/paid-ads/csv` | Supabase server creds (POST) | 400 if no recognisable Google/Meta/GSC/GA4 rows; upserts `paid_*_daily` |
-| `/api/paid-ads/intel` | Supabase server creds. Prefers `google_ads_daily` / `ga4_landing_daily` / `gsc_query_daily` / `gsc_page_daily`; Meta uses `meta_ads_daily` when populated else `paid_campaign_daily` | Empty intel + Meta CSV prompt when no preferred rows exist |
+| `/api/paid-ads/intel` | Supabase server creds. Prefers `google_ads_daily` / `ga4_landing_daily` / `gsc_query_daily` / `gsc_page_daily` / `gsc_dim_daily` (search_appearance); Meta uses `meta_ads_daily` when populated else `paid_campaign_daily` | Empty intel + Meta CSV prompt when no preferred rows exist |
 | `/api/paid-ads/decision` | Supabase server creds + `paid_intel_decisions` | 409 naming the migration if the table is missing |
 | `/api/paid-ads/ingest` | Supabase server creds (POST, Basic Auth) | 400 on bad payload; upserts those two tables on their production uniques |
 | `/api/data-freshness` | Supabase server creds | Layout strip hidden (fail-soft) |
@@ -106,6 +106,6 @@ exist (`docs/oauth-phase2.md`).
 | `META_ADS_ACCESS_TOKEN` | no | `meta-ads-sync` (scaffold) |
 | `META_ADS_ACCOUNT_ID` | no | `meta-ads-sync` (scaffold) |
 
-Search Console API here is **performance only** (`searchAnalytics.query` → `gsc_query_daily` / `gsc_page_daily`). Merchant listings / structured-data / rich-result *issue lists* are **not** available via the Search Console API. Ellis owns GSC mail as the interim alert door. Do not add an issues poll. URL Inspection for a tiny PDP allowlist is a later TODO — skip unless it stays one small table.
+Search Console API here is **performance + cheap dims** (`searchAnalytics.query` → `gsc_query_daily` / `gsc_page_daily` totals SoT, plus `gsc_query_device_daily` / `gsc_page_device_daily` / `gsc_dim_daily` for device, country, searchAppearance). URL Inspection writes latest verdicts for a tiny hardcoded PDP allowlist to `gsc_url_inspection` (fail closed; no Telegram). Merchant listings / structured-data / rich-result *issue lists* are **not** available via the Search Console API. Ellis owns GSC mail as the interim alert door. Do not add an issues poll.
 
 

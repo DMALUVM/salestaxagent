@@ -186,6 +186,23 @@ export function adaptGscPageDaily(row: Record<string, unknown>): SearchQueryDail
   };
 }
 
+/** Site-wide gsc_dim_daily search_appearance → intel appearance rows. */
+export function adaptGscAppearanceDaily(row: Record<string, unknown>): SearchQueryDaily | null {
+  if (String(row.dim_kind ?? "") !== "search_appearance") return null;
+  const date = isoDate(row.metric_date);
+  const query = String(row.dim_value ?? "").trim();
+  if (!date || !query) return null;
+  return {
+    kind: "appearance",
+    date,
+    query,
+    clicks: num(row.clicks),
+    impressions: num(row.impressions),
+    ctr: gscCtrToPct(row.ctr),
+    position: row.position == null ? null : num(row.position),
+  };
+}
+
 /**
  * Keep the last `days` of GSC's own calendar (not Ads as-of).
  * GSC trails ~2 days; do not drop those rows because Google Ads is newer.
@@ -218,7 +235,7 @@ export function rollupGscSnapshot(rows: SearchQueryDaily[]): SearchQueryDaily[] 
     posDen: number;
   }>();
   for (const row of rows) {
-    if (row.kind !== "query" && row.kind !== "page") continue;
+    if (row.kind !== "query" && row.kind !== "page" && row.kind !== "appearance") continue;
     const key = `${row.kind}\0${row.query}`;
     const cur = by.get(key) ?? {
       kind: row.kind,
@@ -252,8 +269,8 @@ export function rollupGscSnapshot(rows: SearchQueryDaily[]): SearchQueryDaily[] 
 }
 
 /**
- * API SoT: roll dated query/page rows over GSC's own last-N days.
- * Undated CSV snapshots pass through. Chart / appearance are unchanged.
+ * API SoT: roll dated query/page/appearance rows over GSC's own last-N days.
+ * Undated CSV snapshots pass through. Chart is unchanged.
  */
 export function gscPerformanceRows(
   rows: SearchQueryDaily[],
@@ -261,14 +278,17 @@ export function gscPerformanceRows(
 ): SearchQueryDaily[] {
   const queries = rows.filter((r) => r.kind === "query");
   const pages = rows.filter((r) => r.kind === "page");
-  const rest = rows.filter((r) => r.kind !== "query" && r.kind !== "page");
+  const appearance = rows.filter((r) => r.kind === "appearance");
+  const rest = rows.filter(
+    (r) => r.kind !== "query" && r.kind !== "page" && r.kind !== "appearance",
+  );
   const roll = (part: SearchQueryDaily[]) => {
     const dated = part.filter((r) => r.date);
     const undated = part.filter((r) => !r.date);
     if (!dated.length) return undated;
     return [...undated, ...rollupGscSnapshot(windowedGscRows(dated, days))];
   };
-  return [...roll(queries), ...roll(pages), ...rest];
+  return [...roll(queries), ...roll(pages), ...roll(appearance), ...rest];
 }
 
 /** Daily site totals from dated GSC query rows — stands in for Chart.csv. */

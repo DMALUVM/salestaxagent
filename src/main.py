@@ -2839,10 +2839,12 @@ def meta_ads_sync_cmd(dry_run):
 @click.option("--dry-run", is_flag=True,
               help="Pull official API; never write rows")
 def gsc_sync_cmd(as_of, days, dry_run):
-    """Search Console API daily queries / pages.
+    """Search Console API daily queries / pages / device / country / appearance.
 
     Official Search Console API only. READ scope webmasters.readonly.
-    Missing Vercel/Mini env → needs OAuth, 0 rows. Never invent metrics.
+    Query/page totals stay on gsc_query_daily / gsc_page_daily. Extra
+    dims + a tiny PDP URL Inspection allowlist are additive. Missing
+    Vercel/Mini env → needs OAuth, 0 rows. Never invent metrics.
     One shot, no report wait-loop. metric_date is the API day.
     Mini `.env` needs the same GOOGLE_* names as Vercel. See docs/oauth-phase2.md.
     """
@@ -5770,7 +5772,9 @@ def run():
                 max_instances=1,
             )
             click.echo("[Scheduler] Search Console API daily at 07:25 "
-                       "(prior America/New_York day + 7d lookback; one shot)")
+                       "(prior America/New_York day + 7d lookback; "
+                       "query/page + device/country/appearance; "
+                       "tiny PDP inspect; one shot)")
         if connector_env_ready("google_ads"):
             scheduler.add_job(
                 _run_google_ads_sync,
@@ -6040,6 +6044,7 @@ def _run_gsc_sync():
             "rows": r.get("rows"),
             "start_date": r.get("start_date"),
             "end_date": r.get("end_date"),
+            "fetched": r.get("fetched"),
         })
     except Exception as e:
         job_finish(run_id, "fail", str(e)[:500])

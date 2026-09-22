@@ -125,16 +125,17 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const [ga4, gscQueries, gscPages, googleAds, metaAds] = await Promise.all([
+    const [ga4, gscQueries, gscPages, gscDims, googleAds, metaAds] = await Promise.all([
       loadOptionalDay(sb, "ga4_landing_daily", "metric_date,landing_page,device,sessions,engaged_sessions,landings,view_item,add_to_cart,begin_checkout,purchase", parsed.asOf),
       loadOptionalDay(sb, "gsc_query_daily", "metric_date,query,clicks,impressions,ctr,position", parsed.asOf),
       loadOptionalDay(sb, "gsc_page_daily", "metric_date,page,clicks,impressions,ctr,position", parsed.asOf),
+      loadOptionalDay(sb, "gsc_dim_daily", "metric_date,dim_kind,dim_value,clicks,impressions,ctr,position", parsed.asOf),
       loadOptionalDay(sb, "google_ads_daily", "metric_date,campaign_id,campaign_name,spend,clicks,conversions", parsed.asOf),
       loadOptionalDay(sb, "meta_ads_daily", "metric_date,campaign_id,campaign_name,spend,clicks,conversions", parsed.asOf),
     ]);
 
     const phase2 = phase2FromLockedDay(parsed.asOf, {
-      ga4, gscQueries, gscPages, googleAds, metaAds,
+      ga4, gscQueries, gscPages, gscDims, googleAds, metaAds,
     });
     const digest = buildConversionDigest({
       asOf: parsed.asOf,

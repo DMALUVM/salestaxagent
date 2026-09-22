@@ -5,6 +5,7 @@ import { buildIntel } from "./intel";
 import {
   adaptGa4LandingDaily,
   adaptGoogleAdsDaily,
+  adaptGscAppearanceDaily,
   adaptGscPageDaily,
   adaptGscQueryDaily,
   adaptMetaAdsDaily,
@@ -186,6 +187,22 @@ describe("gsc adapters", () => {
     assert.equal(p!.kind, "page");
     assert.equal(p!.query, "https://tallowbourn.com/products/tallow-balm");
     assert.equal(p!.ctr, 2.5);
+    const a = adaptGscAppearanceDaily({
+      metric_date: "2026-09-19",
+      dim_kind: "search_appearance",
+      dim_value: "PRODUCT_SNIPPETS",
+      clicks: 1,
+      impressions: 50,
+      ctr: 0.02,
+      position: 8.1,
+    });
+    assert.equal(a!.kind, "appearance");
+    assert.equal(a!.query, "PRODUCT_SNIPPETS");
+    assert.equal(a!.ctr, 2);
+    assert.equal(adaptGscAppearanceDaily({
+      metric_date: "2026-09-19", dim_kind: "device", dim_value: "MOBILE",
+      clicks: 1, impressions: 10,
+    }), null);
   });
 
   test("rolls dated API days into one snapshot row per query", () => {
@@ -226,6 +243,24 @@ describe("gsc adapters", () => {
     ];
     const win = windowedGscRows(rows, 7);
     assert.deepEqual(win.map((r) => r.query), ["new"]);
+  });
+
+  test("gscPerformanceRows rolls dated appearance into one undated snapshot", () => {
+    const out = gscPerformanceRows([
+      {
+        kind: "appearance", date: "2026-09-13", query: "PRODUCT_SNIPPETS",
+        clicks: 1, impressions: 40, ctr: 2.5, position: 8,
+      },
+      {
+        kind: "appearance", date: "2026-09-19", query: "PRODUCT_SNIPPETS",
+        clicks: 1, impressions: 50, ctr: 2, position: 8.2,
+      },
+    ], 7);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].kind, "appearance");
+    assert.equal(out[0].date, "");
+    assert.equal(out[0].impressions, 90);
+    assert.equal(out[0].clicks, 2);
   });
 
   test("gscPerformanceRows leaves undated CSV snapshots alone", () => {
@@ -313,6 +348,10 @@ describe("buildIntel from API-shaped rows after the CSV cutoff", () => {
           rows: 1168, min_date: "2026-09-13", max_date: "2026-09-19",
           origin: "api", fetched_at: "2026-09-21T11:25:00Z",
         },
+        gsc_appearance: {
+          rows: 12, min_date: "2026-09-13", max_date: "2026-09-19",
+          origin: "api", fetched_at: "2026-09-21T11:25:00Z",
+        },
       },
     });
 
@@ -339,6 +378,10 @@ describe("buildIntel from API-shaped rows after the CSV cutoff", () => {
     assert.equal(gsc.origin, "api");
     assert.equal(gsc.dated, true);
     assert.equal(gsc.max_date, "2026-09-19");
+    const appear = intel.freshness.sources.find((s) => s.source === "gsc_appearance")!;
+    assert.equal(appear.origin, "api");
+    assert.equal(appear.file, "gsc_dim_daily (search_appearance)");
+    assert.equal(appear.dated, true);
   });
 
   test("dated API days roll up so web-insights / site cards do not look CSV-empty", () => {
