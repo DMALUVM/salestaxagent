@@ -56,7 +56,7 @@ const API_FILES: Record<FreshnessSource, { label: string; file: string }> = {
   ga4: { label: "GA4 Data API", file: "ga4_landing_daily" },
   gsc_trend: { label: "Search Console API", file: "gsc_query_daily (daily rollup)" },
   gsc_snapshot: { label: "Search Console API", file: "gsc_query_daily + gsc_page_daily" },
-  gsc_appearance: { label: "Search appearance", file: "Search Appearance.csv" },
+  gsc_appearance: { label: "Search Console API", file: "gsc_dim_daily (search_appearance)" },
 };
 
 function sourceCopy(
@@ -149,6 +149,9 @@ export function buildFreshness(opts: {
   const datedSnapshot = opts.queries.some((q) =>
     Boolean(q.date) && (q.kind === "query" || q.kind === "page"))
     || Boolean(opts.stats?.gsc_snapshot?.min_date || opts.stats?.gsc_snapshot?.max_date);
+  const datedAppearance = opts.stats?.gsc_appearance?.origin === "api"
+    || appearance.some((q) => Boolean(q.date))
+    || Boolean(opts.stats?.gsc_appearance?.min_date || opts.stats?.gsc_appearance?.max_date);
 
   const sources: SourceFreshness[] = [
     dated("google", googleCopy.label, googleCopy.file, google),
@@ -179,23 +182,30 @@ export function buildFreshness(opts: {
         expected_days: 0,
         coverage: null,
       },
-    {
-      source: "gsc_appearance",
-      label: appearanceCopy.label,
-      file: appearanceCopy.file,
-      rows: opts.stats?.gsc_appearance?.rows ?? appearance.length,
-      min_date: null,
-      max_date: null,
-      origin: opts.stats?.gsc_appearance?.origin,
-      fetched_at: opts.stats?.gsc_appearance?.fetched_at ?? null,
-      days_behind: null,
-      stale: false,
-      dated: false,
-      days_in_range: 0,
-      range_days: range,
-      expected_days: 0,
-      coverage: null,
-    },
+    datedAppearance
+      ? dated(
+        "gsc_appearance",
+        appearanceCopy.label,
+        appearanceCopy.file,
+        appearance,
+      )
+      : {
+        source: "gsc_appearance",
+        label: appearanceCopy.label,
+        file: appearanceCopy.file,
+        rows: opts.stats?.gsc_appearance?.rows ?? appearance.length,
+        min_date: null,
+        max_date: null,
+        origin: opts.stats?.gsc_appearance?.origin,
+        fetched_at: opts.stats?.gsc_appearance?.fetched_at ?? null,
+        days_behind: null,
+        stale: false,
+        dated: false,
+        days_in_range: 0,
+        range_days: range,
+        expected_days: 0,
+        coverage: null,
+      },
   ];
 
   const paidMax = maxPaidDate(opts.campaigns);

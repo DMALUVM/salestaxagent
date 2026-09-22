@@ -103,7 +103,7 @@ separate rule and is unaffected.
 | shopify_poll | every few hours | Shopify orders → sales_by_state + sales_daily |
 | shopify_funnel_sync | 07:15 daily | ShopifyQL session funnel + abandoned checkouts → `/shopper` |
 | ga4_sync | 07:20 daily | GA4 Data API sessions / landings → `ga4_*_daily` (scheduled only when Mini `.env` has `GOOGLE_OAUTH_*` + `GA4_PROPERTY_ID`; prior America/New_York day + 7d lookback; one shot, no poll) |
-| gsc_sync | 07:25 daily | Search Console API queries / pages → `gsc_*_daily` (scheduled only when Mini `.env` has `GOOGLE_OAUTH_*` + `GSC_SITE_URL`; prior America/New_York day + 7d lookback; GSC final data lags ~2d) |
+| gsc_sync | 07:25 daily | Search Console API query/page totals → `gsc_query_daily` / `gsc_page_daily` plus device/country/searchAppearance → `gsc_*_device_daily` / `gsc_dim_daily` and a tiny PDP URL Inspection allowlist → `gsc_url_inspection` (scheduled only when Mini `.env` has `GOOGLE_OAUTH_*` + `GSC_SITE_URL`; prior America/New_York day + 7d lookback; GSC final data lags ~2d; inspect errors log + continue) |
 | google_ads_sync | 07:30 daily | Google Ads API campaign dailies → `google_ads_daily` (scheduled only when Mini `.env` has `GOOGLE_OAUTH_*` + `GOOGLE_ADS_DEVELOPER_TOKEN` + `GOOGLE_ADS_CUSTOMER_ID`; `GOOGLE_ADS_LOGIN_CUSTOMER_ID` for MCC; prior America/New_York day + 7d lookback; searchStream one shot; never mutate) |
 | ads_campaigns_backfill | Sun 03:00 | 90d campaigns (3 × 30d chunks) for long trends |
 | source_monitoring | Mon 07:00 | Rule-source change detection |

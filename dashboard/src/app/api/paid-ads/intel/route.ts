@@ -1,7 +1,8 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 import {
   DECISION_STATUSES, INTEL_FILTERS, INTEL_RANGES, buildIntel,
-  adaptGa4LandingDaily, adaptGoogleAdsDaily, adaptGscPageDaily, adaptGscQueryDaily,
+  adaptGa4LandingDaily, adaptGoogleAdsDaily, adaptGscAppearanceDaily,
+  adaptGscPageDaily, adaptGscQueryDaily,
   adaptMetaAdsDaily, isoDate, pickOriginStats, preferApiWhenPresent,
   synthesizeGscChart,
   type ApiTableStats, type CampaignDaily, type DecisionStatus, type GaDaily,
@@ -214,7 +215,7 @@ export async function GET(request: Request) {
 
     const apiOpts = { dateCol: "metric_date", fetchedAt: true };
     const [
-      sGoogleApi, sMetaApi, sGaApi, sGscQ, sGscP,
+      sGoogleApi, sMetaApi, sGaApi, sGscQ, sGscP, sGscAppearApi,
       sGoogleCsv, sMetaCsv, sGaCsv, sTrend, sQuery, sPage, sAppearance,
     ] = await Promise.all([
       tableStats("google_ads_daily", apiOpts),
@@ -222,6 +223,7 @@ export async function GET(request: Request) {
       tableStats("ga4_landing_daily", apiOpts),
       tableStats("gsc_query_daily", apiOpts),
       tableStats("gsc_page_daily", apiOpts),
+      tableStats("gsc_dim_daily", { ...apiOpts, eq: { dim_kind: "search_appearance" } }),
       tableStats("paid_campaign_daily", { eq: { platform: "google" } }),
       tableStats("paid_campaign_daily", { eq: { platform: "meta" } }),
       tableStats("paid_ga_daily"),
@@ -241,6 +243,7 @@ export async function GET(request: Request) {
       fetched_at: sGscQ.fetched_at || sGscP.fetched_at,
       missing: sGscQ.missing && sGscP.missing,
     });
+    const appearanceOrigin: WarehouseOrigin = preferApiWhenPresent(sGscAppearApi);
 
     const googleStat = pickOriginStats(googleOrigin, sGoogleApi, sGoogleCsv);
     const metaStat = pickOriginStats(metaOrigin, sMetaApi, sMetaCsv);
@@ -272,7 +275,7 @@ export async function GET(request: Request) {
       ga4: gaStat,
       gsc_trend: trendStat,
       gsc_snapshot: gscStat,
-      gsc_appearance: { ...sAppearance, origin: "csv" as const, fetched_at: null },
+      gsc_appearance: pickOriginStats(appearanceOrigin, sGscAppearApi, sAppearance),
     };
 
     const asOf = maxDate(googleStat.max_date, metaStat.max_date, gaStat.max_date, trendStat.max_date);
@@ -287,7 +290,7 @@ export async function GET(request: Request) {
     const [
       googleApiRes, metaApiRes, csvCampRes,
       gaApiRes, gaCsvRes,
-      gscQueryRes, gscPageRes, csvChartRes, csvSnapRes,
+      gscQueryRes, gscPageRes, gscAppearApiRes, csvChartRes, csvSnapRes,
       dRes,
     ] = await Promise.all([
       googleOrigin === "api"
@@ -311,6 +314,12 @@ export async function GET(request: Request) {
       gscOrigin === "api"
         ? selectRows("gsc_page_daily", { sinceDate: since, dateCol: "metric_date" })
         : Promise.resolve({ rows: [], missing: false, error: null }),
+      appearanceOrigin === "api"
+        ? selectRows("gsc_dim_daily", {
+          sinceDate: since, dateCol: "metric_date",
+          eq: { dim_kind: "search_appearance" },
+        })
+        : Promise.resolve({ rows: [], missing: false, error: null }),
       gscOrigin === "csv"
         ? selectRows("paid_search_query_daily", { eq: { kind: "chart" }, sinceDate: since })
         : Promise.resolve({ rows: [], missing: false, error: null }),
@@ -332,9 +341,11 @@ export async function GET(request: Request) {
       ? gaApiRes.rows.map(adaptGa4LandingDaily).filter((r): r is GaDaily => Boolean(r))
       : gaCsvRes.rows.map(gaRow).filter((r): r is GaDaily => Boolean(r));
 
-    const appearance = csvSnapRes.rows
-      .map(queryRow)
-      .filter((r): r is SearchQueryDaily => r != null && r.kind === "appearance");
+    const appearance = appearanceOrigin === "api"
+      ? gscAppearApiRes.rows.map(adaptGscAppearanceDaily).filter((r): r is SearchQueryDaily => Boolean(r))
+      : csvSnapRes.rows
+        .map(queryRow)
+        .filter((r): r is SearchQueryDaily => r != null && r.kind === "appearance");
     const queries: SearchQueryDaily[] = gscOrigin === "api"
       ? (() => {
         const q = gscQueryRes.rows.map(adaptGscQueryDaily).filter((r): r is SearchQueryDaily => Boolean(r));
@@ -343,14 +354,17 @@ export async function GET(request: Request) {
       })()
       : [...csvSnapRes.rows, ...csvChartRes.rows]
         .map(queryRow)
-        .filter((r): r is SearchQueryDaily => Boolean(r));
+        .filter((r): r is SearchQueryDaily => Boolean(r))
+        .filter((r) => appearanceOrigin !== "api" || r.kind !== "appearance")
+        .concat(appearanceOrigin === "api" ? appearance : []);
 
     const missing = googleOrigin === "csv" && metaOrigin === "csv" && gaOrigin === "csv"
       && csvCampRes.missing && csvSnapRes.missing && gaCsvRes.missing;
     const loadErrors = [
       googleApiRes.error, metaApiRes.error, csvCampRes.error,
       gaApiRes.error, gaCsvRes.error,
-      gscQueryRes.error, gscPageRes.error, csvChartRes.error, csvSnapRes.error, dRes.error,
+      gscQueryRes.error, gscPageRes.error, gscAppearApiRes.error,
+      csvChartRes.error, csvSnapRes.error, dRes.error,
     ].filter((e): e is string => Boolean(e));
 
     const bundle = buildIntel({
