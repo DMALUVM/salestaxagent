@@ -305,7 +305,7 @@ Mini `.env` also needs `GSC_SITE_URL=sc-domain:tallowbourn.com` (plus the shared
 
 Missing Mini env → `needs OAuth` / 0 rows. Apply `supabase/migration_gsc_analysis_dims.sql` once (additive; RLS on, no anon policies).
 
-**Pulled now (official API):** query, page, device, country, searchAppearance (site-wide only — Google will not group it with query/page), plus URL Inspection for three hardcoded PDPs (`/products/tallow-balm`, `/products/natural-tallow-deodorant-extra-strength`, `/products/grass-fed-tallow-lip-balm`). Inspection errors log and continue; they do not fail `gsc-sync` or page Telegram.
+**Pulled now (official API):** query, page, device, country, searchAppearance (site-wide only — Google will not group it with any other dimension, including date; Mini day-bounds the window and stamps `metric_date` from the request), plus URL Inspection for three hardcoded PDPs (`/products/tallow-balm`, `/products/natural-tallow-deodorant-extra-strength`, `/products/grass-fed-tallow-lip-balm`). Inspection errors log and continue; they do not fail `gsc-sync` or page Telegram.
 
 **Not in the Search Console API:** Merchant listings / structured-data / rich-result *issue lists* are not exposed on `searchAnalytics.query` or URL Inspection verdicts. Do **not** invent an issues poll. Ellis owns GSC mail as the interim alert door for those.
 

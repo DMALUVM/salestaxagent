@@ -108,13 +108,17 @@ GSC_PDP_INSPECT_ALLOWLIST = (
     "https://tallowbourn.com/products/natural-tallow-deodorant-extra-strength",
     "https://tallowbourn.com/products/grass-fed-tallow-lip-balm",
 )
-# Site-wide Search Analytics dims. searchAppearance cannot be grouped with
-# query/page (Google forbids it) — keep it site-wide to stay cheap.
+# Site-wide Search Analytics dims that may share the date dimension.
+# searchAppearance cannot be grouped with ANY other dimension — including
+# date. Google returns HTTP 400:
+# "Cannot group by search appearance dimension together with another dimension."
+# Harvest it day-bounded with dimensions=['searchAppearance'] only.
 GSC_SITE_DIMS = (
     ("device", "device"),
     ("country", "country"),
-    ("searchAppearance", "search_appearance"),
 )
+GSC_APPEARANCE_DIMENSION = "searchAppearance"
+GSC_APPEARANCE_KIND = "search_appearance"
 # Latest stable REST version as of 2026-09 (sunset Aug 2027). SELECT only.
 GOOGLE_ADS_API_VERSION = "v25"
 GOOGLE_ADS_SEARCH_STREAM_URL = (
@@ -600,8 +604,10 @@ def pull_gsc_rows(token: str, site_url: str, start: date, end: date,
     """Query + page totals plus cheap device / country / appearance dims.
 
     gsc_query_daily / gsc_page_daily stay the totals SoT. Extra harvests
-    are additive. searchAppearance is site-wide only (Google will not
-    group it with query/page). Date dimension is the API day.
+    are additive. searchAppearance is site-wide and date-less: Google
+    forbids grouping it with any other dimension, including date. Use
+    startDate/endDate as a one-day window and stamp metric_date from
+    that request day. Query/page/device/country still use the date dim.
     """
     errors: list[str] = []
     queries: list[dict] = []
@@ -657,12 +663,45 @@ def pull_gsc_rows(token: str, site_url: str, start: date, end: date,
             return {"metric_date": day, "dim_kind": kind, "dim_value": keys[0]}
         return build
 
+    def harvest_appearance() -> None:
+        """Day-bounded searchAppearance — never put date (or any other dim) in dimensions[]."""
+        day = start
+        while day <= end:
+            stamp = day.isoformat()
+            result = gsc_search_analytics(token, site_url, {
+                "startDate": stamp,
+                "endDate": stamp,
+                "dimensions": [GSC_APPEARANCE_DIMENSION],
+                "dataState": "final",
+            })
+            if result.get("error"):
+                errors.append(f"{GSC_APPEARANCE_DIMENSION}: {result['error']}")
+                day += timedelta(days=1)
+                continue
+            for raw in result.get("rows") or []:
+                if not isinstance(raw, dict):
+                    continue
+                keys = raw.get("keys") or []
+                if not isinstance(keys, list) or not keys:
+                    continue
+                value = str(keys[0] or "").strip()
+                if not value:
+                    continue
+                dims.append({
+                    "metric_date": stamp,
+                    "dim_kind": GSC_APPEARANCE_KIND,
+                    "dim_value": value,
+                    **_gsc_metric_fields(raw, fetched_at),
+                })
+            day += timedelta(days=1)
+
     harvest(["query"], queries, one_key("query"))
     harvest(["page"], pages, one_key("page"))
     harvest(["query", "device"], query_device, key_device("query"))
     harvest(["page", "device"], page_device, key_device("page"))
     for api_name, kind in GSC_SITE_DIMS:
         harvest([api_name], dims, site_dim(kind))
+    harvest_appearance()
     return {
         "queries": queries,
         "pages": pages,
