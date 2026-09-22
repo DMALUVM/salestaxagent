@@ -31,7 +31,7 @@ export interface MetaGrainRow {
   initiate_checkout: number | null;
 }
 
-export type MetaCallAction = "kill" | "cut" | "refresh" | "scale" | "hold";
+export type MetaCallAction = "kill" | "cut" | "refresh" | "scale" | "keep" | "hold";
 export type MetaCallEntity = "campaign" | "adset" | "ad";
 
 /** One line Dave can say on the weekly Ads Manager call. Never invented. */
