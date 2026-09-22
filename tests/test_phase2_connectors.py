@@ -251,24 +251,47 @@ def _route_google(url, json=None, **_kwargs):
     raise AssertionError(f"unexpected URL {url}")
 
 
+def _campaign_insight():
+    return {
+        "campaign_id": "1203301",
+        "campaign_name": "UGC | Tallow Balm | CBO",
+        "date_start": "2026-09-19",
+        "date_stop": "2026-09-19",
+        "spend": "12.50",
+        "clicks": "8",
+        "impressions": "200",
+        "reach": "150",
+        "frequency": "1.3333",
+        "ctr": "4.0",
+        "cpc": "1.5625",
+        "cpm": "62.5",
+        "inline_link_clicks": "7",
+        "unique_clicks": "6",
+        "unique_inline_link_clicks": "5",
+        "actions": [
+            {"action_type": "link_click", "value": "8"},
+            {"action_type": "purchase", "value": "1"},
+            {"action_type": "omni_purchase", "value": "9"},
+            {"action_type": "add_to_cart", "value": "3"},
+            {"action_type": "initiate_checkout", "value": "2"},
+        ],
+        "action_values": [
+            {"action_type": "purchase", "value": "28.00"},
+            {"action_type": "omni_purchase", "value": "999.00"},
+            {"action_type": "add_to_cart", "value": "90.00"},
+            {"action_type": "initiate_checkout", "value": "56.00"},
+        ],
+    }
+
+
 def _route_meta(url, params=None, **_kwargs):
     if "graph.facebook.com" in url and "/insights" in url:
-        return _Resp(_meta_insights([{
-            "campaign_id": "1203301",
-            "campaign_name": "UGC | Tallow Balm | CBO",
-            "date_start": "2026-09-19",
-            "date_stop": "2026-09-19",
-            "spend": "12.50",
-            "clicks": "8",
-            "impressions": "200",
-            "actions": [
-                {"action_type": "link_click", "value": "8"},
-                {"action_type": "purchase", "value": "1"},
-            ],
-            "action_values": [
-                {"action_type": "purchase", "value": "28.00"},
-            ],
-        }]))
+        params = params or {}
+        level = params.get("level") or "campaign"
+        breakdowns = params.get("breakdowns") or ""
+        if breakdowns or level != "campaign":
+            return _Resp({"data": []})
+        return _Resp(_meta_insights([_campaign_insight()]))
     raise AssertionError(f"unexpected URL {url}")
 
 
@@ -932,11 +955,28 @@ def test_meta_ads_success_mocked_http_upserts_locked_day(monkeypatch):
     assert row["impressions"] == 200
     assert row["conversions"] == 1.0
     assert row["conversion_value"] == 28.0
+    assert row["add_to_cart"] == 3.0
+    assert row["add_to_cart_value"] == 90.0
+    assert row["initiate_checkout"] == 2.0
+    assert row["initiate_checkout_value"] == 56.0
+    assert row["reach"] == 150
+    assert row["frequency"] == 1.3333
+    assert row["unique_clicks"] == 6
+    assert row["inline_link_clicks"] == 7
     assert row["source"] == "meta_marketing_api"
+    # First-match only — omni_purchase must not double-count.
+    assert row["conversions"] != 10.0
+    assert row["conversion_value"] != 1027.0
 
-    url, params = seen[0]
+    levels = [p.get("level") for _, p in seen]
+    breakdowns = [p.get("breakdowns") for _, p in seen]
+    assert levels.count("campaign") >= 1
+    assert "adset" in levels
+    assert "ad" in levels
+    assert "publisher_platform" in breakdowns
+    assert "age,gender" in breakdowns
+    url, params = next((u, p) for u, p in seen if p.get("level") == "campaign" and not p.get("breakdowns"))
     assert f"graph.facebook.com/{META_GRAPH_VERSION}/act_156983680801147/insights" in url
-    assert params["level"] == "campaign"
     assert params["time_increment"] == 1
     assert params["access_token"] == "token"
     expected_proof = hmac.new(b"secret", b"token", hashlib.sha256).hexdigest()
@@ -1119,9 +1159,80 @@ def test_meta_ads_chunks_lookback_over_30_days(monkeypatch):
     monkeypatch.setattr("src.db.upsert_rows", lambda *a, **k: 0)
     r = meta_ads_sync(environ=_meta_env(), as_of="2026-09-19", days=45)
     assert r["ok"] is True
-    assert len(ranges) == 2
-    assert ranges[0] == '{"since":"2026-08-06","until":"2026-09-04"}'
-    assert ranges[1] == '{"since":"2026-09-05","until":"2026-09-19"}'
+    # 5 harvests (campaign/adset/ad + 2 breakdowns) × 2 chunks.
+    assert len(ranges) == 10
+    assert set(ranges) == {
+        '{"since":"2026-08-06","until":"2026-09-04"}',
+        '{"since":"2026-09-05","until":"2026-09-19"}',
+    }
+
+
+def test_meta_ads_multi_level_and_breakdowns_upsert(monkeypatch):
+    upserts: list[tuple] = []
+
+    def route(url, params=None, **kwargs):
+        params = params or {}
+        level = params.get("level")
+        breakdowns = params.get("breakdowns") or ""
+        if "unique_clicks" in str(params.get("fields") or "") and breakdowns:
+            raise AssertionError("unique_clicks must not ride along on breakdowns")
+        if breakdowns == "publisher_platform":
+            row = {
+                **_campaign_insight(),
+                "publisher_platform": "instagram",
+                "spend": "8.00",
+            }
+            row.pop("unique_clicks", None)
+            row.pop("unique_inline_link_clicks", None)
+            return _Resp(_meta_insights([row]))
+        if breakdowns == "age,gender":
+            row = {**_campaign_insight(), "age": "25-34", "gender": "female", "spend": "4.00"}
+            row.pop("unique_clicks", None)
+            row.pop("unique_inline_link_clicks", None)
+            return _Resp(_meta_insights([row]))
+        if level == "adset":
+            row = {
+                **_campaign_insight(),
+                "adset_id": "33001",
+                "adset_name": "Prospect | Broad",
+                "frequency": "3.1000",
+            }
+            return _Resp(_meta_insights([row]))
+        if level == "ad":
+            row = {
+                **_campaign_insight(),
+                "ad_id": "44001",
+                "ad_name": "UGC v3",
+                "adset_id": "33001",
+                "adset_name": "Prospect | Broad",
+            }
+            return _Resp(_meta_insights([row]))
+        return _route_meta(url, params=params, **kwargs)
+
+    monkeypatch.setattr("src.phase2_connectors._http_get", route)
+    monkeypatch.setattr(
+        "src.db.upsert_rows",
+        lambda t, rows, on_conflict=None: upserts.append((t, list(rows), on_conflict)) or len(rows),
+    )
+    r = meta_ads_sync(environ=_meta_env(), as_of="2026-09-19", days=1)
+    assert r["ok"] is True
+    assert r["fetched"]["campaigns"] == 1
+    assert r["fetched"]["adsets"] == 1
+    assert r["fetched"]["ads"] == 1
+    assert r["fetched"]["platforms"] == 1
+    assert r["fetched"]["demos"] == 1
+    by = {t: (rows, conflict) for t, rows, conflict in upserts}
+    assert by["meta_ads_adset_daily"][1] == "metric_date,adset_id"
+    assert by["meta_ads_adset_daily"][0][0]["adset_id"] == "33001"
+    assert by["meta_ads_adset_daily"][0][0]["frequency"] == 3.1
+    assert by["meta_ads_ad_daily"][0][0]["ad_id"] == "44001"
+    assert by["meta_ads_platform_daily"][0][0]["publisher_platform"] == "instagram"
+    assert "unique_clicks" not in by["meta_ads_platform_daily"][0][0]
+    demo = by["meta_ads_demo_daily"][0][0]
+    assert demo["age"] == "25-34"
+    assert demo["gender"] == "female"
+    assert "token" not in (r.get("message") or "")
+    assert "token" not in (r.get("error") or "")
 
 
 def test_cli_ga4_gsc_and_ads_success_mocked(monkeypatch):
@@ -1232,6 +1343,13 @@ def test_scopes_are_read_minima():
     assert CONNECTORS["meta_ads"]["scopes"] == ("ads_read",)
     assert "ads_management" not in CONNECTORS["meta_ads"]["scopes"]
     assert "read_insights" not in CONNECTORS["meta_ads"]["scopes"]
+    assert CONNECTORS["meta_ads"]["tables"] == (
+        "meta_ads_daily",
+        "meta_ads_adset_daily",
+        "meta_ads_ad_daily",
+        "meta_ads_platform_daily",
+        "meta_ads_demo_daily",
+    )
 
 
 def test_click_exception_type():
@@ -1256,6 +1374,15 @@ def test_shopify_funnel_untouched_by_phase2():
     assert "gsc_query_daily" not in dims_sql or "alter table gsc_query_daily" not in dims_sql.lower()
     assert "search_appearance" in dims_sql
     assert "Ellis" in dims_sql
+    meta_sql = Path("supabase/migration_meta_ads_enrichment.sql").read_text()
+    assert "create table if not exists meta_ads_adset_daily" in meta_sql
+    assert "create table if not exists meta_ads_ad_daily" in meta_sql
+    assert "create table if not exists meta_ads_platform_daily" in meta_sql
+    assert "create table if not exists meta_ads_demo_daily" in meta_sql
+    assert "add column if not exists frequency" in meta_sql
+    assert "drop table" not in meta_sql.lower()
+    assert "migration_rls_lockdown" in meta_sql
+    assert "never feeds nexus" in meta_sql.lower() or "never nexus" in meta_sql.lower()
 
 
 def test_side_tables_never_feed_nexus_or_pnl():
@@ -1263,7 +1390,9 @@ def test_side_tables_never_feed_nexus_or_pnl():
         text = Path(rel).read_text()
         for table in (
             "ga4_sessions_daily", "ga4_landing_daily", "google_ads_daily",
-            "meta_ads_daily", "gsc_query_daily", "gsc_page_daily",
+            "meta_ads_daily", "meta_ads_adset_daily", "meta_ads_ad_daily",
+            "meta_ads_platform_daily", "meta_ads_demo_daily",
+            "gsc_query_daily", "gsc_page_daily",
             "gsc_query_device_daily", "gsc_page_device_daily",
             "gsc_dim_daily", "gsc_url_inspection",
             "conversion_digest_status",
@@ -1285,6 +1414,9 @@ def test_docs_and_snapshot_list_the_tables():
     assert "Never mutate" in docs or "never mutate" in docs
     assert "/insights" in docs
     assert "act_" in docs
+    assert "meta_ads_adset_daily" in docs
+    assert "publisher_platform" in docs
+    assert "Meta CSV" in docs and "retired" in docs.lower()
     assert "Do not add a second Jev job on Mini" in docs
     assert "ecommdashboard.com" in docs
     assert "Mini `.env`" in docs
@@ -1298,6 +1430,8 @@ def test_docs_and_snapshot_list_the_tables():
         assert "gsc_dim_daily" in text
         assert "gsc_url_inspection" in text
         assert "gsc_query_device_daily" in text
+        assert "meta_ads_adset_daily" in text
+        assert "meta_ads_demo_daily" in text
 
 
 def test_settings_loads_when_phase2_google_env_is_set(monkeypatch):

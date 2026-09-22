@@ -10,7 +10,7 @@ import {
 import { SectionNav } from "@/components/section-nav";
 import { WebInsightsCard } from "@/components/web-insights-card";
 import type {
-  IntelBundle, IntelCard, IntelFilter, IntelRangeDays, PlatformKpis,
+  IntelBundle, IntelCard, IntelFilter, IntelRangeDays, MetaGrainRow, PlatformKpis,
 } from "@/lib/paid-intel/types";
 import { INTEL_FILTERS, INTEL_RANGES } from "@/lib/paid-intel/types";
 import {
@@ -40,7 +40,7 @@ function HowtoLink({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-/** Manual CSV pull steps for /paid-ads. Meta is the live upload. Google/GA4/GSC are optional fallback. */
+/** Legacy CSV emergency steps. Official APIs are SoT — Meta CSV is retired. */
 function PaidAdsCsvHowto({
   open, onOpenChange,
 }: {
@@ -51,10 +51,11 @@ function PaidAdsCsvHowto({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[min(85vh,40rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>How-to: pull CSVs</DialogTitle>
+          <DialogTitle>Legacy CSV (emergency)</DialogTitle>
           <DialogDescription>
-            Google Ads, GA4, and Search Console load from official API sync. Upload Meta CSV until
-            meta_ads_daily has rows. Google / GA4 / GSC CSVs are optional fallback only.
+            Google Ads, Meta, GA4, and Search Console load from official API sync
+            (google_ads_daily / meta_ads_daily / ga4_landing_daily / gsc_*_daily).
+            CSV is a hidden emergency fallback and never blocks this page.
           </DialogDescription>
         </DialogHeader>
         <ol className="list-decimal space-y-3 pl-4 text-[13px] leading-snug">
@@ -73,8 +74,12 @@ function PaidAdsCsvHowto({
           </li>
           <li>
             <p className="font-medium">Meta</p>
+            <p className="text-muted-foreground">
+              Retired. Prefer meta_ads_daily from Mini meta-ads-sync. Do not upload a Meta CSV
+              unless the API table is missing.
+            </p>
             <p>
-              Ads Manager reporting (act=156983680801147, business_id=1028304628604309):{" "}
+              Emergency Ads Manager reporting (act=156983680801147, business_id=1028304628604309):{" "}
               <HowtoLink href={META_ADS_CSV_URL}>{META_ADS_CSV_URL}</HowtoLink>
             </p>
             <p>
@@ -111,9 +116,9 @@ function PaidAdsCsvHowto({
           </li>
         </ol>
         <p className="text-[13px] leading-snug">
-          Then on Dashboard: /paid-ads → Upload → Meta Ads Manager export. Optional fallback: select ALL files at once
+          Then on Dashboard: /paid-ads → Legacy CSV. Optional fallback: select ALL files at once
           (Google + Meta + Queries + Pages + Chart + Search Appearance + GA4;
-          parser IDs by header). Matching days overwrite; older days stay.
+          parser IDs by header). Matching days overwrite; older days stay. Meta API rows win when present.
         </p>
       </DialogContent>
     </Dialog>
@@ -725,9 +730,9 @@ function DataStatus({
             <CircleHelp className="mr-1.5 h-3.5 w-3.5" />
             How-to
           </Button>
-          <Button variant="outline" size="sm" onClick={onUpload}>
+          <Button variant="ghost" size="sm" onClick={onUpload}>
             <Upload className="mr-1.5 h-3.5 w-3.5" />
-            Upload
+            Legacy CSV
           </Button>
         </div>
       </CardHeader>
@@ -792,8 +797,8 @@ function DataStatus({
         </Table>
         <div className="space-y-1 border-t p-3">
           <p className="text-[11px] text-muted-foreground">
-            Google Ads, GA4, and Search Console prefer official API tables (max metric_date + fetched_at).
-            Meta stays on CSV until meta_ads_daily has rows. Optional CSV fallback still overwrites matching days.
+            Google Ads, Meta, GA4, and Search Console prefer official API tables (max metric_date + fetched_at).
+            Meta CSV is retired — meta_ads_daily is SoT. Legacy CSV never blocks this page.
           </p>
           {thin.length > 0 && (
             <p className="text-[11px] text-amber-700 dark:text-amber-400">
@@ -869,6 +874,58 @@ function DeskHeader({
   );
 }
 
+function MetaGrainTables({ rows, title, hint }: { rows: MetaGrainRow[]; title: string; hint: string }) {
+  const by = new Map<string, { name: string; campaign: string; spend: number; value: number; clicks: number; freq: number | null }>();
+  for (const r of rows) {
+    const key = `${r.campaign_name}|${r.entity_name}`;
+    const cur = by.get(key) ?? {
+      name: r.entity_name, campaign: r.campaign_name, spend: 0, value: 0, clicks: 0, freq: null as number | null,
+    };
+    cur.spend += r.spend;
+    cur.value += r.conv_value;
+    cur.clicks += r.clicks;
+    if (r.frequency != null) cur.freq = Math.max(cur.freq ?? 0, r.frequency);
+    by.set(key, cur);
+  }
+  const list = [...by.values()].sort((a, b) => b.spend - a.spend).filter((r) => r.spend >= 1).slice(0, 12);
+  if (!list.length) return null;
+  return (
+    <Card>
+      <CardHeader className="border-b">
+        <CardTitle className="text-sm">{title}</CardTitle>
+        <p className="text-[11px] text-muted-foreground">{hint}</p>
+      </CardHeader>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead className="text-right">Spend</TableHead>
+              <TableHead className="text-right">Purchase $</TableHead>
+              <TableHead className="text-right">Clicks</TableHead>
+              <TableHead className="text-right">Freq</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {list.map((r) => (
+              <TableRow key={`${r.campaign}|${r.name}`}>
+                <TableCell>
+                  <div className="font-medium">{r.name}</div>
+                  <div className="text-[10px] text-muted-foreground">{r.campaign}</div>
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{money(r.spend)}</TableCell>
+                <TableCell className="text-right tabular-nums">{money(r.value)}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmt(r.clicks)}</TableCell>
+                <TableCell className="text-right tabular-nums">{r.freq == null ? "—" : r.freq.toFixed(2)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function PaidAdsIntel({
   data,
   range,
@@ -894,6 +951,12 @@ export function PaidAdsIntel({
 
   const hasWeb = Boolean(data.web_insights?.present);
   const empty = !data.as_of && !hasWeb;
+  const metaDetail = data.meta_detail;
+  const hasMetaGrain = Boolean(
+    metaDetail
+    && (metaDetail.adsets.length || metaDetail.ads.length
+      || metaDetail.platforms.length || metaDetail.demos.length),
+  );
   const adsCards = data.cards.filter((c) => (c.owner ?? "ads") === "ads");
   const siteCards = data.cards.filter((c) => c.owner === "site");
 
@@ -1009,6 +1072,7 @@ export function PaidAdsIntel({
           { id: "ads-desk", label: "Ads lead" },
           { id: "site-desk", label: "Web team" },
           { id: "campaigns", label: "Campaigns" },
+          ...(hasMetaGrain ? [{ id: "meta-grain", label: "Meta grain" }] : []),
           ...(data.gsc.hidden ? [] : [{ id: "gsc", label: "Search" }]),
           { id: "ga4", label: "GA4" },
         ] : []),
@@ -1027,7 +1091,7 @@ export function PaidAdsIntel({
     >
       {drag && (
         <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-background/70 text-sm font-medium">
-          Drop Meta CSV (Google / GA4 / GSC optional fallback)
+          Drop legacy CSV (emergency fallback — Meta API is SoT)
         </div>
       )}
 
@@ -1035,15 +1099,15 @@ export function PaidAdsIntel({
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Paid Ads (Shopify)</h1>
           <p className="text-sm text-muted-foreground">
-            Tallowbourn ads Intel from Google Ads / GA4 / Search Console API sync. Meta still uses CSV until
-            meta_ads_daily has rows. Range is relative to the newest date <em>in the loaded sources</em>
+            Tallowbourn ads Intel from Google Ads / Meta / GA4 / Search Console API sync.
+            Meta CSV is retired. Range is relative to the newest date <em>in the loaded sources</em>
             {data.as_of ? ` (${data.as_of})` : ""}, not today.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={busy}>
+          <Button variant="ghost" size="sm" onClick={() => inputRef.current?.click()} disabled={busy}>
             <Upload className="mr-1.5 h-3.5 w-3.5" />
-            {busy ? "Reading…" : "Upload Meta CSV"}
+            {busy ? "Reading…" : "Legacy CSV"}
           </Button>
           <input
             ref={inputRef}
@@ -1051,7 +1115,7 @@ export function PaidAdsIntel({
             multiple
             accept=".csv,.zip,text/csv,application/zip"
             className="hidden"
-            aria-label="Upload Meta CSV; Google, GSC, or GA4 CSVs remain optional fallback"
+            aria-label="Legacy CSV emergency fallback; Meta, Google, GSC, or GA4 CSVs never block the page"
             onChange={(e) => onFiles(e.target.files)}
           />
           <Button variant="outline" size="sm" onClick={copyGrok} disabled={empty}>
@@ -1121,11 +1185,11 @@ export function PaidAdsIntel({
           <CardContent className="py-12 text-center">
             <Megaphone className="mx-auto mb-3 h-8 w-8 text-muted-foreground/40" />
             <p className="text-sm text-muted-foreground">
-              Google Ads, GA4, and Search Console load from API sync. Drop a Meta Ads Manager campaign export
-              until meta_ads_daily has rows.
+              Waiting for Mini API sync (google-ads-sync / meta-ads-sync / ga4-sync / gsc-sync).
+              Meta CSV is retired and does not block this page.
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Google / GA4 / GSC CSVs remain an optional fallback — the parser still identifies each file by its header.
+              Legacy CSV remains an emergency fallback — the parser still identifies each file by its header.
               A missing source omits that channel; it does not crash. Matching days overwrite; older days stay.
             </p>
           </CardContent>
@@ -1196,7 +1260,7 @@ export function PaidAdsIntel({
             <h2 className="text-sm font-semibold tracking-tight">This week</h2>
             <Card>
               <CardContent className="space-y-3 p-4">
-                <p className="text-sm leading-relaxed">{brief.headline || "API sync or a Meta CSV builds this week’s brief."}</p>
+                <p className="text-sm leading-relaxed">{brief.headline || "API sync builds this week’s brief. Meta CSV is retired."}</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <p className="text-[13px] text-muted-foreground">
                     <span className="font-medium text-foreground">Ads lead. </span>{brief.ads || "No paid-media stack yet."}
@@ -1296,6 +1360,38 @@ export function PaidAdsIntel({
               </CardContent>
             </Card>
           </section>
+
+          {hasMetaGrain && metaDetail && (
+            <section id="meta-grain" className="space-y-3 scroll-mt-12">
+              <h2 className="text-sm font-semibold tracking-tight">Meta grain</h2>
+              <p className="text-[11px] text-muted-foreground">
+                Official meta-ads-sync tables. Reach / unique clicks are not additive across
+                placements or age×gender. Purchase / ATC / IC come from Graph actions — never invented.
+              </p>
+              <div className="grid gap-3 lg:grid-cols-2">
+                <MetaGrainTables
+                  rows={metaDetail.adsets}
+                  title="Ad sets"
+                  hint="meta_ads_adset_daily — fatigue / frequency peak"
+                />
+                <MetaGrainTables
+                  rows={metaDetail.ads}
+                  title="Ads"
+                  hint="meta_ads_ad_daily — creative keep/kill"
+                />
+                <MetaGrainTables
+                  rows={metaDetail.platforms}
+                  title="Placements"
+                  hint="meta_ads_platform_daily — facebook / instagram / audience_network"
+                />
+                <MetaGrainTables
+                  rows={metaDetail.demos}
+                  title="Age × gender"
+                  hint="meta_ads_demo_daily — audience waste"
+                />
+              </div>
+            </section>
+          )}
 
           {!data.gsc.hidden && (
             <section id="gsc" className="space-y-3 scroll-mt-12">

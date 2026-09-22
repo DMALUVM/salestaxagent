@@ -8,6 +8,7 @@ from datetime import date
 
 from src.alerts.paid_ads_freshness import (
     GSC_API_FILE,
+    META_API_FILE,
     GSC_STALE_BEHIND_PRIOR_DAY,
     STALE_AFTER_DAYS,
     _days_behind,
@@ -16,6 +17,7 @@ from src.alerts.paid_ads_freshness import (
     check_paid_ads_freshness,
     gsc_freshness_source,
     gsc_stale_vs_prior,
+    meta_freshness_source,
 )
 
 
@@ -166,6 +168,21 @@ def test_check_uses_api_metric_date_not_csv_fallback(monkeypatch):
     assert gsc["origin"] == "api"
     assert gsc["max_date"] == "2026-09-19"
     assert gsc["stale"] is False
+
+
+def test_meta_prefers_api_tables_and_does_not_ask_for_csv():
+    today = date(2026, 9, 22)
+    api = meta_freshness_source(today, api_max="2026-09-21", csv_max="2026-08-01")
+    assert api["origin"] == "api"
+    assert api["stale"] is False
+    assert api["file"] == META_API_FILE
+    stale = meta_freshness_source(today, api_max="2026-09-10", csv_max=None)
+    assert stale["stale"] is True
+    msg = build_message({"sources": [stale], "stale": [stale]})
+    assert msg is not None
+    assert "meta-ads-sync" in msg
+    assert "Ads Manager campaign export" not in msg
+    assert "Not an all-good ping" in msg
 
 
 def test_gsc_csv_fallback_only_when_api_empty():

@@ -63,7 +63,13 @@ CONNECTORS: dict[str, dict] = {
     "meta_ads": {
         "command": "meta-ads-sync",
         "label": "Meta Marketing API",
-        "tables": ("meta_ads_daily",),
+        "tables": (
+            "meta_ads_daily",
+            "meta_ads_adset_daily",
+            "meta_ads_ad_daily",
+            "meta_ads_platform_daily",
+            "meta_ads_demo_daily",
+        ),
         "env": (
             "META_APP_ID",
             "META_APP_SECRET",
@@ -134,15 +140,52 @@ META_GRAPH_VERSION = "v25.0"
 META_INSIGHTS_URL = (
     "https://graph.facebook.com/{version}/{account_id}/insights"
 )
-META_INSIGHTS_FIELDS = (
-    "campaign_id,campaign_name,spend,clicks,impressions,"
+# More pages than GSC: ad-level + breakdowns over a 90d backfill.
+META_MAX_PAGES = 40
+META_CORE_FIELDS = (
+    "spend,clicks,impressions,reach,frequency,ctr,cpc,cpm,"
+    "inline_link_clicks,unique_clicks,unique_inline_link_clicks,"
     "actions,action_values,date_start,date_stop"
 )
+# Breakdowns omit unique_* — Graph rejects some unique metrics with
+# publisher_platform / age,gender. Reach stays (not additive across dims).
+META_BREAKDOWN_FIELDS = (
+    "campaign_id,campaign_name,spend,clicks,impressions,"
+    "reach,frequency,ctr,cpc,cpm,inline_link_clicks,"
+    "actions,action_values,date_start,date_stop"
+)
+META_LEVEL_FIELDS = {
+    "campaign": f"campaign_id,campaign_name,{META_CORE_FIELDS}",
+    "adset": (
+        f"campaign_id,campaign_name,adset_id,adset_name,{META_CORE_FIELDS}"
+    ),
+    "ad": (
+        f"campaign_id,campaign_name,adset_id,adset_name,"
+        f"ad_id,ad_name,{META_CORE_FIELDS}"
+    ),
+}
 # First match only — purchase + omni_purchase would double-count.
 META_PURCHASE_ACTIONS = (
     "purchase",
     "omni_purchase",
     "offsite_conversion.fb_pixel_purchase",
+)
+META_ATC_ACTIONS = (
+    "add_to_cart",
+    "omni_add_to_cart",
+    "offsite_conversion.fb_pixel_add_to_cart",
+)
+META_IC_ACTIONS = (
+    "initiate_checkout",
+    "omni_initiated_checkout",
+    "omni_initiate_checkout",
+    "offsite_conversion.fb_pixel_initiate_checkout",
+)
+# Campaign-level only. Separate tables so they never explode the SoT PK.
+# publisher_platform = placement waste. age,gender = audience waste.
+META_BREAKDOWNS = (
+    ("publisher_platform", "publisher_platform"),
+    ("age,gender", "age_gender"),
 )
 
 DEFAULT_LOOKBACK_DAYS = 7
@@ -1448,6 +1491,67 @@ def _meta_action_value(actions: Any, types: tuple[str, ...]) -> float | None:
     return None
 
 
+def _meta_text(raw: dict, key: str) -> str | None:
+    if key not in raw or raw.get(key) is None:
+        return None
+    s = str(raw.get(key)).strip()
+    return s or None
+
+
+def _meta_round(value: Any, digits: int) -> float | None:
+    n = _api_float(value)
+    return None if n is None else round(n, digits)
+
+
+def _meta_metric_fields(raw: dict) -> dict[str, Any]:
+    """Copy Graph metrics that were actually returned. Never invent a zero."""
+    row: dict[str, Any] = {}
+    if "spend" in raw:
+        row["spend"] = _meta_round(raw.get("spend"), 2)
+    if "clicks" in raw:
+        row["clicks"] = _api_int(raw.get("clicks"))
+    if "impressions" in raw:
+        row["impressions"] = _api_int(raw.get("impressions"))
+    if "reach" in raw:
+        row["reach"] = _api_int(raw.get("reach"))
+    if "frequency" in raw:
+        row["frequency"] = _meta_round(raw.get("frequency"), 4)
+    if "ctr" in raw:
+        row["ctr"] = _meta_round(raw.get("ctr"), 6)
+    if "cpc" in raw:
+        row["cpc"] = _meta_round(raw.get("cpc"), 4)
+    if "cpm" in raw:
+        row["cpm"] = _meta_round(raw.get("cpm"), 4)
+    if "inline_link_clicks" in raw:
+        row["inline_link_clicks"] = _api_int(raw.get("inline_link_clicks"))
+    if "unique_clicks" in raw:
+        row["unique_clicks"] = _api_int(raw.get("unique_clicks"))
+    if "unique_inline_link_clicks" in raw:
+        row["unique_inline_link_clicks"] = _api_int(
+            raw.get("unique_inline_link_clicks"),
+        )
+    if "actions" in raw:
+        actions = raw.get("actions")
+        row["conversions"] = _meta_action_value(actions, META_PURCHASE_ACTIONS)
+        row["add_to_cart"] = _meta_action_value(actions, META_ATC_ACTIONS)
+        row["initiate_checkout"] = _meta_action_value(actions, META_IC_ACTIONS)
+    if "action_values" in raw:
+        vals = raw.get("action_values")
+        row["conversion_value"] = _meta_round(
+            _meta_action_value(vals, META_PURCHASE_ACTIONS), 2,
+        )
+        row["add_to_cart_value"] = _meta_round(
+            _meta_action_value(vals, META_ATC_ACTIONS), 2,
+        )
+        row["initiate_checkout_value"] = _meta_round(
+            _meta_action_value(vals, META_IC_ACTIONS), 2,
+        )
+    name = _meta_text(raw, "campaign_name")
+    if name is not None:
+        row["campaign_name"] = name
+    return row
+
+
 def meta_ads_insights(
     token: str,
     account_id: str,
@@ -1455,14 +1559,17 @@ def meta_ads_insights(
     end: date,
     *,
     app_secret: str = "",
+    level: str = "campaign",
+    breakdowns: str = "",
+    fields: str = "",
 ) -> dict:
-    """Ad-account campaign insights. GET pages only — no report_run poll."""
+    """Ad-account insights. GET pages only — no report_run poll."""
     url = META_INSIGHTS_URL.format(
         version=META_GRAPH_VERSION, account_id=account_id,
     )
     params: dict[str, Any] | None = {
-        "fields": META_INSIGHTS_FIELDS,
-        "level": "campaign",
+        "fields": fields or META_LEVEL_FIELDS.get(level, META_CORE_FIELDS),
+        "level": level,
         "time_increment": 1,
         "time_range": (
             f'{{"since":"{start.isoformat()}","until":"{end.isoformat()}"}}'
@@ -1470,13 +1577,15 @@ def meta_ads_insights(
         "limit": 500,
         "access_token": token,
     }
+    if breakdowns:
+        params["breakdowns"] = breakdowns
     if app_secret:
         params["appsecret_proof"] = _appsecret_proof(token, app_secret)
 
     rows: list[dict] = []
     next_url = url
     next_params = params
-    for _page in range(MAX_PAGES):
+    for _page in range(META_MAX_PAGES):
         try:
             resp = _http_get(next_url, params=next_params)
         except httpx.HTTPError as e:
@@ -1515,6 +1624,64 @@ def meta_ads_insights(
     return {"rows": rows}
 
 
+def _meta_base_row(raw: dict, start: date, end: date, fetched_at: str) -> dict | None:
+    day = _ga4_date(raw.get("date_start") or raw.get("date_stop"))
+    if not day or not _in_window(day, start, end):
+        return None
+    row: dict[str, Any] = {
+        "metric_date": day,
+        "source": "meta_marketing_api",
+        "fetched_at": fetched_at,
+    }
+    row.update(_meta_metric_fields(raw))
+    cid = _meta_text(raw, "campaign_id")
+    if cid is not None:
+        row["campaign_id"] = cid
+    return row
+
+
+def _pull_meta_harvest(
+    token: str,
+    account_id: str,
+    start: date,
+    end: date,
+    fetched_at: str,
+    *,
+    app_secret: str,
+    level: str,
+    breakdowns: str = "",
+    fields: str = "",
+    key_fn: Callable[[dict], tuple | None],
+    extra_fn: Callable[[dict, dict], None] | None = None,
+) -> dict:
+    """One level/breakdown harvest. Fail that harvest, never invent rows."""
+    from src.rules import ADS_MAX_CHUNK_DAYS
+
+    errors: list[str] = []
+    out: dict[tuple, dict] = {}
+    label = f"{level}{':' + breakdowns if breakdowns else ''}"
+    for chunk_start, chunk_end in _date_chunks(start, end, ADS_MAX_CHUNK_DAYS):
+        result = meta_ads_insights(
+            token, account_id, chunk_start, chunk_end,
+            app_secret=app_secret, level=level,
+            breakdowns=breakdowns, fields=fields,
+        )
+        if result.get("error"):
+            errors.append(f"{label}: {result['error']}")
+            continue
+        for raw in result.get("rows") or []:
+            row = _meta_base_row(raw, start, end, fetched_at)
+            if not row:
+                continue
+            if extra_fn:
+                extra_fn(raw, row)
+            key = key_fn(row)
+            if not key:
+                continue
+            out[key] = row
+    return {"rows": list(out.values()), "errors": errors}
+
+
 def pull_meta_ads_rows(
     token: str,
     account_id: str,
@@ -1524,63 +1691,97 @@ def pull_meta_ads_rows(
     *,
     app_secret: str = "",
 ) -> dict:
-    """Campaign × day grain. metric_date is date_start — never substituted."""
-    from src.rules import ADS_MAX_CHUNK_DAYS
+    """Campaign / adset / ad + campaign breakdowns. metric_date is date_start."""
 
+    def _id_key(*keys: str) -> Callable[[dict], tuple | None]:
+        def _fn(row: dict) -> tuple | None:
+            parts: list[str] = [str(row.get("metric_date") or "")]
+            for key in keys:
+                val = row.get(key)
+                if val is None or val == "":
+                    return None
+                parts.append(str(val))
+            return tuple(parts)
+        return _fn
+
+    def _with_names(*pairs: tuple[str, str]) -> Callable[[dict, dict], None]:
+        def _fn(raw: dict, row: dict) -> None:
+            for src, dest in pairs:
+                val = _meta_text(raw, src)
+                if val is not None:
+                    row[dest] = val
+        return _fn
+
+    harvests = (
+        ("campaigns", _pull_meta_harvest(
+            token, account_id, start, end, fetched_at, app_secret=app_secret,
+            level="campaign", fields=META_LEVEL_FIELDS["campaign"],
+            key_fn=_id_key("campaign_id"),
+        )),
+        ("adsets", _pull_meta_harvest(
+            token, account_id, start, end, fetched_at, app_secret=app_secret,
+            level="adset", fields=META_LEVEL_FIELDS["adset"],
+            key_fn=_id_key("adset_id"),
+            extra_fn=_with_names(("adset_id", "adset_id"), ("adset_name", "adset_name")),
+        )),
+        ("ads", _pull_meta_harvest(
+            token, account_id, start, end, fetched_at, app_secret=app_secret,
+            level="ad", fields=META_LEVEL_FIELDS["ad"],
+            key_fn=_id_key("ad_id"),
+            extra_fn=_with_names(
+                ("ad_id", "ad_id"), ("ad_name", "ad_name"),
+                ("adset_id", "adset_id"), ("adset_name", "adset_name"),
+            ),
+        )),
+        ("platforms", _pull_meta_harvest(
+            token, account_id, start, end, fetched_at, app_secret=app_secret,
+            level="campaign", breakdowns="publisher_platform",
+            fields=META_BREAKDOWN_FIELDS,
+            key_fn=_id_key("campaign_id", "publisher_platform"),
+            extra_fn=_with_names(("publisher_platform", "publisher_platform")),
+        )),
+        ("demos", _pull_meta_harvest(
+            token, account_id, start, end, fetched_at, app_secret=app_secret,
+            level="campaign", breakdowns="age,gender",
+            fields=META_BREAKDOWN_FIELDS,
+            key_fn=_id_key("campaign_id", "age", "gender"),
+            extra_fn=_with_names(("age", "age"), ("gender", "gender")),
+        )),
+    )
     errors: list[str] = []
-    out: dict[tuple[str, str], dict] = {}
-    for chunk_start, chunk_end in _date_chunks(start, end, ADS_MAX_CHUNK_DAYS):
-        result = meta_ads_insights(
-            token, account_id, chunk_start, chunk_end, app_secret=app_secret,
-        )
-        if result.get("error"):
-            errors.append(result["error"])
-            continue
-        for raw in result.get("rows") or []:
-            day = _ga4_date(raw.get("date_start") or raw.get("date_stop"))
-            if not day or not _in_window(day, start, end):
-                continue
-            cid = raw.get("campaign_id")
-            if cid is None or cid == "":
-                continue
-            cid = str(cid).strip()
-            if not cid:
-                continue
-            row: dict[str, Any] = {
-                "metric_date": day,
-                "campaign_id": cid,
-                "source": "meta_marketing_api",
-                "fetched_at": fetched_at,
-            }
-            if "campaign_name" in raw and raw.get("campaign_name") is not None:
-                row["campaign_name"] = str(raw.get("campaign_name"))
-            if "spend" in raw:
-                spend = _api_float(raw.get("spend"))
-                row["spend"] = None if spend is None else round(spend, 2)
-            if "clicks" in raw:
-                row["clicks"] = _api_int(raw.get("clicks"))
-            if "impressions" in raw:
-                row["impressions"] = _api_int(raw.get("impressions"))
-            if "actions" in raw:
-                row["conversions"] = _meta_action_value(
-                    raw.get("actions"), META_PURCHASE_ACTIONS,
-                )
-            if "action_values" in raw:
-                val = _meta_action_value(
-                    raw.get("action_values"), META_PURCHASE_ACTIONS,
-                )
-                row["conversion_value"] = None if val is None else round(val, 2)
-            out[(day, cid)] = row
-    return {"rows": list(out.values()), "errors": errors}
+    buckets: dict[str, list[dict]] = {}
+    for name, pulled in harvests:
+        buckets[name] = list(pulled.get("rows") or [])
+        errors.extend(pulled.get("errors") or [])
+    return {**buckets, "errors": errors}
+
+
+def _meta_sync_message(
+    start: date, end: date, account_id: str, fetched: dict, *,
+    dry_run: bool, upserted: bool,
+) -> str:
+    verb = "upserted" if upserted else f"{account_id}/insights →"
+    extra = "No upsert. " if dry_run else ""
+    return (
+        f"Meta Marketing API{' dry-run' if dry_run else ''} "
+        f"{start.isoformat()}…{end.isoformat()} {verb} "
+        f"{fetched.get('campaigns', 0)} meta_ads_daily + "
+        f"{fetched.get('adsets', 0)} meta_ads_adset_daily + "
+        f"{fetched.get('ads', 0)} meta_ads_ad_daily + "
+        f"{fetched.get('platforms', 0)} meta_ads_platform_daily + "
+        f"{fetched.get('demos', 0)} meta_ads_demo_daily. {extra}"
+        f"ads_read only. Never invent metrics."
+    )
 
 
 def meta_ads_sync(*, dry_run: bool = False, environ: dict | None = None,
                   as_of: str | date | None = None,
                   days: int = DEFAULT_LOOKBACK_DAYS,
                   now: datetime | None = None) -> dict:
-    """Pull Meta Marketing API → upsert meta_ads_daily. Official API only.
+    """Pull Meta Marketing API → upsert campaign / adset / ad / breakdowns.
 
     ads_read insights GET. Never ads_management. Never mutate campaigns.
+    Daily job is prior NY day + 7d lookback. Catch-up: --days 90.
     """
     missing = missing_oauth_env("meta_ads", environ)
     out = _blank_result("meta_ads", dry_run=dry_run, missing=missing)
@@ -1616,19 +1817,28 @@ def meta_ads_sync(*, dry_run: bool = False, environ: dict | None = None,
     pulled = pull_meta_ads_rows(
         token, account_id, start, end, fetched_at, app_secret=app_secret,
     )
-    rows = pulled.get("rows") or []
+    campaigns = pulled.get("campaigns") or []
+    adsets = pulled.get("adsets") or []
+    ads = pulled.get("ads") or []
+    platforms = pulled.get("platforms") or []
+    demos = pulled.get("demos") or []
     errors = list(pulled.get("errors") or [])
     out["errors"] = errors
-    out["fetched"] = {"campaigns": len(rows)}
+    fetched = {
+        "campaigns": len(campaigns),
+        "adsets": len(adsets),
+        "ads": len(ads),
+        "platforms": len(platforms),
+        "demos": len(demos),
+    }
+    out["fetched"] = fetched
+    n = sum(fetched.values())
+    out["rows"] = n
 
     if dry_run:
-        n = len(rows)
-        out["rows"] = n
         out["ok"] = not errors or n > 0
-        out["message"] = (
-            f"Meta Marketing API dry-run {start.isoformat()}…{end.isoformat()} "
-            f"{account_id}/insights → {n} meta_ads_daily. No upsert. "
-            f"ads_read only. Never invent metrics."
+        out["message"] = _meta_sync_message(
+            start, end, account_id, fetched, dry_run=True, upserted=False,
         )
         if errors and n == 0:
             out["error"] = errors[0]
@@ -1643,14 +1853,25 @@ def meta_ads_sync(*, dry_run: bool = False, environ: dict | None = None,
         out["message"] = out["error"]
         return out
 
-    try:
-        written += _upsert(
-            "meta_ads_daily", rows, "metric_date,campaign_id", upsert_rows,
-        )
-    except Exception as e:
-        errors.append(f"meta_ads_daily: {e}"[:240])
+    writes = (
+        ("meta_ads_daily", campaigns, "metric_date,campaign_id"),
+        ("meta_ads_adset_daily", adsets, "metric_date,adset_id"),
+        ("meta_ads_ad_daily", ads, "metric_date,ad_id"),
+        (
+            "meta_ads_platform_daily", platforms,
+            "metric_date,campaign_id,publisher_platform",
+        ),
+        (
+            "meta_ads_demo_daily", demos,
+            "metric_date,campaign_id,age,gender",
+        ),
+    )
+    for table, rows, conflict in writes:
+        try:
+            written += _upsert(table, rows, conflict, upsert_rows)
+        except Exception as e:
+            errors.append(f"{table}: {e}"[:240])
 
-    n = len(rows)
     out["rows"] = n
     out["upserted"] = written
     out["errors"] = errors
@@ -1659,9 +1880,8 @@ def meta_ads_sync(*, dry_run: bool = False, environ: dict | None = None,
         out["error"] = errors[0]
         out["message"] = out["error"]
         return out
-    out["message"] = (
-        f"Meta Marketing API {start.isoformat()}…{end.isoformat()} "
-        f"upserted {n} meta_ads_daily. ads_read only. Never invent metrics."
+    out["message"] = _meta_sync_message(
+        start, end, account_id, fetched, dry_run=False, upserted=True,
     )
     if errors:
         out["error"] = errors[0]

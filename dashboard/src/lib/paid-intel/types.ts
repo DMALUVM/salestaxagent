@@ -14,6 +14,29 @@ export type ProductLine = "deodorant" | "balm" | "soap" | "lip" | "other";
 export type Audience = "prospect" | "retarget" | "unknown";
 export type SearchKind = "query" | "page" | "chart" | "appearance";
 
+export interface MetaGrainRow {
+  grain: "adset" | "ad" | "platform" | "demo";
+  date: string;
+  campaign_name: string;
+  entity_name: string;
+  spend: number;
+  conv_value: number;
+  clicks: number;
+  impressions: number;
+  conversions: number;
+  frequency: number | null;
+  reach: number | null;
+  add_to_cart: number | null;
+  initiate_checkout: number | null;
+}
+
+export interface MetaDetail {
+  adsets: MetaGrainRow[];
+  ads: MetaGrainRow[];
+  platforms: MetaGrainRow[];
+  demos: MetaGrainRow[];
+}
+
 export interface CampaignDaily {
   platform: PaidPlatform;
   date: string;
@@ -426,4 +449,6 @@ export interface IntelBundle {
   };
   grok: { markdown: string; snapshot: GrokSnapshot; adsDesk: string; siteDesk: string };
   sources: { campaigns: number; queries: number; ga: number };
+  /** Meta ad-set / ad / placement / demo grains from official API tables. */
+  meta_detail?: MetaDetail;
 }
