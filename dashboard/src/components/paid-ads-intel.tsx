@@ -1227,7 +1227,7 @@ export function PaidAdsIntel({
           <section id="site-desk" className="space-y-3 scroll-mt-12">
             <DeskHeader
               title="Site &amp; conversion · for the web team"
-              hint="Tracking, bounce, titles, and PDP leaks. Never invent a position change from Queries.csv."
+              hint="Tracking, bounce, titles, and PDP leaks. Never invent a position change from the GSC snapshot."
               prompt={data.grok?.siteDesk ?? ""}
               filename={`tallowbourn-site-desk-${data.as_of ?? "empty"}.md`}
               onError={setMsg}
@@ -1301,12 +1301,19 @@ export function PaidAdsIntel({
             <section id="gsc" className="space-y-3 scroll-mt-12">
               <h2 className="text-sm font-semibold tracking-tight">Search Console</h2>
               <p className="text-[11px] text-muted-foreground">
-                Queries.csv, Pages.csv, and Search Appearance.csv are snapshots (no date). Chart.csv is the daily organic trend. Position change is never invented from the snapshot.
+                {data.freshness?.sources.some((s) =>
+                  (s.source === "gsc_snapshot" || s.source === "gsc_trend") && s.origin === "api")
+                  ? "Query and page totals from gsc_query_daily / gsc_page_daily (gsc-sync). Daily trend is rolled up from dated queries. Position change is never invented."
+                  : "Queries.csv, Pages.csv, and Search Appearance.csv are snapshots (no date). Chart.csv is the daily organic trend. Position change is never invented from the snapshot."}
               </p>
               {data.gsc.chart.length > 0 && (
                 <Card>
                   <CardHeader className="border-b">
-                    <CardTitle className="text-sm">Organic clicks · Chart.csv</CardTitle>
+                    <CardTitle className="text-sm">
+                      {data.freshness?.sources.some((s) => s.source === "gsc_trend" && s.origin === "api")
+                        ? "Organic clicks · gsc_query_daily"
+                        : "Organic clicks · Chart.csv"}
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="p-4">
                     <ChartSpark chart={data.gsc.chart} />

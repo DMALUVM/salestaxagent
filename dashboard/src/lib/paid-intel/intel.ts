@@ -6,6 +6,7 @@ import {
 } from "./window";
 import { buildCardPrompt, buildGrok, type SitePromptContext } from "./grok";
 import { gradeOutcome, measureCheck, type MeasureContext } from "./outcome";
+import { gscPerformanceRows } from "./api-adapt";
 import { buildWebInsights } from "./web-insights";
 import type {
   CampaignAgg, CampaignDaily, DecisionStatus, GaDaily, IntelBrief, IntelBundle,
@@ -557,7 +558,7 @@ function detectShoppingVsPmax(camps: CampaignAgg[]): IntelCard | null {
 
 function detectGscTitleTrap(queries: SearchQueryDaily[]): IntelCard | null {
   const hits = queries.filter((q) =>
-    q.kind === "query" && q.date === "" && (q.position ?? 99) >= 4 && (q.position ?? 99) <= 8
+    q.kind === "query" && (q.position ?? 99) >= 4 && (q.position ?? 99) <= 8
     && q.impressions >= 400 && (q.ctr ?? 100) < 1);
   if (!hits.length) return null;
   const top = [...hits].sort((a, b) => b.impressions - a.impressions)[0];
@@ -565,9 +566,9 @@ function detectGscTitleTrap(queries: SearchQueryDaily[]): IntelCard | null {
     id: "gsc-title-trap",
     owner: "site",
     title: `"${top.query}" is already on page one — the title is the leak`,
-    body: `Snapshot rank ${top.position?.toFixed(1)} with ${fmtInt(top.impressions)} impressions and CTR ${top.ctr?.toFixed(2)}%. This is not a ranking problem. Do not invent a Δ position from Queries.csv.`,
+    body: `Snapshot rank ${top.position?.toFixed(1)} with ${fmtInt(top.impressions)} impressions and CTR ${top.ctr?.toFixed(2)}%. This is not a ranking problem. Do not invent a Δ position from the GSC snapshot.`,
     doThis: `7-day test: rewrite title + meta + first 120 characters to match "${top.query}" exactly (include the product noun). Point an above-the-fold CTA at the matching PDP. Organic only — no ad changes.`,
-    ifItWorks: `CTR on "${top.query}" doubles on the next Queries.csv snapshot.`,
+    ifItWorks: `CTR on "${top.query}" doubles on the next GSC snapshot.`,
     evidence: hits.slice(0, 4).map((q) => `"${q.query}" pos ${q.position?.toFixed(1)} · ${q.impressions} impr · CTR ${q.ctr?.toFixed(2)}%`).join("; "),
     stake: round2(Math.max(top.impressions * 0.02, 40)),
     metric: `CTR ${top.ctr?.toFixed(2)}% at pos ${top.position?.toFixed(1)} — rewrite`,
@@ -578,7 +579,7 @@ function detectGscTitleTrap(queries: SearchQueryDaily[]): IntelCard | null {
 
 function detectGscClimb(queries: SearchQueryDaily[]): IntelCard | null {
   const hits = queries.filter((q) =>
-    q.kind === "query" && q.date === "" && (q.position ?? 0) >= 8 && (q.position ?? 0) <= 15
+    q.kind === "query" && (q.position ?? 0) >= 8 && (q.position ?? 0) <= 15
     && q.impressions >= 200 && (q.ctr ?? 0) >= 2);
   if (!hits.length) return null;
   const top = [...hits].sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions)[0];
@@ -600,14 +601,14 @@ function detectGscClimb(queries: SearchQueryDaily[]): IntelCard | null {
 
 function detectGscPosition(queries: SearchQueryDaily[]): IntelCard | null {
   const hits = queries.filter((q) =>
-    q.kind === "query" && q.date === "" && (q.position ?? 0) >= 4 && (q.position ?? 0) <= 15 && q.impressions >= 80);
+    q.kind === "query" && (q.position ?? 0) >= 4 && (q.position ?? 0) <= 15 && q.impressions >= 80);
   if (hits.length < 8) return null;
   const top = [...hits].sort((a, b) => b.impressions - a.impressions).slice(0, 5);
   return card({
     id: "gsc-striking",
     owner: "site",
     title: `${hits.length} queries sitting in positions 4–15`,
-    body: "Snapshot ranks from Queries.csv — not a measured drop. Do not invent a Δ position. Start with the pos 4–8 queries whose CTR is low; those are title problems, not ranking problems.",
+    body: "Snapshot ranks from Search Console — not a measured drop. Do not invent a Δ position. Start with the pos 4–8 queries whose CTR is low; those are title problems, not ranking problems.",
     doThis: `7-day test: rewrite title + first paragraph for "${top[0].query}" and one sibling. Organic only — no ad changes.`,
     ifItWorks: "Clicks on those queries rise on the next GSC snapshot.",
     evidence: top.map((q) => `"${q.query}" pos ${q.position?.toFixed(1)} · ${q.impressions} impr`).join("; "),
@@ -630,7 +631,7 @@ function detectLowCtrTitles(pages: SearchQueryDaily[]): IntelCard | null {
     title: "PDPs and blogs are showing in Search with CTR under 1%",
     body: `${path} has ${fmtInt(top[0].impressions)} impressions at CTR ${top[0].ctr?.toFixed(2)}%. Google is showing the URL. The title/meta is not earning the click.`,
     doThis: `7-day test: new title + meta on ${path} — lead with the product noun + "grass-fed tallow". Repeat on the next two URLs in evidence.`,
-    ifItWorks: "CTR on those URLs rises on the next Pages.csv snapshot.",
+    ifItWorks: "CTR on those URLs rises on the next GSC snapshot.",
     evidence: top.map((p) => `${p.query.replace(/^https?:\/\/[^/]+/, "")} ${p.impressions} impr CTR ${p.ctr?.toFixed(2)}%`).join("; "),
     stake: round2(Math.min(top[0].impressions * 0.004, 180)),
     metric: `CTR ${top[0].ctr?.toFixed(2)}% — rewrite`,
@@ -981,7 +982,7 @@ export function buildIntel(opts: {
       freshness,
       web_insights: buildWebInsights({
         campaigns: opts.campaigns,
-        queries: opts.queries,
+        queries: gscPerformanceRows(opts.queries, range),
         ga: opts.ga,
         range,
         asOf: null,
@@ -1006,8 +1007,9 @@ export function buildIntel(opts: {
   const ga7 = gaInRange(opts.ga, asOf, 7);
   const ga4 = gaRollup(ga);
   const hideGsc = filter === "meta";
-  const queries = hideGsc ? [] : snapshotQueries(opts.queries, "query").slice(0, 40);
-  const pages = hideGsc ? [] : snapshotQueries(opts.queries, "page").slice(0, 40);
+  const gscPerf = hideGsc ? [] : gscPerformanceRows(opts.queries, range);
+  const queries = hideGsc ? [] : snapshotQueries(gscPerf, "query").slice(0, 40);
+  const pages = hideGsc ? [] : snapshotQueries(gscPerf, "page").slice(0, 40);
   const chart = hideGsc ? [] : snapshotQueries(opts.queries, "chart");
   const appearance = hideGsc ? [] : snapshotQueries(opts.queries, "appearance");
 
@@ -1028,10 +1030,10 @@ export function buildIntel(opts: {
     detectPmaxVsSearch(last7Camps),
     detectShoppingVsPmax(last7Camps),
     ...detectWorstLive(last7Camps),
-    hideGsc ? null : detectGscTitleTrap(opts.queries),
-    hideGsc ? null : detectGscClimb(opts.queries),
-    hideGsc ? null : detectGscPosition(opts.queries),
-    hideGsc ? null : detectLowCtrTitles(opts.queries),
+    hideGsc ? null : detectGscTitleTrap(gscPerf),
+    hideGsc ? null : detectGscClimb(gscPerf),
+    hideGsc ? null : detectGscPosition(gscPerf),
+    hideGsc ? null : detectLowCtrTitles(gscPerf),
     hideGsc ? null : detectAppearanceGap(opts.queries),
     detectMobileLeak(ga7),
     detectBounce(ga7),
@@ -1060,7 +1062,7 @@ export function buildIntel(opts: {
   const measureCtx: MeasureContext = {
     camps: last7Camps,
     ga: ga7,
-    queries: opts.queries,
+    queries: gscPerf,
     google: kpisOf(last7, "google"),
     meta: kpisOf(last7, "meta"),
     blended: kpisOf(last7, "blended"),
@@ -1132,7 +1134,7 @@ export function buildIntel(opts: {
     grok,
     web_insights: buildWebInsights({
       campaigns: last,
-      queries: opts.queries,
+      queries: gscPerf,
       ga,
       range,
       asOf,

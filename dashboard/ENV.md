@@ -106,4 +106,6 @@ exist (`docs/oauth-phase2.md`).
 | `META_ADS_ACCESS_TOKEN` | no | `meta-ads-sync` (scaffold) |
 | `META_ADS_ACCOUNT_ID` | no | `meta-ads-sync` (scaffold) |
 
+Search Console API here is **performance only** (`searchAnalytics.query` → `gsc_query_daily` / `gsc_page_daily`). Merchant listings / structured-data / rich-result *issue lists* are **not** available via the Search Console API. Ellis owns GSC mail as the interim alert door. Do not add an issues poll. URL Inspection for a tiny PDP allowlist is a later TODO — skip unless it stays one small table.
+
 

@@ -294,6 +294,10 @@ Then conversion-digest `"seo": null` until a locked-day GSC row exists. GSC lags
 
 Mini `.env` also needs `GSC_SITE_URL=sc-domain:tallowbourn.com` (plus the shared `GOOGLE_OAUTH_*` names). Then `python -m src.main gsc-sync` pulls `searchAnalytics.query` and upserts `gsc_query_daily` / `gsc_page_daily`. Missing Mini env → `needs OAuth` / 0 rows.
 
+**Not in the Search Console API:** Merchant listings / structured-data / rich-result *issue lists* are not exposed on `searchAnalytics.query` or any other webmasters.readonly call. Do **not** invent an issues poll. Ellis owns GSC mail as the interim alert door for those.
+
+**TODO (skip unless cheap):** URL Inspection API for a tiny hardcoded allowlist of top PDPs, read-only, stored in a new table. Not scheduled this week.
+
 **You’re done when:** `GSC_SITE_URL` matches the property type (domain vs URL-prefix), Mini has the same names, and phase2-status shows GSC configured.
 
 **Fail modes:** `https://www.tallowbourn.com/` when the property is the domain; missing `sc-domain:` prefix; missing trailing slash on a URL-prefix property; added `webmasters` write scope.

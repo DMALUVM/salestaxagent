@@ -1,11 +1,11 @@
-"""Paid-ads CSV freshness nudge.
+"""Paid-ads / GSC freshness nudge.
 
-The Shopify Paid Ads desk (`/paid-ads`) is fed by manual CSV exports, not an
-API. Its staleness banner only exists once you open the page, which is exactly
-when you no longer need reminding. This job reads the warehouse the dashboard
-reads and pings Telegram when an export has gone quiet.
+Google / Meta / GA4 CSV age still uses the Monday /paid-ads upload path.
+Search Console prefers official API tables (`gsc_query_daily` /
+`gsc_page_daily` from daily `gsc-sync`). Stale/fail only — never an
+all-good Telegram.
 
-Read-only. Never writes to the paid_* tables.
+Read-only. Never writes warehouse rows.
 """
 from __future__ import annotations
 
@@ -19,32 +19,46 @@ log = logging.getLogger(__name__)
 # Matches STALE_AFTER_DAYS in dashboard/src/lib/paid-intel/window.ts.
 STALE_AFTER_DAYS = 7
 
-# Each source: (label, what to re-export, table, equality filters)
+# GSC final data lags ~2 days. Fault when max(metric_date) is more than
+# this many calendar days behind the America/New_York prior day.
+GSC_STALE_BEHIND_PRIOR_DAY = 4
+GSC_API_FILE = "gsc-sync → gsc_query_daily + gsc_page_daily"
+
+# CSV sources only. Search Console is resolved separately (API first).
 SOURCES: list[tuple[str, str, str, dict]] = [
     ("Google Ads", "Google Ads Daily (Campaign x Day)",
      "paid_campaign_daily", {"platform": "google"}),
     ("Meta Ads", "Ads Manager campaign export",
      "paid_campaign_daily", {"platform": "meta"}),
     ("GA4", "GA4 Explore (Free form)", "paid_ga_daily", {}),
-    ("Search Console", "Queries.csv + Pages.csv + Chart.csv",
-     "paid_search_query_daily", {"kind": "chart"}),
 ]
 
 
-def _max_date(table: str, filters: dict) -> str | None:
-    """Newest `date` in a table, or None when empty / table absent."""
+def _max_date(table: str, filters: dict | None = None,
+              date_col: str = "date") -> str | None:
+    """Newest date column in a table, or None when empty / table absent.
+
+    CSV intel tables store `date` as text and may have "" snapshot rows —
+    those need ``neq(date, "")``. Official API tables use a date-typed
+    ``metric_date``; PostgREST rejects comparing that to "".
+    """
     try:
-        query = get_client().table(table).select("date")
-        for key, value in filters.items():
+        query = get_client().table(table).select(date_col)
+        for key, value in (filters or {}).items():
             query = query.eq(key, value)
+        # Date-typed API columns: omit the empty-string filter.
+        if date_col == "date":
+            query = query.neq(date_col, "")
         result = (
-            query.neq("date", "")
-            .order("date", desc=True)
+            query.order(date_col, desc=True)
             .limit(1)
             .execute()
         )
         rows = result.data or []
-        return rows[0].get("date") if rows else None
+        if not rows:
+            return None
+        raw = rows[0].get(date_col)
+        return str(raw)[:10] if raw else None
     except Exception as e:
         log.warning("paid freshness: %s %s unreadable: %s", table, filters, str(e)[:200])
         return None
@@ -57,9 +71,52 @@ def _days_behind(iso_date: str, today: date) -> int | None:
         return None
 
 
+def gsc_stale_vs_prior(max_date: str | None, prior: date) -> bool:
+    """True when API max(metric_date) is >4 calendar days behind prior NY day."""
+    if not max_date:
+        return False
+    behind = _days_behind(max_date, prior)
+    return behind is not None and behind > GSC_STALE_BEHIND_PRIOR_DAY
+
+
+def _newer(*dates: str | None) -> str | None:
+    present = [d for d in dates if d]
+    return max(present) if present else None
+
+
+def gsc_freshness_source(today: date, *,
+                         api_max: str | None,
+                         csv_max: str | None) -> dict:
+    """Prefer gsc_*_daily. CSV chart is fallback only when API has no dates."""
+    prior_day = today - timedelta(days=1)
+    if api_max:
+        behind = _days_behind(api_max, today)
+        return {
+            "label": "Search Console",
+            "file": GSC_API_FILE,
+            "max_date": api_max,
+            "days_behind": behind,
+            "stale": gsc_stale_vs_prior(api_max, prior_day),
+            "missing": False,
+            "origin": "api",
+        }
+    behind = _days_behind(csv_max, today) if csv_max else None
+    return {
+        "label": "Search Console",
+        "file": "Queries.csv + Pages.csv + Chart.csv",
+        "max_date": csv_max,
+        "days_behind": behind,
+        "stale": behind is not None and behind >= STALE_AFTER_DAYS,
+        "missing": csv_max is None,
+        "origin": "csv",
+    }
+
+
 def check_paid_ads_freshness(today: date | None = None) -> dict:
     """Return each source's age. Pure read — safe to call any time."""
-    today = today or datetime.now().date()
+    from src.rules import agent_today
+
+    today = today or agent_today()
     sources = []
     for label, file_hint, table, filters in SOURCES:
         newest = _max_date(table, filters)
@@ -73,7 +130,14 @@ def check_paid_ads_freshness(today: date | None = None) -> dict:
             # and nagging about a channel the business does not run is noise.
             "stale": behind is not None and behind >= STALE_AFTER_DAYS,
             "missing": newest is None,
+            "origin": "csv",
         })
+    api_max = _newer(
+        _max_date("gsc_query_daily", date_col="metric_date"),
+        _max_date("gsc_page_daily", date_col="metric_date"),
+    )
+    csv_max = _max_date("paid_search_query_daily", {"kind": "chart"})
+    sources.append(gsc_freshness_source(today, api_max=api_max, csv_max=csv_max))
     stale = [s for s in sources if s["stale"]]
     return {
         "today": today.isoformat(),
@@ -84,15 +148,30 @@ def check_paid_ads_freshness(today: date | None = None) -> dict:
 
 
 def build_message(result: dict) -> str | None:
-    """Telegram body, or None when nothing needs uploading."""
+    """Telegram body, or None when nothing needs a fault ping."""
     stale = result.get("stale") or []
     if not stale:
         return None
-    lines = [
-        "<b>Paid Ads data is stale</b>",
-        "Upload a fresh export at /paid-ads — the intel below is dated.",
-        "",
-    ]
+    api_stale = [s for s in stale if s.get("origin") == "api"]
+    csv_stale = [s for s in stale if s.get("origin") != "api"]
+    if api_stale and not csv_stale:
+        lines = [
+            "<b>Search Console data is stale</b>",
+            "gsc-sync / gsc_*_daily is behind expected lag. Not an all-good ping.",
+            "",
+        ]
+    elif api_stale:
+        lines = [
+            "<b>Paid Ads data is stale</b>",
+            "Upload a fresh export at /paid-ads, or check Mini gsc-sync if Search Console is listed.",
+            "",
+        ]
+    else:
+        lines = [
+            "<b>Paid Ads data is stale</b>",
+            "Upload a fresh export at /paid-ads — the intel below is dated.",
+            "",
+        ]
     for s in sorted(stale, key=lambda x: -(x["days_behind"] or 0)):
         lines.append(
             f"- {s['label']}: newest {s['max_date']} ({s['days_behind']}d old) "

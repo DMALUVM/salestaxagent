@@ -294,8 +294,10 @@ describe("web insights — five blocks on real columns", () => {
     assert.equal(w.low_ctr_pages.length, 0);
     assert.equal(w.money_queries.length, 0);
     assert.ok(w.gaps.some((g) => /GA4 Explore not uploaded/.test(g)));
-    assert.ok(w.gaps.some((g) => /Pages\.csv not uploaded/.test(g)));
-    assert.ok(w.gaps.some((g) => /Queries\.csv not uploaded/.test(g)));
+    assert.ok(w.gaps.some((g) => /gsc_page_daily/.test(g)));
+    assert.ok(w.gaps.some((g) => /gsc_query_daily/.test(g)));
+    assert.ok(!w.gaps.some((g) => /Pages\.csv not uploaded/.test(g)));
+    assert.ok(!w.gaps.some((g) => /Queries\.csv not uploaded/.test(g)));
     assert.ok(!w.gaps.some((g) => /campaign days not uploaded/.test(g)));
     const meta = w.channel_gaps.find((g) => g.platform === "meta");
     assert.equal(meta?.sessions, null, "do not invent a 0-session GA4 row when GA4 is missing");
@@ -328,7 +330,10 @@ describe("web insights lives on /paid-ads only", () => {
     assert.match(INTEL_UI, /WebInsightsCard/);
     assert.match(INTEL_UI, /web-insights/);
     assert.match(CARD, /Web insights/);
-    assert.match(CARD, /Site half of this upload/);
+    assert.match(CARD, /Site half of Search Console/);
+    assert.match(CARD, /gsc_page_daily/);
+    assert.match(CARD, /gsc_query_daily/);
+    assert.doesNotMatch(CARD, /Pages\.csv not uploaded|Queries\.csv not uploaded/);
     assert.doesNotMatch(PPC, /WebInsightsCard|Web insights/);
     assert.doesNotMatch(INV, /WebInsightsCard|Web insights/);
   });
