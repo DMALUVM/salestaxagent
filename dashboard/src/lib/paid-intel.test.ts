@@ -934,6 +934,8 @@ describe("upload yield + appearance / share cards", () => {
     assert.equal(card!.owner, "site");
     assert.match(card!.doThis, /Merchant listings|rich results|Merchant Center/i);
     assert.match(card!.doThis, /Do not redesign Extra Strength/i);
+    assert.match(card!.ifItWorks, /gsc_dim_daily search_appearance/);
+    assert.doesNotMatch(card!.ifItWorks, /next Search Appearance\.csv,/);
     assert.ok(intel.gsc.appearance.some((r) => r.query === "Product snippets"));
     assert.ok(intel.freshness.sources.some((s) => s.source === "gsc_appearance" && s.file === "Search Appearance.csv"));
     assert.ok(intel.grok.snapshot.search_appearance.some((r) => r.appearance === "Product snippets"));
