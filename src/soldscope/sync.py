@@ -406,32 +406,158 @@ def variation_catalog_from_payload(body: dict) -> list[dict]:
     return out
 
 
-def variation_heatmap_days(row: dict) -> dict[str, dict]:
-    """Parse variations-heatmap ``r_YYYY-MM-DD`` objects.
+def _positive_rank(value: Any) -> int | None:
+    n = _int(value)
+    if n is None or n <= 0:
+        return None
+    return n
 
-    SoldScope ``rank`` 0 means not found — treat as missing (same as
-    phrases/v2). Never persist 0 as an organic position.
+
+def variation_child_asin(item: dict) -> str:
+    """Child ASIN on a variations-heatmap row. Empty stays empty."""
+    raw = _first_present(
+        item, "asin", "variationAsin", "variation_asin", "childAsin", "child_asin",
+    )
+    return str(raw or "").strip().upper()
+
+
+def variation_item_current_rank(item: dict) -> int | None:
+    """Current child rank when the snapshot day has no positive heatmap cell.
+
+    ``r_YYYY-MM-DD`` still wins when that day is present. Rank 0 / blank
+    is not found — never turned into a position.
+    """
+    if not isinstance(item, dict):
+        return None
+    return _positive_rank(_first_present(
+        item, "organicPosition", "organic_position", "organicRank",
+    ))
+
+
+def _variation_day_from_value(raw: Any) -> dict | None:
+    day: dict[str, Any] = {}
+    if isinstance(raw, dict):
+        n = _positive_rank(_first_present(
+            raw, "rank", "organicPosition", "organic_position", "position", "organicRank",
+        ))
+        choice = phrase_amazon_choice(raw)
+        if choice is not None:
+            day["amazon_choice"] = choice
+    else:
+        n = _positive_rank(raw)
+    if n is None:
+        return None
+    day["rank"] = n
+    return day
+
+
+def _absorb_variation_day(out: dict[str, dict], key: str, raw: Any) -> None:
+    """Keep the first positive rank for a day. Later shapes do not clobber it."""
+    text = str(key)
+    matched = HEATMAP_DAY_KEY.match(text)
+    if matched:
+        day_iso = matched.group(1)
+    elif len(text) >= 10 and text[:10].count("-") == 2:
+        day_iso = text[:10]
+        try:
+            date.fromisoformat(day_iso)
+        except ValueError:
+            return
+    else:
+        return
+    if day_iso in out:
+        return
+    day = _variation_day_from_value(raw)
+    if day:
+        out[day_iso] = day
+
+
+def variation_heatmap_days(row: dict) -> dict[str, dict]:
+    """Parse variations-heatmap day ranks.
+
+    Accepts ``r_YYYY-MM-DD`` plus a date-keyed ``positions`` / ``ranks`` /
+    ``heatmap`` object and ``history`` / ``days`` lists. SoldScope ``rank``
+    0 means not found — treat as missing. Never persist 0.
     """
     out: dict[str, dict] = {}
     if not isinstance(row, dict):
         return out
     for key, raw in row.items():
-        m = HEATMAP_DAY_KEY.match(str(key))
-        if not m:
+        _absorb_variation_day(out, str(key), raw)
+    for nest_key in ("positions", "organicPositions", "ranks", "heatmap"):
+        nested = row.get(nest_key)
+        if isinstance(nested, dict):
+            for key, raw in nested.items():
+                _absorb_variation_day(out, str(key), raw)
+    for list_key in ("history", "days", "heatmapDays"):
+        seq = row.get(list_key)
+        if not isinstance(seq, list):
             continue
-        day: dict[str, Any] = {}
-        if isinstance(raw, dict):
-            n = _int(_first_present(raw, "rank", "organicPosition", "organic_position"))
-            choice = phrase_amazon_choice(raw)
-            if choice is not None:
-                day["amazon_choice"] = choice
-        else:
-            n = _int(raw)
-        if n is None or n <= 0:
-            continue
-        day["rank"] = n
-        out[m.group(1)] = day
+        for raw in seq:
+            if not isinstance(raw, dict):
+                continue
+            day_key = str(raw.get("date") or raw.get("asOf") or raw.get("as_of") or "")
+            _absorb_variation_day(out, day_key, raw)
     return out
+
+
+def flatten_variation_items(items: list) -> list[dict]:
+    """One level of nested ``variations`` / ``children`` / ``items``.
+
+    A wrapper with no ASIN is replaced by its children. A child that also
+    lists nested variations contributes both, so a re-pull does not drop
+    a tracked kid that SoldScope nested under the first row.
+    """
+    out: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        nested: list[dict] | None = None
+        for key in ("variations", "children", "items"):
+            raw = item.get(key)
+            if isinstance(raw, list) and any(isinstance(x, dict) for x in raw):
+                nested = [x for x in raw if isinstance(x, dict)]
+                break
+        if nested and not variation_child_asin(item):
+            out.extend(flatten_variation_items(nested))
+            continue
+        out.append(item)
+        if nested:
+            out.extend(flatten_variation_items(nested))
+    return out
+
+
+def heatmap_page_has_more(
+    body: dict,
+    *,
+    page: int,
+    batch_len: int,
+    per_page: int,
+    seen: int | None = None,
+) -> bool:
+    """True when another variations-heatmap page should be requested.
+
+    A short page is the last page only when SoldScope does not say
+    otherwise. ``meta.last_page`` / ``links.next`` / ``meta.total`` keep
+    a later child (Unscented behind Sweet Orange) from being dropped.
+    ``seen`` is rows already collected. ``page * batch_len`` is wrong
+    once a later page is shorter than an earlier one.
+    """
+    if batch_len <= 0 or not isinstance(body, dict):
+        return False
+    meta = body.get("meta") if isinstance(body.get("meta"), dict) else {}
+    last = _int(_first_present(meta, "last_page", "lastPage"))
+    if last is not None:
+        return page < last
+    links = body.get("links") if isinstance(body.get("links"), dict) else {}
+    nxt = links.get("next")
+    if isinstance(nxt, str) and nxt.strip():
+        return True
+    total = _int(_first_present(meta, "total", "totalCount"))
+    if total is not None:
+        fetched = seen if seen is not None else (page - 1) * per_page + batch_len
+        return fetched < total
+    return batch_len >= per_page
 
 
 def variation_rows_from_heatmap(
@@ -445,19 +571,40 @@ def variation_rows_from_heatmap(
     phrase: str,
     pulled_at: str,
     theme_by_asin: dict[str, str | None] | None = None,
+    as_of: date | None = None,
 ) -> list[dict]:
-    """One warehouse row per child ASIN × as_of. Skip 0 / blank ranks."""
+    """One warehouse row per child ASIN × as_of. Skip 0 / blank ranks.
+
+    ``as_of`` is the snapshot day. When that day's heatmap cell is missing
+    and the child payload has a positive ``organicPosition``, store that
+    current rank for ``as_of`` only. A positive ``r_`` day is never replaced.
+    Rank 0 is not found and is never stored.
+
+    SoT for a later dashboard cell is the best stored rank among this
+    table and phrases/v2 (see ``selectOrganicCell``). A missing child
+    (Unscented absent on lip balm while a current ``organicPosition``
+    exists) stays missing until the next observe-only pull:
+    ``python -m src.main soldscope-daily-rt`` (job ``soldscope_daily_rt``,
+    06:15 ET). That command only GETs existing groups. It does not
+    invent a rank that SoldScope did not return.
+    """
     themes = theme_by_asin or {}
     rows: list[dict] = []
     seen: set[tuple[str, str]] = set()
-    for item in items:
+    snapshot_day = as_of.isoformat() if isinstance(as_of, date) else None
+    for item in flatten_variation_items(items):
         if not isinstance(item, dict):
             continue
-        child = str(item.get("asin") or "").strip().upper()
+        child = variation_child_asin(item)
         if not child:
             continue
         theme = variation_theme_label(item.get("theme")) or themes.get(child)
-        for day_iso, day in variation_heatmap_days(item).items():
+        days = variation_heatmap_days(item)
+        if snapshot_day and snapshot_day not in days:
+            current = variation_item_current_rank(item)
+            if current is not None:
+                days[snapshot_day] = {"rank": current, "from_current": True}
+        for day_iso, day in days.items():
             key = (child, day_iso)
             if key in seen:
                 continue
@@ -1024,22 +1171,33 @@ def collect_variations_heatmap(
     heatmap_from: date | None = None,
     heatmap_to: date | None = None,
 ) -> list[dict]:
-    """Paginate variations-heatmap. perPage 100; stop when a page is short."""
+    """Paginate variations-heatmap. Follow last_page / next / total.
+
+    perPage 100. A short page stops only when SoldScope does not report
+    another page — otherwise a later tracked child is dropped.
+    """
     items: list[dict] = []
     page = 1
+    per_page = 100
     while True:
         body = get_phrase_variations_heatmap(
             group_id,
             product_id,
             phrase_id,
             page=page,
-            per_page=100,
+            per_page=per_page,
             heatmap_date_from=heatmap_from.isoformat() if heatmap_from else None,
             heatmap_date_to=heatmap_to.isoformat() if heatmap_to else None,
         )
         batch = [p for p in _page_items(body) if isinstance(p, dict)]
         items.extend(batch)
-        if len(batch) < 100:
+        if not heatmap_page_has_more(
+            body,
+            page=page,
+            batch_len=len(batch),
+            per_page=per_page,
+            seen=len(items),
+        ):
             break
         page += 1
         if page > 20:
@@ -1117,7 +1275,14 @@ def rank_rows_from_phrases(
     """One warehouse row per phrase × as_of. Heatmap days come from r_YYYY-MM-DD.
 
     Null / missing heatmap ranks are skipped — days are never invented.
-    Today's organicPosition row is always written when the phrase exists.
+    The phrase row for ``as_of`` is always written when the phrase exists.
+
+    Rank Tracker heatmap SoT for a calendar day is ``r_YYYY-MM-DD.rank``.
+    ``organicPosition`` is a separate current scrape (its previous often
+    does not equal yesterday's heatmap cell) and must not replace a
+    positive heatmap rank. It fills the cell only when that day's heatmap
+    rank is missing. A divergent organicAsin is not copied onto a
+    different heatmap rank — that would label the wrong child.
     """
     rows: list[dict] = []
     seen: set[tuple[str, str]] = set()
@@ -1128,17 +1293,32 @@ def rank_rows_from_phrases(
             continue
         heatmap = phrase_heatmap_days(p)
         today_heat = heatmap.get(today_iso) or {}
-        today_pos = phrase_organic_position(p)
-        if today_pos is None:
-            today_pos = today_heat.get("rank")
-        today_child = phrase_organic_asin(p) or today_heat.get("organic_asin")
-        today_choice = phrase_amazon_choice(p)
-        if today_choice is None:
+        scraped_pos = phrase_organic_position(p)
+        heat_rank = today_heat.get("rank")
+        if heat_rank is not None:
+            today_pos = heat_rank
+        else:
+            today_pos = scraped_pos
+        heat_child = today_heat.get("organic_asin")
+        scraped_child = phrase_organic_asin(p)
+        if heat_child:
+            today_child = heat_child
+        elif today_pos is not None and today_pos == scraped_pos:
+            today_child = scraped_child
+        else:
+            today_child = None
+        if heat_rank is not None:
             today_choice = today_heat.get("amazon_choice")
+            if today_choice is None and today_pos == scraped_pos:
+                today_choice = phrase_amazon_choice(p)
+        else:
+            today_choice = phrase_amazon_choice(p)
+            if today_choice is None:
+                today_choice = today_heat.get("amazon_choice")
         today_key = (phrase, today_iso)
         if today_key not in seen:
             seen.add(today_key)
-            rows.append(_phrase_snapshot_row(
+            row = _phrase_snapshot_row(
                 p,
                 asin=asin,
                 marketplace=marketplace,
@@ -1151,7 +1331,12 @@ def rank_rows_from_phrases(
                 amazon_choice=today_choice,
                 pulled_at=pulled_at,
                 current=True,
-            ))
+            )
+            row["raw"]["heatmapRank"] = heat_rank
+            row["raw"]["scrapedOrganicPosition"] = scraped_pos
+            if heat_rank is not None:
+                row["raw"]["heatmap"] = True
+            rows.append(row)
         for day_iso, day in heatmap.items():
             key = (phrase, day_iso)
             if key in seen:
@@ -1282,6 +1467,7 @@ def _pull_variation_rows_for_product(
             phrase=phrase,
             pulled_at=pulled_at,
             theme_by_asin=theme_by_asin,
+            as_of=heat_to,
         ))
     log.info(
         "SoldScope RT variations-heatmap: group %s product %s "

@@ -416,8 +416,8 @@ export function rowHasThemeCatalog(
 }
 
 /**
- * Theme (or last-4 fallback) for the family-winner child on a day.
- * Never returns a rank — the cell primary # is the family phrases/v2 position.
+ * Theme (or last-4 fallback) for the child that holds the heatmap cell.
+ * Never returns a rank — the cell primary # is the Rank Tracker day rank.
  */
 export function winnerChildLabel(
   row: Pick<HeatmapRow, "variation_slots" | "organic_child_asins">,
@@ -473,23 +473,79 @@ export function isTopTenOrganic(rank: number | null | undefined): boolean {
 }
 
 /**
+ * Organic cell for one keyword × day.
+ *
+ * SoT is the best stored rank (lowest organic position) among the
+ * phrases/v2 snapshot and every tracked child. Rank 0 / missing is not
+ * a rank and is never invented.
+ * When a tracked child beats phrases/v2, the cell number, winner theme,
+ * and heat fill are that child. phrases/v2 remains when it is better
+ * than every stored child, or when no child rank was stored.
+ * A tie with phrases/v2 keeps the phrases/v2 organic asin (and its
+ * theme). Otherwise the lowest ASIN among children at the best rank.
+ */
+export function selectOrganicCell(args: {
+  phraseRank?: number | null;
+  phraseAsin?: string | null;
+  phraseChoice?: boolean | null;
+  slots?: VariationDaySlot[] | null;
+}): { rank: number | null; asin: string | null; amazonChoice: boolean | null } {
+  const phraseRank = asRank(args.phraseRank);
+  const phraseAsin = asOrganicChild(args.phraseAsin);
+  const phraseChoice = typeof args.phraseChoice === "boolean" ? args.phraseChoice : null;
+  const ranked = (args.slots ?? [])
+    .map((slot) => ({
+      asin: asOrganicChild(slot.asin),
+      rank: asRank(slot.rank),
+      amazon_choice: typeof slot.amazon_choice === "boolean" ? slot.amazon_choice : null,
+    }))
+    .filter((slot): slot is { asin: string; rank: number; amazon_choice: boolean | null } => (
+      slot.asin != null && slot.rank != null
+    ));
+  const childRanks = ranked.map((slot) => slot.rank);
+  const phraseBeatsChildren = phraseRank != null && childRanks.every((rank) => phraseRank < rank);
+  const bestRank = phraseBeatsChildren || childRanks.length === 0
+    ? phraseRank
+    : Math.min(...(phraseRank == null ? childRanks : [phraseRank, ...childRanks]));
+  if (bestRank == null) {
+    return { rank: null, asin: phraseAsin, amazonChoice: phraseChoice };
+  }
+  // phrases/v2 shares the best stored number: keep its ASIN. Theme still
+  // resolves from the matching variation slot when one exists.
+  if (phraseRank != null && phraseRank === bestRank && phraseAsin) {
+    const same = ranked.find((slot) => slot.asin === phraseAsin);
+    return {
+      rank: bestRank,
+      asin: phraseAsin,
+      amazonChoice: same?.amazon_choice ?? phraseChoice,
+    };
+  }
+  const holders = ranked
+    .filter((slot) => slot.rank === bestRank)
+    .sort((a, b) => a.asin.localeCompare(b.asin));
+  const winner = holders[0];
+  if (!winner) {
+    return { rank: bestRank, asin: phraseAsin, amazonChoice: phraseChoice };
+  }
+  return {
+    rank: bestRank,
+    asin: winner.asin,
+    amazonChoice: winner.amazon_choice ?? phraseChoice,
+  };
+}
+
+/**
  * Extra day-cell chips: one identity and one rank per child ASIN.
  *
- * Rank source of truth when phrases/v2 and variations-heatmap disagree
- * for the same ASIN (do not render both numbers — except top-10):
- *   - Cell primary # / fill / sort / spark stay on the family-winner
- *     phrases/v2 `organic_position` (`positions[week]`).
- *   - Variation snapshot rank is the SoT for a child's chip when a
- *     variation row exists. Theme catalog labels the child (never an
- *     ASIN CHILD pill + theme for the same ASIN).
- *   - Non-winner children with a stored variation rank are always
- *     chipped (11+ stay compact).
- *   - Winner is omitted from extra chips when their variation rank is
- *     missing or >10 — the cell # + theme already identify them.
- *   - If the winner's variation rank is 1–10, always list theme+#N.
- *     That top-10 child rank must never be hidden behind “winner only”,
- *     even when it differs from the family-winner phrases position.
- *     When the two ranks match, skip the extra chip (already listed).
+ * The cell number / fill / sort / spark is `selectOrganicCell` (best
+ * stored rank). A child who owns that number is not chipped again.
+ *   - Variation snapshot rank is the chip rank. Theme labels the child
+ *     (never an ASIN CHILD pill + theme for the same ASIN).
+ *   - Other children with a stored variation rank are chipped.
+ *   - Winner is omitted when their variation rank is missing, >10, or
+ *     already equal to the cell number.
+ *   - A winner whose variation rank is 1–10 and differs from the cell
+ *     is always listed as theme+#N.
  */
 export function heatmapDayChips(
   row: Pick<HeatmapRow, "variation_slots" | "organic_child_asins" | "organic_child_asin" | "positions">,
@@ -916,6 +972,22 @@ export function buildOrganicRankProgress(input: {
       amazon_choice: typeof row.amazon_choice === "boolean" ? row.amazon_choice : null,
     });
     cur.variation_slots[asOf] = slots;
+  }
+
+  // Cell = best stored rank. A child that beats phrases/v2 owns the
+  // number, the theme, and therefore the heat fill.
+  for (const cur of series.values()) {
+    for (const asOf of shownWeeks) {
+      const picked = selectOrganicCell({
+        phraseRank: cur.positions[asOf],
+        phraseAsin: cur.organic_child_asins[asOf],
+        phraseChoice: cur.amazon_choices[asOf],
+        slots: cur.variation_slots[asOf] ?? [],
+      });
+      cur.positions[asOf] = picked.rank;
+      cur.organic_child_asins[asOf] = picked.asin;
+      if (picked.amazonChoice != null) cur.amazon_choices[asOf] = picked.amazonChoice;
+    }
   }
 
   const lastWeek = shownWeeks[shownWeeks.length - 1] ?? null;
