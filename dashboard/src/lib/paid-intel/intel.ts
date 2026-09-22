@@ -491,7 +491,7 @@ function detectAppearanceGap(queries: SearchQueryDaily[]): IntelCard | null {
     title: `${weak.query} shows a lot and earns little vs ${strong.query}`,
     body: `${weak.query} has ${fmtInt(weak.impressions)} impressions at CTR ${weak.ctr?.toFixed(2) ?? "—"}% and position ${weak.position?.toFixed(1) ?? "—"}. ${strong.query} is already at position ${strong.position?.toFixed(1) ?? "—"} with CTR ${strong.ctr?.toFixed(2) ?? "—"}%. This is a rich-result / merchant-listing coverage gap, not a PDP redesign.`,
     doThis: `7-day test: Nora/Blair — expand Merchant listings and product rich results (Merchant Center feed, product structured data, GTIN / price / availability). Do not redesign Extra Strength or any converting PDP.`,
-    ifItWorks: `CTR on ${weak.query} rises on the next Search Appearance.csv, or ${strong.query} picks up more of the impression mix.`,
+    ifItWorks: `CTR on ${weak.query} rises on the next gsc_dim_daily search_appearance row (or Search Appearance.csv fallback), or ${strong.query} picks up more of the impression mix.`,
     evidence: rows.slice(0, 6).map((q) =>
       `${q.query} ${q.impressions} impr · CTR ${q.ctr?.toFixed(2) ?? "—"}% · pos ${q.position?.toFixed(1) ?? "—"}`).join("; "),
     stake: round2(Math.max(weak.impressions * 0.02, 40)),
