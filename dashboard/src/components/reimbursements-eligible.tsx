@@ -520,9 +520,14 @@ export function ReimbursementsEligiblePanel() {
           <Card>
             <CardHeader className="pb-2">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <CardTitle className="text-sm font-medium">
-                  Open cases ({fmt(visible.length)})
-                </CardTitle>
+                <div>
+                  <CardTitle className="text-sm font-medium">
+                    Open cases ({fmt(visible.length)})
+                  </CardTitle>
+                  <p className="mt-1 text-[11px] font-normal text-muted-foreground">
+                    Filed / Reconciled / Not pursuing stay off this list. Enqueue 90D queue rebuild will not reopen those. An auto receipts_cover clear can reopen if the shipment is still short.
+                  </p>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Select
                     value={clearReason}

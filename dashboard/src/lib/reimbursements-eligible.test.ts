@@ -420,6 +420,8 @@ describe("Reese package + page contract", () => {
     assert.match(api, /fba_case_events/);
     assert.match(sync, /reimbursements_case_sync/);
     assert.match(ui, /Enqueue 90D queue rebuild/);
+    assert.match(ui, /will not reopen those/);
+    assert.match(ui, /receipts_cover/);
     assert.match(ui, /Enqueueing\.\.\./);
     assert.doesNotMatch(ui, />\s*Sync queue\s*</);
     assert.match(ui, /\.\/\.venv\/bin\/python -m src\.main reimbursements-case-sync/);
