@@ -239,6 +239,8 @@ describe("wiring", () => {
     assert.match(defs, /does not call an LLM/);
     assert.match(defs, /Jev hold does not blank/);
     assert.match(defs, /Never Meta/);
+    assert.match(defs, /Never Meta in improvements/);
+    assert.match(defs, /phase2\.meta is locked-day facts only/);
     assert.doesNotMatch(defs, /until Jev is wired/);
     assert.doesNotMatch(defs, /twice-daily cron/);
     assert.doesNotMatch(defs, /digest improvements stay empty/);
