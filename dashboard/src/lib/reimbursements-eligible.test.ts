@@ -104,6 +104,46 @@ describe("needs-case vs paid", () => {
     assert.equal(isNeedsCase(rows[1]), false);
   });
 
+  test("open cases exclude submitted and resolved unless Dave reopens", () => {
+    const rows = [
+      row({ event_key: "open", event_date: "2026-09-01", status: "needs_case", quantity: 1 }),
+      row({
+        event_key: "submitted",
+        event_date: "2026-09-01",
+        status: "case_submitted",
+        quantity: 1,
+        dismissed_at: "2026-09-15T00:00:00Z",
+        dismissed_note: "filed",
+      }),
+      row({
+        event_key: "resolved",
+        event_date: "2026-09-01",
+        status: "found_offset",
+        quantity: 0,
+        dismissed_at: "2026-09-15T00:00:00Z",
+        dismissed_note: "reconciled",
+      }),
+      row({
+        event_key: "stale-mark",
+        event_date: "2026-09-01",
+        status: "needs_case",
+        quantity: 2,
+        dismissed_at: "2026-09-15T00:00:00Z",
+        dismissed_note: "filed",
+      }),
+      row({
+        event_key: "reopened-cover",
+        event_date: "2026-09-01",
+        status: "needs_case",
+        quantity: 1,
+        dismissed_note: "receipts_cover",
+      }),
+    ];
+    assert.deepEqual(filterNeedsCase(rows).map((r) => r.event_key), ["open", "reopened-cover"]);
+    assert.equal(isNeedsCase(rows[1]), false);
+    assert.equal(isNeedsCase(rows[2]), false);
+  });
+
   test("summarize counts needs-case units and known estimates", () => {
     const rows = [
       row({

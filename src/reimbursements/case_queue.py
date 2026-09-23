@@ -159,6 +159,12 @@ CLEAR_NOTE_FILED = "filed"
 CLEAR_NOTE_RECONCILED = "reconciled"
 CLEAR_NOTE_NOT_PURSUING = "not_pursuing"
 CLEAR_NOTE_RECEIPTS_COVER = "receipts_cover"
+# Open-cases clears Dave sets by hand. receipts_cover is the auto ghost clear.
+USER_CLEAR_NOTES = frozenset({
+    CLEAR_NOTE_FILED,
+    CLEAR_NOTE_RECONCILED,
+    CLEAR_NOTE_NOT_PURSUING,
+})
 
 # Sellerboard CLOSED + UnitsReceived=0 ghosts: ledger Receipts often land at a
 # different FC than the plan destination. Prefer Reference ID (= FBA*) match;
@@ -870,32 +876,63 @@ def existing_sellerboard_rows(existing: Iterable[dict]) -> list[dict]:
     return out
 
 
+def _clear_note(row: dict) -> str:
+    return str(row.get("dismissed_note") or "").strip().lower()
+
+
+def is_user_locked_case(row: dict) -> bool:
+    """Dave marked this shipment submitted or resolved. Sync must not reopen it.
+
+    Submitted = ``case_submitted`` (Open cases Clear: filed or not pursuing).
+    Resolved = manual ``found_offset`` with ``dismissed_at`` (reconciled).
+    Auto ``receipts_cover`` is not a user lock, even when a zero-recv ghost
+    also stamped ``dismissed_at`` — receipt netting may reopen that short.
+    Auto found_offset without ``dismissed_at`` is recomputed each sync.
+    """
+    status = row.get("status")
+    note = _clear_note(row)
+    if status == STATUS_CASE_SUBMITTED:
+        return True
+    if status == STATUS_FOUND_OFFSET and row.get("dismissed_at"):
+        return note != CLEAR_NOTE_RECEIPTS_COVER
+    return False
+
+
+def user_dismiss_hides_open_case(row: dict) -> bool:
+    """Open cases / alerts stay clear of a user mark left on a rebuilt row.
+
+    A receipts_cover stamp is the auto clear, so a netted short may show.
+    """
+    note = _clear_note(row)
+    if note == CLEAR_NOTE_RECEIPTS_COVER:
+        return False
+    if row.get("dismissed_at"):
+        return True
+    return note in USER_CLEAR_NOTES
+
+
 def preserve_submitted_status(
     events: list[dict],
     existing: Iterable[dict],
 ) -> list[dict]:
-    """Keep Dave's case_submitted / manual reconciled dismiss across Mini rebuilds.
+    """Keep Dave's submitted / resolved marks across Mini rebuilds.
 
-    Paid / live found-offset wins. Auto-reconcile (found_offset without
-    dismissed_at) is recomputed each sync so a later short can reopen.
+    Restores the user status even when Sellerboard backfill or receipt
+    netting rebuilt the row as needs_case or an auto found_offset.
+    Paid (already_reimbursed) still wins. Auto receipts_cover is not locked.
     New event_keys (new shipment) stay Needs case.
     """
     prior: dict[str, dict] = {}
     for row in existing:
         key = str(row.get("event_key") or "").strip()
-        if not key:
-            continue
-        status = row.get("status")
-        if status == STATUS_CASE_SUBMITTED:
-            prior[key] = row
-        elif status == STATUS_FOUND_OFFSET and row.get("dismissed_at"):
+        if key and is_user_locked_case(row):
             prior[key] = row
     out: list[dict] = []
     for ev in events:
         row = dict(ev)
         key = str(row.get("event_key") or "").strip()
         saved = prior.get(key)
-        if saved and row.get("status") == STATUS_NEEDS_CASE:
+        if saved and row.get("status") != STATUS_ALREADY_REIMBURSED:
             row["status"] = saved.get("status") or STATUS_CASE_SUBMITTED
             row["dismissed_at"] = saved.get("dismissed_at")
             row["dismissed_note"] = saved.get("dismissed_note")
@@ -928,6 +965,11 @@ def preserve_found_offset_unless_amazon_short(
     for ev in events:
         row = dict(ev)
         saved = prior.get(str(row.get("event_key") or "").strip())
+        # Submitted / resolved stays put. Final preserve_submitted_status
+        # copies the user mark back after receipt netting.
+        if saved and is_user_locked_case(saved):
+            out.append(row)
+            continue
         if saved and row.get("status") not in (
             STATUS_ALREADY_REIMBURSED, STATUS_CASE_SUBMITTED, STATUS_FOUND_OFFSET,
         ):
@@ -978,6 +1020,8 @@ def preserve_found_offset_unless_amazon_short(
 def is_active_inbound_alert(row: dict) -> bool:
     """Overview alert: CLOSED/stale inbound short, not submitted / paid / zero."""
     if row.get("status") != STATUS_NEEDS_CASE:
+        return False
+    if user_dismiss_hides_open_case(row):
         return False
     if int(row.get("quantity") or 0) <= 0:
         return False
