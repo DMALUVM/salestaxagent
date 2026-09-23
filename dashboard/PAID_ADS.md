@@ -52,8 +52,11 @@ require spend ≥ $1.
 **Meta call sheet** on `/paid-ads` sits at the top of Command — the weekly Ads Manager list:
 ranked pause / cut 30% / creative refresh / scale / keep from `meta_ads_daily`
 + adset/ad grains, last-7 vs prior-7, spend ≥ $1. Each line is one spoken ask
-with spend, ROAS/CPA, and prior-week trend. Conversion-digest `phase2.meta_actions`
-is the locked-day pause subset only — Iris `improvements` stay Google/Blake.
+with spend, ROAS/CPA, and prior-week trend. Conversion-digest `phase2.meta`
+is the locked prior-day Meta block (totals, top campaigns, pause actions).
+`phase2.meta_actions` mirrors those pause lines. Iris Morning Brief prints
+`phase2.meta` and does not substitute an older day. `improvements` stay
+Google/Blake.
 
 Copy for Grok = keep/kill prompt + numbered stack + **Upload yield** evidence
 (Search appearance, worst Google impr share / top IS, top GSC pages, paid GA4
