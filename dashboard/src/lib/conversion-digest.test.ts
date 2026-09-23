@@ -508,6 +508,38 @@ describe("improvements from locked-day actions", () => {
     assert.equal(d.improvements.at(-1)?.rank, d.improvements.length);
   });
 
+  test("Meta pause stays off improvements; Google ads line is unchanged", () => {
+    const rows = improvementsFromLockedDay({
+      asOf: "2026-09-19",
+      dailyRow: daily(),
+      phase2: phase2Of({
+        ads: [{
+          campaign_id: "99", campaign_name: "Brand Search",
+          spend: 42, clicks: 18, conversions: 0,
+        }],
+        meta: {
+          totals: {
+            spend: 18, clicks: 6, impressions: 400,
+            conversions: 0, conversion_value: 0, roas: 0,
+          },
+          campaigns: [{
+            campaign_id: "1", campaign_name: "Dead UGC",
+            spend: 18, clicks: 6, conversions: 0,
+            conversion_value: 0, roas: 0,
+          }],
+          actions: [{
+            campaign_name: "Dead UGC", spend: 18, conversions: 0,
+            say: "Pause Dead UGC.",
+          }],
+        },
+      }),
+    });
+    const texts = rows.map((r) => r.text).join("\n");
+    assert.match(texts, /Ads Brand Search: \$42\.00 \/ 18 clicks \/ 0 conv — review negatives or pause \[Blake\]/);
+    assert.doesNotMatch(texts, /Dead UGC|\bMeta\b|meta_ads/);
+    assert.equal(rows.filter((r) => r.owner === "Blake").length, 1);
+  });
+
   test("Jev pursue overlays severity only — never 7d last_stats lost counts", () => {
     const rows = improvementsFromLockedDay({
       asOf: "2026-09-19",

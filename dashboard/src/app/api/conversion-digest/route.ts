@@ -26,9 +26,14 @@ import type { AbandonedRow } from "@/lib/shopify-funnel";
  * → improvements: [] when no material as_of rows. No Shopify / theme
  * writes. No Mini gateway key.
  *
- * Phase 2 extras (`phase2.landing_drops` / `seo` / `ads` / `connectors`)
- * are null/false until official-API rows exist for the locked day.
- * Missing tables are not an error. Never invents GA4/GSC/ads numbers.
+ * Phase 2 extras (`phase2.landing_drops` / `seo` / `ads` / `meta` /
+ * `connectors`) are null/false until official-API rows exist for the
+ * locked day. Missing tables are not an error. Never invents
+ * GA4/GSC/ads numbers.
+ *
+ * Iris Morning Brief prints `phase2.meta` for the prior day (as_of /
+ * D-1 America/New_York). Never substitute an older Meta day.
+ * ads_read warehouse only (`meta_ads_daily`). `phase2.ads` is Google-only.
  *
  * Auth: dashboard Basic Auth + service-role warehouse. Not anon.
  */
@@ -131,7 +136,7 @@ export async function GET(request: NextRequest) {
       loadOptionalDay(sb, "gsc_page_daily", "metric_date,page,clicks,impressions,ctr,position", parsed.asOf),
       loadOptionalDay(sb, "gsc_dim_daily", "metric_date,dim_kind,dim_value,clicks,impressions,ctr,position", parsed.asOf),
       loadOptionalDay(sb, "google_ads_daily", "metric_date,campaign_id,campaign_name,spend,clicks,conversions", parsed.asOf),
-      loadOptionalDay(sb, "meta_ads_daily", "metric_date,campaign_id,campaign_name,spend,clicks,conversions", parsed.asOf),
+      loadOptionalDay(sb, "meta_ads_daily", "metric_date,campaign_id,campaign_name,spend,clicks,impressions,conversions,conversion_value", parsed.asOf),
     ]);
 
     const phase2 = phase2FromLockedDay(parsed.asOf, {

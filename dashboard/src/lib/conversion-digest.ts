@@ -7,7 +7,9 @@
  * Funnel / primary_leak / abandons: shopify_funnel_* only.
  * improvements: ranked as_of actions (max 5). Morgan/CoS locked schema:
  * owner (one of Harry|Nora|Blake|Blair|Kit), severity, evidence, concrete_ask,
- * dave_tap, rank, text. One owner. Ban “fix PDP/ATC”. Meta skipped.
+ * dave_tap, rank, text. One owner. Ban “fix PDP/ATC”. Meta stays on
+ * phase2.meta (Iris Morning Brief); this ranked list is Google/Blake,
+ * Shopify, GSC, and GA4.
  * Empty when nothing material. Never invents metrics.
  */
 
@@ -564,6 +566,7 @@ export function improvementsFromLockedDay(input: {
     ...gscOpportunities(p2?.seo?.queries ?? []).map((q) => ({ ...q, kind: "query" as const })),
     ...gscOpportunities(p2?.seo?.pages ?? []).map((q) => ({ ...q, kind: "page" as const })),
   ];
+  // Google waste only. Meta pause lines stay on phase2.meta.actions.
   const ads = adsWaste(p2?.ads ?? []);
   const items = jevItemsFromLockedDay({
     asOf: input.asOf,
