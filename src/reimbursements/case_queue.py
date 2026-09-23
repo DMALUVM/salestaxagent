@@ -948,10 +948,29 @@ def preserve_found_offset_unless_amazon_short(
                     _int_or_none(info.get("quantity_received")),
                     _int_or_none(info.get("quantity_short")),
                 )
-            if short is None or short <= 0:
+            row_short = inbound_live_short(
+                _int_or_none(row.get("quantity_shipped")),
+                _int_or_none(row.get("quantity_received")),
+                _int_or_none(row.get("quantity")),
+            )
+            prior_note = str(saved.get("dismissed_note") or "").strip()
+            # Amazon still short → keep rebuilt needs_case.
+            if short is not None and short > 0:
+                pass
+            # Amazon balanced → restore found_offset (true clear).
+            elif short is not None and short <= 0:
                 row = _mark_inbound_found_offset(row, info)
-                if saved.get("dismissed_note"):
-                    row["dismissed_note"] = saved.get("dismissed_note")
+                if prior_note:
+                    row["dismissed_note"] = prior_note
+            # No Amazon row: do not revive balanced ghosts, EXCEPT when the
+            # prior clear was receipts_cover (pos-only bug) and ship−recv
+            # still shows a short after netted receipts.
+            elif prior_note == CLEAR_NOTE_RECEIPTS_COVER and row_short and row_short > 0:
+                pass
+            else:
+                row = _mark_inbound_found_offset(row, info)
+                if prior_note:
+                    row["dismissed_note"] = prior_note
         out.append(row)
     return out
 
@@ -1117,9 +1136,9 @@ def collect_receipt_qty_by_shipment(
 ) -> dict[tuple[str, str], int]:
     """Sum Receipts qty keyed by (FBA shipment_id, normalized SKU).
 
-    Ledger detail Reference ID for Receipts is the FBA* shipment id when
-    Amazon stamped it. Rows without a parseable FBA reference are ignored
-    here (see ``collect_receipt_qty_pool``).
+    Nets positive and negative Receipts for the same FBA* reference
+    (later -1/-2 adjustments are real shortfalls). Rows without a
+    parseable FBA reference are ignored here (see ``collect_receipt_qty_pool``).
     """
     out: dict[tuple[str, str], int] = {}
     for row in receipt_events:
@@ -1129,7 +1148,7 @@ def collect_receipt_qty_by_shipment(
             qty = int(row.get("quantity") or 0)
         except (TypeError, ValueError):
             continue
-        if qty <= 0:
+        if qty == 0:
             continue
         sid = fba_shipment_id(
             row.get("reference_id"),
@@ -1716,10 +1735,12 @@ def sync_case_queue(
         paid = []
     try:
         inventory_events = _with_one_retry(fetch_all, "inventory_events")
+        # Include negative Receipt adjustments so shipment-keyed cover
+        # nets to Amazon's true received qty (pos-only falsely clears shorts).
         receipt_events = [
             r for r in inventory_events
             if "receipt" in (r.get("event_type") or "").lower()
-            and int(r.get("quantity") or 0) > 0
+            and int(r.get("quantity") or 0) != 0
         ]
     except Exception as e:
         log.warning("inventory_events receipts unavailable: %s", e)
