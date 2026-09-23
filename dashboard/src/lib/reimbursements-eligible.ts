@@ -269,8 +269,26 @@ export function caseDay(row: Pick<CaseEventRow, "event_date">): string {
   return raw.length >= 10 ? raw.slice(0, 10) : raw;
 }
 
-export function isNeedsCase(row: Pick<CaseEventRow, "status" | "quantity">): boolean {
-  return row.status === "needs_case" && caseQty(row) > 0;
+const USER_CLEAR_NOTES = new Set(["filed", "reconciled", "not_pursuing"]);
+
+/** User submitted/resolved mark. Auto receipts_cover is not one. */
+export function isUserDismissed(
+  row: Partial<Pick<CaseEventRow, "dismissed_at" | "dismissed_note">>,
+): boolean {
+  const note = String(row.dismissed_note ?? "").trim().toLowerCase();
+  if (note === "receipts_cover") return false;
+  if (row.dismissed_at) return true;
+  return USER_CLEAR_NOTES.has(note);
+}
+
+export function isNeedsCase(
+  row: Pick<CaseEventRow, "status" | "quantity"> &
+    Partial<Pick<CaseEventRow, "dismissed_at" | "dismissed_note">>,
+): boolean {
+  if (row.status !== "needs_case" || caseQty(row) <= 0) return false;
+  // Submitted / resolved stay out of Open cases unless Dave clears the mark.
+  if (isUserDismissed(row)) return false;
+  return true;
 }
 
 export function isCaseSubmitted(row: Pick<CaseEventRow, "status">): boolean {

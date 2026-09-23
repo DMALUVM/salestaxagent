@@ -36,6 +36,7 @@ from src.reimbursements.case_queue import (
     apply_paid_dedupe,
     apply_receipt_cover,
     build_case_events,
+    collect_receipt_qty_by_shipment,
     collect_live_inbound_qty,
     collect_reconcile_shipment_ids,
     fetch_amazon_inbound_qty,
@@ -46,7 +47,9 @@ from src.reimbursements.case_queue import (
     is_active_inbound_alert,
     is_inbound_balanced,
     merge_inbound_sources,
+    preserve_found_offset_unless_amazon_short,
     preserve_submitted_status,
+    sync_case_queue,
     reason_group,
     seller_central_link,
     sellerboard_inbound_discrepancies,
@@ -1224,6 +1227,234 @@ def test_zero_recv_closed_receipts_full_dismisses():
     assert row["quantity_received"] == 1080
     assert row.get("dismissed_at")
     assert row.get("dismissed_note") == CLEAR_NOTE_RECEIPTS_COVER
+
+
+def test_negative_receipt_nets_cover_and_keeps_one_unit_short():
+    """A later -1 Receipt reduces cover so a 1-unit short stays Needs-case.
+
+    Positive-only sums treated +N plus a later -1 as full cover and stamped
+    found_offset / receipts_cover. Netting must leave the short, and a prior
+    receipts_cover clear must not be revived while ship−recv is still short.
+    """
+    sid = "FBA19LQ19M4L"
+    sku = "DDPE0001SHOP"
+    receipts = [
+        {
+            "event_type": "Receipts",
+            "event_date": "2026-08-01",
+            "sku": sku,
+            "quantity": 10,
+            "reference_id": sid,
+        },
+        {
+            "event_type": "Receipts",
+            "event_date": "2026-08-02",
+            "sku": sku,
+            "quantity": 0,
+            "reference_id": sid,
+        },
+        {
+            "event_type": "Receipts",
+            "event_date": "2026-08-03",
+            "sku": sku,
+            "quantity": -1,
+            "reference_id": sid,
+        },
+    ]
+    assert collect_receipt_qty_by_shipment(receipts)[(sid, sku)] == 9
+
+    # Prior pos-only receipts_cover must not be revived while ship−recv is short
+    # and Amazon has no live row. A true Amazon balance still stays found_offset.
+    rebuilt = [{
+        "event_key": f"inbound|{sid}|{sku}",
+        "source": SOURCE_SELLERBOARD,
+        "sku": sku,
+        "shipment_id": sid,
+        "quantity": 1,
+        "quantity_shipped": 10,
+        "quantity_received": 9,
+        "reason": "Lost_Inbound",
+        "status": STATUS_NEEDS_CASE,
+    }]
+    prior = [{
+        "event_key": f"inbound|{sid}|{sku}",
+        "status": STATUS_FOUND_OFFSET,
+        "dismissed_note": CLEAR_NOTE_RECEIPTS_COVER,
+        "sku": sku,
+        "shipment_id": sid,
+        "quantity": 0,
+        "quantity_shipped": 10,
+        "quantity_received": 10,
+    }]
+    kept = preserve_found_offset_unless_amazon_short(rebuilt, prior)
+    assert kept[0]["status"] == STATUS_NEEDS_CASE
+    assert kept[0]["quantity"] == 1
+    balanced = preserve_found_offset_unless_amazon_short(
+        rebuilt,
+        prior,
+        amazon_live={
+            (sid, sku): {"quantity_shipped": 10, "quantity_received": 10},
+        },
+    )
+    assert balanced[0]["status"] == STATUS_FOUND_OFFSET
+    assert balanced[0]["quantity"] == 0
+
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 1),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[{
+            "shipment_id": sid,
+            "sku": sku,
+            "quantity_shipped": 10,
+            "quantity_received": 0,
+            "quantity_short": 10,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-08-20",
+            "fulfillment_center": "SCK4",
+        }],
+        existing_events=[{
+            "event_key": f"inbound|{sid}|{sku}",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-08-20",
+            "sku": sku,
+            "quantity": 0,
+            "quantity_shipped": 10,
+            "quantity_received": 10,
+            "reason": "Lost_Inbound",
+            "shipment_id": sid,
+            "status": STATUS_FOUND_OFFSET,
+            "dismissed_at": "2026-08-21T12:00:00Z",
+            "dismissed_note": CLEAR_NOTE_RECEIPTS_COVER,
+            "fulfillment_center": "SCK4",
+        }],
+        receipt_events=receipts,
+    )
+    row = next(e for e in events if e["shipment_id"] == sid)
+    assert row["status"] == STATUS_NEEDS_CASE
+    assert row["quantity"] == 1
+    assert row["quantity_received"] == 9
+    assert row.get("dismissed_note") != CLEAR_NOTE_RECEIPTS_COVER
+
+
+def test_sync_keeps_submitted_and_resolved_out_of_needs_case(monkeypatch):
+    """User submitted / resolved marks survive sync, including receipt netting.
+
+    Open cases is needs_case only. case_submitted is submitted (filed).
+    Manual found_offset + dismissed_at is resolved (reconciled). An auto
+    receipts_cover clear on a different shipment still reopens when the
+    netted receipt leaves a short.
+    """
+    sku = "DDPE0001SHOP"
+
+    def _sb(sid, received, short):
+        return {
+            "shipment_id": sid,
+            "sku": sku,
+            "quantity_shipped": 10,
+            "quantity_received": received,
+            "quantity_short": short,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-09-01",
+            "fulfillment_center": "SCK4",
+        }
+
+    def _existing(sid, status, note, dismissed_at):
+        return {
+            "event_key": f"inbound|{sid}|{sku}",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-09-01",
+            "sku": sku,
+            "quantity": 0,
+            "quantity_shipped": 10,
+            "quantity_received": 10,
+            "reason": "Lost_Inbound",
+            "shipment_id": sid,
+            "status": status,
+            "dismissed_at": dismissed_at,
+            "dismissed_note": note,
+            "fulfillment_center": "SCK4",
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-09-01",
+        }
+
+    def _receipts(sid):
+        return [
+            {
+                "event_type": "Receipts",
+                "event_date": "2026-08-01",
+                "sku": sku,
+                "quantity": 10,
+                "reference_id": sid,
+            },
+            {
+                "event_type": "Receipts",
+                "event_date": "2026-08-03",
+                "sku": sku,
+                "quantity": -1,
+                "reference_id": sid,
+            },
+        ]
+
+    tables = {
+        "fba_inventory_adjustments": [],
+        "inventory_inbound_shipments": [],
+        "inventory_inbound_shipment_items": [],
+        "sellerboard_inbound_discrepancies": [
+            _sb("FBA19SUBMIT", 9, 1),
+            _sb("FBA19RESOLV", 9, 1),
+            _sb("FBA19COVER1", 0, 10),
+            _sb("FBA19NEWROW", 8, 2),
+        ],
+        "fba_case_events": [
+            _existing("FBA19SUBMIT", STATUS_CASE_SUBMITTED, "filed", "2026-09-15T12:00:00Z"),
+            _existing("FBA19RESOLV", STATUS_FOUND_OFFSET, "reconciled", "2026-09-15T12:00:00Z"),
+            _existing("FBA19COVER1", STATUS_FOUND_OFFSET, CLEAR_NOTE_RECEIPTS_COVER, "2026-08-21T12:00:00Z"),
+        ],
+        "fba_reimbursements": [],
+        "inventory_events": (
+            _receipts("FBA19SUBMIT")
+            + _receipts("FBA19RESOLV")
+            + _receipts("FBA19COVER1")
+        ),
+    }
+
+    def fetch_all(table, *args, **kwargs):
+        return list(tables.get(table, []))
+
+    monkeypatch.setattr("src.db.fetch_all", fetch_all)
+    monkeypatch.setattr(
+        "src.reimbursements.case_queue.fetch_amazon_inbound_qty",
+        lambda *args, **kwargs: ([], {}),
+    )
+
+    summary = sync_case_queue(days=120, dry_run=True, fetch_ledger=False)
+    by_sid = {e["shipment_id"]: e for e in summary["events"]}
+
+    submitted = by_sid["FBA19SUBMIT"]
+    assert submitted["status"] == STATUS_CASE_SUBMITTED
+    assert submitted["dismissed_note"] == "filed"
+    assert submitted["dismissed_at"] == "2026-09-15T12:00:00Z"
+    assert is_active_inbound_alert(submitted) is False
+
+    resolved = by_sid["FBA19RESOLV"]
+    assert resolved["status"] == STATUS_FOUND_OFFSET
+    assert resolved["dismissed_note"] == "reconciled"
+    assert resolved["dismissed_at"] == "2026-09-15T12:00:00Z"
+    assert is_active_inbound_alert(resolved) is False
+
+    reopened = by_sid["FBA19COVER1"]
+    assert reopened["status"] == STATUS_NEEDS_CASE
+    assert reopened["quantity"] == 1
+    assert is_active_inbound_alert(reopened) is True
+
+    fresh = by_sid["FBA19NEWROW"]
+    assert fresh["status"] == STATUS_NEEDS_CASE
+    assert fresh["quantity"] == 2
+    assert is_active_inbound_alert(fresh) is True
 
 
 def test_real_recv_short_kept_as_needs_case():
