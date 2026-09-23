@@ -9,6 +9,11 @@
  * same as_of day. Missing tables / no OAuth rows → null sections.
  * Never invents a session, leak, or SEO number. Never substitutes
  * an older day. Does not feed nexus or P&L.
+ *
+ * Iris Morning Brief prints `phase2.meta` for the prior day (as_of /
+ * D-1 America/New_York). Never substitute an older Meta day.
+ * ads_read warehouse only (`meta_ads_daily`). `phase2.ads` is Google-only
+ * so Meta spend is not counted twice.
  */
 import { asInt } from "./shopify-funnel";
 import { metaDigestActions } from "./paid-intel/meta-call";
@@ -55,11 +60,50 @@ export type MetaDigestAction = {
   say: string;
 };
 
+export type MetaCampaignFact = {
+  campaign_id: string;
+  campaign_name: string;
+  spend: number | null;
+  clicks: number | null;
+  conversions: number | null;
+  conversion_value: number | null;
+  /** conversion_value / spend when spend > 0 and value is known. Else null. */
+  roas: number | null;
+};
+
+export type MetaDigestTotals = {
+  spend: number | null;
+  clicks: number | null;
+  /** Null when no locked-day row returned impressions. */
+  impressions: number | null;
+  conversions: number | null;
+  conversion_value: number | null;
+  /**
+   * totals.conversion_value / totals.spend when spend > 0 and every
+   * positive-spend row stored a conversion_value. Else null.
+   */
+  roas: number | null;
+};
+
+/** Locked-day Meta facts. Null when that day has zero meta_ads_daily rows. */
+export type MetaDigestSection = {
+  totals: MetaDigestTotals;
+  campaigns: MetaCampaignFact[];
+  /** Pause lines only (spend ≥ $5, conversions known and < 0.5). Locked day. */
+  actions: MetaDigestAction[];
+};
+
 export type Phase2Digest = {
   landing_drops: LandingDrop[] | null;
   seo: SeoSection | null;
+  /** Google Ads campaigns for the locked day. Meta is `meta`, not this list. */
   ads: AdsCampaign[] | null;
-  /** Locked-day Meta pause asks. Not mixed into Iris improvements (those stay Google/Blake). */
+  /**
+   * Prior-day Meta from meta_ads_daily. Iris Morning Brief prints this.
+   * Null when the locked day has zero rows — never an older substitute.
+   */
+  meta: MetaDigestSection | null;
+  /** Same pause lines as `meta.actions`. Null when `meta` is null. */
   meta_actions: MetaDigestAction[] | null;
   connectors: {
     ga4: boolean;
@@ -74,6 +118,7 @@ export function emptyPhase2(): Phase2Digest {
     landing_drops: null,
     seo: null,
     ads: null,
+    meta: null,
     meta_actions: null,
     connectors: { ga4: false, gsc: false, google_ads: false, meta_ads: false },
   };
@@ -183,7 +228,89 @@ function asQty(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Locked-day Google / Meta Ads campaign facts. Null when that day has no rows. */
+function metricDay(v: unknown): string {
+  return String(v ?? "").slice(0, 10);
+}
+
+function sumKnown(values: Array<number | null>, digits: number): number | null {
+  let total = 0;
+  let any = false;
+  for (const v of values) {
+    if (v == null || !Number.isFinite(v)) continue;
+    total += v;
+    any = true;
+  }
+  if (!any) return null;
+  const factor = 10 ** digits;
+  return Math.round(total * factor) / factor;
+}
+
+/** Value / spend when spend > 0 and value is known. Never invent a ratio. */
+function roasOf(spend: number | null, value: number | null): number | null {
+  if (spend == null || !(spend > 0) || value == null) return null;
+  return Math.round((value / spend) * 10000) / 10000;
+}
+
+const META_CAMPAIGN_CAP = 10;
+
+/**
+ * Locked-day Meta block for Iris. Null when that day has zero rows.
+ * Totals sum every row (warehouse SUM). Campaigns are the top spend slice.
+ * Actions are the existing pause lines — no weekly cut/scale.
+ */
+export function metaSection(
+  rows: Array<Record<string, unknown>>,
+  date: string,
+  limit = META_CAMPAIGN_CAP,
+): MetaDigestSection | null {
+  const day = rows.filter((r) => metricDay(r.metric_date) === date);
+  if (!day.length) return null;
+
+  const campaigns: MetaCampaignFact[] = [];
+  for (const r of day) {
+    const campaign_id = String(r.campaign_id ?? "").trim();
+    const campaign_name = String(r.campaign_name ?? "").trim();
+    if (!campaign_id && !campaign_name) continue;
+    const spend = asMoney(r.spend);
+    const conversion_value = asMoney(r.conversion_value);
+    campaigns.push({
+      campaign_id,
+      campaign_name,
+      spend,
+      clicks: asInt(r.clicks),
+      conversions: asQty(r.conversions),
+      conversion_value,
+      roas: roasOf(spend, conversion_value),
+    });
+  }
+  campaigns.sort((a, b) =>
+    (b.spend ?? -1) - (a.spend ?? -1)
+    || a.campaign_name.localeCompare(b.campaign_name)
+    || a.campaign_id.localeCompare(b.campaign_id));
+
+  const spend = sumKnown(day.map((r) => asMoney(r.spend)), 2);
+  const conversion_value = sumKnown(day.map((r) => asMoney(r.conversion_value)), 2);
+  // A positive-spend row with no stored value would make value/spend
+  // treat that spend as $0 returned. Leave ROAS null instead.
+  const valueIncomplete = day.some((r) => {
+    const rowSpend = asMoney(r.spend);
+    return rowSpend != null && rowSpend > 0 && asMoney(r.conversion_value) == null;
+  });
+  return {
+    totals: {
+      spend,
+      clicks: sumKnown(day.map((r) => asInt(r.clicks)), 0),
+      impressions: sumKnown(day.map((r) => asInt(r.impressions)), 0),
+      conversions: sumKnown(day.map((r) => asQty(r.conversions)), 4),
+      conversion_value,
+      roas: valueIncomplete ? null : roasOf(spend, conversion_value),
+    },
+    campaigns: campaigns.slice(0, limit),
+    actions: metaDigestActions(day, date),
+  };
+}
+
+/** Locked-day Google Ads campaign facts. Null when that day has no rows. */
 export function adsCampaigns(
   rows: Array<Record<string, unknown>>,
   date: string,
@@ -271,16 +398,18 @@ export function phase2FromLockedDay(
   const gscDims = tables.gscDims ?? [];
   const googleAds = tables.googleAds ?? [];
   const metaAds = tables.metaAds ?? [];
+  const meta = metaSection(metaAds, date);
   return {
     landing_drops: topLandingDrops(ga4, date),
     seo: seoSection(gscQueries, gscPages, date, gscDims),
-    ads: adsCampaigns([...googleAds, ...metaAds], date),
-    meta_actions: hasDate(metaAds, date) ? metaDigestActions(metaAds, date) : null,
+    ads: adsCampaigns(googleAds, date),
+    meta,
+    meta_actions: meta ? meta.actions : null,
     connectors: {
       ga4: hasDate(ga4, date),
       gsc: hasDate(gscQueries, date) || hasDate(gscPages, date) || hasDate(gscDims, date),
       google_ads: hasDate(googleAds, date),
-      meta_ads: hasDate(metaAds, date),
+      meta_ads: meta != null,
     },
   };
 }
