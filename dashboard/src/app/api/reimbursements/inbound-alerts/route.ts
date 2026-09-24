@@ -149,7 +149,10 @@ export async function POST(request: NextRequest) {
       const existing = found.get(key);
       if (!existing) continue;
       const status = String(existing.status ?? "");
-      if (status === "already_reimbursed" || status === "found_offset") {
+      // Paid rows stay paid. found_offset (auto receipts_cover or a prior
+      // reconcile) still takes Dave's clear so the next case-sync cannot
+      // reopen it. Skipping found_offset left the auto note in place.
+      if (status === "already_reimbursed") {
         cleared.push(key);
         continue;
       }

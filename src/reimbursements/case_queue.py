@@ -210,7 +210,10 @@ def _fba_id(value: str | None) -> str | None:
 
 
 def inbound_event_key(shipment_id: str, sku: str) -> str:
-    return f"inbound|{shipment_id}|{normalize_sku(sku)}"
+    """Stable inbound key. Shipment id and SKU are canonical (upper)."""
+    raw = (shipment_id or "").strip()
+    sid = fba_shipment_id(raw) or raw.upper()
+    return f"inbound|{sid}|{normalize_sku(sku)}"
 
 
 def _parse_day(value: object) -> date | None:
@@ -883,19 +886,72 @@ def _clear_note(row: dict) -> str:
 def is_user_locked_case(row: dict) -> bool:
     """Dave marked this shipment submitted or resolved. Sync must not reopen it.
 
-    Submitted = ``case_submitted`` (Open cases Clear: filed or not pursuing).
+    Submitted = ``case_submitted`` (Clear: filed or not pursuing).
     Resolved = manual ``found_offset`` with ``dismissed_at`` (reconciled).
-    Auto ``receipts_cover`` is not a user lock, even when a zero-recv ghost
-    also stamped ``dismissed_at`` — receipt netting may reopen that short.
+    Auto ``receipts_cover`` is not a user lock. A Sellerboard 0-recv ghost
+    stays cleared; a shipment-keyed receipt remainder may still reopen it.
     Auto found_offset without ``dismissed_at`` is recomputed each sync.
     """
     status = row.get("status")
     note = _clear_note(row)
+    if note == CLEAR_NOTE_RECEIPTS_COVER:
+        return False
     if status == STATUS_CASE_SUBMITTED:
         return True
+    # filed / reconciled / not_pursuing plus a dismiss stamp, even if a
+    # previous rebuild left status as needs_case.
+    if note in USER_CLEAR_NOTES and row.get("dismissed_at"):
+        return True
+    # Manual found_offset. Auto balance stamps note "reconciled" with no
+    # dismissed_at — that one is recomputed each sync.
     if status == STATUS_FOUND_OFFSET and row.get("dismissed_at"):
-        return note != CLEAR_NOTE_RECEIPTS_COVER
+        return True
     return False
+
+
+def _row_indexes(
+    existing: Iterable[dict],
+    predicate,
+) -> tuple[dict[str, dict], dict[tuple[str, str], dict]]:
+    """Index rows by event_key and by (FBA shipment, SKU)."""
+    by_key: dict[str, dict] = {}
+    by_ship: dict[tuple[str, str], dict] = {}
+    for row in existing:
+        if not predicate(row):
+            continue
+        key = str(row.get("event_key") or "").strip()
+        if key:
+            by_key[key] = row
+        match = inbound_match_key(row.get("shipment_id"), row.get("sku"))
+        if match:
+            by_ship[match] = row
+    return by_key, by_ship
+
+
+def _lookup_indexed(
+    row: dict,
+    by_key: dict[str, dict],
+    by_ship: dict[tuple[str, str], dict],
+) -> dict | None:
+    """Match a rebuilt row to a prior row by event_key, else shipment+SKU.
+
+    Sellerboard SKUs are mixed case and a legacy key may not equal the
+    canonical ``inbound|FBA…|SKU`` key. Same shipment + SKU is one case.
+    """
+    key = str(row.get("event_key") or "").strip()
+    if key and key in by_key:
+        return by_key[key]
+    match = inbound_match_key(row.get("shipment_id"), row.get("sku"))
+    if match:
+        return by_ship.get(match)
+    return None
+
+
+def _pin_event_key(row: dict, saved: dict) -> None:
+    """Keep the warehouse key so a rebuild cannot insert a second open row."""
+    saved_key = str(saved.get("event_key") or "").strip()
+    if saved_key:
+        row["event_key"] = saved_key
 
 
 def user_dismiss_hides_open_case(row: dict) -> bool:
@@ -919,25 +975,47 @@ def preserve_submitted_status(
 
     Restores the user status even when Sellerboard backfill or receipt
     netting rebuilt the row as needs_case or an auto found_offset.
+    Matches event_key or the same FBA shipment + SKU (legacy key drift).
     Paid (already_reimbursed) still wins. Auto receipts_cover is not locked.
-    New event_keys (new shipment) stay Needs case.
+    A new shipment stays Needs case.
     """
-    prior: dict[str, dict] = {}
-    for row in existing:
-        key = str(row.get("event_key") or "").strip()
-        if key and is_user_locked_case(row):
-            prior[key] = row
+    by_key, by_ship = _row_indexes(existing, is_user_locked_case)
     out: list[dict] = []
     for ev in events:
         row = dict(ev)
-        key = str(row.get("event_key") or "").strip()
-        saved = prior.get(key)
+        saved = _lookup_indexed(row, by_key, by_ship)
         if saved and row.get("status") != STATUS_ALREADY_REIMBURSED:
+            _pin_event_key(row, saved)
             row["status"] = saved.get("status") or STATUS_CASE_SUBMITTED
             row["dismissed_at"] = saved.get("dismissed_at")
             row["dismissed_note"] = saved.get("dismissed_note")
         out.append(row)
     return out
+
+
+def _restore_found_offset(row: dict, saved: dict, info: dict | None) -> dict:
+    """Put an auto clear back, including its dismiss stamp for the archive."""
+    out = _mark_inbound_found_offset(row, info)
+    prior_note = str(saved.get("dismissed_note") or "").strip()
+    if prior_note:
+        out["dismissed_note"] = prior_note
+    if saved.get("dismissed_at") and not out.get("dismissed_at"):
+        out["dismissed_at"] = saved.get("dismissed_at")
+    _pin_event_key(out, saved)
+    return out
+
+
+def _sellerboard_real_partial(row: dict, row_short: int | None) -> bool:
+    """True when the rebuilt row already shows units received and a remainder.
+
+    Sellerboard CLOSED UnitsReceived=0 always reports short == shipped.
+    That is the ghost ``receipts_cover`` already dismissed. A real partial
+    has received > 0 and short > 0 (the pos-only receipt bug's 9-of-10).
+    """
+    if row_short is None or row_short <= 0:
+        return False
+    received = _int_or_none(row.get("quantity_received"))
+    return received is not None and received > 0
 
 
 def preserve_found_offset_unless_amazon_short(
@@ -948,26 +1026,28 @@ def preserve_found_offset_unless_amazon_short(
 ) -> list[dict]:
     """Keep Amazon-cleared found_offset rows across Sellerboard upserts.
 
-    Reopen only when live Amazon short > 0. Missing Amazon data must not
-    let a stale Sellerboard short revive last night's 24 balanced IDs.
-    Manual dismiss (dismissed_at) still wins via preserve_submitted_status.
+    Reopen when live Amazon short > 0, or when Sellerboard itself shows a
+    real partial (received > 0 and still short). A 0-recv Sellerboard dump
+    must not revive a receipts_cover ghost — shipment-keyed receipt netting
+    reopens that ghost later only if the net receipt leaves a remainder.
+    Missing Amazon data must not revive last night's balanced IDs.
+    Manual dismiss still wins via preserve_submitted_status.
     """
-    prior: dict[str, dict] = {}
-    for row in existing:
-        key = str(row.get("event_key") or "").strip()
-        if key and row.get("status") == STATUS_FOUND_OFFSET:
-            prior[key] = row
-    if not prior:
+    prior, prior_ship = _row_indexes(
+        existing, lambda row: row.get("status") == STATUS_FOUND_OFFSET,
+    )
+    if not prior and not prior_ship:
         return events
+    user_key, user_ship = _row_indexes(existing, is_user_locked_case)
     live = amazon_live or {}
     totals = amazon_totals or {}
     out: list[dict] = []
     for ev in events:
         row = dict(ev)
-        saved = prior.get(str(row.get("event_key") or "").strip())
+        saved = _lookup_indexed(row, prior, prior_ship)
         # Submitted / resolved stays put. Final preserve_submitted_status
         # copies the user mark back after receipt netting.
-        if saved and is_user_locked_case(saved):
+        if _lookup_indexed(row, user_key, user_ship):
             out.append(row)
             continue
         if saved and row.get("status") not in (
@@ -996,23 +1076,24 @@ def preserve_found_offset_unless_amazon_short(
                 _int_or_none(row.get("quantity")),
             )
             prior_note = str(saved.get("dismissed_note") or "").strip()
-            # Amazon still short → keep rebuilt needs_case.
+            # Amazon still short → keep rebuilt needs_case on the same key.
             if short is not None and short > 0:
-                pass
+                _pin_event_key(row, saved)
             # Amazon balanced → restore found_offset (true clear).
             elif short is not None and short <= 0:
-                row = _mark_inbound_found_offset(row, info)
-                if prior_note:
-                    row["dismissed_note"] = prior_note
-            # No Amazon row: do not revive balanced ghosts, EXCEPT when the
-            # prior clear was receipts_cover (pos-only bug) and ship−recv
-            # still shows a short after netted receipts.
-            elif prior_note == CLEAR_NOTE_RECEIPTS_COVER and row_short and row_short > 0:
-                pass
+                row = _restore_found_offset(row, saved, info)
+            # No Amazon row. A receipts_cover ghost (Sellerboard received 0)
+            # stays cleared. A real partial (received > 0, still short) stays
+            # open so the pos-only receipt bug cannot hide it. Receipt
+            # netting below reopens a 0-recv ghost when the FBA reference
+            # nets to a remainder.
+            elif (
+                prior_note == CLEAR_NOTE_RECEIPTS_COVER
+                and _sellerboard_real_partial(row, row_short)
+            ):
+                _pin_event_key(row, saved)
             else:
-                row = _mark_inbound_found_offset(row, info)
-                if prior_note:
-                    row["dismissed_note"] = prior_note
+                row = _restore_found_offset(row, saved, info)
         out.append(row)
     return out
 
@@ -1351,8 +1432,10 @@ def apply_receipt_cover(
             out.append(row)
             continue
         orig_recv = _int_or_none(row.get("quantity_received"))
-        # case_submitted: only reclassify zero-recv ghosts (wrongly filed)
-        if row.get("status") == STATUS_CASE_SUBMITTED and orig_recv not in (None, 0):
+        # Dave's file / not-pursuing mark stays, including zero-recv ghosts.
+        if row.get("status") == STATUS_CASE_SUBMITTED or (
+            _clear_note(row) in USER_CLEAR_NOTES and row.get("dismissed_at")
+        ):
             out.append(row)
             continue
         covered, basis = _receipt_cover_for_row(row, by_shipment, pool)
@@ -1379,16 +1462,26 @@ def apply_receipt_cover(
             row["receipt_cover_qty"] = covered
         else:
             # Partial receipt cover on a real short — keep Needs-case remainder.
-            if row.get("status") == STATUS_CASE_SUBMITTED:
+            # Shipment-keyed net (reference_id) reopens an auto receipts_cover
+            # ghost when +N and a later -1 leave a remainder. A user note does
+            # not reach here (skipped above).
+            note = _clear_note(row)
+            if note in USER_CLEAR_NOTES:
                 out.append(dict(ev))
                 continue
             row["quantity_shipped"] = shipped
             row["quantity_received"] = effective_recv
             row["quantity"] = short
-            if row.get("status") == STATUS_FOUND_OFFSET and not row.get("dismissed_at"):
+            reopen_auto = (
+                note == CLEAR_NOTE_RECEIPTS_COVER and basis == "reference_id"
+            )
+            if reopen_auto or (
+                row.get("status") == STATUS_FOUND_OFFSET and not row.get("dismissed_at")
+            ) or row.get("status") not in (STATUS_FOUND_OFFSET, STATUS_CASE_SUBMITTED):
                 row["status"] = STATUS_NEEDS_CASE
-            elif row.get("status") not in (STATUS_FOUND_OFFSET, STATUS_CASE_SUBMITTED):
-                row["status"] = STATUS_NEEDS_CASE
+                if reopen_auto:
+                    row["dismissed_at"] = None
+                    row["dismissed_note"] = None
             row["receipt_cover_basis"] = basis
             row["receipt_cover_qty"] = covered
         out.append(row)
