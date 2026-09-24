@@ -27,7 +27,50 @@ import {
 } from "./organic-rank-progress";
 import { gnoDecisionRulesTxt, gnoOutcomesCsv } from "./gno-methodology";
 import {
+  AGREEMENTS_HEADERS,
+  BID_REVIEW_HEADERS,
+  BLEEDERS10_HEADERS,
+  BLEEDERS20_HEADERS,
+  BLEEDERS10_MIN_CLICKS,
+  HARVEST_QUEUE_HEADERS,
+  LIFETIME_ZERO_HEADERS,
+  RANKING_LIP_BALM_QUERY,
+  RANKING_SUCCESS_METRIC,
+  REQUIRED_PACK_FILES,
+  ROW_FILTERS_APPLIED,
+  SQP_WOW_HEADERS,
+  STRUCTURE_AUDIT_HEADERS,
+  WATCH_PLACEMENT_HEADERS,
+  adProductOf,
+  bidReviewSuggestion,
+  bleeder20Threshold,
+  bleeders20Decision,
+  campaignPurposeOf,
+  childFlavorOf,
+  contractSearchTermTag,
+  countDelta,
+  csvDataRowCount,
+  dedupeWatchCampaignRows,
+  evaluatePackQuality,
+  isRankingCampaign,
+  isRankingQuery,
+  joinSqpWow,
+  ledgerWithinDays,
+  queryNormalized,
+  renderFreshnessBlock,
+  renderPackManifest,
+  seededAgreements,
+  siblingExactAuctions,
+  spendsDisagree,
+  structureAuditFindings,
+  termRelevance,
+  windowLabelFromPack,
+  type CampaignPurpose,
+  type QualityLevel,
+} from "./gno-pack-contract";
+import {
   competitorKrOutliersCsv,
+  COMPETITOR_KR_CSV_HEADERS,
   type CompetitorOutlierRow,
 } from "./soldscope-competitor-outliers";
 
@@ -40,6 +83,16 @@ export const WATCH_CAMPAIGN_CSV_HEADERS = [
   "clicks", "spend", "cpc", "orders", "sales", "acos", "watch_list",
   "metrics_complete", "family", "break_even_acos", "acos_vs_be", "cm_note",
   ...ORGANIC_RANK_EXPORT_HEADERS,
+  "window_label", "grain", "campaign_id", "ad_group_id", "mixed_ad_groups",
+  "advertised_asin", "advertised_sku", "parent_asin", "hero_asin", "child_flavor",
+  "mixed_asin", "serving_status", "meta_sync", "portfolio_id", "portfolio_name",
+  "portfolio_budget", "portfolio_budget_type", "spend_yesterday", "spend_dby",
+  "budget_util_yesterday", "budget_capped_yesterday",
+  "tos_click_share", "ros_click_share", "pp_click_share", "placement_report_lag",
+  "ctr", "aov", "cvr", "roas", "campaign_purpose", "ranking_query", "ranking_success_metric",
+  "targeting_type", "match_types_in_campaign", "keyword_count_enabled", "keyword_count_paused",
+  "exact_keyword_count", "created_at", "last_updated_at", "days_live",
+  "protected_recent_test", "id_missing", "duplicate_reason", "window_mismatch",
 ] as const;
 
 export const AUTO_LOOSE_TERM_CSV_HEADERS = [
@@ -48,6 +101,13 @@ export const AUTO_LOOSE_TERM_CSV_HEADERS = [
   "cvr", "has_enabled_exact_elsewhere", "proposed_tag",
   "family", "break_even_acos", "acos_vs_be", "cm_note",
   ...ORGANIC_RANK_EXPORT_HEADERS,
+  "window_label", "grain", "campaign_id", "query_normalized",
+  "ctr", "cpc", "exact_elsewhere_campaign_ids",
+  "already_negative", "negative_match_type_if_any", "negative_ids",
+  "proposed_tag_reason", "harvest_ready", "destination_exact_campaign_id",
+  "destination_exact_has_impressions", "relevance",
+  "sqp_impression_share", "sqp_purchase_share", "sqp_week_end", "min_search_volume_ok",
+  "metrics_complete", "id_missing",
 ] as const;
 
 export const KEYWORD_TARGET_CSV_HEADERS = [
@@ -56,23 +116,36 @@ export const KEYWORD_TARGET_CSV_HEADERS = [
   "orders", "sales", "acos", "metrics_complete",
   "family", "break_even_acos", "acos_vs_be", "cm_note",
   ...ORGANIC_RANK_EXPORT_HEADERS,
+  "window_label", "grain", "campaign_id", "ad_group_id", "keyword_id", "target_id",
+  "query_normalized", "ctr", "cpc", "cvr",
+  "has_enabled_exact_elsewhere", "exact_elsewhere_campaign_ids",
+  "sibling_exact_campaign_count", "sibling_exact_campaign_ids", "highest_sibling_bid",
+  "already_negative_exact_in_source", "destination_exact_campaign_id",
+  "destination_exact_has_impressions", "bleeders10_flag", "bleeders20_flag",
+  "lifetime_zero_flag", "protected_recent_test", "campaign_purpose",
+  "window_mismatch", "id_missing",
 ] as const;
 
 export const NEGATIVES_CSV_HEADERS = [
-  "campaign_name", "keyword", "match_type",
+  "campaign_id", "ad_group_id", "negative_id", "campaign_name",
+  "keyword", "query_normalized", "match_type", "level", "state",
+  "added_at", "source",
 ] as const;
 
 export const ADVERTISED_PRODUCT_L7_CSV_HEADERS = [
   "date_start", "date_end", "asin", "campaign_name", "watch_list",
   "spend", "orders", "sales", "acos", "sku", "product_name",
   "mixed_asin", "family", "break_even_acos", "acos_vs_be", "cm_note",
+  "attribution", "do_not_sum", "child_flavor", "hero_child",
+  "sku_cogs", "cm_per_unit", "profit_verified",
 ] as const;
 
 export const SQP_SLICE_CSV_HEADERS = [
   "week_start", "week_end", "asin", "search_query", "query_normalized",
   "search_query_volume", "impression_share", "click_share", "purchase_share",
   "asin_impressions", "asin_clicks", "asin_purchases", "source",
-  "stale_pre_raise",
+  "stale_pre_raise", "week_type", "advertised_asin", "hero_asin",
+  "child_flavor", "sqp_lag_days",
 ] as const;
 
 export const SQP_SLICE_QUERIES = [
@@ -88,10 +161,12 @@ export const SQP_STALE_AFTER_DAYS = 10;
 export const SQP_COMPARISON_FILENAME = "sqp_weekly_slice_COMPARISON_PRE_RAISE.csv";
 
 export type WatchList = "NEW_EXACT" | "KEEPER" | "DAY5_PAUSE" | "FLAVOR_SHELL" | "OTHER";
-export type ProposedTag = "KEEP" | "HARVEST_CANDIDATE" | "JUNK_CANDIDATE";
+export type ProposedTag =
+  | "KEEP" | "HARVEST_CANDIDATE" | "JUNK_CANDIDATE"
+  | "HARVEST_EXACT" | "NEGATIVE_EXACT" | "NEGATIVE_PHRASE" | "WATCH" | "JUNK" | "SKIP";
 export type AlertPriority = "P0" | "P1" | "P2";
 export type TermWindowLabel = "L2" | "L7";
-export type PackWindowLabel = "Today" | "Last2" | "Last7";
+export type PackWindowLabel = "Today" | "Last1" | "Last2" | "Last7" | "Last30" | "Last60";
 export type GnoFamily = "lip_3pk" | "deo" | "balm" | "other";
 
 /** Config family contribution-margin BE — not ad-only TACOS. */
@@ -182,9 +257,16 @@ export interface PlacementRow {
 }
 
 export interface NegativeRow {
+  campaign_id?: string | null;
+  ad_group_id?: string | null;
+  negative_id?: string | null;
   campaign_name: string;
   keyword: string;
   match_type?: string | null;
+  level?: string | null;
+  state?: string | null;
+  added_at?: string | null;
+  source?: string | null;
 }
 
 export interface Metrics {
@@ -298,6 +380,24 @@ export interface HarvestTerm {
   organic_as_of: string | null;
   /** UI-only. Not a CSV column. */
   learning_note?: string;
+  window_label?: string;
+  grain?: string;
+  campaign_id?: string;
+  query_normalized?: string;
+  proposed_tag_reason?: string;
+  harvest_ready?: boolean;
+  relevance?: string;
+  already_negative?: boolean;
+  metrics_complete?: boolean;
+  id_missing?: boolean;
+  ctr?: number | null;
+  cpc?: number | null;
+  sqp_impression_share?: number | null;
+  sqp_purchase_share?: number | null;
+  sqp_week_end?: string | null;
+  destination_exact_campaign_id?: string;
+  destination_exact_has_impressions?: boolean;
+  exact_elsewhere_campaign_ids?: string;
 }
 
 export interface WatchCampaignExportRow {
@@ -333,6 +433,27 @@ export interface WatchCampaignExportRow {
   organic_rank_delta: number | null;
   aba_sfr: number | null;
   organic_as_of: string | null;
+  window_label?: string;
+  grain?: string;
+  campaign_id?: string;
+  campaign_purpose?: string;
+  ranking_query?: string;
+  ranking_success_metric?: string;
+  meta_sync?: boolean;
+  id_missing?: boolean;
+  child_flavor?: string;
+  duplicate_reason?: string | null;
+  window_mismatch?: boolean;
+  placement_report_lag?: boolean;
+  spend_yesterday?: number | null;
+  spend_dby?: number | null;
+  budget_util_yesterday?: number | null;
+  budget_capped_yesterday?: boolean;
+  protected_recent_test?: boolean;
+  advertised_asin?: string;
+  portfolio_id?: string;
+  portfolio_name?: string;
+  serving_status?: string;
 }
 
 export interface KeywordTargetExportRow {
@@ -361,6 +482,21 @@ export interface KeywordTargetExportRow {
   organic_rank_delta: number | null;
   aba_sfr: number | null;
   organic_as_of: string | null;
+  window_label?: string;
+  grain?: string;
+  campaign_id?: string;
+  keyword_id?: string;
+  query_normalized?: string;
+  campaign_purpose?: string;
+  window_mismatch?: boolean;
+  id_missing?: boolean;
+  bleeders10_flag?: boolean;
+  bleeders20_flag?: boolean;
+  protected_recent_test?: boolean;
+  sibling_exact_campaign_count?: number;
+  sibling_exact_campaign_ids?: string;
+  highest_sibling_bid?: number | null;
+  ad_group_id?: string;
 }
 
 export interface AdvertisedProductL7Row {
@@ -380,6 +516,13 @@ export interface AdvertisedProductL7Row {
   break_even_acos: number;
   acos_vs_be: number | null;
   cm_note: string;
+  attribution?: string;
+  do_not_sum?: boolean;
+  child_flavor?: string;
+  hero_child?: boolean;
+  sku_cogs?: number | null;
+  cm_per_unit?: number | null;
+  profit_verified?: boolean;
 }
 
 export interface SqpSliceRow {
@@ -401,12 +544,19 @@ export interface SqpSliceRow {
    * Older weeks emitted as COMPARISON / PRE_RAISE are true.
    */
   stale_pre_raise?: boolean;
+  week_type?: string;
+  advertised_asin?: string | null;
+  hero_asin?: string | null;
+  child_flavor?: string | null;
+  sqp_lag_days?: number | null;
 }
 
 export interface AsinCatalogRow {
   asin: string;
   sku?: string | null;
   product_name?: string | null;
+  cogs_per_unit?: number | null;
+  updated_at?: string | null;
 }
 
 export const GNO_SPEC = spec;
@@ -894,11 +1044,17 @@ function splitHarvestExtra(
 }
 
 function organicExportFields(hit: OrganicRankJoin = emptyOrganicRankJoin()) {
+  const organic_rank = hit.organic_rank === 0 ? null : hit.organic_rank;
+  const aba_sfr = hit.aba_sfr === 0 ? null : hit.aba_sfr;
+  const organic_rank_prev = hit.organic_rank_prev === 0 ? null : hit.organic_rank_prev;
+  const organic_rank_delta = organic_rank == null || organic_rank_prev == null
+    ? null
+    : hit.organic_rank_delta;
   return {
-    organic_rank: hit.organic_rank,
-    organic_rank_prev: hit.organic_rank_prev,
-    organic_rank_delta: hit.organic_rank_delta,
-    aba_sfr: hit.aba_sfr,
+    organic_rank,
+    organic_rank_prev,
+    organic_rank_delta,
+    aba_sfr,
     organic_as_of: hit.organic_as_of,
   };
 }
@@ -1002,7 +1158,7 @@ function rollSearchTerms(input: {
       hasExact,
     );
     const learned = applyHarvestLearning(
-      base,
+      base as "KEEP" | "HARVEST_CANDIDATE" | "JUNK_CANDIDATE",
       { orders: m.orders, spend: m.spend, search_term: term },
       ledger,
     );
@@ -1011,8 +1167,12 @@ function rollSearchTerms(input: {
       date_start: start,
       date_end: end,
       label,
+      window_label: label,
+      grain: "WINDOW_AGG",
+      campaign_id: String(group[0].campaign_id ?? ""),
       campaign_name: campaignName,
       customer_search_term: term,
+      query_normalized: queryNormalized(term),
       match_type: group[0].match_type || "",
       impressions: m.impressions,
       clicks: m.clicks,
@@ -1021,9 +1181,13 @@ function rollSearchTerms(input: {
       sales: m.sales,
       acos: m.acos,
       cvr: m.cvr,
+      ctr: m.impressions > 0 ? m.clicks / m.impressions : null,
+      cpc: m.cpc,
       has_enabled_exact_elsewhere: hasExact,
       proposed_tag: learned.tag,
       learning_note: learned.note,
+      metrics_complete: true,
+      id_missing: !String(group[0].campaign_id ?? "").trim(),
       ...frame,
     }, term, frame.family, organicIndex);
     out.push(row);
@@ -1435,6 +1599,25 @@ export function packWindows(
   ];
 }
 
+/** Today + L1/L2/L7/L30/L60. All closed windows end yesterday and do not slide. */
+export function contractPackWindows(
+  today: string,
+  asOf: string,
+  campaigns?: { date: string }[],
+): PackWindow[] {
+  const base = packWindows(today, asOf, campaigns);
+  const closed = packClosedEnd(today, asOf);
+  const complete = base[1]?.metrics_complete ?? false;
+  return [
+    base[0],
+    { start: closed, end: closed, label: "Last1", metrics_complete: complete },
+    base[1],
+    base[2],
+    { start: windowStart(closed, 30), end: closed, label: "Last30", metrics_complete: complete },
+    { start: windowStart(closed, 60), end: closed, label: "Last60", metrics_complete: complete },
+  ];
+}
+
 export function watchCampaignExportRows(input: {
   asOf: string;
   today?: string;
@@ -1442,71 +1625,117 @@ export function watchCampaignExportRows(input: {
   placements: PlacementRow[];
   campaignMeta?: CampaignMeta[];
   organicIndex?: Map<string, OrganicRankJoin[]>;
+  windows?: PackWindow[];
 }): WatchCampaignExportRow[] {
   const { campaigns, placements } = input;
   const today = input.today || input.asOf;
-  const windows = packWindows(today, input.asOf, campaigns);
+  const windows = input.windows ?? packWindows(today, input.asOf, campaigns);
   const latest = latestByCampaign(campaigns);
   const meta = input.campaignMeta ?? [];
   const organicIndex = input.organicIndex;
   const names = uniqueWatchNames(campaigns, meta.map((m) => m.campaign_name));
   const rows: WatchCampaignExportRow[] = [];
+  const yesterday = packClosedEnd(today);
   for (const w of windows) {
     for (const { name, list } of names) {
-      const campRows = campaigns.filter((r) =>
+      const matched = campaigns.filter((r) =>
         namesEqual(r.campaign_name, name) || (list === "DAY5_PAUSE" && nameContains(r.campaign_name, name)));
-      const storedName = campRows[0]?.campaign_name ?? name;
-      // Today is config-only. Spend / orders / ACOS live on closed L2 + L7.
-      const m = w.metrics_complete
-        ? sumMetrics(inWindow(campRows, w.start, w.end))
-        : { impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0, cpc: 0, acos: null, cvr: null };
-      const place = w.metrics_complete
-        ? placementShares(inWindow(
-          placements.filter((p) =>
-            namesEqual(p.campaign_name, name) || nameContains(p.campaign_name, name)),
-          w.start, w.end,
-        ))
-        : { tos_spend_share: null, ros_spend_share: null, pp_spend_share: null };
-      const snap = latest.get(normalizeName(storedName));
-      const metaRow = metaForName(meta, storedName) ?? metaForName(meta, name);
-      const state = String(snap?.campaign_status || metaRow?.state || "");
-      const budget = snap?.budget != null ? Number(snap.budget)
-        : (metaRow?.daily_budget != null ? Number(metaRow.daily_budget) : null);
-      const portfolio = String(metaRow?.portfolio_name || "").trim() || "none";
-      const placementLag = w.metrics_complete
-        && m.spend > 0
-        && place.tos_spend_share == null
-        && place.ros_spend_share == null
-        && place.pp_spend_share == null;
-      const frame = contributionFrame(storedName, m.acos, placementLag ? [PLACEMENT_LAG_NOTE] : []);
-      rows.push(attachOrganicFields({
-        date_start: w.start,
-        date_end: w.end,
-        campaign_name: storedName,
-        asin: extractAsin(storedName),
-        state,
-        portfolio,
-        daily_budget: budget,
-        tos_modifier_pct: metaRow?.tos_modifier_pct ?? null,
-        ros_modifier_pct: metaRow?.ros_modifier_pct ?? null,
-        pp_modifier_pct: metaRow?.pp_modifier_pct ?? null,
-        tos_spend_share: place.tos_spend_share,
-        ros_spend_share: place.ros_spend_share,
-        pp_spend_share: place.pp_spend_share,
-        impressions: m.impressions,
-        clicks: m.clicks,
-        spend: m.spend,
-        cpc: m.cpc,
-        orders: m.orders,
-        sales: m.sales,
-        acos: m.acos,
-        watch_list: list,
-        metrics_complete: w.metrics_complete,
-        ...frame,
-      }, extractExactKeyword(storedName) ?? "", frame.family, organicIndex));
+      const idBuckets = distinctCampaignBuckets(matched);
+      for (const campRows of idBuckets) {
+        const storedName = campRows[0]?.campaign_name ?? name;
+        // Today is config-only. Spend / orders / ACOS live on closed windows.
+        const m = w.metrics_complete
+          ? sumMetrics(inWindow(campRows, w.start, w.end))
+          : { impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0, cpc: 0, acos: null, cvr: null };
+        const place = w.metrics_complete
+          ? placementShares(inWindow(
+            placements.filter((p) =>
+              namesEqual(p.campaign_name, storedName) || namesEqual(p.campaign_name, name)
+              || nameContains(p.campaign_name, name)),
+            w.start, w.end,
+          ))
+          : { tos_spend_share: null, ros_spend_share: null, pp_spend_share: null };
+        const snap = latest.get(normalizeName(storedName)) ?? latest.get(normalizeName(name));
+        const metaRow = metaForName(meta, storedName) ?? metaForName(meta, name);
+        const state = String(snap?.campaign_status || metaRow?.state || "");
+        const campaignId = String(campRows.find((r) => r.campaign_id)?.campaign_id
+          ?? metaRow?.campaign_id ?? "").trim();
+        const budget = snap?.budget != null ? Number(snap.budget)
+          : (metaRow?.daily_budget != null ? Number(metaRow.daily_budget) : null);
+        const portfolio = String(metaRow?.portfolio_name || "").trim() || "none";
+        const placementLag = w.metrics_complete
+          && m.spend > 0
+          && place.tos_spend_share == null
+          && place.ros_spend_share == null
+          && place.pp_spend_share == null;
+        const frame = contributionFrame(storedName, m.acos, placementLag ? [PLACEMENT_LAG_NOTE] : []);
+        const purpose = campaignPurposeOf(storedName, list);
+        const yRow = campRows.find((r) => r.date === yesterday);
+        const dby = campRows.find((r) => r.date === shiftDays(yesterday, -1));
+        const asins = extractAsin(storedName).split("/").map((a) => a.trim()).filter(Boolean);
+        const ranking = purpose === "ranking";
+        rows.push(attachOrganicFields({
+          date_start: w.start,
+          date_end: w.end,
+          window_label: windowLabelFromPack(w.label),
+          grain: "campaign",
+          campaign_id: campaignId,
+          campaign_name: storedName,
+          asin: extractAsin(storedName),
+          advertised_asin: asins.length === 1 ? asins[0] : "",
+          child_flavor: childFlavorOf(storedName),
+          mixed_asin: asins.length > 1,
+          state,
+          serving_status: state ? state.toUpperCase() : "",
+          meta_sync: Boolean(campaignId) && Boolean(state),
+          id_missing: !campaignId,
+          portfolio,
+          portfolio_id: metaRow?.portfolio_id ?? "",
+          portfolio_name: portfolio === "none" ? "" : portfolio,
+          daily_budget: budget,
+          spend_yesterday: yRow ? n(yRow.spend) : null,
+          spend_dby: dby ? n(dby.spend) : null,
+          budget_util_yesterday: yRow && budget ? n(yRow.spend) / budget : null,
+          budget_capped_yesterday: Boolean(yRow && budget && n(yRow.spend) >= budget),
+          tos_modifier_pct: metaRow?.tos_modifier_pct ?? null,
+          ros_modifier_pct: metaRow?.ros_modifier_pct ?? null,
+          pp_modifier_pct: metaRow?.pp_modifier_pct ?? null,
+          tos_spend_share: place.tos_spend_share,
+          ros_spend_share: place.ros_spend_share,
+          pp_spend_share: place.pp_spend_share,
+          placement_report_lag: placementLag,
+          impressions: m.impressions,
+          clicks: m.clicks,
+          spend: m.spend,
+          cpc: m.cpc,
+          orders: m.orders,
+          sales: m.sales,
+          acos: m.acos,
+          ctr: m.impressions > 0 ? m.clicks / m.impressions : null,
+          cvr: m.cvr,
+          aov: m.orders > 0 ? m.sales / m.orders : null,
+          roas: m.spend > 0 ? m.sales / m.spend : null,
+          watch_list: list,
+          campaign_purpose: purpose,
+          ranking_query: ranking ? RANKING_LIP_BALM_QUERY : "",
+          ranking_success_metric: ranking ? RANKING_SUCCESS_METRIC : "",
+          metrics_complete: w.metrics_complete,
+          protected_recent_test: false,
+          window_mismatch: false,
+          duplicate_reason: "",
+          ...frame,
+        }, extractExactKeyword(storedName) ?? (ranking ? RANKING_LIP_BALM_QUERY : ""), frame.family, organicIndex));
+      }
     }
   }
-  return rows;
+  return dedupeWatchCampaignRows(rows);
+}
+
+function distinctCampaignBuckets(rows: CampaignDailyRow[]): CampaignDailyRow[][] {
+  if (!rows.length) return [[]];
+  const ids = [...new Set(rows.map((r) => String(r.campaign_id ?? "").trim()).filter(Boolean))];
+  if (ids.length < 2) return [rows];
+  return ids.map((id) => rows.filter((r) => String(r.campaign_id ?? "").trim() === id));
 }
 
 export function csvEscape(value: string | number | boolean | null | undefined): string {
@@ -1545,9 +1774,17 @@ export function keywordTargetsCsv(rows: KeywordTargetExportRow[]): string {
 
 export function negativesSnapshotCsv(rows: NegativeRow[]): string {
   return toCsv(NEGATIVES_CSV_HEADERS, rows.map((r) => ({
+    campaign_id: r.campaign_id ?? "",
+    ad_group_id: r.ad_group_id ?? "",
+    negative_id: r.negative_id ?? "",
     campaign_name: r.campaign_name,
     keyword: r.keyword,
+    query_normalized: queryNormalized(r.keyword),
     match_type: r.match_type ?? "",
+    level: r.level ?? "",
+    state: r.state ?? "",
+    added_at: r.added_at ?? "",
+    source: r.source || "unknown",
   })));
 }
 
@@ -1616,6 +1853,7 @@ export function keywordTargetExportRows(input: {
   searchTerms: SearchTermRow[];
   campaigns?: CampaignDailyRow[];
   organicIndex?: Map<string, OrganicRankJoin[]>;
+  windows?: PackWindow[];
 }): KeywordTargetExportRow[] {
   // Include PAUSED + ENABLED. Today rows are config-only (bid / state).
   const wanted = input.keywordTargets.filter((t) => {
@@ -1624,7 +1862,7 @@ export function keywordTargetExportRows(input: {
   });
   const campaigns = input.campaigns ?? [];
   const rows: KeywordTargetExportRow[] = [];
-  for (const w of packWindows(input.today, input.asOf, campaigns)) {
+  for (const w of input.windows ?? packWindows(input.today, input.asOf, campaigns)) {
     const windowRows: KeywordTargetExportRow[] = [];
     const summaryByCampaign = new Map<string, Set<string>>();
     for (const t of wanted) {
@@ -1640,15 +1878,28 @@ export function keywordTargetExportRows(input: {
         ? keywordWindowMetrics(input.searchTerms, t, w.start, w.end, { skipDates: skip })
         : emptyMetrics();
       const frame = contributionFrame(t.campaign_name, m.acos);
+      const purpose = campaignPurposeOf(t.campaign_name, watchListOf(t.campaign_name));
       windowRows.push(attachOrganicFields({
         date_start: w.start,
         date_end: w.end,
+        window_label: windowLabelFromPack(w.label),
+        grain: "target",
+        campaign_id: String(t.campaign_id ?? ""),
+        ad_group_id: String(t.ad_group_id ?? ""),
+        keyword_id: String(t.keyword_id ?? ""),
+        query_normalized: queryNormalized(t.keyword_text),
         campaign_name: t.campaign_name,
         asin: extractAsin(t.campaign_name),
         keyword_text: t.keyword_text,
         match_type: t.match_type || "",
         keyword_state: t.state || "",
         bid: t.bid ?? null,
+        campaign_purpose: purpose,
+        window_mismatch: false,
+        id_missing: !String(t.keyword_id ?? t.campaign_id ?? "").trim(),
+        protected_recent_test: false,
+        bleeders10_flag: false,
+        bleeders20_flag: false,
         impressions: m.impressions,
         clicks: m.clicks,
         spend: m.spend,
@@ -1734,6 +1985,9 @@ export function advertisedProductL7Rows(input: {
     ]);
     for (const asin of asins) {
       const cat = catalog.get(asin.toUpperCase());
+      const cogs = cat?.cogs_per_unit != null && Number(cat.cogs_per_unit) > 0
+        ? Number(cat.cogs_per_unit) : null;
+      const hero = familyHeroAsin(frame.family);
       out.push({
         date_start: start,
         date_end: closed,
@@ -1747,6 +2001,13 @@ export function advertisedProductL7Rows(input: {
         sku: String(cat?.sku ?? ""),
         product_name: String(cat?.product_name ?? ""),
         mixed_asin: mixed,
+        attribution: "campaign_name_parse",
+        do_not_sum: mixed,
+        child_flavor: childFlavorOf(storedName),
+        hero_child: Boolean(hero && asin.toUpperCase() === hero.toUpperCase()),
+        sku_cogs: cogs,
+        cm_per_unit: null,
+        profit_verified: false,
         ...frame,
       });
     }
@@ -1898,6 +2159,10 @@ function sqpRowsForWeek(rows: SqpSliceRow[], weekEnd: string, stale: boolean): S
       click_share: r.click_share ?? null,
       purchase_share: r.purchase_share ?? null,
       stale_pre_raise: stale,
+      week_type: stale ? "comparison" : "current",
+      advertised_asin: r.asin ?? "",
+      hero_asin: "",
+      child_flavor: "",
     }))
     .sort((a, b) => {
       const qa = normalizeTerm(a.query_normalized || a.search_query);
@@ -1907,11 +2172,18 @@ function sqpRowsForWeek(rows: SqpSliceRow[], weekEnd: string, stale: boolean): S
     });
 }
 
+function withSqpLag(rows: SqpSliceRow[], packDate: string): SqpSliceRow[] {
+  return rows.map((r) => ({
+    ...r,
+    sqp_lag_days: isoDayDelta(packDate, String(r.week_end ?? "")),
+  }));
+}
+
 /** Current file only: newest complete week, stale_pre_raise=false. */
 export function sqpWeeklySliceRows(rows: SqpSliceRow[], packDate: string): SqpSliceRow[] {
   const plan = selectSqpSliceWeek(rows, packDate);
   if (!plan.current || plan.stale) return [];
-  return sqpRowsForWeek(rows, plan.current.weekEnd, false);
+  return withSqpLag(sqpRowsForWeek(rows, plan.current.weekEnd, false), packDate);
 }
 
 /** Separately labeled COMPARISON / PRE_RAISE week. Not current. */
@@ -1919,7 +2191,7 @@ export function sqpComparisonSliceRows(rows: SqpSliceRow[], packDate: string): S
   const plan = selectSqpSliceWeek(rows, packDate);
   if (!plan.comparison || plan.stale || !plan.current) return [];
   if (plan.comparison.weekEnd === plan.current.weekEnd) return [];
-  return sqpRowsForWeek(rows, plan.comparison.weekEnd, true);
+  return withSqpLag(sqpRowsForWeek(rows, plan.comparison.weekEnd, true), packDate);
 }
 
 export function sqpWeeklySliceCsv(rows: SqpSliceRow[]): string {
@@ -1938,6 +2210,11 @@ export function sqpWeeklySliceCsv(rows: SqpSliceRow[]): string {
     asin_purchases: r.asin_purchases ?? null,
     source: r.source ?? "",
     stale_pre_raise: r.stale_pre_raise === true,
+    week_type: r.week_type ?? (r.stale_pre_raise ? "comparison" : "current"),
+    advertised_asin: r.advertised_asin ?? r.asin ?? "",
+    hero_asin: r.hero_asin ?? "",
+    child_flavor: r.child_flavor ?? "",
+    sqp_lag_days: r.sqp_lag_days ?? null,
   })));
 }
 
@@ -1983,7 +2260,7 @@ export function gnoPackReadme(input: {
     "",
     "Spend source of truth:",
     "- watch_campaigns.csv campaign-level L2/L7 is SoT for spend (ads_campaigns_daily).",
-    "- auto_loose / fat_parent / broad_m search-term files are term-level negate/harvest only.",
+    "- auto_loose / fat_parent / broad_m search-term files are WINDOW_AGG term-level negate/harvest only (NOT_SOT). Do not sum ST $ or keyword $ and call it campaign spend.",
     "- ads_search_terms_daily is timeUnit=SUMMARY stamped on chunk END. A 7-day SUMMARY is not L2 or L7.",
     "- Auto Loose L2 ST rows are omitted unless 1-day ST stamps exist for that window. Do not sum ST $ vs the campaign tile.",
     "",
@@ -1997,6 +2274,7 @@ export function gnoPackReadme(input: {
     "- aba_sfr is Brand Analytics SFR (`aba_search_frequency_rank`) only. Never from SoldScope searchVolume. Blank = not stored.",
     `- ${ORGANIC_RANK_EMPTY_CELL_NOTE}`,
     "- This desk never creates SoldScope Rank Tracker groups.",
+    "- organic_groups / phrases / snapshot_rows: snapshot_rows can exceed phrases when one phrase is stored on more than one ASIN.",
     "- Action (Blake): strong organic (low #) + high paid spend → harvest / negate / bid restraint.",
     "- Action (Blake): weak or missing organic + converting ST → Exact protect.",
     "",
@@ -2040,6 +2318,91 @@ export function gnoPackStamp(now: Date = new Date()): string {
   return `${g("year")}-${g("month")}-${g("day")}_${g("hour")}${g("minute")}`;
 }
 
+function blankZeroRank<T extends { organic_rank?: number | null; aba_sfr?: number | null }>(row: T): T {
+  return {
+    ...row,
+    organic_rank: row.organic_rank === 0 ? null : row.organic_rank ?? null,
+    aba_sfr: row.aba_sfr === 0 ? null : row.aba_sfr ?? null,
+  };
+}
+
+function placementCode(placement: string): "TOS" | "ROS" | "PP" | "" {
+  if (TOS_RE.test(placement)) return "TOS";
+  if (PP_RE.test(placement)) return "PP";
+  if (ROS_RE.test(placement)) return "ROS";
+  return "";
+}
+
+function tagContractTerms(rows: HarvestTerm[], negatives: NegativeRow[]): HarvestTerm[] {
+  const neg = new Set(negatives.map((n) => `${normalizeName(n.campaign_name)}\t${queryNormalized(n.keyword)}`));
+  return rows.map((r) => {
+    const scored = contractSearchTermTag({
+      clicks: r.clicks,
+      orders: r.orders,
+      search_term: r.customer_search_term,
+      has_enabled_exact_elsewhere: r.has_enabled_exact_elsewhere,
+      already_negative: neg.has(`${normalizeName(r.campaign_name)}\t${queryNormalized(r.customer_search_term)}`),
+      destination_exists: false,
+      destination_has_impressions: false,
+    });
+    return {
+      ...r,
+      proposed_tag: scored.proposed_tag,
+      proposed_tag_reason: scored.proposed_tag_reason,
+      harvest_ready: scored.harvest_ready,
+      relevance: scored.relevance,
+      already_negative: neg.has(`${normalizeName(r.campaign_name)}\t${queryNormalized(r.customer_search_term)}`),
+      query_normalized: queryNormalized(r.customer_search_term),
+    };
+  });
+}
+
+function campWindowKey(name: string, start: string, end: string): string {
+  return `${normalizeName(name)}\t${start}\t${end}`;
+}
+
+function flagSpendMismatches(
+  watch: WatchCampaignExportRow[],
+  keywords: KeywordTargetExportRow[],
+  terms: HarvestTerm[],
+): { disagrees: boolean; window_mismatch: boolean }[] {
+  const tile = new Map<string, number>();
+  for (const row of watch) {
+    if (!row.metrics_complete) continue;
+    tile.set(campWindowKey(row.campaign_name, row.date_start, row.date_end), n(row.spend));
+  }
+  const sums = new Map<string, number>();
+  const add = (name: string, start: string, end: string, spend: number, complete: boolean) => {
+    if (!complete) return;
+    const key = campWindowKey(name, start, end);
+    sums.set(key, (sums.get(key) ?? 0) + n(spend));
+  };
+  for (const row of keywords) add(row.campaign_name, row.date_start, row.date_end, row.spend, row.metrics_complete);
+  for (const row of terms) {
+    if (!row.date_start || !row.date_end) continue;
+    add(row.campaign_name, row.date_start, row.date_end, row.spend, row.metrics_complete !== false);
+  }
+  const flagged = new Set<string>();
+  const checks: { disagrees: boolean; window_mismatch: boolean }[] = [];
+  for (const [key, sum] of sums) {
+    const camp = tile.get(key);
+    if (camp == null) continue;
+    const disagrees = spendsDisagree(sum, camp);
+    if (!disagrees) continue;
+    flagged.add(key);
+    checks.push({ disagrees: true, window_mismatch: true });
+  }
+  for (const row of keywords) {
+    const key = campWindowKey(row.campaign_name, row.date_start, row.date_end);
+    if (flagged.has(key)) row.window_mismatch = true;
+  }
+  for (const row of watch) {
+    const key = campWindowKey(row.campaign_name, row.date_start, row.date_end);
+    if (flagged.has(key)) row.window_mismatch = true;
+  }
+  return checks;
+}
+
 export function buildGnoPack(input: {
   asOf: string;
   today?: string;
@@ -2055,95 +2418,598 @@ export function buildGnoPack(input: {
   asinCatalog?: AsinCatalogRow[];
   organicSnapshots?: RankSnapshot[] | null;
   competitorOutliers?: CompetitorOutlierRow[] | null;
-}): { files: { name: string; body: string }[]; filename: string } {
+  priorPack?: { id?: string; counts?: { auto_loose?: number; broad_m?: number; watch?: number; sqp?: number } } | null;
+  addsThisWeekAlready?: number | null;
+}): { files: { name: string; body: string }[]; filename: string; quality_gates: QualityLevel } {
   const today = input.today || input.asOf;
   const asOf = input.asOf;
   const closed = packClosedEnd(today, asOf);
+  const windows = contractPackWindows(today, asOf, input.campaigns);
+  const metricsOpen = !l2L7MetricsComplete(today, asOf, input.campaigns);
   const targets = input.keywordTargets ?? [];
-  const ledger = input.ledger ?? [];
+  const ledger = ledgerWithinDays(input.ledger ?? [], today, 30);
+  const negatives = input.negatives ?? [];
   const organicIndex = buildOrganicRankJoinIndex(input.organicSnapshots ?? []);
-  const organicRows = organicRankSnapshotRows(input.organicSnapshots ?? []);
+  const organicRows = organicRankSnapshotRows(input.organicSnapshots ?? []).map(blankZeroRank);
   const watch = watchCampaignExportRows({
-    asOf,
-    today,
-    campaigns: input.campaigns,
-    placements: input.placements,
-    campaignMeta: input.campaignMeta,
-    organicIndex,
+    asOf, today, campaigns: input.campaigns, placements: input.placements,
+    campaignMeta: input.campaignMeta, organicIndex, windows,
   });
-  const autoTerms = searchTermExportRows(
-    input.searchTerms, input.campaigns, closed, isAutoLoose, targets, ledger, organicIndex);
-  const fatTerms = searchTermExportRows(
-    input.searchTerms, input.campaigns, closed, isFatParent, targets, ledger, organicIndex);
-  const broadTerms = searchTermExportRows(
-    input.searchTerms, input.campaigns, closed, isBroadM, targets, ledger, organicIndex);
+  const stampComplete = <T extends HarvestTerm>(rows: T[]): T[] => rows.map((r) => ({
+    ...r,
+    metrics_complete: metricsOpen ? false : r.metrics_complete !== false,
+  }));
+  const autoTerms = tagContractTerms(stampComplete(searchTermExportRows(
+    input.searchTerms, input.campaigns, closed, isAutoLoose, targets, input.ledger ?? [], organicIndex,
+  )), negatives);
+  const fatTerms = tagContractTerms(stampComplete(searchTermExportRows(
+    input.searchTerms, input.campaigns, closed, isFatParent, targets, input.ledger ?? [], organicIndex,
+  )), negatives);
+  const broadTerms = tagContractTerms(stampComplete(searchTermExportRows(
+    input.searchTerms, input.campaigns, closed, isBroadM, targets, input.ledger ?? [], organicIndex,
+  )), negatives);
   const keywords = keywordTargetExportRows({
     today, asOf, keywordTargets: targets, searchTerms: input.searchTerms,
-    campaigns: input.campaigns, organicIndex,
+    campaigns: input.campaigns, organicIndex, windows,
   });
   const advertised = advertisedProductL7Rows({
     today, asOf, campaigns: input.campaigns,
     campaignMeta: input.campaignMeta, asinCatalog: input.asinCatalog,
   });
-  const files = [
+  const mismatchChecks = flagSpendMismatches(watch, keywords, [...autoTerms, ...fatTerms, ...broadTerms]);
+
+  const sqpRowsIn = input.sqpWeekly ?? [];
+  const sqpPlan = selectSqpSliceWeek(sqpRowsIn, today);
+  const sqp = sqpWeeklySliceRows(sqpRowsIn, today);
+  const sqpComparison = sqpComparisonSliceRows(sqpRowsIn, today);
+  const l30 = windowStart(closed, 30);
+  const l60 = windowStart(closed, 60);
+  const l7 = windowStart(closed, 7);
+  const complete = !metricsOpen;
+
+  const bleeders10: Record<string, unknown>[] = [];
+  const bleeders20: Record<string, unknown>[] = [];
+  const seenBleeder = new Set<string>();
+  for (const t of targets) {
+    const list = watchListOf(t.campaign_name);
+    if (list === "OTHER" && !isRankingCampaign(t.campaign_name)) continue;
+    const skip = summarySearchTermDates(input.searchTerms, input.campaigns, t.campaign_name, l60, closed);
+    const m60 = complete
+      ? keywordWindowMetrics(input.searchTerms, t, l60, closed, { skipDates: skip })
+      : emptyMetrics();
+    const m30 = complete
+      ? keywordWindowMetrics(input.searchTerms, t, l30, closed, { skipDates: skip })
+      : emptyMetrics();
+    const frame = contributionFrame(t.campaign_name, m30.acos);
+    const purpose = campaignPurposeOf(t.campaign_name, list === "OTHER" ? "FLAVOR_SHELL" : list);
+    const relevance = termRelevance(t.keyword_text);
+    const key = `${t.campaign_id ?? t.campaign_name}\t${queryNormalized(t.keyword_text)}`;
+    if (m60.clicks >= BLEEDERS10_MIN_CLICKS && m60.orders === 0 && !seenBleeder.has(`10:${key}`)) {
+      seenBleeder.add(`10:${key}`);
+      const watchTag = (relevance === "hero" || relevance === "family") && m60.clicks <= 12;
+      bleeders10.push({
+        source_type: "target",
+        date_start: l60, date_end: closed, window_label: "L60", metrics_complete: complete,
+        campaign_id: t.campaign_id ?? "", campaign_name: t.campaign_name,
+        keyword_id: t.keyword_id ?? "", target_id: t.keyword_id ?? "",
+        search_term: "", query_normalized: queryNormalized(t.keyword_text),
+        clicks_60: m60.clicks, spend_60: m60.spend, orders_60: m60.orders,
+        relevance, state: t.state ?? "", protected_recent_test: false,
+        conquesting: relevance === "brand_conquest", last_click_date: "",
+        proposed_tag: watchTag ? "WATCH" : "SKIP",
+        proposed_tag_reason: watchTag
+          ? "highly relevant, 10–12 clicks; stay WATCH. Never auto-pause."
+          : "60d clicks>=10 and 0 orders; review only. Never auto-pause.",
+        family: frame.family,
+      });
+    }
+    const decision = bleeders20Decision({
+      family: frame.family,
+      break_even_acos: frame.break_even_acos,
+      ad_product: adProductOf(t.campaign_name),
+      orders_30: m30.orders,
+      spend_30: m30.spend,
+      sales_30: m30.sales,
+      campaign_purpose: purpose,
+      protected_recent_test: false,
+    });
+    if (decision.include && !seenBleeder.has(`20:${key}`)) {
+      seenBleeder.add(`20:${key}`);
+      bleeders20.push({
+        date_start: l30, date_end: closed, window_label: "L30",
+        campaign_id: t.campaign_id ?? "", campaign_name: t.campaign_name,
+        keyword_id: t.keyword_id ?? "", target_id: t.keyword_id ?? "",
+        keyword_text: t.keyword_text, query_normalized: queryNormalized(t.keyword_text),
+        family: frame.family, break_even_acos: frame.break_even_acos,
+        threshold_acos: decision.threshold_acos,
+        acos_30: decision.acos_30, over_by_pp: decision.over_by_pp,
+        orders_30: m30.orders, spend_30: m30.spend,
+        ad_product: adProductOf(t.campaign_name),
+        campaign_purpose: purpose, protected_recent_test: false,
+        cut_suggestion: false,
+        proposed_tag: decision.proposed_tag,
+        proposed_tag_reason: decision.proposed_tag_reason,
+      });
+      for (const kw of keywords) {
+        if (normalizeName(kw.campaign_name) === normalizeName(t.campaign_name)
+          && queryNormalized(kw.keyword_text) === queryNormalized(t.keyword_text)) {
+          kw.bleeders20_flag = true;
+        }
+      }
+    }
+    if (m60.clicks >= BLEEDERS10_MIN_CLICKS && m60.orders === 0) {
+      for (const kw of keywords) {
+        if (normalizeName(kw.campaign_name) === normalizeName(t.campaign_name)
+          && queryNormalized(kw.keyword_text) === queryNormalized(t.keyword_text)) {
+          kw.bleeders10_flag = true;
+        }
+      }
+    }
+  }
+
+  const siblings = siblingExactAuctions(targets);
+  const siblingQueries = new Set(siblings.map((s) => s.query_normalized));
+  for (const kw of keywords) {
+    const q = queryNormalized(kw.keyword_text);
+    const hit = siblings.find((s) => s.query_normalized === q);
+    if (!hit) continue;
+    kw.sibling_exact_campaign_count = hit.campaigns.length;
+    kw.sibling_exact_campaign_ids = hit.campaigns.map((c) => c.campaign_id).filter(Boolean).join("|");
+    const bids = hit.campaigns.map((c) => c.bid).filter((b): b is number => b != null);
+    kw.highest_sibling_bid = bids.length ? Math.max(...bids) : null;
+  }
+
+  const bidReview = watch
+    .filter((r) => r.window_label === "L7")
+    .map((l7row) => {
+      const l30row = watch.find((r) =>
+        r.window_label === "L30" && normalizeName(r.campaign_name) === normalizeName(l7row.campaign_name)
+        && String(r.campaign_id ?? "") === String(l7row.campaign_id ?? ""));
+      const purpose = (l7row.campaign_purpose || "profit") as CampaignPurpose;
+      const acosL7 = l7row.acos;
+      const acosL30 = l30row?.acos ?? null;
+      let trend: "improving" | "worsening" | "flat" | "unknown" = "unknown";
+      if (acosL7 != null && acosL30 != null) {
+        if (Math.abs(acosL7 - acosL30) <= 1) trend = "flat";
+        else trend = acosL7 < acosL30 ? "improving" : "worsening";
+      }
+      const budgetConstrained = l7row.budget_capped_yesterday === true
+        || (l7row.budget_util_yesterday != null && l7row.budget_util_yesterday >= 0.9);
+      const query = queryNormalized(l7row.ranking_query || extractExactKeyword(l7row.campaign_name) || "");
+      const sibling = query ? siblingQueries.has(query) : false;
+      const suggestion = bidReviewSuggestion({
+        purpose, acos_l7: acosL7, acos_l30: acosL30,
+        break_even: l7row.break_even_acos, budget_constrained: budgetConstrained,
+        sibling_auction: sibling,
+      });
+      const onBleeder10 = bleeders10.some((b) => normalizeName(String(b.campaign_name)) === normalizeName(l7row.campaign_name));
+      const ladder = (l30row?.orders ?? 0) === 0 && (l30row?.clicks ?? 0) >= 5;
+      return {
+        campaign_id: l7row.campaign_id ?? "",
+        campaign_name: l7row.campaign_name,
+        purpose,
+        spend_l7: l7row.spend,
+        acos_l7: acosL7,
+        spend_l30: l30row?.spend ?? null,
+        acos_l30: acosL30,
+        trend,
+        budget_constrained: budgetConstrained,
+        one_lever_suggestion: suggestion.suggestion,
+        suggestion_reason: suggestion.reason,
+        stack_risk: onBleeder10 && ladder,
+        do_not_stack_with_bleeders: true,
+      };
+    })
+    .sort((a, b) => n(b.spend_l7) - n(a.spend_l7));
+
+  const addsUnknown = input.addsThisWeekAlready == null || !Number.isFinite(Number(input.addsThisWeekAlready));
+  const adds = addsUnknown ? null : Number(input.addsThisWeekAlready);
+  const remaining = addsUnknown ? 0 : Math.max(0, 3 - (adds ?? 0));
+  const harvestPool = [...autoTerms, ...fatTerms, ...broadTerms]
+    .filter((r) => r.label === "L7" && (r.proposed_tag === "HARVEST_EXACT" || r.proposed_tag === "WATCH") && r.orders >= 2);
+  const harvestQueue = harvestPool.slice(0, remaining).map((r) => ({
+    term: r.customer_search_term,
+    query_normalized: queryNormalized(r.customer_search_term),
+    family: r.family,
+    source_campaign_id: r.campaign_id ?? "",
+    clicks_l7: r.clicks, orders_l7: r.orders, acos_l7: r.acos,
+    clicks_l30: null, orders_l30: null,
+    organic_rank: r.organic_rank, sqp_ps: r.sqp_purchase_share ?? null,
+    destination_exact_exists: false, destination_campaign_id: "",
+    destination_state: "", destination_budget: null, destination_impressions: 0,
+    source_negate_pending: false, slot_cost: 1,
+    proposed_tag: "WATCH",
+    proposed_tag_reason: "destination impressions unknown; HARVEST_EXACT not allowed",
+    harvest_ready: false,
+    adds_this_week_already: addsUnknown ? "unknown" : adds,
+    remaining_slots: remaining,
+  }));
+
+  const findings = structureAuditFindings({
+    siblings,
+    metaSyncMissing: watch
+      .filter((r) => r.window_label === "Today" && r.meta_sync === false
+        && (r.watch_list === "NEW_EXACT" || r.watch_list === "FLAVOR_SHELL"))
+      .map((r) => ({ campaign_name: r.campaign_name, watch_list: r.watch_list })),
+    rankingUnlabeled: watch
+      .filter((r) => isRankingCampaign(r.campaign_name) && r.campaign_purpose !== "ranking" && r.window_label === "Today")
+      .map((r) => ({ campaign_id: r.campaign_id, campaign_name: r.campaign_name })),
+  });
+
+  const placementRows: Record<string, unknown>[] = [];
+  for (const label of ["L7", "L30"] as const) {
+    const w = windows.find((x) => windowLabelFromPack(x.label) === label);
+    if (!w) continue;
+    const names = new Map<string, WatchCampaignExportRow>();
+    for (const row of watch.filter((r) => r.window_label === label)) {
+      names.set(`${row.campaign_id ?? ""}\t${normalizeName(row.campaign_name)}`, row);
+    }
+    for (const row of names.values()) {
+      const matched = inWindow(input.placements, w.start, w.end).filter((p) =>
+        namesEqual(p.campaign_name, row.campaign_name));
+      const buckets = new Map<string, PlacementRow[]>();
+      for (const p of matched) {
+        const code = placementCode(p.placement);
+        if (!code) continue;
+        const list = buckets.get(code) ?? [];
+        list.push(p);
+        buckets.set(code, list);
+      }
+      for (const [code, group] of buckets) {
+        const m = sumMetrics(group);
+        const spendAll = [...buckets.values()].reduce((s, g) => s + sumMetrics(g).spend, 0);
+        placementRows.push({
+          date_start: w.start, date_end: w.end, window_label: label,
+          metrics_complete: w.metrics_complete, grain: "placement",
+          campaign_id: row.campaign_id ?? "", campaign_name: row.campaign_name,
+          placement: code,
+          impressions: m.impressions, clicks: m.clicks, spend: m.spend,
+          orders: m.orders, sales: m.sales, acos: m.acos,
+          modifier_pct: code === "TOS" ? row.tos_modifier_pct : code === "ROS" ? row.ros_modifier_pct : row.pp_modifier_pct,
+          spend_share: spendAll > 0 ? m.spend / spendAll : null,
+          click_share: null, order_share: null,
+          agreement_tos: false, agreement_ros: false, agreement_pp: false,
+          high_tos_is: false,
+        });
+      }
+    }
+  }
+
+  const agreements = seededAgreements();
+  const rank = watch.find((r) => isRankingCampaign(r.campaign_name) && r.campaign_id);
+  if (rank?.campaign_id) agreements[0].campaign_id = rank.campaign_id;
+
+  const wow = joinSqpWow(
+    sqp.map((r) => ({
+      query: String(r.search_query ?? r.query_normalized ?? ""),
+      asin: String(r.asin ?? ""),
+      volume: r.search_query_volume ?? null,
+      impression_share: r.impression_share ?? null,
+      purchase_share: r.purchase_share ?? null,
+      impressions: r.asin_impressions ?? null,
+      purchases: r.asin_purchases ?? null,
+    })),
+    sqpComparison.map((r) => ({
+      query: String(r.search_query ?? r.query_normalized ?? ""),
+      asin: String(r.asin ?? ""),
+      volume: r.search_query_volume ?? null,
+      impression_share: r.impression_share ?? null,
+      purchase_share: r.purchase_share ?? null,
+      impressions: r.asin_impressions ?? null,
+      purchases: r.asin_purchases ?? null,
+    })),
+  );
+
+  const organicPackHeaders = [
+    ...ORGANIC_RANK_SNAPSHOT_CSV_HEADERS,
+    "query_normalized", "hero_asin", "tracker_group_name", "sfr_source",
+    "soldscope_search_volume", "organic_as_of_prev", "paid_spend_l7_on_phrase", "converting_st_no_exact",
+  ] as const;
+  const organicBody = toCsv(organicPackHeaders, organicRows.map((r) => ({
+    ...r,
+    query_normalized: queryNormalized(r.keyword),
+    hero_asin: familyHeroAsin(r.family) ?? "",
+    tracker_group_name: "",
+    sfr_source: r.aba_sfr == null ? "" : "aba",
+    soldscope_search_volume: null,
+    organic_as_of_prev: "",
+    paid_spend_l7_on_phrase: null,
+    converting_st_no_exact: "",
+  })));
+
+  const competitorBody = toCsv(
+    [...COMPETITOR_KR_CSV_HEADERS, "query_normalized", "bidding_campaign_ids", "our_exact_bid",
+      "competitor_on_serp_evidence", "family_fit", "cap_slot", "suggested_lever_reason", "harvest_blocked_reason"],
+    (input.competitorOutliers ?? []).map((r) => ({
+      ...r,
+      already_bidding: r.already_bidding === "Y" ? true : r.already_bidding === "N" ? false : r.already_bidding,
+      query_normalized: queryNormalized(r.keyword),
+      bidding_campaign_ids: "",
+      our_exact_bid: null,
+      competitor_on_serp_evidence: "",
+      family_fit: "",
+      cap_slot: null,
+      suggested_lever_reason: "",
+      harvest_blocked_reason: "",
+    })),
+  );
+
+  const autoL2 = autoTerms.filter((r) => r.label === "L2").length;
+  const fatEmpty = fatTerms.length === 0;
+  const skuDates = (input.asinCatalog ?? [])
+    .map((r) => String(r.updated_at ?? "").slice(0, 10))
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort();
+  const skuAsOf = skuDates.length ? skuDates[skuDates.length - 1] : "";
+  const skuMissing = !(input.asinCatalog ?? []).some((r) => r.cogs_per_unit != null && Number(r.cogs_per_unit) > 0);
+  const organicAsOf = organicRows.map((r) => r.organic_as_of).filter((d): d is string => !!d).sort().at(-1) ?? "";
+  const groups = new Set(organicRows.map((r) => r.family)).size;
+  const phrases = new Set(organicRows.map((r) => queryNormalized(r.keyword))).size;
+  const sqpLag = sqpPlan.lastCompleteWeekEnd ? isoDayDelta(today, sqpPlan.lastCompleteWeekEnd) : null;
+  const sqpSources = [...new Set(sqp.map((r) => String(r.source ?? "")).filter(Boolean))];
+  const rankingLines = watch
+    .filter((r) => r.campaign_purpose === "ranking" && r.window_label === "Today")
+    .map((r) => `${r.campaign_id || "id_missing"} | ${r.campaign_name} | ${r.ranking_query}`);
+  const metaMissing = watch
+    .filter((r) => r.window_label === "Today" && r.meta_sync === false
+      && (r.watch_list === "NEW_EXACT" || r.watch_list === "FLAVOR_SHELL"))
+    .map((r) => r.campaign_name);
+  const emptyReasons = [
+    autoTerms.length === 0 ? "EMPTY_REASON auto_loose_search_terms.csv: no 1-day search-term stamps in the closed L2/L7 windows" : "",
+    fatEmpty ? "EMPTY_REASON fat_parent_search_terms.csv: no fat-parent search-term stamps (or none configured in window)" : "",
+    broadTerms.length === 0 ? "EMPTY_REASON broad_m_search_terms.csv: no 1-day stamps for GG - Lip Balm - Broad M" : "",
+    sqp.length === 0 ? "EMPTY_REASON sqp_weekly_slice.csv: no current complete Sun–Sat slice shipped" : "",
+    "EMPTY_REASON lifetime_zero.csv: ltd_unavailable — do not substitute 60-day data as lifetime",
+  ].filter(Boolean);
+
+  const stFile = (name: string, rows: HarvestTerm[]) => ({
+    name,
+    rows: rows.length,
+    emptyReason: rows.length > 0 || emptyReasons.some((line) => line.includes(name)),
+    grains: rows.map((r) => r.grain || "WINDOW_AGG"),
+    labels: rows.map((r) => r.label || r.window_label || ""),
+  });
+  const quality = evaluatePackQuality({
+    today,
+    yesterday: closed,
+    sqpCurrentWeekEnd: sqp[0]?.week_end ?? null,
+    sqpNewestCompleteWeekEnd: sqpPlan.lastCompleteWeekEnd,
+    sqpLagDays: sqpLag,
+    sqpStaleOver10: sqpPlan.staleReason === "newest_complete_week_older_than_10_days",
+    sqpFiles: [
+      ...sqp.map((r) => ({ name: "sqp_weekly_slice.csv", week_type: "current", week_end: String(r.week_end ?? ""), stale_pre_raise: r.stale_pre_raise === true })),
+      ...sqpComparison.map((r) => ({ name: SQP_COMPARISON_FILENAME, week_type: "comparison", week_end: String(r.week_end ?? ""), stale_pre_raise: r.stale_pre_raise === true })),
+    ],
+    watchRows: watch.map((r) => ({
+      campaign_id: r.campaign_id, campaign_name: r.campaign_name,
+      window_label: r.window_label || "", date_end: r.date_end,
+      metrics_complete: r.metrics_complete, watch_list: r.watch_list,
+      state: r.state, meta_sync: r.meta_sync, spend: r.spend,
+      placement_shares_empty: r.placement_report_lag === true,
+    })),
+    spendMismatches: mismatchChecks,
+    stPresentedAsCampaignSot: false,
+    stFiles: [stFile("auto_loose_search_terms.csv", autoTerms), stFile("fat_parent_search_terms.csv", fatTerms), stFile("broad_m_search_terms.csv", broadTerms)],
+    organicAsOf: organicAsOf || null,
+    organicZeroFilled: organicRows.some((r) => r.organic_rank === 0 || r.aba_sfr === 0),
+    inventedSqpShares: false,
+    bleeders20: bleeders20.map((b) => ({
+      campaign_purpose: String(b.campaign_purpose),
+      threshold_acos: Number(b.threshold_acos),
+      break_even_acos: Number(b.break_even_acos),
+      ad_product: String(b.ad_product),
+      cut_suggestion: b.cut_suggestion === true,
+      proposed_tag: String(b.proposed_tag),
+    })),
+    bidReview: bidReview.map((b) => ({ purpose: b.purpose, suggestion: b.one_lever_suggestion })),
+    priorCounts: input.priorPack?.counts ?? null,
+    currentCounts: {
+      auto_loose: autoTerms.length,
+      broad_m: broadTerms.length,
+      watch: watch.length,
+      sqp: sqp.length,
+    },
+    rowFiltersApplied: ROW_FILTERS_APPLIED,
+    fatParentEmpty: fatEmpty,
+    ltdUnavailable: true,
+    addsThisWeekUnknown: addsUnknown,
+    skuCostsMissing: skuMissing,
+    outcomesImplementedUnknown: ledger.some((r) => !!r.proposed_tag),
+    placementLag: watch.some((r) => r.placement_report_lag === true),
+  });
+
+  const prior = input.priorPack?.counts;
+  const beforeAfter = [
+    `auto_loose BEFORE ${prior?.auto_loose ?? "n/a"} AFTER ${autoTerms.length}`,
+    `broad_m BEFORE ${prior?.broad_m ?? "n/a"} AFTER ${broadTerms.length}`,
+    `watch BEFORE ${prior?.watch ?? "n/a"} AFTER ${watch.length}`,
+    `sqp BEFORE ${prior?.sqp ?? "n/a"} AFTER ${sqp.length}`,
+  ].join("; ");
+  const windowLine = (label: string) => {
+    const w = windows.find((x) => windowLabelFromPack(x.label) === label);
+    if (!w) return "";
+    return label === "L1" || label === "Today" ? w.start : `${w.start} → ${w.end}`;
+  };
+  const sqpCurrentText = sqpPlan.current && sqp.length
+    ? `${sqpPlan.current.weekStart} → ${sqpPlan.current.weekEnd}`
+    : "";
+  const comparisonText = sqpComparison.length && sqpPlan.comparison
+    ? `${sqpPlan.comparison.weekStart}→${sqpPlan.comparison.weekEnd}`
+    : "none";
+  const unexpected = [
+    ...[autoTerms, fatTerms, broadTerms].flatMap((rows, i) => rows.length ? [] : [ST_REVIEW_FILES_SAFE[i]]),
+    sqp.length ? "" : "sqp_weekly_slice.csv",
+  ].filter(Boolean).join(", ");
+
+  const filename = `gno-pack-${gnoPackStamp(input.now)}.zip`;
+  const packId = filename.replace(/\.zip$/, "");
+  const freshness = renderFreshnessBlock({
+    pack_id: packId,
+    pack_timestamp: (input.now ?? new Date()).toISOString(),
+    account_timezone: AMAZON_TZ,
+    today,
+    l1: windowLine("L1"),
+    l2: windowLine("L2"),
+    l7: windowLine("L7"),
+    l30: windowLine("L30"),
+    l60: windowLine("L60"),
+    sqpCurrent: sqpCurrentText,
+    sqpNewestStoredWeekEnd: sqpPlan.lastStoredWeekEnd ?? "",
+    sqpSource: sqpSources.length === 1 ? sqpSources[0] : sqpSources.join("|"),
+    sqpLagDays: sqpLag == null || !Number.isFinite(sqpLag) ? "" : String(sqpLag),
+    sqpComparison: comparisonText,
+    organicAsOf,
+    organicGroups: `${groups} / phrases: ${phrases} / snapshot_rows: ${organicRows.length}`,
+    placementAsOf: input.placements.map((p) => p.date).sort().at(-1) ?? "",
+    negativesAsOf: negatives.length ? "stored snapshot; added_at not on every row" : "",
+    skuCostsAsOf: skuAsOf || "missing",
+    bleeders10: `${l60} → ${closed}`,
+    bleeders20: `${l30} → ${closed}`,
+    unexpectedEmpty: unexpected,
+    rowFilters: ROW_FILTERS_APPLIED,
+    qualityGates: quality.level,
+    qualityNotes: quality.notes,
+  });
+  const contractNotes = [
+    "ST grain: WINDOW_AGG (review files). Raw optional files, when present, are grain=DAILY and are not labeled L7.",
+    "ST filters: none. SUMMARY stamps are excluded from L2/L7 rather than relabeled.",
+    `BEFORE/AFTER vs prior pack: ${beforeAfter}`,
+    `Auto Loose L2 omitted? ${autoL2 === 0 ? "yes — no 1-day ST stamps for that window" : "no"}`,
+    fatEmpty ? "fat_parent empty reason: no search-term stamps for the configured fat-parent campaign in the closed windows." : "fat_parent empty reason: n/a",
+    `NEW_EXACT / flavor rows with meta_sync=false: ${metaMissing.length ? metaMissing.join(" | ") : "none"}`,
+    `ranking campaigns: ${rankingLines.length ? rankingLines.join(" || ") : "none in this pack"}`,
+    ...emptyReasons,
+    "Campaign spend SoT is ads_campaigns_daily on watch_campaigns. Keyword and search-term dollars are NOT_SOT.",
+    "Family BE lip_3pk=42, deo=36, balm=36. Bleeders 2.0 is family BE+20pp (SP) or BE+10pp (SB/SBV/SD).",
+    "Never writes to Amazon.",
+  ].join("\n");
+
+  const methodology = gnoPackReadme({
+    files: [...REQUIRED_PACK_FILES],
+    sqpIncluded: sqp.length > 0,
+    sqpNote: sqpPlan.note,
+    sqpStale: sqpPlan.stale,
+    sqpStaleReason: sqpPlan.staleReason,
+    sqpLastWeekEnd: sqpPlan.stale
+      ? (sqpPlan.lastCompleteWeekEnd ?? sqpPlan.lastStoredWeekEnd)
+      : sqpPlan.lastCompleteWeekEnd,
+    sqpWeek: sqpPlan.current,
+    sqpComparison: sqpComparison.length ? sqpPlan.comparison : null,
+    organicIncluded: organicRows.length > 0,
+    competitorIncluded: (input.competitorOutliers ?? []).length > 0,
+  });
+  const readme = `${freshness}\n\n${contractNotes}\n\n${methodology}\n`;
+
+  const rawAuto = rawDailySearchTerms(input.searchTerms, input.campaigns, closed, isAutoLoose);
+  const rawBroad = rawDailySearchTerms(input.searchTerms, input.campaigns, closed, isBroadM);
+  const rawFat = rawDailySearchTerms(input.searchTerms, input.campaigns, closed, isFatParent);
+
+  const files: { name: string; body: string }[] = [
     { name: "watch_campaigns.csv", body: watchCampaignsCsv(watch) },
+    { name: "watch_placements.csv", body: toCsv(WATCH_PLACEMENT_HEADERS, placementRows) },
+    { name: "keyword_targets.csv", body: keywordTargetsCsv(keywords) },
     { name: "auto_loose_search_terms.csv", body: autoLooseSearchTermsCsv(autoTerms) },
     { name: "fat_parent_search_terms.csv", body: autoLooseSearchTermsCsv(fatTerms) },
     { name: "broad_m_search_terms.csv", body: autoLooseSearchTermsCsv(broadTerms) },
-    { name: "keyword_targets.csv", body: keywordTargetsCsv(keywords) },
     { name: "advertised_product_l7.csv", body: advertisedProductL7Csv(advertised) },
+    { name: "sqp_weekly_slice.csv", body: sqpWeeklySliceCsv(sqp) },
+    { name: "sqp_wow.csv", body: toCsv(SQP_WOW_HEADERS, wow) },
+    { name: "organic_rank_snapshot.csv", body: organicBody },
+    { name: "competitor_kr_outliers.csv", body: competitorBody },
+    { name: "negatives_snapshot.csv", body: negativesSnapshotCsv(negatives) },
+    { name: "bleeders_10.csv", body: toCsv(BLEEDERS10_HEADERS, bleeders10) },
+    { name: "bleeders_20.csv", body: toCsv(BLEEDERS20_HEADERS, bleeders20) },
+    { name: "lifetime_zero.csv", body: toCsv(LIFETIME_ZERO_HEADERS, []) },
+    { name: "bid_review_candidates.csv", body: toCsv(BID_REVIEW_HEADERS, bidReview) },
+    { name: "harvest_queue.csv", body: toCsv(HARVEST_QUEUE_HEADERS, harvestQueue) },
+    { name: "structure_audit.csv", body: toCsv(STRUCTURE_AUDIT_HEADERS, findings as unknown as Record<string, unknown>[]) },
+    { name: "agreements.csv", body: toCsv(AGREEMENTS_HEADERS, agreements) },
+    { name: "gno_decision_rules.txt", body: gnoDecisionRulesTxt() },
+    { name: "gno_outcomes.csv", body: gnoOutcomesCsv(ledger) },
   ];
-  const sqpRows = input.sqpWeekly ?? [];
-  const sqpPlan = selectSqpSliceWeek(sqpRows, today);
-  const sqp = sqpWeeklySliceRows(sqpRows, today);
-  const sqpComparison = sqpComparisonSliceRows(sqpRows, today);
-  if (sqp.length) {
-    files.push({ name: "sqp_weekly_slice.csv", body: sqpWeeklySliceCsv(sqp) });
-  }
   if (sqpComparison.length) {
     files.push({ name: SQP_COMPARISON_FILENAME, body: sqpWeeklySliceCsv(sqpComparison) });
   }
-  files.push({
-    name: "organic_rank_snapshot.csv",
-    body: organicRankSnapshotCsv(organicRows),
+  if (rawAuto.length) files.push({ name: "auto_loose_search_terms_raw.csv", body: autoLooseSearchTermsCsv(rawAuto) });
+  if (rawBroad.length) files.push({ name: "broad_m_search_terms_raw.csv", body: autoLooseSearchTermsCsv(rawBroad) });
+  if (rawFat.length) files.push({ name: "fat_parent_search_terms_raw.csv", body: autoLooseSearchTermsCsv(rawFat) });
+  files.unshift({ name: "README.txt", body: readme });
+  const manifest = renderPackManifest({
+    pack_id: packId,
+    pack_timestamp: (input.now ?? new Date()).toISOString(),
+    files,
+    windows: {
+      Today: today,
+      L1: windowLine("L1"),
+      L2: windowLine("L2"),
+      L7: windowLine("L7"),
+      L30: windowLine("L30"),
+      L60: windowLine("L60"),
+      sqp_current: sqpCurrentText,
+    },
+    quality_gates: quality.level,
+    quality_gate_notes: quality.notes,
+    prior_pack_id: input.priorPack?.id ?? null,
+    row_count_deltas: {
+      auto_loose: countDelta(autoTerms.length, prior?.auto_loose),
+      broad_m: countDelta(broadTerms.length, prior?.broad_m),
+      watch: countDelta(watch.length, prior?.watch),
+      sqp: countDelta(sqp.length, prior?.sqp),
+    },
+    row_filters_applied: ROW_FILTERS_APPLIED,
   });
-  const competitorRows = input.competitorOutliers ?? [];
-  files.push({
-    name: "competitor_kr_outliers.csv",
-    body: competitorKrOutliersCsv(competitorRows),
+  files.splice(1, 0, { name: "pack_manifest.json", body: manifest });
+  return { files, filename, quality_gates: quality.level };
+}
+
+const ST_REVIEW_FILES_SAFE = ["auto_loose_search_terms.csv", "fat_parent_search_terms.csv", "broad_m_search_terms.csv"] as const;
+
+function rawDailySearchTerms(
+  termRows: SearchTermRow[],
+  campaignRows: CampaignDailyRow[],
+  closedEnd: string,
+  predicate: (name: string) => boolean,
+): HarvestTerm[] {
+  const start = windowStart(closedEnd, 7);
+  const scoped = inWindow(termRows, start, closedEnd).filter((r) => predicate(r.campaign_name));
+  const dates = [...new Set(scoped.map((r) => r.date))];
+  const daily = dates.filter((d) => stDateLooksDaily(
+    searchTermSpendOnDate(scoped, predicate, d),
+    campaignSpendOnDate(campaignRows, predicate, d),
+  ));
+  if (daily.length < 2) return [];
+  return scoped.filter((r) => daily.includes(r.date)).map((r) => {
+    const frame = contributionFrame(r.campaign_name, null);
+    return {
+      date_start: r.date,
+      date_end: r.date,
+      label: undefined,
+      window_label: "DAILY",
+      grain: "DAILY",
+      campaign_id: String(r.campaign_id ?? ""),
+      campaign_name: r.campaign_name,
+      customer_search_term: r.search_term,
+      query_normalized: queryNormalized(r.search_term),
+      match_type: r.match_type || "",
+      impressions: n(r.impressions),
+      clicks: n(r.clicks),
+      spend: n(r.spend),
+      orders: n(r.orders_14d),
+      sales: n(r.sales_14d),
+      acos: n(r.sales_14d) > 0 ? (n(r.spend) / n(r.sales_14d)) * 100 : null,
+      cvr: null,
+      has_enabled_exact_elsewhere: false,
+      proposed_tag: "KEEP",
+      proposed_tag_reason: "raw daily stamp; not an L7 review row",
+      family: frame.family,
+      break_even_acos: frame.break_even_acos,
+      acos_vs_be: null,
+      cm_note: "NOT_SOT raw daily stamp",
+      organic_rank: null,
+      organic_rank_prev: null,
+      organic_rank_delta: null,
+      aba_sfr: null,
+      organic_as_of: null,
+    };
   });
-  if (input.negatives && input.negatives.length) {
-    const wanted = input.negatives.filter((n) =>
-      isAutoLoose(n.campaign_name) || isFatParent(n.campaign_name)
-      || isNewExact(n.campaign_name) || isBroadM(n.campaign_name));
-    if (wanted.length) {
-      files.push({ name: "negatives_snapshot.csv", body: negativesSnapshotCsv(wanted) });
-    }
-  }
-  files.push({
-    name: "gno_decision_rules.txt",
-    body: gnoDecisionRulesTxt(),
-  });
-  files.push({
-    name: "gno_outcomes.csv",
-    body: gnoOutcomesCsv(ledger),
-  });
-  files.push({
-    name: "README.txt",
-    body: gnoPackReadme({
-      files: files.map((f) => f.name).concat("README.txt"),
-      sqpIncluded: sqp.length > 0,
-      sqpNote: sqpPlan.note,
-      sqpStale: sqpPlan.stale,
-      sqpStaleReason: sqpPlan.staleReason,
-      sqpLastWeekEnd: sqpPlan.stale
-        ? (sqpPlan.lastCompleteWeekEnd ?? sqpPlan.lastStoredWeekEnd)
-        : sqpPlan.lastCompleteWeekEnd,
-      sqpWeek: sqpPlan.current,
-      sqpComparison: sqpComparison.length ? sqpPlan.comparison : null,
-      organicIncluded: organicRows.length > 0,
-      competitorIncluded: competitorRows.length > 0,
-    }),
-  });
-  return { files, filename: `gno-pack-${gnoPackStamp(input.now)}.zip` };
 }

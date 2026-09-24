@@ -77,6 +77,13 @@ import {
 } from "./gno-ppc-watch";
 import { zipStore } from "./zip-store";
 import { evaluateExportNeed, QUIET } from "./gno-export-state";
+import {
+  FRESHNESS_LINES,
+  bleeder20Threshold,
+  contractSearchTermTag,
+  dedupeWatchCampaignRows,
+  evaluatePackQuality,
+} from "./gno-pack-contract";
 
 const ROOT_JSON = path.join(process.cwd(), "..", "config", "gno_ppc_watch.json");
 const DASH_JSON = path.join(process.cwd(), "config", "gno_ppc_watch.json");
@@ -666,7 +673,10 @@ describe("export pack columns", () => {
     assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /competitor_kr_outliers\.csv/);
     assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /gno_decision_rules\.txt/);
     assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /gno_outcomes\.csv/);
-    assert.equal(names.includes("sqp_weekly_slice.csv"), false);
+    const emptySqp = pack.files.find((f) => f.name === "sqp_weekly_slice.csv");
+    assert.ok(emptySqp);
+    assert.equal(emptySqp!.body.trim().split("\n").length, 1);
+    assert.equal(pack.files.some((f) => f.name === SQP_COMPARISON_FILENAME), false);
     assert.ok(names.length >= 5);
     assert.equal(pack.filename, "gno-pack-2026-09-07_1504.zip");
     const zip = zipStore(pack.files);
@@ -1650,7 +1660,11 @@ describe("GNO pack freshness — SQP current slice and unslid L2/L7", () => {
       placements: [],
       sqpWeekly: [bidRaise, inProgress],
     });
-    assert.equal(pack.files.some((f) => f.name.includes("sqp_weekly")), false);
+    const staleCurrent = pack.files.find((f) => f.name === "sqp_weekly_slice.csv");
+    assert.ok(staleCurrent);
+    assert.equal(staleCurrent!.body.trim().split("\n").length, 1);
+    assert.doesNotMatch(staleCurrent!.body, /2026-09-12/);
+    assert.equal(pack.files.some((f) => f.name === SQP_COMPARISON_FILENAME), false);
     const readme = pack.files.find((f) => f.name === "README.txt")!.body;
     assert.match(readme, /SQP_STALE reason=newest_complete_week_older_than_10_days last_week_end=2026-09-12/);
     assert.doesNotMatch(readme, /stale_pre_raise=false/);
@@ -1672,7 +1686,11 @@ describe("GNO pack freshness — SQP current slice and unslid L2/L7", () => {
       placements: [],
       sqpWeekly: [inProgress],
     });
-    assert.equal(pack.files.some((f) => f.name.includes("sqp_weekly")), false);
+    const openCurrent = pack.files.find((f) => f.name === "sqp_weekly_slice.csv");
+    assert.ok(openCurrent);
+    assert.equal(openCurrent!.body.trim().split("\n").length, 1);
+    assert.doesNotMatch(openCurrent!.body, /2026-09-26/);
+    assert.equal(pack.files.some((f) => f.name === SQP_COMPARISON_FILENAME), false);
     assert.match(
       pack.files.find((f) => f.name === "README.txt")!.body,
       /SQP_STALE reason=no_complete_sun_sat_week last_week_end=2026-09-26/,
@@ -1747,5 +1765,325 @@ describe("GNO pack freshness — SQP current slice and unslid L2/L7", () => {
     assert.equal(l2?.metrics_complete, true);
     assert.equal(l2?.spend, 0);
     assert.equal(l7?.spend, 0);
+  });
+});
+
+describe("GNO pack contract 2026-09-24", () => {
+  const RANK = "Unscented Lip Balm - SP - Lip Balm - KWs - Exact";
+  const ASSORTED = "Assorted Lip Balm - SP - Lip Balm - KWs - Exact";
+  const PEPPER = "Peppermint Lip Balm - SP - Lip Balm - KWs - Exact";
+
+  test("README freshness block is first and names every required key", () => {
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      now: new Date("2026-09-24T18:00:00-07:00"),
+      campaigns: [],
+      searchTerms: [],
+      placements: [],
+    });
+    const readme = pack.files.find((f) => f.name === "README.txt")!.body;
+    const lines = readme.split("\n");
+    assert.equal(lines[0].startsWith("pack_id:"), true);
+    for (const key of FRESHNESS_LINES) {
+      assert.ok(lines.some((line) => line.startsWith(key)), key);
+    }
+    const notesAt = lines.findIndex((line) => line.startsWith("quality_gate_notes:"));
+    const methodAt = lines.findIndex((line) => line.startsWith("GNO Export pack"));
+    assert.ok(notesAt >= 0 && methodAt > notesAt);
+    assert.match(readme, /America\/Los_Angeles/);
+    assert.match(readme, /lip_3pk=42/);
+    assert.match(readme, /deo=36/);
+    assert.match(readme, /balm=36/);
+    assert.match(readme, /Never writes to Amazon/);
+    assert.match(readme, /WINDOW_AGG/);
+    assert.match(readme, /NOT_SOT/);
+    for (const name of [
+      "pack_manifest.json", "watch_placements.csv", "bleeders_10.csv", "bleeders_20.csv",
+      "lifetime_zero.csv", "bid_review_candidates.csv", "harvest_queue.csv",
+      "structure_audit.csv", "agreements.csv", "sqp_wow.csv", "gno_outcomes.csv",
+    ]) {
+      assert.ok(pack.files.some((f) => f.name === name), name);
+    }
+    assert.match(pack.files.find((f) => f.name === "agreements.csv")!.body, /ranking campaign/);
+    assert.match(pack.files.find((f) => f.name === "agreements.csv")!.body, /42/);
+    assert.match(pack.files.find((f) => f.name === "lifetime_zero.csv")!.body, /product_cvr/);
+    assert.match(readme, /ltd_unavailable/);
+    const manifest = JSON.parse(pack.files.find((f) => f.name === "pack_manifest.json")!.body);
+    assert.equal(manifest.observe_only, true);
+    assert.ok(manifest.files.some((f: { name: string; sha256: string }) => f.name === "README.txt" && f.sha256.length === 64));
+  });
+
+  test("review search terms are WINDOW_AGG and SUMMARY is not labeled L7", () => {
+    const campaigns = [
+      camp(AUTO_LOOSE_NAME, { date: "2026-09-22", spend: 20, campaign_id: "auto-1" }),
+      camp(AUTO_LOOSE_NAME, { date: "2026-09-23", spend: 22, campaign_id: "auto-1" }),
+    ];
+    const terms: SearchTermRow[] = [
+      {
+        date: "2026-09-22", campaign_id: "auto-1", campaign_name: AUTO_LOOSE_NAME,
+        search_term: "tallow lip balm", match_type: "TARGETING_EXPRESSION",
+        spend: 8, sales_14d: 0, orders_14d: 0, clicks: 3, impressions: 40,
+      },
+      {
+        date: "2026-09-23", campaign_id: "auto-1", campaign_name: AUTO_LOOSE_NAME,
+        search_term: "tallow lip balm", match_type: "TARGETING_EXPRESSION",
+        spend: 9, sales_14d: 0, orders_14d: 0, clicks: 4, impressions: 50,
+      },
+    ];
+    const st = searchTermExportRows(terms, campaigns, "2026-09-23", isAutoLoose);
+    const l7 = st.filter((r) => r.label === "L7" && r.customer_search_term === "tallow lip balm");
+    assert.equal(l7.length, 1);
+    assert.equal(l7[0].grain, "WINDOW_AGG");
+    assert.equal(l7[0].clicks, 7);
+    assert.equal(l7[0].window_label, "L7");
+    const summary: SearchTermRow[] = [{
+      date: "2026-09-23", campaign_name: AUTO_LOOSE_NAME, search_term: "tallow lip balm",
+      match_type: "TARGETING_EXPRESSION", spend: 400, clicks: 90, impressions: 2000, orders_14d: 0, sales_14d: 0,
+    }];
+    const hidden = searchTermExportRows(summary, campaigns, "2026-09-23", isAutoLoose);
+    assert.equal(hidden.filter((r) => r.label === "L7").length, 0);
+    const scored = contractSearchTermTag({
+      clicks: 2, orders: 2, search_term: "tallow lip balm", has_enabled_exact_elsewhere: false,
+    });
+    assert.notEqual(scored.proposed_tag, "HARVEST_EXACT");
+  });
+
+  test("watch_campaigns dedups campaign_id+window and keeps distinct ids", () => {
+    const doubled = dedupeWatchCampaignRows([
+      { campaign_id: "111", campaign_name: "Catch-All-Lip Balm-Auto High Interest", window_label: "L7" },
+      { campaign_id: "111", campaign_name: "Catch-All-Lip Balm-Auto High Interest", window_label: "L7" },
+    ]);
+    assert.equal(doubled.length, 1);
+    const both = dedupeWatchCampaignRows([
+      { campaign_id: "111", campaign_name: "Catch-All-Lip Balm-Auto High Interest", window_label: "L7" },
+      { campaign_id: "222", campaign_name: "Catch-All-Lip Balm-Auto High Interest", window_label: "L7" },
+    ]);
+    assert.equal(both.length, 2);
+    assert.ok(both.every((r) => r.duplicate_reason === "name_collision"));
+  });
+
+  test("Bleeders 2.0 uses family BE plus points, never 37", () => {
+    assert.equal(bleeder20Threshold(42, "SP"), 62);
+    assert.equal(bleeder20Threshold(36, "SP"), 56);
+    assert.equal(bleeder20Threshold(36, "SB"), 46);
+    assert.equal(bleeder20Threshold(36, "SBV"), 46);
+    assert.notEqual(bleeder20Threshold(36, "SP"), 37);
+    const deo = "SP | DEO | B0CLHYY3BB | EX | tallow deodorant | TOS";
+    const pack = buildGnoPack({
+      asOf: "2026-09-23", today: "2026-09-24",
+      campaigns: [camp(deo, { date: "2026-09-23", spend: 60, campaign_id: "deo-1" })],
+      searchTerms: [{
+        date: "2026-09-23", campaign_id: "deo-1", campaign_name: deo,
+        search_term: "tallow deodorant", keyword: "tallow deodorant", keyword_id: "deo-kw",
+        match_type: "EXACT", spend: 60, sales_14d: 100, orders_14d: 2, clicks: 12, impressions: 80,
+      }],
+      placements: [],
+      keywordTargets: [{
+        campaign_id: "deo-1", keyword_id: "deo-kw", campaign_name: deo,
+        keyword_text: "tallow deodorant", match_type: "EXACT", state: "ENABLED", bid: 1.2,
+      }],
+    });
+    const body = pack.files.find((f) => f.name === "bleeders_20.csv")!.body;
+    assert.match(body, /56/);
+    assert.match(body, /deo/);
+    assert.doesNotMatch(body, /,37,/);
+    const under = buildGnoPack({
+      asOf: "2026-09-23", today: "2026-09-24",
+      campaigns: [camp(deo, { date: "2026-09-23", spend: 50, campaign_id: "deo-1" })],
+      searchTerms: [{
+        date: "2026-09-23", campaign_id: "deo-1", campaign_name: deo,
+        search_term: "tallow deodorant", keyword: "tallow deodorant", keyword_id: "deo-kw",
+        match_type: "EXACT", spend: 50, sales_14d: 100, orders_14d: 2, clicks: 12, impressions: 80,
+      }],
+      placements: [],
+      keywordTargets: [{
+        campaign_id: "deo-1", keyword_id: "deo-kw", campaign_name: deo,
+        keyword_text: "tallow deodorant", match_type: "EXACT", state: "ENABLED", bid: 1.2,
+      }],
+    });
+    const underBody = under.files.find((f) => f.name === "bleeders_20.csv")!.body;
+    assert.equal(underBody.trim().split("\n").length, 1);
+  });
+
+  test("ranking Exact lip balm is exempt from ACOS cut and Bleeders 2.0 pause suggestions", () => {
+    const pack = buildGnoPack({
+      asOf: "2026-09-23", today: "2026-09-24",
+      campaigns: [
+        camp(RANK, { date: "2026-09-23", spend: 40, sales_14d: 40, orders_14d: 2, campaign_id: "rank-1", campaign_status: "ENABLED" }),
+        camp(ASSORTED, { date: "2026-09-23", spend: 5, campaign_id: "as-1", campaign_status: "ENABLED" }),
+        camp(PEPPER, { date: "2026-09-23", spend: 5, campaign_id: "pep-1", campaign_status: "ENABLED" }),
+      ],
+      campaignMeta: [
+        { campaign_id: "rank-1", campaign_name: RANK, state: "ENABLED", daily_budget: 25 },
+        { campaign_id: "as-1", campaign_name: ASSORTED, state: "ENABLED", daily_budget: 25 },
+        { campaign_id: "pep-1", campaign_name: PEPPER, state: "ENABLED", daily_budget: 25 },
+      ],
+      searchTerms: [{
+        date: "2026-09-23", campaign_id: "rank-1", campaign_name: RANK,
+        search_term: "lip balm", keyword: "lip balm", keyword_id: "kw-lip",
+        match_type: "EXACT", spend: 40, sales_14d: 40, orders_14d: 2, clicks: 18, impressions: 200,
+      }],
+      placements: [],
+      keywordTargets: [
+        { campaign_id: "rank-1", keyword_id: "kw-lip", campaign_name: RANK, keyword_text: "lip balm", match_type: "EXACT", state: "ENABLED", bid: 1.8 },
+        { campaign_id: "as-1", keyword_id: "kw-as", campaign_name: ASSORTED, keyword_text: "lip balm", match_type: "EXACT", state: "ENABLED", bid: 1.1 },
+        { campaign_id: "pep-1", keyword_id: "kw-pep", campaign_name: PEPPER, keyword_text: "lip balm", match_type: "EXACT", state: "ENABLED", bid: 0.9 },
+      ],
+    });
+    const watch = pack.files.find((f) => f.name === "watch_campaigns.csv")!.body;
+    assert.match(watch, /ranking/);
+    const b20 = pack.files.find((f) => f.name === "bleeders_20.csv")!.body;
+    const b20lines = b20.trim().split("\n");
+    const header = b20lines[0].split(",");
+    const purposeAt = header.indexOf("campaign_purpose");
+    const cutAt = header.indexOf("cut_suggestion");
+    const tagAt = header.indexOf("proposed_tag");
+    const threshAt = header.indexOf("threshold_acos");
+    const rankLine = b20lines.find((line) => line.includes(RANK));
+    assert.ok(rankLine);
+    const cols = rankLine!.split(",");
+    assert.equal(cols[purposeAt], "ranking");
+    assert.equal(cols[cutAt], "false");
+    assert.equal(cols[tagAt], "SKIP");
+    assert.equal(cols[threshAt], "62");
+    assert.doesNotMatch(rankLine!, /review_bid_down|pause/);
+    const bids = pack.files.find((f) => f.name === "bid_review_candidates.csv")!.body;
+    const bidHeader = bids.trim().split("\n")[0].split(",");
+    const sugAt = bidHeader.indexOf("one_lever_suggestion");
+    const rankBid = bids.trim().split("\n").find((line) => line.includes(RANK));
+    assert.ok(rankBid);
+    assert.notEqual(rankBid!.split(",")[sugAt], "review_bid_down");
+    assert.doesNotMatch(rankBid!, /pause/);
+    const audit = pack.files.find((f) => f.name === "structure_audit.csv")!.body;
+    assert.match(audit, /sibling_exact_auction/);
+    assert.match(audit, /lip balm/);
+  });
+
+  test("keyword spend above the campaign tile sets window_mismatch and keeps campaign SoT", () => {
+    const pack = buildGnoPack({
+      asOf: "2026-09-23", today: "2026-09-24",
+      campaigns: [camp(AUTO_LOOSE_NAME, { date: "2026-09-23", spend: 10, campaign_id: "auto-1", campaign_status: "ENABLED" })],
+      searchTerms: [{
+        date: "2026-09-23", campaign_id: "auto-1", campaign_name: AUTO_LOOSE_NAME,
+        search_term: "loose query", keyword: "loose query", keyword_id: "kw-loose",
+        match_type: "TARGETING_EXPRESSION", spend: 14, sales_14d: 0, orders_14d: 0, clicks: 4, impressions: 40,
+      }],
+      placements: [],
+      keywordTargets: [{
+        campaign_id: "auto-1", keyword_id: "kw-loose", campaign_name: AUTO_LOOSE_NAME,
+        keyword_text: "loose query", match_type: "TARGETING_EXPRESSION", state: "ENABLED", bid: 0.5,
+      }],
+    });
+    const watch = pack.files.find((f) => f.name === "watch_campaigns.csv")!.body;
+    const watchHeader = watch.trim().split("\n")[0].split(",");
+    const spendAt = watchHeader.indexOf("spend");
+    const winAt = watchHeader.indexOf("window_label");
+    const misAt = watchHeader.indexOf("window_mismatch");
+    const l7 = watch.trim().split("\n").find((line) => {
+      const cols = line.split(",");
+      return cols[winAt] === "L7" && line.includes(AUTO_LOOSE_NAME);
+    });
+    assert.ok(l7);
+    assert.equal(l7!.split(",")[spendAt], "10");
+    assert.equal(l7!.split(",")[misAt], "true");
+    const kw = pack.files.find((f) => f.name === "keyword_targets.csv")!.body;
+    const kwHeader = kw.trim().split("\n")[0].split(",");
+    const kwMis = kwHeader.indexOf("window_mismatch");
+    const kwL7 = kw.trim().split("\n").find((line) => line.includes("loose query") && line.includes("2026-09-17"));
+    assert.ok(kwL7);
+    assert.equal(kwL7!.split(",")[kwMis], "true");
+  });
+
+  test("quality gates FAIL the contract cases", () => {
+    const base = {
+      today: "2026-09-24",
+      yesterday: "2026-09-23",
+      sqpCurrentWeekEnd: "2026-09-19",
+      sqpNewestCompleteWeekEnd: "2026-09-19",
+      sqpLagDays: 5,
+      sqpStaleOver10: false,
+      sqpFiles: [] as { name: string; week_type: string; week_end: string; stale_pre_raise: boolean }[],
+      watchRows: [] as {
+        campaign_id?: string; campaign_name: string; window_label: string; date_end: string;
+        metrics_complete: boolean; watch_list: string; state?: string; meta_sync?: boolean;
+      }[],
+      spendMismatches: [] as { disagrees: boolean; window_mismatch: boolean }[],
+      stPresentedAsCampaignSot: false,
+      stFiles: [{ name: "auto_loose_search_terms.csv", rows: 1, emptyReason: true, grains: ["WINDOW_AGG"], labels: ["L7"] }],
+      organicAsOf: "2026-09-23",
+      organicZeroFilled: false,
+      inventedSqpShares: false,
+      bleeders20: [] as { campaign_purpose: string; threshold_acos: number; break_even_acos: number; ad_product: string; cut_suggestion: boolean; proposed_tag: string }[],
+      bidReview: [] as { purpose: string; suggestion: string }[],
+      priorCounts: null,
+      currentCounts: { auto_loose: 1, broad_m: 0, watch: 1, sqp: 1 },
+      rowFiltersApplied: "WINDOW_AGG",
+      fatParentEmpty: false,
+      ltdUnavailable: false,
+      addsThisWeekUnknown: false,
+      skuCostsMissing: false,
+      outcomesImplementedUnknown: false,
+      placementLag: false,
+    };
+    assert.equal(evaluatePackQuality(base).level, "PASS");
+    assert.equal(evaluatePackQuality({ ...base, sqpStaleOver10: true }).level, "FAIL");
+    assert.ok(evaluatePackQuality({
+      ...base,
+      sqpFiles: [{ name: "sqp_weekly_slice_COMPARISON_PRE_RAISE.csv", week_type: "comparison", week_end: "2026-09-12", stale_pre_raise: false }],
+    }).fails.some((f) => f.startsWith("2 ")));
+    assert.ok(evaluatePackQuality({
+      ...base,
+      watchRows: [{ campaign_name: "A", window_label: "L7", date_end: "2026-09-20", metrics_complete: true, watch_list: "KEEPER" }],
+    }).fails.some((f) => f.startsWith("3 ")));
+    assert.ok(evaluatePackQuality({ ...base, organicAsOf: "2026-09-20" }).fails.some((f) => f.startsWith("4 ")));
+    assert.ok(evaluatePackQuality({ ...base, stPresentedAsCampaignSot: true }).fails.some((f) => f.startsWith("5 ")));
+    assert.ok(evaluatePackQuality({
+      ...base, spendMismatches: [{ disagrees: true, window_mismatch: false }],
+    }).fails.some((f) => f.startsWith("6 ")));
+    assert.ok(evaluatePackQuality({
+      ...base,
+      watchRows: [
+        { campaign_id: "1", campaign_name: "Catch-All", window_label: "L7", date_end: "2026-09-23", metrics_complete: true, watch_list: "DAY5_PAUSE" },
+        { campaign_id: "1", campaign_name: "Catch-All", window_label: "L7", date_end: "2026-09-23", metrics_complete: true, watch_list: "DAY5_PAUSE" },
+      ],
+    }).fails.some((f) => f.startsWith("7 ")));
+    assert.ok(evaluatePackQuality({
+      ...base,
+      watchRows: [{ campaign_name: "New", window_label: "Today", date_end: "2026-09-24", metrics_complete: false, watch_list: "NEW_EXACT", state: "", meta_sync: true }],
+    }).fails.some((f) => f.startsWith("8 ")));
+    assert.ok(evaluatePackQuality({
+      ...base,
+      stFiles: [{ name: "auto_loose_search_terms.csv", rows: 0, emptyReason: false, grains: [], labels: [] }],
+    }).fails.some((f) => f.startsWith("9 ")));
+    assert.ok(evaluatePackQuality({
+      ...base,
+      priorCounts: { auto_loose: 100 },
+      currentCounts: { auto_loose: 10, broad_m: 0, watch: 1, sqp: 1 },
+      rowFiltersApplied: "",
+    }).fails.some((f) => f.startsWith("10 ")));
+    assert.ok(evaluatePackQuality({ ...base, organicZeroFilled: true }).fails.some((f) => f.startsWith("11 ")));
+    assert.ok(evaluatePackQuality({
+      ...base,
+      bleeders20: [{ campaign_purpose: "ranking", threshold_acos: 62, break_even_acos: 42, ad_product: "SP", cut_suggestion: true, proposed_tag: "WATCH" }],
+    }).fails.some((f) => f.startsWith("12 ")));
+    assert.ok(evaluatePackQuality({
+      ...base,
+      bidReview: [{ purpose: "ranking", suggestion: "review_bid_down" }],
+    }).fails.some((f) => f.startsWith("12 ")));
+    assert.ok(evaluatePackQuality({
+      ...base,
+      bleeders20: [{ campaign_purpose: "profit", threshold_acos: 37, break_even_acos: 42, ad_product: "SP", cut_suggestion: false, proposed_tag: "WATCH" }],
+    }).fails.some((f) => f.startsWith("13 ")));
+    assert.ok(evaluatePackQuality({ ...base, inventedSqpShares: true }).fails.some((f) => f.startsWith("14 ")));
+    assert.ok(evaluatePackQuality({
+      ...base,
+      stFiles: [{ name: "auto_loose_search_terms.csv", rows: 2, emptyReason: true, grains: ["DAILY", "SUMMARY"], labels: ["L7", "L7"] }],
+    }).fails.some((f) => f.startsWith("15 ")));
+    const warn = evaluatePackQuality({ ...base, sqpLagDays: 9, fatParentEmpty: true, skuCostsMissing: true });
+    assert.equal(warn.level, "WARN");
+    assert.match(warn.notes, /SQP_LAG_DAYS 9/);
+    assert.match(warn.notes, /fat_parent empty/);
+    assert.match(warn.notes, /sku_costs missing/);
   });
 });
