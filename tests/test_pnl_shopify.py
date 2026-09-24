@@ -16,6 +16,7 @@ from src.pnl_shopify import (
     CHANNEL,
     FORMULA,
     aggregate_shopify_days,
+    estimate_outbound_ship,
     monthly_shopify_cogs,
 )
 from src.shopify_backfill import is_subscription_order, shipping_price_of
@@ -66,29 +67,37 @@ def test_subscription_rule_covers_source_tags_and_selling_plan():
     assert not is_subscription_order({"source_name": "web", "tags": "gift"})
 
 
-def test_contribution_is_merchandise_plus_ship_minus_outbound_minus_cogs():
+def test_contribution_is_merchandise_plus_ship_minus_outbound_minus_cogs_minus_ads():
     orders = [
         _order(1, "2026-09-01", 40.0, 5.0),
         _order(2, "2026-09-01", 20.0, 0.0, sub=True),
     ]
     monthly = {"2026-09": {"cogs": 30.0, "units": 6, "sales": 60.0}}
-    rows = aggregate_shopify_days(orders, monthly, outbound_per_order=5.50)
+    rows = aggregate_shopify_days(
+        orders, monthly, ad_spend_by_day={"2026-09-01": 4.25})
     assert len(rows) == 1
     r = rows[0]
     assert r["channel"] == CHANNEL
     assert r["grain"] == "account"
-    # merchandise 60 + ship 5 = 65; outbound 2×5.50 = 11; cogs 30
+    # merchandise 60 + ship 5 = 65; units 6 known;
+    # outbound 2×8.30 + 0.50×6 = 19.60; cogs 30; ads 4.25
     assert r["gross_sales"] == 65.0
-    assert r["est_fba_fees"] == 11.0
+    assert r["units"] == 6
+    assert r["est_fba_fees"] == 19.60
     assert r["est_cogs"] == 30.0
-    assert r["est_contribution"] == 24.0
+    assert r["ad_spend"] == 4.25
+    assert r["est_contribution"] == 11.15
+    assert r["net_after_ads"] == 11.15
     meta = json.loads(r["meta"])
     assert meta["formula"] == FORMULA
     assert meta["shipping_charged"] == 5.0
     assert meta["subscription_orders"] == 1
     assert meta["one_time_orders"] == 1
-    assert meta["outbound_basis"] == "config_estimate"
-    assert "TODO" in meta["todo"]
+    assert meta["outbound_basis"] == "tpl_apr_jun_2026"
+    assert meta["outbound_units_known"] is True
+    assert "Apr–Jun 2026" in meta["outbound_note"]
+    assert "google_ads_daily" in meta["ad_spend_note"]
+    assert "ads_campaigns_daily" in meta["ad_spend_note"]
 
 
 def test_test_and_cancelled_orders_do_not_enter_contribution():
@@ -97,19 +106,22 @@ def test_test_and_cancelled_orders_do_not_enter_contribution():
         _order(2, "2026-09-01", 999.0, 9.0, test=True),
         _order(3, "2026-09-01", 999.0, 9.0, cancelled="2026-09-02T00:00:00Z"),
     ]
-    rows = aggregate_shopify_days(orders, {}, outbound_per_order=5.50)
+    rows = aggregate_shopify_days(orders, {})
     assert rows[0]["gross_sales"] == 45.0
     assert json.loads(rows[0]["meta"])["order_count"] == 1
+    meta = json.loads(rows[0]["meta"])
+    assert meta["outbound_basis"] == "tpl_flat_fallback"
+    assert rows[0]["est_fba_fees"] == 9.90
 
 
 def test_refunds_reduce_merchandise_and_never_go_negative():
     orders = [_order(1, "2026-09-01", 20.0, 5.0, refund=50.0)]
-    rows = aggregate_shopify_days(orders, {}, outbound_per_order=5.50)
+    rows = aggregate_shopify_days(orders, {})
     meta = json.loads(rows[0]["meta"])
     assert meta["merchandise"] == 0.0
     assert meta["shipping_charged"] == 5.0
-    # 0 + 5 − 5.50 − 0 = −0.50
-    assert rows[0]["est_contribution"] == -0.50
+    # units unknown → 9.90; 0 + 5 − 9.90 − 0 − 0 ads = −4.90
+    assert rows[0]["est_contribution"] == -4.90
 
 
 def test_cogs_allocates_by_day_share_of_month_merchandise():
@@ -118,8 +130,7 @@ def test_cogs_allocates_by_day_share_of_month_merchandise():
         _order(2, "2026-09-02", 10.0, 0.0),
     ]
     monthly = {"2026-09": {"cogs": 20.0, "units": 8, "sales": 40.0}}
-    rows = {r["date"]: r for r in aggregate_shopify_days(
-        orders, monthly, outbound_per_order=0)}
+    rows = {r["date"]: r for r in aggregate_shopify_days(orders, monthly)}
     assert rows["2026-09-01"]["est_cogs"] == 15.0   # 20 * 30/40
     assert rows["2026-09-02"]["est_cogs"] == 5.0    # 20 * 10/40
 
@@ -156,10 +167,49 @@ def test_compute_pnl_isolates_shopify_failures():
 
 def test_amazon_channel_never_written_by_shopify_aggregator():
     rows = aggregate_shopify_days(
-        [_order(1, "2026-09-01", 10.0, 0.0)], {}, outbound_per_order=5.50)
+        [_order(1, "2026-09-01", 10.0, 0.0)], {})
     assert all(r["channel"] == "shopify" for r in rows)
     import inspect
     from src import pnl_shopify as m
     src = inspect.getsource(m.aggregate_shopify_days)
     assert 'channel": "amazon"' not in src
     assert "channel': 'amazon'" not in src
+    assert "ads_campaigns_daily" not in src
+
+
+def test_outbound_formula_matches_apr_jun_invoice_fit():
+    # 337 orders × 8.30 + 0.50 × 1,040 units = 3,317.10
+    amount, basis = estimate_outbound_ship(337, 1040, units_known=True)
+    assert basis == "tpl_apr_jun_2026"
+    assert amount == 3317.10
+    one, _ = estimate_outbound_ship(1, 1, units_known=True)
+    assert one == 8.80
+    flat, flat_basis = estimate_outbound_ship(10, None, units_known=False)
+    assert flat_basis == "tpl_flat_fallback"
+    assert flat == 99.00
+    assert estimate_outbound_ship(0, 5, units_known=True) == (0.0, "none")
+
+
+def test_missing_ad_days_are_zero_and_not_filled_from_neighbors():
+    orders = [
+        _order(1, "2026-08-01", 20.0, 0.0),
+        _order(2, "2026-09-14", 20.0, 0.0),
+    ]
+    rows = {r["date"]: r for r in aggregate_shopify_days(
+        orders, {},
+        ad_spend_by_day={"2026-09-14": 12.5, "2026-09-15": 9.0},
+    )}
+    assert rows["2026-08-01"]["ad_spend"] == 0.0
+    assert rows["2026-09-14"]["ad_spend"] == 12.5
+    assert "2026-09-15" not in rows
+
+
+def test_pnl_route_loads_google_and_meta_without_amazon_campaigns():
+    api = Path("dashboard/src/app/api/pnl/route.ts").read_text()
+    assert "google_ads_daily" in api
+    assert "meta_ads_daily" in api
+    assert "applyShopifyProfitAdjustments" in api
+    assert 'from("ads_campaigns_daily")' in api
+    # Amazon monthly ads stay on the campaign table. The Shopify loader
+    # is a separate function and does not append into adsByDay.
+    assert "loadChannelAdSpend" in api

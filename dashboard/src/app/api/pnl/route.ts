@@ -6,7 +6,7 @@ import {
   attachMonthReimbursements,
   sumReimbursementsByDay,
 } from "@/lib/fba-reimbursements";
-import type { ShopifyPnlRow } from "@/lib/shopify-pnl";
+import { applyShopifyProfitAdjustments, type ChannelAdSpend, type ShopifyPnlRow } from "@/lib/shopify-pnl";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 interface PnlRow {
@@ -57,6 +57,8 @@ async function paginate<T>(
  * check, not an ingest. Incomplete daily windows stay on sales_by_sku.
  * Shopify is never folded into Amazon contribution. Shopify lives on
  * channel='shopify' and is returned separately as shopifyDaily.
+ * Shopify ad spend is google_ads_daily + meta_ads_daily for that day.
+ * It is not added to ads_campaigns_daily. A missing day is $0.
  */
 export async function GET() {
   try {
@@ -173,10 +175,14 @@ export async function GET() {
       adsLagging: Boolean(adsDateMax && adsDateMax < asOf),
       timezone: "America/Los_Angeles",
       formula: "gross_sales - referral - fba - ad_spend - cogs",
-      shopifyDaily: shopifyDailyRows(shopifyRaw),
+      shopifyDaily: applyShopifyProfitAdjustments(
+        shopifyDailyRows(shopifyRaw),
+        await loadChannelAdSpend(sb, "google_ads_daily"),
+        await loadChannelAdSpend(sb, "meta_ads_daily"),
+      ),
       shopifyAsOf: shiftDays(agentToday(), -1),
       shopifyTimezone: "America/New_York",
-      shopifyFormula: "merchandise + shipping_charged - est_outbound_ship - cogs",
+      shopifyFormula: "merchandise + shipping_charged - est_outbound_ship - cogs - google_ads - meta_ads",
       adsSource: adsByMonth.length
         ? "ads_monthly_spend (import) then ads_campaigns_daily.spend"
         : "ads_campaigns_daily.spend",
@@ -223,8 +229,30 @@ function shopifyDailyRows(raw: PnlRow[]): ShopifyPnlRow[] {
       outbound_per_order: num("outbound_per_order"),
       outbound_basis: typeof meta.outbound_basis === "string" ? meta.outbound_basis : undefined,
       cogs_basis: typeof meta.cogs_basis === "string" ? meta.cogs_basis : undefined,
+      units_known: typeof meta.outbound_units_known === "boolean" ? meta.outbound_units_known : undefined,
+      ad_spend: Number(r.ad_spend) || 0,
     };
   });
+}
+
+/** Campaign-grain Google or Meta spend. Missing table → []. Never Amazon PPC. */
+async function loadChannelAdSpend(
+  sb: SupabaseClient,
+  table: "google_ads_daily" | "meta_ads_daily",
+): Promise<ChannelAdSpend[]> {
+  try {
+    const rows = await paginate<{ metric_date: string; spend: number | null }>((from, to) =>
+      sb.from(table).select("metric_date,spend")
+        .order("metric_date", { ascending: true })
+        .range(from, to),
+    );
+    return rows.map((r) => ({
+      date: String(r.metric_date || "").slice(0, 10),
+      spend: Number(r.spend) || 0,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 async function loadMonthly(
