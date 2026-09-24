@@ -117,7 +117,7 @@ async function pageAsinCatalog(
   const rows: Record<string, unknown>[] = [];
   let offset = 0;
   while (true) {
-    const r = await sb.from("sku_costs").select("sku,asin,product_name")
+    const r = await sb.from("sku_costs").select("sku,asin,product_name,cogs_per_unit,updated_at")
       .order("sku", { ascending: true })
       .range(offset, offset + 999);
     if (r.error) {
@@ -135,6 +135,8 @@ async function pageAsinCatalog(
       asin: String(r.asin ?? "").trim(),
       sku: r.sku != null ? String(r.sku) : "",
       product_name: r.product_name != null ? String(r.product_name) : "",
+      cogs_per_unit: r.cogs_per_unit == null || r.cogs_per_unit === "" ? null : Number(r.cogs_per_unit),
+      updated_at: r.updated_at != null ? String(r.updated_at) : "",
     }))
     .filter((r) => r.asin);
 }
@@ -168,7 +170,7 @@ export async function GET() {
   try {
     const asOf = amazonAsOf();
     const today = amazonToday();
-    const start = windowStart(today, 14);
+    const start = windowStart(today, 60);
     const sb = getServerSupabase();
     const [campaigns, searchTerms, placements, metaLoaded, keywords, negatives, sqpWeekly, asinCatalog, organicSources, competitorKr] = await Promise.all([
       pageRows(sb, "ads_campaigns_daily", CAMP_COLS, start, today, "campaign_id"),

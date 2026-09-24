@@ -23,6 +23,23 @@
     "deo": 36,
     "balm": 36
   },
+  "harvest_min_clicks": 5,
+  "harvest_min_orders": 2,
+  "negate_min_clicks": 8,
+  "max_new_structures_per_week": 3,
+  "bleeders10_min_clicks": 10,
+  "bleeders20_sp_pp": 20,
+  "bleeders20_sb_pp": 10,
+  "window_mismatch_ratio": 0.25,
+  "ranking_agreements": [
+    {
+      "campaign_name": "Unscented Lip Balm - SP - Lip Balm - KWs - Exact",
+      "keyword": "lip balm",
+      "campaign_purpose": "ranking",
+      "ranking_query": "lip balm",
+      "ranking_success_metric": "organic_rank + sqp_impression_share + sqp_purchase_share"
+    }
+  ],
   "keep_alive": [
     "SP | TBL - 3Pck | B0CLHTKY3V |  Auto | Loose Match-TOS | SSG",
     "SP - KW (TOS) - Exact - Tallow Lip Balm KW",
