@@ -6,6 +6,7 @@
  */
 import bundled from "../../config/soldscope.json";
 import bundledTitles from "../../config/asin_titles.json";
+import { queryNormalized } from "./query-normalized";
 
 export const SOLDSCOPE_OBSERVE_ONLY = true;
 
@@ -87,10 +88,12 @@ export type SoldScopeSalesRow = {
   date?: string | null;
 };
 
-/** Same join key as src.amazon_ads.organic_rank.normalize_keyword. */
+/**
+ * Same join key as query_normalized: lowercase, trim, collapse whitespace,
+ * ASCII-fold, women→woman. man/men are not folded.
+ */
 export function normalizeKeyword(text: string | null | undefined): string {
-  if (!text) return "";
-  return String(text).trim().toLowerCase().replace(/\s+/g, " ");
+  return queryNormalized(text);
 }
 
 export function heroList(

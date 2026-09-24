@@ -10,6 +10,7 @@
 import bundled from "../../config/soldscope_competitors.json";
 import { familyHeroAsin, lookupOrganicRank, type OrganicRankJoin } from "@/lib/organic-rank-progress";
 import { normalizeKeyword } from "@/lib/soldscope-status";
+import { isBrandConquest, isSoftBodyButter } from "@/lib/query-normalized";
 
 function isEnabledExactState(status: string | null | undefined): boolean {
   const s = String(status ?? "").trim().toLowerCase();
@@ -191,7 +192,8 @@ export function classifyFamilyFit(
   }
   let soft = keywordMatchesAny(keyword, filters.softWatch.any_family)
     || keywordMatchesAny(keyword, filters.softWatch[family] ?? [])
-    || keywordMatchesAny(keyword, filters.softWatchBrands);
+    || keywordMatchesAny(keyword, filters.softWatchBrands)
+    || isSoftBodyButter(keyword);
   if (family === "deo" && !filters.deoHeroWomenFirst && keywordMatchesAny(keyword, ["lume.*for women"])) {
     soft = true;
   }
@@ -244,7 +246,127 @@ export type CompetitorOutlierRow = {
   suggested_lever: SuggestedLever;
   harvest_bias?: boolean;
   as_of: string | null;
+  organic_asin?: string | null;
+  sponsored_asin?: string | null;
+  family_fit?: "allow" | "deny" | "soft";
+  harvest_blocked_reason?: string;
+  suggested_lever_reason?: string;
+  competitor_on_serp_evidence?: string;
+  cap_slot?: number | null;
 };
+
+export function krContractDecision(row: {
+  keyword: string;
+  our_hero_family: CompetitorFamily;
+  already_bidding: "Y" | "N" | boolean;
+  suggested_lever?: SuggestedLever;
+  competitor_asin?: string | null;
+  organic_asin?: string | null;
+  sponsored_asin?: string | null;
+}): {
+  family_fit: "allow" | "deny" | "soft";
+  suggested_lever: SuggestedLever;
+  harvest_blocked_reason: string;
+  suggested_lever_reason: string;
+  competitor_on_serp_evidence: string;
+} {
+  const fit = classifyFamilyFit(row.keyword, row.our_hero_family);
+  let family_fit: "allow" | "deny" | "soft" = !fit.fit
+    ? "deny"
+    : (fit.softWatch || isSoftBodyButter(row.keyword) ? "soft" : "allow");
+  if (isSoftBodyButter(row.keyword) && family_fit === "allow") family_fit = "soft";
+  const already = row.already_bidding === "Y" || row.already_bidding === true;
+  const comp = String(row.competitor_asin ?? "").trim().toUpperCase();
+  const org = String(row.organic_asin ?? "").trim().toUpperCase();
+  const sp = String(row.sponsored_asin ?? "").trim().toUpperCase();
+  const evidence: string[] = [];
+  if (comp && org && org === comp) evidence.push(`organic_asin=${org}`);
+  if (comp && sp && sp === comp) evidence.push(`sponsored_asin=${sp}`);
+  const competitor_on_serp_evidence = evidence.join("|");
+  if (isBrandConquest(row.keyword)) {
+    return {
+      family_fit,
+      suggested_lever: already ? "skip" : "watch",
+      harvest_blocked_reason: "brand_conquest",
+      suggested_lever_reason: "competitor brand; never harvest_exact",
+      competitor_on_serp_evidence,
+    };
+  }
+  if (family_fit === "soft") {
+    return {
+      family_fit: "soft",
+      suggested_lever: already ? "skip" : "watch",
+      harvest_blocked_reason: "soft_watch",
+      suggested_lever_reason: "soft family-fit; never harvest_exact",
+      competitor_on_serp_evidence,
+    };
+  }
+  if (family_fit === "deny") {
+    return {
+      family_fit: "deny",
+      suggested_lever: "skip",
+      harvest_blocked_reason: "family_deny",
+      suggested_lever_reason: "family deny; never harvest_exact",
+      competitor_on_serp_evidence,
+    };
+  }
+  if (already) {
+    return {
+      family_fit: "allow",
+      suggested_lever: "skip",
+      harvest_blocked_reason: "already_bidding",
+      suggested_lever_reason: "exact already bidding",
+      competitor_on_serp_evidence,
+    };
+  }
+  if (row.suggested_lever === "harvest_exact") {
+    return {
+      family_fit: "allow",
+      suggested_lever: "harvest_exact",
+      harvest_blocked_reason: "",
+      suggested_lever_reason: "allow family-fit; harvest_exact is recommend-only and never writes Amazon",
+      competitor_on_serp_evidence,
+    };
+  }
+  return {
+    family_fit: "allow",
+    suggested_lever: row.suggested_lever === "skip" ? "skip" : "watch",
+    harvest_blocked_reason: "low_volume",
+    suggested_lever_reason: "below harvest bar; watch or skip only",
+    competitor_on_serp_evidence,
+  };
+}
+
+export function finalizeCompetitorKrRows(rows: CompetitorOutlierRow[]): CompetitorOutlierRow[] {
+  const familyCount: Record<string, number> = { lip: 0, balm: 0, deo: 0 };
+  let harvests = 0;
+  return rows.map((row, i) => {
+    const decision = krContractDecision(row);
+    let lever = decision.suggested_lever;
+    let blocked = decision.harvest_blocked_reason;
+    let reason = decision.suggested_lever_reason;
+    if (lever === "harvest_exact") {
+      const fam = row.our_hero_family;
+      if ((familyCount[fam] ?? 0) >= BLAKE_FAMILY_CAP || harvests >= BLAKE_TOTAL_CAP) {
+        lever = "watch";
+        blocked = "cap";
+        reason = "cap 5 per family / 15 total; watch only";
+      } else {
+        familyCount[fam] = (familyCount[fam] ?? 0) + 1;
+        harvests += 1;
+      }
+    }
+    return {
+      ...row,
+      suggested_lever: lever,
+      family_fit: decision.family_fit,
+      harvest_blocked_reason: lever === "harvest_exact" ? "" : blocked,
+      suggested_lever_reason: reason,
+      competitor_on_serp_evidence: decision.competitor_on_serp_evidence,
+      cap_slot: i + 1,
+    };
+  });
+}
 
 function asFamily(value: string | null | undefined): CompetitorFamily | null {
   const f = String(value ?? "").trim().toLowerCase();
@@ -388,13 +510,31 @@ export function buildCompetitorOutliers(args: {
     const present = competitorPresent(row, asin, BLAKE_FILTERS.requireCompetitorOnSerp);
     if (!present) continue;
     const fit = classifyFamilyFit(keyword, family, BLAKE_FILTERS);
-    if (!fit.fit) continue;
+    const brand = isBrandConquest(keyword);
+    if (!fit.fit && !brand) continue;
     const bid = classifyExactBidding(keyword, args.targets ?? [], extra);
     const opp = asInt(row.opportunity_score);
     const hero = familyHeroAsin(family);
     const ours = args.organicIndex
       ? lookupOrganicRank(args.organicIndex, keyword, hero)
       : null;
+    const suggested = suggestLever({
+      alreadyExact: bid.already,
+      present,
+      familyFit: fit.fit || brand,
+      opportunity: opp,
+      opportunityFloor: floor,
+      softWatch: fit.softWatch || isSoftBodyButter(keyword),
+    });
+    const decision = krContractDecision({
+      keyword,
+      our_hero_family: family,
+      already_bidding: bid.already_bidding,
+      suggested_lever: suggested,
+      competitor_asin: asin,
+      organic_asin: row.organic_asin,
+      sponsored_asin: row.sponsored_asin,
+    });
     rows.push({
       keyword,
       keyword_normalized: normalizeKeyword(keyword),
@@ -407,16 +547,15 @@ export function buildCompetitorOutliers(args: {
       competitor_sponsored_rank: asInt(row.sponsored_rank),
       our_organic_rank: ours?.organic_rank ?? null,
       already_bidding: bid.already_bidding,
-      suggested_lever: suggestLever({
-        alreadyExact: bid.already,
-        present,
-        familyFit: true,
-        opportunity: opp,
-        opportunityFloor: floor,
-        softWatch: fit.softWatch,
-      }),
+      suggested_lever: decision.suggested_lever,
       harvest_bias: fit.harvestBias,
       as_of: row.as_of ?? null,
+      organic_asin: row.organic_asin ?? null,
+      sponsored_asin: row.sponsored_asin ?? null,
+      family_fit: decision.family_fit,
+      harvest_blocked_reason: decision.harvest_blocked_reason,
+      suggested_lever_reason: decision.suggested_lever_reason,
+      competitor_on_serp_evidence: decision.competitor_on_serp_evidence,
     });
   }
 

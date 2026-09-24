@@ -20,6 +20,13 @@ const LEAD_HOURS = Number(spec.export_review_lead_hours ?? 6);
 const DIGEST_START = spec.digest_window_et?.start ?? "06:30";
 const DIGEST_END = spec.digest_window_et?.end ?? "08:00";
 
+export interface GnoPriorRowCounts {
+  auto_loose?: number;
+  broad_m?: number;
+  watch?: number;
+  sqp?: number;
+}
+
 export interface GnoExportStateRow {
   id?: string;
   last_export_at?: string | null;
@@ -28,6 +35,15 @@ export interface GnoExportStateRow {
   acked_p0_keys?: string[] | null;
   acked_p1_keys?: string[] | null;
   updated_at?: string | null;
+  /** Row counts written by the previous export. Absent until that pack stored them. */
+  last_row_counts?: GnoPriorRowCounts | null;
+}
+
+/** `gno-pack-YYYY-MM-DD_HHMM` from last_export_filename. Null when unknown. */
+export function packIdFromExportFilename(filename: string | null | undefined): string | null {
+  const base = String(filename ?? "").trim().replace(/\.zip$/i, "");
+  if (!base.startsWith("gno-pack-") || base.length <= "gno-pack-".length) return null;
+  return base;
 }
 
 export interface ExportBanner {

@@ -14,6 +14,7 @@ import {
   isReviewDue,
   mergeGnoAdsOntoState,
   p0Key,
+  packIdFromExportFilename,
   resolveGnoReviewClock,
   reviewWindowStart,
 } from "./gno-export-state";
@@ -22,6 +23,14 @@ import { GNO_NEXT_REVIEW_AT } from "./gno-ppc-watch";
 const P0 = { code: "KEEPER_MISSING", campaign_name: "Auto Loose", search_term: undefined };
 
 describe("GNO export due-state", () => {
+  test("prior pack id is the last export filename without the zip suffix", () => {
+    assert.equal(packIdFromExportFilename("gno-pack-2026-09-24_0824.zip"), "gno-pack-2026-09-24_0824");
+    assert.equal(packIdFromExportFilename("gno-pack-2026-09-24_0824"), "gno-pack-2026-09-24_0824");
+    assert.equal(packIdFromExportFilename(""), null);
+    assert.equal(packIdFromExportFilename(null), null);
+    assert.equal(packIdFromExportFilename("notes.txt"), null);
+  });
+
   test("P0 with no last export is EXPORT_NEEDED", () => {
     const b = evaluateExportNeed({
       now: new Date("2026-09-07T12:00:00-07:00"),

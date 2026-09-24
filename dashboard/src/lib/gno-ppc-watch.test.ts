@@ -69,6 +69,7 @@ import {
   watchCampaignsCsv,
   watchCampaignExportRows,
   watchListOf,
+  daysLiveAsOf,
   type CampaignDailyRow,
   type CampaignMeta,
   type KeywordTarget,
@@ -83,6 +84,9 @@ import {
   contractSearchTermTag,
   dedupeWatchCampaignRows,
   evaluatePackQuality,
+  organicTrackerCensus,
+  queryNormalized,
+  seriesCoversWindow,
 } from "./gno-pack-contract";
 
 const ROOT_JSON = path.join(process.cwd(), "..", "config", "gno_ppc_watch.json");
@@ -1030,7 +1034,9 @@ describe("GNO pack nits — closed-day L2 + Today config-only", () => {
     assert.equal(today?.family, "lip_3pk");
     assert.equal(today?.break_even_acos, 42);
     assert.equal(today?.acos_vs_be, null);
-    assert.equal(today?.cm_note, CM_NOTE);
+    assert.match(today?.cm_note ?? "", /config family CM BE \(not TACOS\)/);
+    assert.match(today?.cm_note ?? "", /days_live blank: created_at missing/);
+    assert.equal(today?.days_live ?? null, null);
     assert.equal(l2?.family, "lip_3pk");
     assert.equal(l2?.break_even_acos, 42);
   });
@@ -2085,5 +2091,444 @@ describe("GNO pack contract 2026-09-24", () => {
     assert.match(warn.notes, /SQP_LAG_DAYS 9/);
     assert.match(warn.notes, /fat_parent empty/);
     assert.match(warn.notes, /sku_costs missing/);
+  });
+});
+
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted && c === "\"" && line[i + 1] === "\"") {
+      cur += "\"";
+      i += 1;
+      continue;
+    }
+    if (c === "\"") {
+      quoted = !quoted;
+      continue;
+    }
+    if (c === "," && !quoted) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+function parseCsv(body: string): Record<string, string>[] {
+  const lines = body.trim().split(/\n/).filter((l) => l.length > 0);
+  const headers = splitCsvLine(lines[0] ?? "");
+  return lines.slice(1).map((line) => {
+    const cols = splitCsvLine(line);
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => { row[h] = cols[i] ?? ""; });
+    return row;
+  });
+}
+
+describe("Dave nine zipper-audit fixes", () => {
+  const kwName = "SP | DEO | B0CLHYY3BB | EX | tallow deodorant | TOS";
+
+  test("query_normalized folds women to woman and quotes Amazon ids", () => {
+    assert.equal(queryNormalized("  Déodorant   for   Women "), "deodorant for woman");
+    assert.equal(queryNormalized("tallow deodorant for men"), "tallow deodorant for men");
+    assert.equal(queryNormalized("for woman"), queryNormalized("for women"));
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: [camp(kwName, {
+        date: "2026-09-23", spend: 4, campaign_id: "123456789012345678", campaign_status: "ENABLED",
+      })],
+      campaignMeta: [{
+        campaign_id: "123456789012345678",
+        campaign_name: kwName,
+        state: "ENABLED",
+        portfolio_id: "998877665544332211",
+      }],
+      searchTerms: [],
+      placements: [],
+      keywordTargets: [{
+        campaign_id: "123456789012345678",
+        ad_group_id: "222333444555666777",
+        keyword_id: "111222333444555666",
+        campaign_name: kwName,
+        keyword_text: "deodorant for women",
+        match_type: "EXACT",
+        state: "ENABLED",
+        bid: 1,
+      }],
+    });
+    const watch = pack.files.find((f) => f.name === "watch_campaigns.csv")!.body;
+    const kw = pack.files.find((f) => f.name === "keyword_targets.csv")!.body;
+    assert.match(watch, /"123456789012345678"/);
+    assert.match(watch, /"998877665544332211"/);
+    assert.match(kw, /"111222333444555666"/);
+    assert.match(kw, /"222333444555666777"/);
+    const kwRows = parseCsv(kw);
+    assert.ok(kwRows.some((r) => r.query_normalized === "deodorant for woman"));
+    const readme = pack.files.find((f) => f.name === "README.txt")!.body;
+    assert.match(readme, /women→woman/);
+    assert.match(readme, /man\/men are not folded/);
+  });
+
+  test("L60 is blank unless daily facts cover 60 closed days; days_live comes from created_at", () => {
+    assert.equal(seriesCoversWindow(["2026-09-23"], "2026-07-26", "2026-09-23").covers, false);
+    assert.equal(seriesCoversWindow(["2026-07-26", "2026-09-23"], "2026-07-26", "2026-09-23").covers, true);
+    assert.equal(daysLiveAsOf("2026-09-01T17:00:00Z", "2026-09-24"), 23);
+
+    const short = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: [camp(kwName, {
+        date: "2026-09-23", spend: 91.01, clicks: 12, orders_14d: 0, campaign_id: "deo-1", campaign_status: "ENABLED",
+      })],
+      searchTerms: [{
+        date: "2026-09-23", campaign_id: "deo-1", campaign_name: kwName,
+        search_term: "tallow deodorant", keyword: "tallow deodorant", keyword_id: "deo-kw",
+        match_type: "EXACT", spend: 91.01, sales_14d: 0, orders_14d: 0, clicks: 12, impressions: 80,
+      }],
+      placements: [],
+      keywordTargets: [{
+        campaign_id: "deo-1", keyword_id: "deo-kw", campaign_name: kwName,
+        keyword_text: "tallow deodorant", match_type: "EXACT", state: "ENABLED", bid: 1.2,
+      }],
+    });
+    const shortKw = parseCsv(short.files.find((f) => f.name === "keyword_targets.csv")!.body)
+      .filter((r) => r.keyword_text === "tallow deodorant");
+    const shortL30 = shortKw.find((r) => r.window_label === "L30");
+    const shortL60 = shortKw.find((r) => r.window_label === "L60");
+    assert.equal(shortL30?.metrics_complete, "true");
+    assert.equal(shortL30?.spend, "91.01");
+    assert.equal(shortL60?.metrics_complete, "false");
+    assert.equal(shortL60?.spend, "");
+    assert.notEqual(shortL60?.spend, shortL30?.spend);
+    const shortBleed = short.files.find((f) => f.name === "bleeders_10.csv")!.body.trim().split("\n");
+    assert.equal(shortBleed.length, 1);
+    assert.match(short.files.find((f) => f.name === "README.txt")!.body, /Bleeders 1\.0 window \(60d\): .* untrusted coverage_days=/);
+    assert.match(short.files.find((f) => f.name === "watch_campaigns.csv")!.body, /days_live blank: created_at missing/);
+
+    const dated = "2026-09-10T12:00:00Z";
+    const long = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: [
+        camp(kwName, { date: "2026-07-26", spend: 10, clicks: 12, orders_14d: 0, campaign_id: "deo-1", campaign_status: "ENABLED" }),
+        camp(kwName, { date: "2026-09-23", spend: 91.01, clicks: 1, orders_14d: 0, campaign_id: "deo-1", campaign_status: "ENABLED" }),
+      ],
+      campaignMeta: [{ campaign_id: "deo-1", campaign_name: kwName, state: "ENABLED", created_at: dated }],
+      searchTerms: [
+        {
+          date: "2026-07-26", campaign_id: "deo-1", campaign_name: kwName,
+          search_term: "tallow deodorant", keyword: "tallow deodorant", keyword_id: "deo-kw",
+          match_type: "EXACT", spend: 10, sales_14d: 0, orders_14d: 0, clicks: 12, impressions: 40,
+        },
+        {
+          date: "2026-09-23", campaign_id: "deo-1", campaign_name: kwName,
+          search_term: "tallow deodorant", keyword: "tallow deodorant", keyword_id: "deo-kw",
+          match_type: "EXACT", spend: 91.01, sales_14d: 0, orders_14d: 0, clicks: 1, impressions: 20,
+        },
+      ],
+      placements: [],
+      keywordTargets: [{
+        campaign_id: "deo-1", keyword_id: "deo-kw", campaign_name: kwName,
+        keyword_text: "tallow deodorant", match_type: "EXACT", state: "ENABLED", bid: 1.2,
+        created_at: dated,
+      }],
+    });
+    const longKw = parseCsv(long.files.find((f) => f.name === "keyword_targets.csv")!.body)
+      .filter((r) => r.keyword_text === "tallow deodorant");
+    const longL60 = longKw.find((r) => r.window_label === "L60");
+    const longL30 = longKw.find((r) => r.window_label === "L30");
+    assert.equal(longL60?.metrics_complete, "true");
+    assert.equal(longL60?.spend, "101.01");
+    assert.equal(longL30?.spend, "91.01");
+    const todayKw = longKw.find((r) => r.window_label === "Today");
+    assert.equal(todayKw?.days_live, "14");
+    const bleed = parseCsv(long.files.find((f) => f.name === "bleeders_10.csv")!.body);
+    assert.equal(bleed.length, 1);
+    assert.equal(bleed[0].window_untrusted, "false");
+    assert.equal(bleed[0].metrics_complete, "true");
+    assert.equal(bleed[0].clicks_60, "13");
+    assert.equal(bleed[0].spend_60, "101.01");
+    assert.doesNotMatch(
+      long.files.find((f) => f.name === "README.txt")!.body,
+      /Bleeders 1\.0 window \(60d\): .*untrusted/,
+    );
+  });
+
+  test("spend_yesterday and SOP flags stay on Today rows", () => {
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: [
+        camp(kwName, { date: "2026-07-26", spend: 10, clicks: 12, budget: 20, campaign_id: "deo-1", campaign_status: "ENABLED" }),
+        camp(kwName, { date: "2026-09-22", spend: 3, budget: 20, campaign_id: "deo-1", campaign_status: "ENABLED" }),
+        camp(kwName, { date: "2026-09-23", spend: 91.01, clicks: 1, budget: 20, campaign_id: "deo-1", campaign_status: "ENABLED" }),
+      ],
+      searchTerms: [
+        {
+          date: "2026-07-26", campaign_id: "deo-1", campaign_name: kwName,
+          search_term: "tallow deodorant", keyword: "tallow deodorant", keyword_id: "deo-kw",
+          match_type: "EXACT", spend: 10, orders_14d: 0, clicks: 12, impressions: 40,
+        },
+        {
+          date: "2026-09-23", campaign_id: "deo-1", campaign_name: kwName,
+          search_term: "tallow deodorant", keyword: "tallow deodorant", keyword_id: "deo-kw",
+          match_type: "EXACT", spend: 5, orders_14d: 0, clicks: 1, impressions: 10,
+        },
+      ],
+      placements: [],
+      keywordTargets: [{
+        campaign_id: "deo-1", keyword_id: "deo-kw", campaign_name: kwName,
+        keyword_text: "tallow deodorant", match_type: "EXACT", state: "ENABLED", bid: 1.2,
+      }],
+    });
+    const watch = parseCsv(pack.files.find((f) => f.name === "watch_campaigns.csv")!.body)
+      .filter((r) => r.campaign_name === kwName);
+    const today = watch.find((r) => r.window_label === "Today");
+    assert.equal(today?.spend_yesterday, "91.01");
+    assert.equal(today?.spend_dby, "3");
+    assert.ok(today?.budget_util_yesterday);
+    assert.equal(today?.budget_capped_yesterday, "true");
+    for (const label of ["L1", "L2", "L7", "L30", "L60"]) {
+      const row = watch.find((r) => r.window_label === label);
+      assert.ok(row, label);
+      assert.equal(row?.spend_yesterday, "", label);
+      assert.equal(row?.spend_dby, "", label);
+      assert.equal(row?.budget_util_yesterday, "", label);
+      assert.equal(row?.budget_capped_yesterday, "", label);
+    }
+    const kw = parseCsv(pack.files.find((f) => f.name === "keyword_targets.csv")!.body)
+      .filter((r) => r.keyword_text === "tallow deodorant");
+    const todayKw = kw.find((r) => r.window_label === "Today");
+    assert.equal(todayKw?.bleeders10_flag, "true");
+    for (const label of ["L1", "L2", "L7", "L30", "L60"]) {
+      const row = kw.find((r) => r.window_label === label);
+      assert.equal(row?.bleeders10_flag, "", label);
+      assert.equal(row?.bleeders20_flag, "", label);
+      assert.equal(row?.lifetime_zero_flag, "", label);
+    }
+    assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /SOP flags bleeders10_flag/);
+  });
+
+  test("competitor brand conquest and body butter never harvest_exact", () => {
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: [],
+      searchTerms: [],
+      placements: [],
+      competitorOutliers: [
+        {
+          keyword: "native deodorant",
+          keyword_normalized: "native deodorant",
+          competitor_asin: "B0FTS2DC7Y",
+          our_hero_family: "deo",
+          volume: 280,
+          sfr: null,
+          opportunity: 170,
+          competitor_organic_rank: 5,
+          competitor_sponsored_rank: null,
+          our_organic_rank: null,
+          already_bidding: "N",
+          suggested_lever: "harvest_exact",
+          as_of: "2026-09-23",
+          organic_asin: "B0FTS2DC7Y",
+        },
+        {
+          keyword: "medicube collagen cream",
+          keyword_normalized: "medicube collagen cream",
+          competitor_asin: "B0MEDICUBE1",
+          our_hero_family: "balm",
+          volume: 400,
+          sfr: null,
+          opportunity: 200,
+          competitor_organic_rank: 3,
+          competitor_sponsored_rank: null,
+          our_organic_rank: null,
+          already_bidding: "N",
+          suggested_lever: "harvest_exact",
+          as_of: "2026-09-23",
+          sponsored_asin: "B0MEDICUBE1",
+        },
+        {
+          keyword: "whipped body butter",
+          keyword_normalized: "whipped body butter",
+          competitor_asin: "B0BUTTER111",
+          our_hero_family: "balm",
+          volume: 700,
+          sfr: null,
+          opportunity: 220,
+          competitor_organic_rank: 4,
+          competitor_sponsored_rank: null,
+          our_organic_rank: null,
+          already_bidding: "N",
+          suggested_lever: "harvest_exact",
+          as_of: "2026-09-23",
+          organic_asin: "B0BUTTER111",
+        },
+      ],
+    });
+    const rows = parseCsv(pack.files.find((f) => f.name === "competitor_kr_outliers.csv")!.body);
+    const byKw = Object.fromEntries(rows.map((r) => [r.keyword, r]));
+    for (const keyword of ["native deodorant", "medicube collagen cream", "whipped body butter"]) {
+      assert.notEqual(byKw[keyword].suggested_lever, "harvest_exact", keyword);
+      assert.ok(byKw[keyword].family_fit, keyword);
+      assert.ok(byKw[keyword].competitor_on_serp_evidence, keyword);
+      assert.ok(byKw[keyword].cap_slot, keyword);
+      assert.ok(byKw[keyword].suggested_lever_reason, keyword);
+      assert.ok(byKw[keyword].harvest_blocked_reason, keyword);
+    }
+    assert.equal(byKw["native deodorant"].harvest_blocked_reason, "brand_conquest");
+    assert.equal(byKw["medicube collagen cream"].harvest_blocked_reason, "brand_conquest");
+    assert.equal(byKw["whipped body butter"].family_fit, "soft");
+    assert.equal(byKw["whipped body butter"].harvest_blocked_reason, "soft_watch");
+    assert.match(byKw["native deodorant"].competitor_on_serp_evidence, /organic_asin=B0FTS2DC7Y/);
+    assert.match(byKw["medicube collagen cream"].competitor_on_serp_evidence, /sponsored_asin=B0MEDICUBE1/);
+  });
+
+  test("organic snapshot joins Exact L7 spend and counts phrases apart from rows", () => {
+    const phrase = "tallow lip balm";
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: [camp(kwName, {
+        date: "2026-09-23", spend: 12.5, campaign_id: "deo-1", campaign_status: "ENABLED",
+      })],
+      searchTerms: [{
+        date: "2026-09-23", campaign_id: "deo-1", campaign_name: kwName,
+        search_term: phrase, keyword: phrase, keyword_id: "kw-1",
+        match_type: "EXACT", spend: 12.5, orders_14d: 1, clicks: 4, impressions: 40,
+      }],
+      placements: [],
+      keywordTargets: [{
+        campaign_id: "deo-1", keyword_id: "kw-1", campaign_name: kwName,
+        keyword_text: phrase, match_type: "EXACT", state: "ENABLED", bid: 1,
+      }],
+      organicSnapshots: [
+        { phrase, asin: "B0CLHTF8YN", organic_position: 8, as_of: "2026-09-23", group_id: 3537 },
+        { phrase, asin: "B0DQFKMJFY", organic_position: 12, as_of: "2026-09-23", group_id: 3553 },
+        { phrase: "lonely phrase", asin: "B0HBSZ71XQ", organic_position: 20, as_of: "2026-09-23", group_id: 3624 },
+      ],
+    });
+    const organic = parseCsv(pack.files.find((f) => f.name === "organic_rank_snapshot.csv")!.body);
+    const paid = organic.filter((r) => r.query_normalized === phrase);
+    assert.ok(paid.length >= 2);
+    assert.ok(paid.every((r) => r.paid_spend_l7_on_phrase === "12.50"));
+    const lonely = organic.find((r) => r.query_normalized === "lonely phrase");
+    assert.equal(lonely?.paid_spend_l7_on_phrase, "");
+    const census = organicTrackerCensus(
+      [
+        { phrase, group_id: 3537 },
+        { phrase, group_id: 3553 },
+        { phrase: "lonely phrase", group_id: 3624 },
+      ],
+      organic,
+    );
+    assert.equal(census.phrases, 2);
+    assert.ok(census.snapshot_rows > census.phrases);
+    const readme = pack.files.find((f) => f.name === "README.txt")!.body;
+    assert.match(readme, /organic_groups: 3 \/ phrases: 2 \/ snapshot_rows: \d+/);
+    assert.match(readme, /multi-ASIN/);
+    assert.equal(census.groups, 3);
+  });
+
+  test("prior pack id, outcomes carry-forward, and harvest floor are always printed", () => {
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: [],
+      searchTerms: [],
+      placements: [],
+      priorPack: {
+        id: "gno-pack-2026-09-24_0824",
+        counts: { auto_loose: 10, broad_m: 4, watch: 20, sqp: 3 },
+      },
+      ledger: [{
+        created_at: "2026-09-20T15:00:00Z",
+        pack_date: "2026-09-20",
+        campaign_id: "555666777888999000",
+        campaign_name: kwName,
+        search_term: "deodorant for women",
+        proposed_tag: "WATCH",
+        dave_action: "hold",
+        source: "ui",
+        notes: "desk note",
+      }],
+    });
+    const readme = pack.files.find((f) => f.name === "README.txt")!.body;
+    const manifest = JSON.parse(pack.files.find((f) => f.name === "pack_manifest.json")!.body);
+    assert.equal(manifest.prior_pack_id, "gno-pack-2026-09-24_0824");
+    assert.equal(manifest.row_count_deltas.auto_loose.prior, 10);
+    assert.match(readme, /prior_pack_id: gno-pack-2026-09-24_0824/);
+    assert.match(readme, /auto_loose BEFORE 10 AFTER/);
+    assert.match(readme, /harvest_min_clicks: 5/);
+    assert.match(readme, /harvest_min_orders: 2/);
+    assert.match(readme, /max_new_structures_per_week: 3/);
+    assert.match(readme, /adds_this_week_already: unknown/);
+    assert.match(readme, /remaining_slots: 0/);
+    assert.match(readme, /harvest_queue_rows: 0/);
+    const outcomes = parseCsv(pack.files.find((f) => f.name === "gno_outcomes.csv")!.body);
+    assert.equal(outcomes.length, 1);
+    assert.equal(outcomes[0].dave_action, "hold");
+    assert.equal(outcomes[0].query_normalized, "deodorant for woman");
+    assert.equal(outcomes[0].implemented, "unknown");
+    assert.equal(outcomes[0].campaign_id, "555666777888999000");
+    assert.match(pack.files.find((f) => f.name === "gno_outcomes.csv")!.body, /"555666777888999000"/);
+
+    const empty = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: [],
+      searchTerms: [],
+      placements: [],
+      priorPack: { id: "gno-pack-2026-09-24_0824" },
+    });
+    const emptyOut = empty.files.find((f) => f.name === "gno_outcomes.csv")!.body.trim().split("\n");
+    assert.equal(emptyOut.length, 1);
+    assert.match(empty.files.find((f) => f.name === "README.txt")!.body, /outcomes_empty_reason:/);
+    assert.match(empty.files.find((f) => f.name === "README.txt")!.body, /harvest_queue_rows: 0/);
+  });
+
+  test("sibling audit is one row per phrase and README lists every Today meta_sync=false name", () => {
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: NEW_EXACT.map((name) => camp(name, {
+        date: "2026-09-23", campaign_status: "", campaign_id: "",
+      })),
+      searchTerms: [],
+      placements: [],
+      keywordTargets: [
+        { campaign_id: "111", campaign_name: "Unscented Lip Balm - SP - Lip Balm - KWs - Exact", keyword_text: "lip balm", match_type: "EXACT", state: "ENABLED", bid: 1.5 },
+        { campaign_id: "222", campaign_name: "Assorted Lip Balm - SP - Lip Balm - KWs - Exact", keyword_text: "Lip  Balm", match_type: "EXACT", state: "ENABLED", bid: 1.1 },
+        { campaign_id: "333", campaign_name: "Peppermint Lip Balm - SP - Lip Balm - KWs - Exact", keyword_text: "lip balm", match_type: "EXACT", state: "ENABLED", bid: 0.9 },
+        { campaign_id: "444", campaign_name: "Women Exact A", keyword_text: "deodorant for women", match_type: "EXACT", state: "ENABLED", bid: 0.8 },
+        { campaign_id: "555", campaign_name: "Woman Exact B", keyword_text: "deodorant for woman", match_type: "EXACT", state: "ENABLED", bid: 0.7 },
+      ],
+    });
+    const audit = parseCsv(pack.files.find((f) => f.name === "structure_audit.csv")!.body)
+      .filter((r) => r.finding_type === "sibling_exact_auction");
+    const lip = audit.filter((r) => r.evidence.includes("lip balm"));
+    assert.equal(lip.length, 1);
+    assert.match(lip[0].entity_names, /Unscented Lip Balm/);
+    assert.match(lip[0].entity_names, /Assorted Lip Balm/);
+    assert.match(lip[0].entity_names, /Peppermint Lip Balm/);
+    assert.match(lip[0].entity_ids, /111/);
+    assert.match(lip[0].entity_ids, /222/);
+    assert.match(lip[0].entity_ids, /333/);
+    const woman = audit.filter((r) => r.evidence.includes("deodorant for woman"));
+    assert.equal(woman.length, 1);
+    assert.match(woman[0].entity_names, /Women Exact A/);
+    assert.match(woman[0].entity_names, /Woman Exact B/);
+    const readme = pack.files.find((f) => f.name === "README.txt")!.body;
+    const line = readme.split("\n").find((l) => l.startsWith("NEW_EXACT / flavor rows with meta_sync=false:"));
+    assert.ok(line);
+    for (const name of NEW_EXACT) assert.match(line!, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   });
 });

@@ -17,7 +17,8 @@ import {
   type SearchTermRow,
   type SqpSliceRow,
 } from "@/lib/gno-ppc-watch";
-import { ackPayload, exportBannerFromState } from "@/lib/gno-export-state";
+import { ackPayload, exportBannerFromState, packIdFromExportFilename } from "@/lib/gno-export-state";
+import { csvDataRowCount } from "@/lib/gno-pack-contract";
 import { loadGnoExportState, loadGnoLedger, saveGnoExportAck } from "@/lib/gno-store";
 import { loadOrganicRankSources, loadSoldScopeCompetitorKr } from "@/lib/soldscope-load";
 import { buildOrganicRankJoinIndex } from "@/lib/organic-rank-progress";
@@ -208,6 +209,7 @@ async function buildGnoExportZip(now: Date): Promise<Uint8Array> {
     const campRows = campaigns as unknown as CampaignDailyRow[];
     const termRows = searchTerms as unknown as SearchTermRow[];
     const placeRows = placements as unknown as PlacementRow[];
+    const priorId = packIdFromExportFilename(exportState?.last_export_filename);
     const pack = buildGnoPack({
       asOf,
       today,
@@ -228,6 +230,9 @@ async function buildGnoExportZip(now: Date): Promise<Uint8Array> {
         extraExact: extraExactFromWatch(NEW_EXACT),
         organicIndex: buildOrganicRankJoinIndex(organicSources.snapshots),
       }),
+      priorPack: priorId || exportState?.last_row_counts
+        ? { id: priorId ?? undefined, counts: exportState?.last_row_counts ?? undefined }
+        : null,
     });
     const alerts = evaluateGnoAlerts({
       asOf, today, now, campaigns: campRows, searchTerms: termRows, placements: placeRows,
@@ -239,7 +244,16 @@ async function buildGnoExportZip(now: Date): Promise<Uint8Array> {
     const p0 = alerts.filter((a) => a.priority === "P0");
     const p1 = alerts.filter((a) => a.priority === "P1");
     const banner = exportBannerFromState(exportState, { now, p0, p1 });
-    await saveGnoExportAck(ackPayload(banner, p0, p1, pack.filename, now));
+    const countOf = (name: string) => csvDataRowCount(pack.files.find((f) => f.name === name)?.body ?? "");
+    await saveGnoExportAck({
+      ...ackPayload(banner, p0, p1, pack.filename, now),
+      last_row_counts: {
+        auto_loose: countOf("auto_loose_search_terms.csv"),
+        broad_m: countOf("broad_m_search_terms.csv"),
+        watch: countOf("watch_campaigns.csv"),
+        sqp: countOf("sqp_weekly_slice.csv"),
+      },
+    });
     const zip = zipStore(pack.files);
     return zip;
   } catch (e) {
