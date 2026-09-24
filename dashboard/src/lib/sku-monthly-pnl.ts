@@ -6,13 +6,17 @@
  *
  * When sales_daily / pnl_daily covers a month completely (closed-day
  * count matches the calendar, with slack only on the in-progress month)
- * and Amazon gross is materially higher than sales_by_sku, that month
- * is replaced by the daily account totals — including closed months
- * such as July. Headline sales / units / contribution come from stored
- * pnl_daily account rows, not a re-derived fee formula and not
- * amazon_net_proceeds (settlement posted-date). SKU Economics is a
- * check, not an ingest. Incomplete daily windows stay on sales_by_sku.
- * Shopify is never mixed in.
+ * and Amazon gross is materially higher than sales_by_sku, that month's
+ * dollars are replaced by the daily account totals — including closed
+ * months such as July. Headline sales come from sales_daily when it
+ * beats pnl_daily. Units come only from pnl_daily days that cover the
+ * month. sales_daily has no units column; a sales_daily-only day is not
+ * a measured 0. If pnl_daily unit coverage is absent, zero, or shorter
+ * than the month (Aug/Apr-style, and May's 4 pnl days), keep
+ * sales_by_sku units. Do not invent the missing days' units.
+ * amazon_net_proceeds (settlement posted-date) is never Month
+ * contribution. SKU Economics is a check, not an ingest. Incomplete
+ * daily windows stay on sales_by_sku. Shopify is never mixed in.
  *
  * Ads: an imported ads_monthly_spend row wins for that month (full
  * SKU Economics / Ads Console month). Otherwise campaign days from
@@ -68,6 +72,11 @@ export interface DailyAccountRow {
   /** Settlement posted-date. Never rolled into Month contribution. */
   amazon_net_proceeds?: number | null;
   channel?: string;
+  /**
+   * pnl_daily account row vs a sales_daily dollar row with no unit truth.
+   * sales_only days must not be summed as measured zero units.
+   */
+  units_basis?: "pnl_daily" | "sales_only";
 }
 
 /** Amazon sales_daily row — sales truth; units come from pnl_daily. */
@@ -399,6 +408,7 @@ export function mergeSalesDaily(
       est_contribution: r.est_contribution,
       net_after_ads: r.net_after_ads,
       channel: "amazon",
+      units_basis: "pnl_daily",
     });
   }
   for (const r of salesDaily) {
@@ -409,7 +419,16 @@ export function mergeSalesDaily(
     const sales = Number(r.gross_sales) || 0;
     const existing = byDate.get(date);
     if (!existing) {
-      byDate.set(date, { date, gross_sales: sales, units: 0, est_cogs: 0, channel: "amazon" });
+      // sales_daily has dollars only. units: 0 here means "unknown",
+      // not a counted zero — overlay must not sum these into the month.
+      byDate.set(date, {
+        date,
+        gross_sales: sales,
+        units: 0,
+        est_cogs: 0,
+        channel: "amazon",
+        units_basis: "sales_only",
+      });
     } else if (sales > existing.gross_sales + DAILY_SALES_MATERIAL_DELTA) {
       existing.gross_sales = sales;
     }
@@ -460,8 +479,9 @@ function overlayDailyMonths(opts: {
   for (const [ym, days] of accountByYm) {
     if (!dailyCoversMonth(days.length, ym, opts.asOf)) continue;
     const dailySales = money(days.reduce((s, r) => s + (Number(r.gross_sales) || 0), 0));
-    const dailyUnits = days.reduce((s, r) => s + (Number(r.units) || 0), 0);
     const existing = monthByYm.get(ym);
+    const unitChoice = unitsForDailyOverlay(days, existing, ym, opts.asOf);
+    const units = unitChoice.units;
     const skuSales = existing?.gross_sales ?? 0;
     const moreComplete = dailySales > skuSales + DAILY_SALES_MATERIAL_DELTA;
     // Overlay any month with complete daily coverage when daily Amazon
@@ -482,7 +502,10 @@ function overlayDailyMonths(opts: {
     // (July: $103,140.12 / 7,405 / $21,757.74). Recalculate only when the
     // account rows have no contribution — never from amazon_net_proceeds
     // (settlement posted-date) and never from SKU Economics net proceeds.
-    const stored = storedAccountEconomics(days);
+    // Stored pnl economics already match a full pnl unit month. When units
+    // fall back to sales_by_sku, re-derive fees from those units instead of
+    // a stored contribution that was built on missing or zero units.
+    const stored = unitChoice.fromPnl ? storedAccountEconomics(days) : null;
     let cogs: number;
     let referral: number;
     let fba: number;
@@ -496,10 +519,14 @@ function overlayDailyMonths(opts: {
       contribution = stored.contribution;
     } else {
       referral = money(dailySales * opts.referralPct);
-      fba = money(dailyUnits * opts.fbaPerUnit);
+      fba = money(units * opts.fbaPerUnit);
       adsSpend = opts.adsSpend[ym] ?? existing?.ad_spend ?? 0;
       if (skuCogs != null) cogs = skuCogs;
-      else if (existing && skuSales > 0) cogs = money(existing.est_cogs * (dailySales / skuSales));
+      else if (!unitChoice.fromPnl && existing) {
+        // Units stayed on sales_by_sku, so COGS stays units × sku_costs.
+        // Scaling COGS with the higher sales_daily dollars would invent cost.
+        cogs = existing.est_cogs;
+      } else if (existing && skuSales > 0) cogs = money(existing.est_cogs * (dailySales / skuSales));
       else cogs = money(days.reduce((s, r) => s + (Number(r.est_cogs) || 0), 0));
     }
 
@@ -507,7 +534,7 @@ function overlayDailyMonths(opts: {
       ym,
       date: existing?.date ?? `${ym}-01`,
       sales: dailySales,
-      units: dailyUnits,
+      units,
       referral,
       fba,
       cogs,
@@ -528,6 +555,26 @@ function overlayDailyMonths(opts: {
       monthByYm.set(ym, next);
     }
   }
+}
+
+/**
+ * Unit replacement is allowed only from pnl_daily days that themselves
+ * cover the month and sum to a non-zero count. sales_daily-only days
+ * are not measured zeros. Partial pnl coverage (May 2026: 4 days) keeps
+ * sales_by_sku units rather than publishing the partial sum.
+ */
+function unitsForDailyOverlay(
+  days: DailyAccountRow[],
+  existing: MonthlyPnlRow | undefined,
+  ym: string,
+  asOf: string | null,
+): { units: number; fromPnl: boolean } {
+  const pnlDays = days.filter((r) => r.units_basis !== "sales_only");
+  const pnlUnits = pnlDays.reduce((s, r) => s + (Number(r.units) || 0), 0);
+  const pnlCovers = dailyCoversMonth(pnlDays.length, ym, asOf) && pnlUnits > 0;
+  if (pnlCovers) return { units: pnlUnits, fromPnl: true };
+  if (existing && existing.units > 0) return { units: existing.units, fromPnl: false };
+  return { units: pnlUnits, fromPnl: false };
 }
 
 function buildDailySkuLines(
