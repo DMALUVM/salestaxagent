@@ -1457,6 +1457,208 @@ def test_sync_keeps_submitted_and_resolved_out_of_needs_case(monkeypatch):
     assert is_active_inbound_alert(fresh) is True
 
 
+def test_sync_keeps_filed_zero_recv_and_does_not_revive_receipts_cover_ghosts(monkeypatch):
+    """Sep 24 resurrection: Sellerboard 0-recv dumps must not refill Needs-case.
+
+    FBA19D5FJT6G / FBA19D5FGB0K were auto receipts_cover (archive) and came
+    back as ~2117 units after case-sync. A filed / reconciled / not_pursuing
+    mark stays out of the open list even when receipt netting leaves a
+    remainder and the stored event_key is a legacy mixed-case key.
+    A 0-recv receipts_cover ghost with no shipment-keyed remainder stays
+    cleared. A reference-id net short (10 then -1) still reopens.
+    """
+    sku = "DDPE0004SHOP"
+
+    def _sb(sid, received, short, sku_raw=sku):
+        return {
+            "shipment_id": sid,
+            "sku": sku_raw,
+            "quantity_shipped": 540,
+            "quantity_received": received,
+            "quantity_short": short,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-07-02",
+            "fulfillment_center": "HLI2",
+        }
+
+    def _existing(sid, status, note, dismissed_at, event_key=None, sku_raw=sku):
+        return {
+            "event_key": event_key or f"inbound|{sid}|{sku_raw}",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-07-02",
+            "sku": sku_raw,
+            "quantity": 0 if status == STATUS_FOUND_OFFSET else 540,
+            "quantity_shipped": 540,
+            "quantity_received": 540 if status == STATUS_FOUND_OFFSET else 0,
+            "reason": "Lost_Inbound",
+            "shipment_id": sid,
+            "status": status,
+            "dismissed_at": dismissed_at,
+            "dismissed_note": note,
+            "fulfillment_center": "HLI2",
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-07-02",
+        }
+
+    tables = {
+        "fba_inventory_adjustments": [],
+        "inventory_inbound_shipments": [],
+        "inventory_inbound_shipment_items": [],
+        "sellerboard_inbound_discrepancies": [
+            _sb("FBA19D5FJT6G", 0, 540),
+            _sb("FBA19D5FGB0K", 0, 540, "DDPE0002Shop"),
+            _sb("FBA19DGCDYJW", 0, 540, "DDPE0003Shop"),
+            _sb("FBA19GHOST00", 0, 540),
+            _sb("FBA19COVER1", 0, 540),
+        ],
+        "fba_case_events": [
+            _existing("FBA19D5FJT6G", STATUS_CASE_SUBMITTED, "filed", "2026-09-23T12:00:00Z"),
+            _existing(
+                "FBA19D5FGB0K",
+                STATUS_CASE_SUBMITTED,
+                "filed",
+                "2026-09-24T14:41:15Z",
+                event_key="inbound|fba19d5fgb0k|ddpe0002shop",
+                sku_raw="DDPE0002Shop",
+            ),
+            _existing(
+                "FBA19DGCDYJW",
+                STATUS_FOUND_OFFSET,
+                "reconciled",
+                "2026-09-23T12:00:00Z",
+                sku_raw="DDPE0003Shop",
+            ),
+            _existing(
+                "FBA19GHOST00",
+                STATUS_FOUND_OFFSET,
+                CLEAR_NOTE_RECEIPTS_COVER,
+                "2026-09-20T12:00:00Z",
+            ),
+            _existing(
+                "FBA19COVER1",
+                STATUS_FOUND_OFFSET,
+                CLEAR_NOTE_RECEIPTS_COVER,
+                "2026-08-21T12:00:00Z",
+            ),
+        ],
+        "fba_reimbursements": [],
+        "inventory_events": [
+            {
+                "event_type": "Receipts",
+                "event_date": "2026-06-26",
+                "sku": "DDPE0002SHOP",
+                "quantity": 40,
+                "reference_id": "FBA19D5FGB0K",
+            },
+            {
+                "event_type": "Receipts",
+                "event_date": "2026-08-01",
+                "sku": sku,
+                "quantity": 540,
+                "reference_id": "FBA19COVER1",
+            },
+            {
+                "event_type": "Receipts",
+                "event_date": "2026-08-03",
+                "sku": sku,
+                "quantity": -1,
+                "reference_id": "FBA19COVER1",
+            },
+        ],
+    }
+
+    def fetch_all(table, *args, **kwargs):
+        return list(tables.get(table, []))
+
+    monkeypatch.setattr("src.db.fetch_all", fetch_all)
+    monkeypatch.setattr(
+        "src.reimbursements.case_queue.fetch_amazon_inbound_qty",
+        lambda *args, **kwargs: ([], {}),
+    )
+
+    summary = sync_case_queue(days=120, dry_run=True, fetch_ledger=False)
+    by_sid = {e["shipment_id"]: e for e in summary["events"]}
+    needs = [e for e in summary["events"] if e.get("status") == STATUS_NEEDS_CASE]
+
+    filed = by_sid["FBA19D5FJT6G"]
+    assert filed["status"] == STATUS_CASE_SUBMITTED
+    assert filed["dismissed_note"] == "filed"
+    assert filed["dismissed_at"] == "2026-09-23T12:00:00Z"
+    assert is_active_inbound_alert(filed) is False
+
+    drifted = by_sid["FBA19D5FGB0K"]
+    assert drifted["status"] == STATUS_CASE_SUBMITTED
+    assert drifted["event_key"] == "inbound|fba19d5fgb0k|ddpe0002shop"
+    assert drifted["dismissed_note"] == "filed"
+    assert is_active_inbound_alert(drifted) is False
+
+    reconciled = by_sid["FBA19DGCDYJW"]
+    assert reconciled["status"] == STATUS_FOUND_OFFSET
+    assert reconciled["dismissed_note"] == "reconciled"
+    assert reconciled["dismissed_at"] == "2026-09-23T12:00:00Z"
+    assert is_active_inbound_alert(reconciled) is False
+
+    ghost = by_sid["FBA19GHOST00"]
+    assert ghost["status"] == STATUS_FOUND_OFFSET
+    assert ghost["dismissed_note"] == CLEAR_NOTE_RECEIPTS_COVER
+    assert ghost["quantity"] == 0
+    assert is_active_inbound_alert(ghost) is False
+
+    reopened = by_sid["FBA19COVER1"]
+    assert reopened["status"] == STATUS_NEEDS_CASE
+    assert reopened["quantity"] == 1
+    assert is_active_inbound_alert(reopened) is True
+
+    assert [e["shipment_id"] for e in needs] == ["FBA19COVER1"]
+
+
+def test_not_pursuing_stays_out_of_needs_case_after_rebuild():
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 6, 1),
+        end=date(2026, 9, 24),
+        sellerboard_rows=[{
+            "shipment_id": "FBA19FHXV3N6",
+            "sku": "DDPE0003Shop",
+            "quantity_shipped": 540,
+            "quantity_received": 0,
+            "quantity_short": 540,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-07-02",
+            "fulfillment_center": "GYR2",
+        }],
+        existing_events=[{
+            "event_key": "inbound|FBA19FHXV3N6|DDPE0003SHOP",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-07-02",
+            "sku": "DDPE0003SHOP",
+            "quantity": 538,
+            "quantity_shipped": 540,
+            "quantity_received": 2,
+            "reason": "Lost_Inbound",
+            "shipment_id": "FBA19FHXV3N6",
+            "status": STATUS_CASE_SUBMITTED,
+            "dismissed_at": "2026-09-24T14:41:47Z",
+            "dismissed_note": "not_pursuing",
+            "fulfillment_center": "GYR2",
+        }],
+        receipt_events=[{
+            "event_type": "Receipts",
+            "event_date": "2026-06-27",
+            "sku": "DDPE0003SHOP",
+            "quantity": 2,
+            "reference_id": "FBA19FHXV3N6",
+        }],
+    )
+    row = next(e for e in events if e["shipment_id"] == "FBA19FHXV3N6")
+    assert row["status"] == STATUS_CASE_SUBMITTED
+    assert row["dismissed_note"] == "not_pursuing"
+    assert is_active_inbound_alert(row) is False
+
+
 def test_real_recv_short_kept_as_needs_case():
     """Real partial receive (e.g. 538/540) stays Needs-case — not a ghost."""
     events = build_case_events(
