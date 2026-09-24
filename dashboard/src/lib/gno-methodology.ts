@@ -30,12 +30,22 @@ export const GNO_OUTCOME_CSV_HEADERS = [
   "created_at",
   "pack_date",
   "dave_action",
+  "campaign_id",
   "campaign_name",
   "search_term",
+  "query_normalized",
   "term_family",
   "proposed_tag",
   "source",
   "notes",
+  "implemented",
+  "implemented_at",
+  "plus_72h_start",
+  "plus_72h_end",
+  "plus_72h_spend",
+  "plus_72h_orders",
+  "plus_72h_acos",
+  "rollback",
 ] as const;
 
 export interface GnoRule {
@@ -263,7 +273,9 @@ export function gnoDecisionRulesTxt(): string {
     "Source: tallowbourn-ppc GNO-METHODOLOGY.md (Sep 12–13 2026 native capture).",
     "Dave's current instructions and named campaign agreements take precedence.",
     "This desk's family CM BE (lip 42 / deo 36 / balm 36) is SoT — not the 37% Bleeders 2.0 scenario.",
-    `Deep advisor (152-source library, execution center, SKU economics): ${TALLOWBOURN_PPC_DESK.url}`,
+    "Rules capture pack_date: 2026-09-24.",
+    "Ranking agreement: Unscented Lip Balm - SP - Lip Balm - KWs - Exact, Exact keyword lip balm, purpose=ranking. Exempt from ACOS cuts, Bleeders 2.0 pause suggestions, and DAY5 auto-pause. Score organic_rank + sqp_impression_share + sqp_purchase_share. Still emit spend. Never raise budget.",
+    `Deep advisor (do not clone the 152-source library): ${TALLOWBOURN_PPC_DESK.url}`,
     "",
   ];
   for (const r of GNO_DECISION_RULES) {
@@ -296,12 +308,22 @@ export function gnoOutcomesCsv(rows: GnoLedgerRow[]): string {
       created_at: r.created_at ?? "",
       pack_date: r.pack_date ?? "",
       dave_action: r.dave_action,
+      campaign_id: "",
       campaign_name: r.campaign_name ?? "",
       search_term: r.search_term ?? "",
+      query_normalized: String(r.search_term ?? "").replace(/\s+/g, " ").trim().toLowerCase(),
       term_family: r.term_family ?? "",
       proposed_tag: r.proposed_tag ?? "",
       source: r.source ?? "",
       notes: r.notes ?? "",
+      implemented: "unknown",
+      implemented_at: "",
+      plus_72h_start: "",
+      plus_72h_end: "",
+      plus_72h_spend: "",
+      plus_72h_orders: "",
+      plus_72h_acos: "",
+      rollback: "",
     };
     lines.push(GNO_OUTCOME_CSV_HEADERS.map((h) => csvEscape(rec[h])).join(","));
   }
