@@ -12,7 +12,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { exportBannerFromState, mergeGnoAdsOntoState } from "@/lib/gno-export-state";
 import {
   exportFailureMessage,
+  exportThrownMessage,
   filenameFromDisposition,
+  interpretExportBody,
   responseLooksLikeZip,
   triggerZipDownload,
 } from "@/lib/gno-export-download";
@@ -255,7 +257,7 @@ export function PpcGnoWatch() {
   const [adsLoading, setAdsLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [noticeTone, setNoticeTone] = useState<"ok" | "err">("ok");
+  const [noticeTone, setNoticeTone] = useState<"ok" | "err" | "wait">("ok");
   const [sqpNotice, setSqpNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [queued, setQueued] = useState<string[]>([]);
   const [sqpBusy, setSqpBusy] = useState(false);
@@ -322,16 +324,30 @@ export function PpcGnoWatch() {
     }).catch(() => { /* localStorage already holds the checkoff */ });
   }
 
-  function showNotice(text: string | null, tone: "ok" | "err" = "ok") {
+  function showNotice(text: string | null, tone: "ok" | "err" | "wait" = "ok") {
     setNotice(text);
     setNoticeTone(tone);
   }
 
   async function exportPack() {
     setExporting(true);
-    showNotice(null);
+    showNotice(
+      "Pack is building on the server. Keep this tab open — the zip saves when it finishes.",
+      "wait",
+    );
+    const ctrl = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ctrl.abort();
+    }, 240_000);
+    let phase: "headers" | "body" = "headers";
     try {
-      const res = await fetch("/api/ppc/gno-export");
+      const res = await fetch("/api/ppc/gno-export", {
+        signal: ctrl.signal,
+        credentials: "same-origin",
+      });
+      phase = "body";
       const ct = res.headers.get("content-type") ?? "";
       const disposition = res.headers.get("content-disposition");
       if (!res.ok || !responseLooksLikeZip(ct, disposition)) {
@@ -339,18 +355,19 @@ export function PpcGnoWatch() {
         showNotice(exportFailureMessage(res.status, ct, text), "err");
         return;
       }
-      const blob = await res.blob();
-      if (blob.size < 22) {
-        showNotice("Export failed. The server returned an empty file, so nothing was saved.", "err");
+      const parsed = interpretExportBody(new Uint8Array(await res.arrayBuffer()));
+      if (!parsed.ok) {
+        showNotice(parsed.message, "err");
         return;
       }
       const name = filenameFromDisposition(disposition) ?? "gno-pack.zip";
-      triggerZipDownload(blob, name);
-      showNotice(`Downloaded ${name}. Check your Downloads folder. Observe only — nothing writes to Amazon.`);
+      triggerZipDownload(new Blob([parsed.zip.slice()], { type: "application/zip" }), name);
+      showNotice(`Downloaded ${name}. Check your Downloads folder. Observe only — nothing writes to Amazon.`, "ok");
       await load();
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : "Export failed. No zip was saved.", "err");
+      showNotice(exportThrownMessage(e, phase, timedOut), "err");
     } finally {
+      clearTimeout(timer);
       setExporting(false);
     }
   }
@@ -482,7 +499,9 @@ export function PpcGnoWatch() {
           className={`rounded-md border px-3 py-2 text-sm ${
             noticeTone === "err"
               ? "border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
-              : "border-emerald-400/50 bg-emerald-50 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+              : noticeTone === "wait"
+                ? "border-amber-500/60 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+                : "border-emerald-400/50 bg-emerald-50 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
           }`}
         >
           {notice}

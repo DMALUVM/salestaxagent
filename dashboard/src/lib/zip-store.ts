@@ -181,3 +181,110 @@ export function zipAttachmentResponse(
     },
   });
 }
+
+/**
+ * Transport framing for a zip whose bytes are not ready yet.
+ * Leading 0x00 heartbeats keep the socket alive; the client strips them.
+ * The zip itself still starts with PK\x03\x04. A build failure is the
+ * UTF-8 text `GNOERR:` plus the message, after those heartbeats.
+ */
+export const ZIP_FRAMING_NUL_HEARTBEAT = "nul-heartbeat";
+
+const HEARTBEAT = Uint8Array.of(0);
+const GNOERR_PREFIX = "GNOERR:";
+
+function pulse(ms: number): { promise: Promise<void>; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const promise = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  return {
+    promise,
+    cancel() {
+      if (timer !== undefined) clearTimeout(timer);
+    },
+  };
+}
+
+/**
+ * Return a zip attachment whose first body byte is written before `produce`
+ * resolves. Next flushes response headers only when the first chunk is
+ * written, so a stream that stays empty during a long pack build is dropped
+ * by the browser (`Failed to fetch`) with no serverless completion.
+ */
+export function streamingZipResponse(
+  filename: string,
+  produce: () => Promise<Uint8Array>,
+  opts?: { heartbeatMs?: number; extraHeaders?: Record<string, string> },
+): Response {
+  const heartbeatMs = opts?.heartbeatMs ?? 2_000;
+  const safeName = filename.replace(/["\r\n]/g, "");
+  let started = false;
+  let zip: Uint8Array | null = null;
+  let failure: string | null = null;
+  let offset = 0;
+  let producePromise: Promise<void> | null = null;
+  let beat: ReturnType<typeof pulse> | null = null;
+
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (!started) {
+        started = true;
+        console.info("gno-export stream open", safeName);
+        producePromise = Promise.resolve().then(produce).then(
+          (bytes) => {
+            zip = bytes;
+            console.info("gno-export zip bytes", bytes.length, safeName);
+          },
+          (err: unknown) => {
+            failure = err instanceof Error ? err.message : String(err);
+            console.error("gno-export build failed", err);
+          },
+        );
+        controller.enqueue(HEARTBEAT);
+        return;
+      }
+
+      if (zip == null && failure == null) {
+        beat = pulse(heartbeatMs);
+        await Promise.race([producePromise, beat.promise]);
+        beat.cancel();
+        beat = null;
+        if (zip == null && failure == null) {
+          controller.enqueue(HEARTBEAT);
+          return;
+        }
+      }
+
+      if (failure != null) {
+        controller.enqueue(new TextEncoder().encode(`${GNOERR_PREFIX}${failure}`));
+        controller.close();
+        return;
+      }
+
+      if (zip == null || offset >= zip.length) {
+        controller.close();
+        return;
+      }
+
+      const end = Math.min(offset + 64 * 1024, zip.length);
+      controller.enqueue(zip.subarray(offset, end));
+      offset = end;
+      if (offset >= zip.length) controller.close();
+    },
+    cancel() {
+      beat?.cancel();
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "content-type": "application/zip",
+      "content-disposition": `attachment; filename="${safeName}"`,
+      "cache-control": "no-store",
+      "x-gno-zip-framing": ZIP_FRAMING_NUL_HEARTBEAT,
+      ...opts?.extraHeaders,
+    },
+  });
+}

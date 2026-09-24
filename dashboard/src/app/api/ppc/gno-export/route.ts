@@ -1,10 +1,11 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 import { amazonAsOf, amazonToday, windowStart } from "@/lib/as-of";
-import { zipAttachmentResponse, zipStore } from "@/lib/zip-store";
+import { streamingZipResponse, zipStore } from "@/lib/zip-store";
 import {
   NEW_EXACT,
   buildGnoPack,
   evaluateGnoAlerts,
+  gnoPackStamp,
   GNO_DESK_SPEND_LOOKBACK_DAYS,
   SQP_SLICE_QUERIES,
   type AsinCatalogRow,
@@ -39,9 +40,11 @@ import {
  * Older weeks, if shipped, are COMPARISON / PRE_RAISE only.
  * Observe / export only. Never writes to Amazon.
  *
- * The zip is deflated and streamed. A STORE zip of this pack exceeds
- * Vercel's 4.5MB buffered response limit: the function can log 200 while
- * the browser receives no file.
+ * The zip is deflated. The response writes a heartbeat byte before the
+ * Supabase read so the platform flushes headers during the build. A silent
+ * wait with zero bytes is dropped by the browser (Failed to fetch) and
+ * never shows a serverless completion. A STORE zip of this pack also
+ * exceeds Vercel's 4.5MB buffered response limit.
  */
 
 export const runtime = "nodejs";
@@ -174,7 +177,10 @@ async function pageAll(
   return rows;
 }
 
-export async function GET() {
+const EXPORT_HINT =
+  "Export reads stored ads tables + Campaigns API snapshot. Nothing writes to Amazon.";
+
+async function buildGnoExportZip(now: Date): Promise<Uint8Array> {
   try {
     const asOf = amazonAsOf();
     const today = amazonToday();
@@ -205,7 +211,7 @@ export async function GET() {
     const pack = buildGnoPack({
       asOf,
       today,
-      now: new Date(),
+      now,
       campaigns: campRows,
       searchTerms: termRows,
       placements: placeRows,
@@ -223,7 +229,6 @@ export async function GET() {
         organicIndex: buildOrganicRankJoinIndex(organicSources.snapshots),
       }),
     });
-    const now = new Date();
     const alerts = evaluateGnoAlerts({
       asOf, today, now, campaigns: campRows, searchTerms: termRows, placements: placeRows,
       lookbackDays: GNO_DESK_SPEND_LOOKBACK_DAYS,
@@ -236,13 +241,18 @@ export async function GET() {
     const banner = exportBannerFromState(exportState, { now, p0, p1 });
     await saveGnoExportAck(ackPayload(banner, p0, p1, pack.filename, now));
     const zip = zipStore(pack.files);
-    return zipAttachmentResponse(zip, pack.filename, {
-      "x-gno-observe-only": "1",
-    });
+    return zip;
   } catch (e) {
-    return Response.json({
-      error: e instanceof Error ? e.message : String(e),
-      hint: "Export reads stored ads tables + Campaigns API snapshot. Nothing writes to Amazon.",
-    }, { status: 503 });
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(`${detail} ${EXPORT_HINT}`);
   }
+}
+
+export function GET() {
+  const now = new Date();
+  const filename = `gno-pack-${gnoPackStamp(now)}.zip`;
+  console.info("gno-export handler", filename);
+  return streamingZipResponse(filename, () => buildGnoExportZip(now), {
+    extraHeaders: { "x-gno-observe-only": "1" },
+  });
 }
