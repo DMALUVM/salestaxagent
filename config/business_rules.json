@@ -16,8 +16,10 @@
   },
   "shopify": {
     "timezone": "America/New_York",
-    "estimated_outbound_ship_cost": 5.50,
-    "//estimated_outbound_ship_cost": "Config estimate of 3PL outbound $/parcel for Shopify contribution. Not carrier invoice truth. TODO: replace with real 3PL $/parcel when invoices are parsed."
+    "outbound_fixed_per_order": 8.30,
+    "outbound_per_unit": 0.50,
+    "outbound_flat_fallback_per_order": 9.90,
+    "//outbound_model": "DTC 3PL outbound fit from Apr–Jun 2026 tpl_cost_detail invoices (Mar partial and Aug order-fee qty excluded). $2.00 order fee + $6.00 average postage + $0.30 packaging + $0.50 per pick (≈ per unit on this catalog). est_outbound_ship = 8.30 + 0.50 × units_in_order. Flat $9.90/order when units are unknown. Storage and account management stay out of the per-order estimate."
   },
   "spapi": {
     "max_chunk_days": 30,

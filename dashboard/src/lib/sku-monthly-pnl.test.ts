@@ -316,11 +316,88 @@ describe("SKU monthly contribution", () => {
     const d2 = merged.find((r) => r.date === "2026-08-02");
     assert.equal(d1?.gross_sales, 3480.49);
     assert.equal(d1?.units, 200);
+    assert.equal(d1?.units_basis, "pnl_daily");
     assert.equal(d2?.gross_sales, 3623.65);
+    assert.equal(d2?.units_basis, "sales_only");
     assert.equal(merged.every((r) => r.channel === "amazon"), true);
     assert.equal(merged.reduce((s, r) => s + r.gross_sales, 0) < 10000, true);
   });
+
+  test("Aug and Apr sales_daily overlays keep sales_by_sku units", () => {
+    // Warehouse shape: sales_daily covers the month and beats sales_by_sku
+    // dollars, but pnl_daily has no Amazon units. The old overlay published
+    // units 0. Dollars may move; units stay on sales_by_sku.
+    const result = buildAmazonMonthlyPnl({
+      skuRows: [
+        { channel: "amazon", sku: "AA", period_start: "2025-08-01", units: 6176, gross_sales: 80000 },
+        { channel: "amazon", sku: "AA", period_start: "2026-04-01", units: 9049, gross_sales: 100000 },
+      ],
+      costs: [{ sku: "AA", cogs_per_unit: 2 }],
+      adsByDay: [],
+      dailyAccount: [],
+      salesDaily: [
+        ...salesDailyCovering("2025-08", 31, 90919),
+        ...salesDailyCovering("2026-04", 30, 129238),
+      ],
+      asOf: "2026-08-31",
+    });
+    const aug = result.months.find((m) => m.date.startsWith("2025-08"));
+    const apr = result.months.find((m) => m.date.startsWith("2026-04"));
+    assert.ok(aug);
+    assert.equal(aug.gross_sales, 90919);
+    assert.equal(aug.units, 6176);
+    assert.equal(aug.source, "daily");
+    assert.equal(aug.sales_basis, "daily");
+    assert.equal(aug.est_fba_fees, 21616);
+    assert.equal(aug.est_cogs, 12352);
+    assert.ok(apr);
+    assert.equal(apr.gross_sales, 129238);
+    assert.equal(apr.units, 9049);
+    assert.equal(apr.est_cogs, 18098);
+    assert.equal(apr.source, "daily");
+    assert.notEqual(apr.units, 0);
+  });
+
+  test("May partial pnl_daily does not replace sales_by_sku units with 1068", () => {
+    // 4 pnl_daily days hold 1,068 units. The other 27 are sales_daily-only.
+    // Publishing 1,068 understates the month. Keep sales_by_sku units.
+    // Dollars still follow the higher sales_daily total.
+    const result = buildAmazonMonthlyPnl({
+      skuRows: [
+        { channel: "amazon", sku: "AA", period_start: "2026-05-01", units: 8669, gross_sales: 110000 },
+      ],
+      costs: [{ sku: "AA", cogs_per_unit: 3 }],
+      adsByDay: [],
+      dailyAccount: amazonDays("2026-05", 4, 16000, 1068),
+      salesDaily: salesDailyCovering("2026-05", 31, 124305),
+      asOf: "2026-08-31",
+    });
+    const may = result.months.find((m) => m.date.startsWith("2026-05"));
+    assert.ok(may);
+    assert.equal(may.gross_sales, 124305);
+    assert.equal(may.units, 8669);
+    assert.notEqual(may.units, 1068);
+    assert.notEqual(may.units, 0);
+    assert.equal(may.est_fba_fees, 30341.5);
+    assert.equal(may.est_cogs, 26007);
+    assert.equal(may.source, "daily");
+  });
 });
+
+function salesDailyCovering(ym: string, count: number, total: number) {
+  const each = Math.round((total / count) * 100) / 100;
+  const rows: { sale_date: string; gross_sales: number; channel: string }[] = [];
+  for (let d = 1; d <= count; d++) {
+    rows.push({
+      sale_date: `${ym}-${String(d).padStart(2, "0")}`,
+      gross_sales: each,
+      channel: "amazon",
+    });
+  }
+  const sum = rows.reduce((s, r) => s + r.gross_sales, 0);
+  rows[rows.length - 1].gross_sales = Math.round((rows[rows.length - 1].gross_sales + total - sum) * 100) / 100;
+  return rows;
+}
 
 function amazonDays(
   ym: string,
