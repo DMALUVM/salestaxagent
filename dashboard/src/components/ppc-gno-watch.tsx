@@ -10,6 +10,12 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { exportBannerFromState, mergeGnoAdsOntoState } from "@/lib/gno-export-state";
+import {
+  exportFailureMessage,
+  filenameFromDisposition,
+  responseLooksLikeZip,
+  triggerZipDownload,
+} from "@/lib/gno-export-download";
 import { CM_NOTE } from "@/lib/gno-ppc-watch";
 import { GnoDeskReference } from "@/components/gno-desk-reference";
 import { OrganicRankHeatmap } from "@/components/organic-rank-heatmap";
@@ -321,25 +327,23 @@ export function PpcGnoWatch() {
     try {
       const res = await fetch("/api/ppc/gno-export");
       const ct = res.headers.get("content-type") ?? "";
-      if (!res.ok || !ct.includes("zip")) {
-        const d = ct.includes("json") ? await res.json() : null;
-        setNotice(d?.hint ?? d?.error ?? `Export failed (${res.status}).`);
+      const disposition = res.headers.get("content-disposition");
+      if (!res.ok || !responseLooksLikeZip(ct, disposition)) {
+        const text = await res.text();
+        setNotice(exportFailureMessage(res.status, ct, text));
         return;
       }
-      const match = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "");
-      const name = match?.[1] ?? "gno-pack.zip";
-      const url = URL.createObjectURL(await res.blob());
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      setNotice(`Downloaded ${name} — observe only. Drop it in Grok. Nothing writes to Amazon.`);
+      const blob = await res.blob();
+      if (blob.size < 22) {
+        setNotice("Export failed. The server returned an empty file, so nothing was saved.");
+        return;
+      }
+      const name = filenameFromDisposition(disposition) ?? "gno-pack.zip";
+      triggerZipDownload(blob, name);
+      setNotice(`Downloaded ${name}. Check your Downloads folder. Observe only — nothing writes to Amazon.`);
       await load();
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Export failed.");
+      setNotice(e instanceof Error ? e.message : "Export failed. No zip was saved.");
     } finally {
       setExporting(false);
     }
@@ -454,15 +458,29 @@ export function PpcGnoWatch() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => { setLoading(true); load(); }}>
+          <Button type="button" variant="outline" size="sm" onClick={() => { setLoading(true); load(); }}>
             <RefreshCw className="mr-1 h-3 w-3" /> Refresh
           </Button>
-          <Button size="sm" onClick={exportPack} disabled={exporting}>
+          <Button type="button" size="sm" onClick={exportPack} disabled={exporting}>
             <Download className="mr-1 h-3 w-3" />
             {exporting ? "Building…" : "Export GNO pack"}
           </Button>
         </div>
       </div>
+
+      {notice && (
+        <p
+          role={/fail|error|empty|too large|could not/i.test(notice) ? "alert" : "status"}
+          data-gno-notice
+          className={`rounded-md border px-3 py-2 text-sm ${
+            /fail|error|empty|too large|could not/i.test(notice)
+              ? "border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
+              : "border-emerald-400/50 bg-emerald-50 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+          }`}
+        >
+          {notice}
+        </p>
+      )}
 
       <div
         role="status"
@@ -536,10 +554,6 @@ export function PpcGnoWatch() {
 
       {adsLoading && (
         <p className="text-xs text-muted-foreground">Loading campaign tiles…</p>
-      )}
-
-      {notice && (
-        <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs">{notice}</p>
       )}
 
       {(p0.length > 0 || (showDone && p0Done.length > 0)) && (
