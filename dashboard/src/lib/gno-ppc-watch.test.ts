@@ -2682,6 +2682,13 @@ describe("Dave six pack reviewability fixes", () => {
         ],
       },
       {
+        query_normalized: "unknown bid chapstick",
+        campaigns: [
+          { campaign_id: "o-null", campaign_name: "Orange Lip Balm - SP - Unknown Bid - KW - Exact", bid: null, keyword_id: "" },
+          { campaign_id: "a-null", campaign_name: "Assorted Lip Balm - SP - Unknown Bid - KWs - Exact", bid: 1.05, keyword_id: "" },
+        ],
+      },
+      {
         query_normalized: "lip balm",
         campaigns: [
           flavor("Unscented Lip Balm - SP - Lip Balm - KWs - Exact", 1.8),
@@ -2698,6 +2705,7 @@ describe("Dave six pack reviewability fixes", () => {
       })),
     ]);
     assert.equal(picked.kept.some((r) => r.query_normalized === "beef tallow chapstick"), false);
+    assert.equal(picked.kept.some((r) => r.query_normalized === "unknown bid chapstick"), true);
     assert.equal(picked.kept[0]?.query_normalized, "lip balm");
     assert.equal(picked.kept.length, SIBLING_AUDIT_CAP);
     assert.ok(picked.omitted > 0);

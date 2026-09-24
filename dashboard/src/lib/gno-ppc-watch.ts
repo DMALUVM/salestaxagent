@@ -3042,7 +3042,7 @@ export function buildGnoPack(input: {
     `remaining_slots: ${remaining}`,
     `harvest_queue_rows: ${harvestQueue.length}`,
     "harvest_queue: floor-passers (clicks>=harvest_min_clicks and orders>=harvest_min_orders) are emitted even when remaining_slots=0. Exact already exists → KEEP with that explanation. Other slot-less floor-passers → WATCH reason slot_cap.",
-    `structure_audit sibling_exact_auction: actionable conflicts only, one row per query_normalized, cap ${siblingAudit.kept.length} shown / ${siblingAudit.omitted} omitted of ${siblingAudit.total} co-auctions. Dropped before the cap: flavor-shell-only splits (Orange/Assorted/Peppermint/Unscented) whose enabled exact bids differ by less than $0.25 and that do not include the ranking campaign or ranking query. Kept rows sort ranking, then campaign count, then bid spread.`,
+    `structure_audit sibling_exact_auction: actionable conflicts only, one row per query_normalized, cap ${siblingAudit.kept.length} shown / ${siblingAudit.omitted} omitted of ${siblingAudit.total} co-auctions. Dropped before the cap: flavor-shell-only splits (Orange/Assorted/Peppermint/Unscented) whose enabled exact bids are all known and differ by less than $0.25, and that do not include the ranking campaign or ranking query. A missing bid stays on the file. Kept rows sort ranking, then campaign count, then bid spread.`,
     addsUnknown ? "adds_this_week_already unknown; remaining_slots capped conservative at 0. Floor-passers still emit as WATCH / slot_cap." : "",
     `ranking campaigns: ${rankingLines.length ? rankingLines.join(" || ") : "none in this pack"}`,
     ...emptyReasons,

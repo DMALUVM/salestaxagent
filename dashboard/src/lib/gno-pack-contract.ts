@@ -566,11 +566,13 @@ export function siblingExactAuctions(targets: {
 
 /**
  * Desk cap for sibling_exact_auction rows.
- * Flavor-shell-only co-auctions with a bid spread under $0.25 are not a
- * conflict (Orange/Assorted/Peppermint/Unscented bidding the same child
- * keyword is the shell matrix). Everything else is a conflict: a ranking
- * campaign or ranking query, a non-shell campaign in the set, or a shell
- * split whose enabled exact bids differ by at least $0.25.
+ * Flavor-shell-only co-auctions are not a conflict when every enabled Exact
+ * bid is known and the spread is under $0.25 (Orange/Assorted/Peppermint/
+ * Unscented bidding the same child keyword is the shell matrix). A missing
+ * bid is kept — an unknown spread is not proof the shells agree.
+ * Everything else is a conflict: a ranking campaign or ranking query, a
+ * non-shell campaign in the set, or a shell split whose known bids differ
+ * by at least $0.25.
  * Conflicts sort ranking first, then campaign count, then bid spread, and
  * the CSV keeps at most this many so the file stays scannable.
  */
@@ -583,11 +585,11 @@ function isFlavorShellCampaignName(name: string): boolean {
   return FLAVOR_SHELL_NAME_RE.test(namesKey(name));
 }
 
-function siblingBidSpread(campaigns: SiblingExact["campaigns"]): number {
+function siblingBidSpread(campaigns: SiblingExact["campaigns"]): number | null {
   const bids = campaigns
     .map((c) => c.bid)
     .filter((bid): bid is number => bid != null && Number.isFinite(bid));
-  if (bids.length < 2) return 0;
+  if (bids.length < campaigns.length || bids.length < 2) return null;
   return Math.max(...bids) - Math.min(...bids);
 }
 
@@ -601,7 +603,8 @@ export function siblingConflictWorthEyes(row: SiblingExact): boolean {
   if (siblingIsRanking(row)) return true;
   const flavorOnly = row.campaigns.length > 0
     && row.campaigns.every((c) => isFlavorShellCampaignName(c.campaign_name));
-  if (flavorOnly && siblingBidSpread(row.campaigns) < SIBLING_AUDIT_BID_SPREAD) return false;
+  const spread = siblingBidSpread(row.campaigns);
+  if (flavorOnly && spread != null && spread < SIBLING_AUDIT_BID_SPREAD) return false;
   return true;
 }
 
@@ -615,7 +618,9 @@ export function selectActionableSiblings(siblings: SiblingExact[]): {
     const rankDelta = Number(siblingIsRanking(b)) - Number(siblingIsRanking(a));
     if (rankDelta !== 0) return rankDelta;
     if (b.campaigns.length !== a.campaigns.length) return b.campaigns.length - a.campaigns.length;
-    const spread = siblingBidSpread(b.campaigns) - siblingBidSpread(a.campaigns);
+    const spreadB = siblingBidSpread(b.campaigns);
+    const spreadA = siblingBidSpread(a.campaigns);
+    const spread = (spreadB ?? Number.POSITIVE_INFINITY) - (spreadA ?? Number.POSITIVE_INFINITY);
     if (spread !== 0) return spread;
     return a.query_normalized.localeCompare(b.query_normalized);
   });
