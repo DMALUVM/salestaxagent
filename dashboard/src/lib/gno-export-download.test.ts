@@ -4,10 +4,12 @@ import path from "node:path";
 import { describe, test } from "node:test";
 import {
   exportFailureMessage,
+  exportThrownMessage,
   filenameFromDisposition,
+  interpretExportBody,
   responseLooksLikeZip,
 } from "./gno-export-download";
-import { unzipStore, zipAttachmentResponse, zipStore } from "./zip-store";
+import { streamingZipResponse, unzipStore, zipAttachmentResponse, zipStore } from "./zip-store";
 
 const VERCEL_BODY_LIMIT = Math.floor(4.5 * 1024 * 1024);
 
@@ -77,19 +79,100 @@ describe("GNO export download", () => {
     assert.equal(unzipStore(bytes)[0].body, "Observe only.\n");
   });
 
-  test("export route streams a deflated zip and does not buffer a Node Buffer", () => {
+  test("export route writes a heartbeat before the pack build and does not buffer a Node Buffer", () => {
     const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/gno-export/route.ts"), "utf8");
     const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-gno-watch.tsx"), "utf8");
-    assert.match(route, /zipAttachmentResponse\(zip, pack\.filename/);
+    const handler = route.slice(route.indexOf("export function GET"));
+    assert.match(handler, /streamingZipResponse\(/);
+    assert.doesNotMatch(handler, /await /);
     assert.match(route, /maxDuration = 300/);
-    assert.match(route, /application\/zip|zipAttachmentResponse/);
+    assert.doesNotMatch(route, /zipAttachmentResponse/);
     assert.doesNotMatch(route, /Buffer\.from\(zip\)/);
     assert.match(route, /observe/i);
     assert.match(ui, /exportFailureMessage/);
+    assert.match(ui, /exportThrownMessage/);
+    assert.match(ui, /interpretExportBody/);
     assert.match(ui, /triggerZipDownload/);
     assert.match(ui, /data-gno-notice/);
     assert.match(ui, /data-gno-notice-tone=\{noticeTone\}/);
     assert.match(ui, /showNotice\(exportFailureMessage\(res\.status, ct, text\), "err"\)/);
+    assert.match(ui, /showNotice\(\s*"Pack is building on the server/);
     assert.doesNotMatch(ui, /URL\.revokeObjectURL\(url\)/);
+    assert.match(ui, /exportThrownMessage\(e, phase, timedOut\)/);
+  });
+
+  test("heartbeats arrive before the zip exists, then strip back to a real zip", async () => {
+    const zip = zipStore([{ name: "README.txt", body: "Observe only.\n" }]);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let built = false;
+    const res = streamingZipResponse("gno-pack-2026-09-24_1415.zip", async () => {
+      await gate;
+      built = true;
+      return zip;
+    }, {
+      heartbeatMs: 20,
+      extraHeaders: { "x-gno-observe-only": "1" },
+    });
+    assert.equal(res.headers.get("x-gno-zip-framing"), "nul-heartbeat");
+    assert.equal(res.headers.get("x-gno-observe-only"), "1");
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    assert.equal(built, false);
+    assert.equal(first.value?.[0], 0);
+    release();
+    const parts: Uint8Array[] = [];
+    if (first.value) parts.push(first.value);
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      if (next.value) parts.push(next.value);
+    }
+    const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let off = 0;
+    for (const part of parts) {
+      all.set(part, off);
+      off += part.length;
+    }
+    const parsed = interpretExportBody(all);
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    assert.deepEqual(parsed.zip, zip);
+    assert.equal(unzipStore(parsed.zip)[0].body, "Observe only.\n");
+  });
+
+  test("a build failure is a GNOERR payload, not a rejected stream", async () => {
+    const res = streamingZipResponse("gno-pack.zip", async () => {
+      throw new Error("ads_search_terms_daily: fetch failed");
+    }, { heartbeatMs: 5 });
+    const parsed = interpretExportBody(new Uint8Array(await res.arrayBuffer()));
+    assert.equal(parsed.ok, false);
+    if (parsed.ok) return;
+    assert.match(parsed.message, /ads_search_terms_daily: fetch failed/);
+  });
+
+  test("names timeout, dropped connection, and cancel instead of Failed to fetch", () => {
+    assert.match(
+      exportThrownMessage(new TypeError("Failed to fetch"), "headers", false),
+      /lost the connection before any response arrived/,
+    );
+    assert.match(
+      exportThrownMessage(new TypeError("Failed to fetch"), "body", false),
+      /lost the connection while the pack was still building/,
+    );
+    assert.match(
+      exportThrownMessage(Object.assign(new Error("The user aborted a request."), { name: "AbortError" }), "body", true),
+      /timed out while the pack was still building/,
+    );
+    assert.match(
+      exportThrownMessage(Object.assign(new Error("The user aborted a request."), { name: "AbortError" }), "headers", false),
+      /cancelled/,
+    );
+    assert.doesNotMatch(
+      exportThrownMessage(new TypeError("Failed to fetch"), "headers", false),
+      /^Failed to fetch$/,
+    );
   });
 });
