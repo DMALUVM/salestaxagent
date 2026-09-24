@@ -3,13 +3,28 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, test } from "node:test";
 import {
+  consumeExportStatusText,
   exportFailureMessage,
   exportThrownMessage,
   filenameFromDisposition,
   interpretExportBody,
+  isPackToken,
+  readExportStatusStream,
+  readyPackDownloadUrl,
   responseLooksLikeZip,
+  safePackFilename,
+  triggerNativeGetDownload,
+  type NativeDownloadNode,
 } from "./gno-export-download";
-import { streamingZipResponse, unzipStore, zipAttachmentResponse, zipStore } from "./zip-store";
+import {
+  BUFFERED_ZIP_MAX,
+  readyZipResponse,
+  streamingExportStatus,
+  streamingZipResponse,
+  unzipStore,
+  zipAttachmentResponse,
+  zipStore,
+} from "./zip-store";
 
 const VERCEL_BODY_LIMIT = Math.floor(4.5 * 1024 * 1024);
 
@@ -79,20 +94,26 @@ describe("GNO export download", () => {
     assert.equal(unzipStore(bytes)[0].body, "Observe only.\n");
   });
 
-  test("export route writes a heartbeat before the pack build and does not buffer a Node Buffer", () => {
+  test("export route returns a status stream, then a short native zip GET", () => {
     const route = readFileSync(path.join(process.cwd(), "src/app/api/ppc/gno-export/route.ts"), "utf8");
     const ui = readFileSync(path.join(process.cwd(), "src/components/ppc-gno-watch.tsx"), "utf8");
     const handler = route.slice(route.indexOf("export function GET"));
-    assert.match(handler, /streamingZipResponse\(/);
+    assert.match(handler, /streamingExportStatus\(/);
     assert.doesNotMatch(handler, /await /);
+    assert.match(handler, /searchParams\.get\("pack"\)/);
     assert.match(route, /maxDuration = 300/);
-    assert.doesNotMatch(route, /zipAttachmentResponse/);
+    assert.match(route, /storePack\(/);
+    assert.match(route, /readyZipResponse\(/);
+    assert.doesNotMatch(route, /streamingZipResponse/);
     assert.doesNotMatch(route, /Buffer\.from\(zip\)/);
     assert.match(route, /observe/i);
     assert.match(ui, /exportFailureMessage/);
     assert.match(ui, /exportThrownMessage/);
-    assert.match(ui, /interpretExportBody/);
-    assert.match(ui, /triggerZipDownload/);
+    assert.match(ui, /readExportStatusStream/);
+    assert.match(ui, /triggerNativeGetDownload/);
+    assert.match(ui, /readyPackDownloadUrl/);
+    assert.doesNotMatch(ui, /arrayBuffer\(/);
+    assert.doesNotMatch(ui, /interpretExportBody/);
     assert.match(ui, /data-gno-notice/);
     assert.match(ui, /data-gno-notice-tone=\{noticeTone\}/);
     assert.match(ui, /showNotice\(exportFailureMessage\(res\.status, ct, text\), "err"\)/);
@@ -174,5 +195,167 @@ describe("GNO export download", () => {
       exportThrownMessage(new TypeError("Failed to fetch"), "headers", false),
       /^Failed to fetch$/,
     );
+  });
+
+  test("status text ignores heartbeats and reads READY or GNOERR", () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const filename = "gno-pack-2026-09-24_1227.zip";
+    assert.equal(consumeExportStatusText(".\n"), null);
+    assert.equal(consumeExportStatusText(`.\nREADY ${JSON.stringify({ token, filename })}`), null);
+    const ready = consumeExportStatusText(`.\nREADY ${JSON.stringify({ token, filename })}\n`);
+    assert.deepEqual(ready, { ok: true, token, filename });
+    const err = consumeExportStatusText(".\nGNOERR:ads_search_terms_daily: fetch failed\n");
+    assert.equal(err?.ok, false);
+    if (err?.ok !== false) return;
+    assert.match(err.message, /ads_search_terms_daily/);
+    assert.equal(isPackToken("../etc/passwd"), false);
+    assert.equal(safePackFilename("../../evil.zip"), "gno-pack.zip");
+    assert.equal(
+      readyPackDownloadUrl(token, filename),
+      `/api/ppc/gno-export?pack=${token}&name=${filename}`,
+    );
+  });
+
+  test("a body error after READY still returns the download link", async () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const filename = "gno-pack-2026-09-24_1227.zip";
+    const enc = new TextEncoder();
+    const readyLine = `READY ${JSON.stringify({ token, filename })}`;
+    let n = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        n += 1;
+        if (n === 1) {
+          controller.enqueue(enc.encode(".\n"));
+          return;
+        }
+        if (n === 2) {
+          controller.enqueue(enc.encode(readyLine));
+          return;
+        }
+        controller.error(new TypeError("Failed to fetch"));
+      },
+    });
+    const parsed = await readExportStatusStream(stream);
+    assert.deepEqual(parsed, { ok: true, token, filename });
+  });
+
+  test("a body error before READY still rejects", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new TypeError("Failed to fetch"));
+      },
+    });
+    await assert.rejects(
+      () => readExportStatusStream(stream),
+      (err: unknown) => err instanceof TypeError && /Failed to fetch/.test(err.message),
+    );
+  });
+
+  test("status stream heartbeats before the pack is stored, then READY", async () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const filename = "gno-pack-2026-09-24_1415.zip";
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let built = false;
+    const res = streamingExportStatus(filename, async () => {
+      await gate;
+      built = true;
+      return { token, filename };
+    }, { heartbeatMs: 20, extraHeaders: { "x-gno-observe-only": "1" } });
+    assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(res.headers.get("x-gno-export-framing"), "status-line");
+    assert.equal(res.headers.get("content-disposition"), null);
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    assert.equal(built, false);
+    assert.equal(new TextDecoder().decode(first.value), ".\n");
+    release();
+    const dec = new TextDecoder();
+    let text = ".\n";
+    while (true) {
+      const next = await reader.read();
+      if (next.value) text += dec.decode(next.value);
+      if (next.done) break;
+    }
+    const parsed = consumeExportStatusText(text.endsWith("\n") ? text : `${text}\n`);
+    assert.equal(parsed?.ok, true);
+    if (!parsed?.ok) return;
+    assert.equal(parsed.token, token);
+    assert.equal(parsed.filename, filename);
+  });
+
+  test("a build failure is a GNOERR line on the status stream", async () => {
+    const res = streamingExportStatus("gno-pack.zip", async () => {
+      throw new Error("ads_search_terms_daily: fetch failed");
+    }, { heartbeatMs: 5 });
+    const parsed = await readExportStatusStream(res.body);
+    assert.equal(parsed.ok, false);
+    if (parsed.ok) return;
+    assert.match(parsed.message, /ads_search_terms_daily: fetch failed/);
+  });
+
+  test("a short ready zip is the raw file with Content-Length and no heartbeat prefix", async () => {
+    const zip = zipStore([{ name: "README.txt", body: "Observe only.\n" }]);
+    const res = readyZipResponse(zip, "gno-pack-2026-09-24_1415.zip", {
+      "x-gno-observe-only": "1",
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "application/zip");
+    assert.equal(res.headers.get("content-length"), String(zip.byteLength));
+    assert.equal(res.headers.get("x-gno-zip-framing"), null);
+    assert.equal(res.headers.get("x-gno-observe-only"), "1");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    assert.equal(bytes[0], 0x50);
+    assert.equal(bytes[1], 0x4b);
+    assert.deepEqual(bytes, zip);
+    assert.equal(unzipStore(bytes)[0].body, "Observe only.\n");
+  });
+
+  test("a pack over the buffered cap still streams a clean zip", async () => {
+    const big = new Uint8Array(BUFFERED_ZIP_MAX + 1);
+    big[0] = 0x50;
+    big[1] = 0x4b;
+    big[2] = 0x03;
+    big[3] = 0x04;
+    const res = readyZipResponse(big, "gno-pack-2026-09-24_1415.zip");
+    assert.equal(res.headers.get("content-length"), null);
+    assert.equal(res.headers.get("content-disposition"), 'attachment; filename="gno-pack-2026-09-24_1415.zip"');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    assert.equal(bytes.byteLength, big.byteLength);
+    assert.equal(bytes[0], 0x50);
+    assert.notEqual(bytes[0], 0);
+  });
+
+  test("native download targets a hidden iframe, not fetch", () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const filename = "gno-pack-2026-09-24_1227.zip";
+    const url = readyPackDownloadUrl(token, filename);
+    const appended: string[] = [];
+    let clicked = "";
+    const dom = {
+      body: { appendChild(node: unknown) { appended.push((node as { href?: string; name?: string }).href || (node as { name?: string }).name || ""); } },
+      createElement(tag: "iframe" | "a"): NativeDownloadNode {
+        const node: NativeDownloadNode = {
+          name: "",
+          title: "",
+          href: "",
+          target: "",
+          rel: "",
+          style: { width: "", height: "", border: "", position: "" },
+          setAttribute() { /* aria */ },
+          click() { clicked = node.href; },
+          remove() { /* detached */ },
+        };
+        node.name = tag;
+        return node;
+      },
+    };
+    triggerNativeGetDownload(url, dom);
+    assert.equal(clicked, url);
+    assert.ok(appended.includes("gno-export-download"));
+    assert.ok(appended.includes(url));
   });
 });

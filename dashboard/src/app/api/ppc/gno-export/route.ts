@@ -1,6 +1,8 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 import { amazonAsOf, amazonToday, windowStart } from "@/lib/as-of";
-import { streamingZipResponse, zipStore } from "@/lib/zip-store";
+import { loadPack, storePack } from "@/lib/gno-export-handoff";
+import { isPackToken, safePackFilename } from "@/lib/gno-export-download";
+import { readyZipResponse, streamingExportStatus, zipStore } from "@/lib/zip-store";
 import {
   NEW_EXACT,
   buildGnoPack,
@@ -41,11 +43,14 @@ import {
  * Older weeks, if shipped, are COMPARISON / PRE_RAISE only.
  * Observe / export only. Never writes to Amazon.
  *
- * The zip is deflated. The response writes a heartbeat byte before the
- * Supabase read so the platform flushes headers during the build. A silent
- * wait with zero bytes is dropped by the browser (Failed to fetch) and
- * never shows a serverless completion. A STORE zip of this pack also
- * exceeds Vercel's 4.5MB buffered response limit.
+ * The zip is deflated. The build response is a tiny text status stream
+ * (heartbeat lines, then READY or GNOERR) so the socket stays up without
+ * putting framing bytes in the file. The zip is stored and the browser
+ * downloads it with a short same-origin GET. fetch()+arrayBuffer() on the
+ * long build stream returned Failed to fetch / NetworkError after headers
+ * — and after this route had already logged the finished zip.
+ * A native download does not surface a browser-bar failure in the page
+ * banner. GNOERR and HTTP errors still do. Observe only.
  */
 
 export const runtime = "nodejs";
@@ -262,11 +267,55 @@ async function buildGnoExportZip(now: Date): Promise<Uint8Array> {
   }
 }
 
-export function GET() {
+function plain(status: number, message: string): Response {
+  return new Response(message, {
+    status,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
+}
+
+async function publishGnoExport(now: Date): Promise<{ token: string; filename: string }> {
+  const filename = `gno-pack-${gnoPackStamp(now)}.zip`;
+  const zip = await buildGnoExportZip(now);
+  console.info("gno-export zip bytes", zip.byteLength, filename);
+  const token = crypto.randomUUID();
+  try {
+    await storePack(token, zip);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new Error(`Could not store the pack for download. ${detail} ${EXPORT_HINT}`);
+  }
+  return { token, filename };
+}
+
+async function readyPackResponse(token: string, name: string | null): Promise<Response> {
+  const filename = safePackFilename(name);
+  if (!isPackToken(token)) return plain(404, "Unknown pack.");
+  try {
+    const zip = await loadPack(token);
+    if (!zip || zip.byteLength < 22) {
+      return plain(404, "That pack is no longer available. Click Export again.");
+    }
+    console.info("gno-export ready", zip.byteLength, filename);
+    return readyZipResponse(zip, filename, { "x-gno-observe-only": "1" });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error("gno-export ready failed", detail);
+    return plain(503, "Export file could not be read. Click Export again.");
+  }
+}
+
+export function GET(request: Request): Response | Promise<Response> {
+  const url = new URL(request.url);
+  const pack = url.searchParams.get("pack");
+  if (pack) return readyPackResponse(pack, url.searchParams.get("name"));
   const now = new Date();
   const filename = `gno-pack-${gnoPackStamp(now)}.zip`;
   console.info("gno-export handler", filename);
-  return streamingZipResponse(filename, () => buildGnoExportZip(now), {
+  return streamingExportStatus(filename, () => publishGnoExport(now), {
     extraHeaders: { "x-gno-observe-only": "1" },
   });
 }
