@@ -118,8 +118,9 @@ describe("GNO export download", () => {
     assert.match(ui, /data-gno-notice-tone=\{noticeTone\}/);
     assert.match(ui, /showNotice\(exportFailureMessage\(res\.status, ct, text\), "err"\)/);
     assert.match(ui, /Export GNO pack/);
-    assert.match(ui, /Check your Downloads folder\. Observe only/);
+    assert.match(ui, /Saving \$\{status\.filename\}\. Check your Downloads folder\. Observe only/);
     assert.match(ui, /showNotice\(\s*"Pack is building on the server/);
+    assert.doesNotMatch(ui, /Downloaded \$\{/);
     const helper = readFileSync(path.join(process.cwd(), "src/lib/gno-export-download.ts"), "utf8");
     assert.match(helper, /empty file, so nothing was saved/);
     assert.doesNotMatch(ui, /Failed to fetch/);
