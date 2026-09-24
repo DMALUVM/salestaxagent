@@ -422,12 +422,12 @@ export interface WatchCampaignExportRow {
   tos_spend_share: number | null;
   ros_spend_share: number | null;
   pp_spend_share: number | null;
-  impressions: number | null;
-  clicks: number | null;
-  spend: number | null;
-  cpc: number | null;
-  orders: number | null;
-  sales: number | null;
+  impressions?: number;
+  clicks?: number;
+  spend?: number;
+  cpc?: number;
+  orders?: number;
+  sales?: number;
   acos: number | null;
   watch_list: WatchList;
   /** false on Today — Ads lag; $0 is not a pause. Read spend/ACOS from L2/L7. */
@@ -476,11 +476,11 @@ export interface KeywordTargetExportRow {
   match_type: string;
   keyword_state: string;
   bid: number | null;
-  impressions: number | null;
-  clicks: number | null;
-  spend: number | null;
-  orders: number | null;
-  sales: number | null;
+  impressions?: number;
+  clicks?: number;
+  spend?: number;
+  orders?: number;
+  sales?: number;
   acos: number | null;
   /** false on Today — config-only until Amazon attributes. */
   metrics_complete: boolean;
@@ -1668,7 +1668,7 @@ export function watchCampaignExportRows(input: {
         const m = useMetrics
           ? sumMetrics(inWindow(campRows, w.start, w.end))
           : l60Blank
-            ? { impressions: null, clicks: null, spend: null, orders: null, sales: null, cpc: null, acos: null, cvr: null }
+            ? { impressions: undefined, clicks: undefined, spend: undefined, orders: undefined, sales: undefined, cpc: undefined, acos: null, cvr: null }
             : { impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0, cpc: 0, acos: null, cvr: null };
         const place = useMetrics
           ? placementShares(inWindow(
@@ -1904,11 +1904,11 @@ export function keywordWindowMetrics(
 }
 
 function metricFingerprint(m: {
-  impressions: number | null;
-  clicks: number | null;
-  spend: number | null;
-  orders: number | null;
-  sales: number | null;
+  impressions?: number | null;
+  clicks?: number | null;
+  spend?: number | null;
+  orders?: number | null;
+  sales?: number | null;
 }): string {
   return [
     m.impressions ?? 0,
@@ -1992,11 +1992,11 @@ export function keywordTargetExportRows(input: {
         bleeders10_flag: isToday ? false : null,
         bleeders20_flag: isToday ? false : null,
         lifetime_zero_flag: isToday ? false : null,
-        impressions: l60Blank ? null : m.impressions,
-        clicks: l60Blank ? null : m.clicks,
-        spend: l60Blank ? null : m.spend,
-        orders: l60Blank ? null : m.orders,
-        sales: l60Blank ? null : m.sales,
+        impressions: l60Blank ? undefined : m.impressions,
+        clicks: l60Blank ? undefined : m.clicks,
+        spend: l60Blank ? undefined : m.spend,
+        orders: l60Blank ? undefined : m.orders,
+        sales: l60Blank ? undefined : m.sales,
         acos: l60Blank ? null : m.acos,
         metrics_complete: useMetrics,
         ...frame,
@@ -2467,7 +2467,7 @@ function flagSpendMismatches(
     tile.set(campWindowKey(row.campaign_name, row.date_start, row.date_end), n(row.spend));
   }
   const sums = new Map<string, number>();
-  const add = (name: string, start: string, end: string, spend: number, complete: boolean) => {
+  const add = (name: string, start: string, end: string, spend: number | null | undefined, complete: boolean) => {
     if (!complete) return;
     const key = campWindowKey(name, start, end);
     sums.set(key, (sums.get(key) ?? 0) + n(spend));
