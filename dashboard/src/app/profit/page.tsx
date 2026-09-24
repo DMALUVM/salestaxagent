@@ -12,7 +12,13 @@ import { isConfigured } from "@/lib/supabase";
 import type { PnlRow } from "@/lib/pnl-periods";
 import type { MonthlySkuLine } from "@/lib/sku-monthly-pnl";
 import type { ShopifyPnlRow } from "@/lib/shopify-pnl";
-import { emptyShopifyWindow, summarizeShopifyWindow } from "@/lib/shopify-pnl";
+import {
+  emptyShopifyWindow,
+  SHOPIFY_OUTBOUND_FIXED_PER_ORDER,
+  SHOPIFY_OUTBOUND_FLAT_FALLBACK,
+  SHOPIFY_OUTBOUND_PER_UNIT,
+  summarizeShopifyWindow,
+} from "@/lib/shopify-pnl";
 import { Shield, DollarSign, AlertTriangle } from "lucide-react";
 
 function fmt(n: number) { return n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
@@ -206,10 +212,41 @@ export default function ProfitPage() {
                 <p className="text-xs text-muted-foreground">subscription / one-time orders</p>
               </div>
             </div>
+            <div className="space-y-1 border-t pt-3 text-sm">
+              <p className="text-[10px] uppercase text-muted-foreground">30-day Shopify waterfall</p>
+              {[
+                { label: "Merchandise", value: shopify30.merchandise, color: "" },
+                { label: "+ Shipping charged", value: shopify30.shippingCharged, color: "" },
+                { label: "− Est. outbound", value: -shopify30.estOutbound, color: "text-red-500" },
+                { label: "− COGS", value: -shopify30.cogs, color: "text-red-500" },
+                { label: "− Google + Meta ads", value: -shopify30.adSpend, color: "text-red-500" },
+                {
+                  label: "= Contribution",
+                  value: shopify30.contribution,
+                  color: shopify30.contribution >= 0 ? "text-emerald-600 font-semibold" : "text-red-600 font-semibold",
+                  signed: true,
+                },
+              ].map((item) => (
+                <div key={item.label} className="flex justify-between">
+                  <span className="text-muted-foreground">{item.label}</span>
+                  <span className={`tabular-nums ${item.color}`}>
+                    {"signed" in item && item.signed && item.value < 0 ? "-" : ""}${fmtD(Math.abs(item.value))}
+                  </span>
+                </div>
+              ))}
+              {(shopify30.googleAdSpend > 0 || shopify30.metaAdSpend > 0) && (
+                <p className="text-[11px] text-muted-foreground">
+                  Google ${fmtD(shopify30.googleAdSpend)} · Meta ${fmtD(shopify30.metaAdSpend)}.
+                  Days with no row in that table are $0.
+                </p>
+              )}
+            </div>
             <p className="text-[11px] text-muted-foreground">
               As of {shopifyAsOf} (America/New_York). Contribution = merchandise + shipping charged
-              − estimated outbound (${fmtD(shopifyDaily[0]?.outbound_per_order ?? 5.5)}/order from
-              config, not a 3PL invoice) − COGS from sku_costs. Amazon P&amp;L below is unchanged.
+              − estimated outbound (${fmtD(SHOPIFY_OUTBOUND_FIXED_PER_ORDER)} + ${fmtD(SHOPIFY_OUTBOUND_PER_UNIT)} × units,
+              or ${fmtD(SHOPIFY_OUTBOUND_FLAT_FALLBACK)}/order when units are unknown; Apr–Jun 2026 3PL invoice fit)
+              − COGS from sku_costs − Google + Meta ads. Storage and account management are not in outbound.
+              Amazon ads stay on the Amazon waterfall below.
               {shopify30.provisionalOrders > 0 && (
                 <span className="ml-1 text-amber-600 dark:text-amber-400">
                   {shopify30.provisionalOrders} order(s) still use residual shipping (total−subtotal−tax)

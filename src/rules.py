@@ -35,10 +35,15 @@ AMAZON_PRICE_FIELD: str = _RULES["amazon"]["price_field"]
 # ── Shopify ───────────────────────────────────────────────
 SHOPIFY_TZ_NAME: str = _RULES["shopify"]["timezone"]
 SHOPIFY_TZ: ZoneInfo = ZoneInfo(SHOPIFY_TZ_NAME)
-# Config estimate of outbound $/parcel for Shopify contribution.
-# Not a 3PL invoice. TODO: replace with real $/parcel when invoices land.
-SHOPIFY_EST_OUTBOUND_SHIP_COST: float = float(
-    _RULES["shopify"].get("estimated_outbound_ship_cost", 5.50))
+# DTC outbound from the Apr–Jun 2026 3PL invoice fit. See business_rules.json.
+# est = fixed_per_order + per_unit × units. Flat fallback when units are unknown.
+# Storage and account management are not in these rates.
+SHOPIFY_OUTBOUND_FIXED_PER_ORDER: float = float(
+    _RULES["shopify"].get("outbound_fixed_per_order", 8.30))
+SHOPIFY_OUTBOUND_PER_UNIT: float = float(
+    _RULES["shopify"].get("outbound_per_unit", 0.50))
+SHOPIFY_OUTBOUND_FLAT_FALLBACK: float = float(
+    _RULES["shopify"].get("outbound_flat_fallback_per_order", 9.90))
 
 # ── SP-API ────────────────────────────────────────────────
 SPAPI_MAX_CHUNK_DAYS: int = _RULES["spapi"]["max_chunk_days"]

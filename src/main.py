@@ -3665,9 +3665,16 @@ def pnl_sync_cmd(days, no_skus):
                    f"(ship charged ${shop.get('total_shipping_charged', 0):,.2f}) "
                    f"- outbound ${shop.get('total_outbound_est', 0):,.2f} "
                    f"- COGS ${shop.get('total_cogs', 0):,.2f} "
+                   f"- Google/Meta ${shop.get('total_ad_spend', 0):,.2f} "
                    f"= ${shop.get('total_contribution', 0):,.2f}")
-        click.echo(f"  outbound ${shop.get('outbound_per_order', 0):.2f}/order "
-                   f"(config estimate, not 3PL invoices)")
+        click.echo(
+            f"  outbound ${shop.get('outbound_fixed_per_order', 0):.2f} + "
+            f"${shop.get('outbound_per_unit', 0):.2f}×units "
+            f"(flat ${shop.get('outbound_flat_fallback_per_order', 0):.2f}/order "
+            f"if units unknown; 3PL Apr–Jun 2026 fit, storage excluded)"
+        )
+        click.echo("  ads = google_ads_daily + meta_ads_daily "
+                   "(missing days $0, not Amazon PPC)")
         if shop.get("provisional_shipping_orders"):
             click.echo(f"  ⚠ {shop['provisional_shipping_orders']} order(s) still on "
                        f"provisional shipping (total−subtotal−tax). "
