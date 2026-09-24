@@ -13,10 +13,9 @@ import { exportBannerFromState, mergeGnoAdsOntoState } from "@/lib/gno-export-st
 import {
   exportFailureMessage,
   exportThrownMessage,
-  filenameFromDisposition,
-  interpretExportBody,
-  responseLooksLikeZip,
-  triggerZipDownload,
+  readExportStatusStream,
+  readyPackDownloadUrl,
+  triggerNativeGetDownload,
 } from "@/lib/gno-export-download";
 import { CM_NOTE } from "@/lib/gno-ppc-watch";
 import { GnoDeskReference } from "@/components/gno-desk-reference";
@@ -348,21 +347,22 @@ export function PpcGnoWatch() {
         credentials: "same-origin",
       });
       phase = "body";
-      const ct = res.headers.get("content-type") ?? "";
-      const disposition = res.headers.get("content-disposition");
-      if (!res.ok || !responseLooksLikeZip(ct, disposition)) {
+      if (!res.ok) {
         const text = await res.text();
+        const ct = res.headers.get("content-type") ?? "";
         showNotice(exportFailureMessage(res.status, ct, text), "err");
         return;
       }
-      const parsed = interpretExportBody(new Uint8Array(await res.arrayBuffer()));
-      if (!parsed.ok) {
-        showNotice(parsed.message, "err");
+      const status = await readExportStatusStream(res.body);
+      if (!status.ok) {
+        showNotice(status.message, "err");
         return;
       }
-      const name = filenameFromDisposition(disposition) ?? "gno-pack.zip";
-      triggerZipDownload(new Blob([parsed.zip.slice()], { type: "application/zip" }), name);
-      showNotice(`Downloaded ${name}. Check your Downloads folder. Observe only — nothing writes to Amazon.`, "ok");
+      triggerNativeGetDownload(readyPackDownloadUrl(status.token, status.filename));
+      showNotice(
+        `Saving ${status.filename}. Check your Downloads folder. Observe only — nothing writes to Amazon.`,
+        "ok",
+      );
       await load();
     } catch (e) {
       showNotice(exportThrownMessage(e, phase, timedOut), "err");
