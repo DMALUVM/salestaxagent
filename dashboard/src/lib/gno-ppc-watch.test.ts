@@ -80,12 +80,18 @@ import { zipStore } from "./zip-store";
 import { evaluateExportNeed, QUIET } from "./gno-export-state";
 import {
   FRESHNESS_LINES,
+  SIBLING_AUDIT_CAP,
+  assembleHarvestQueue,
   bleeder20Threshold,
   contractSearchTermTag,
+  csvEscapeField,
   dedupeWatchCampaignRows,
   evaluatePackQuality,
+  isAmazonIdHeader,
+  isBrandConquest,
   organicTrackerCensus,
   queryNormalized,
+  selectActionableSiblings,
   seriesCoversWindow,
 } from "./gno-pack-contract";
 
@@ -2413,6 +2419,7 @@ describe("Dave nine zipper-audit fixes", () => {
       organicSnapshots: [
         { phrase, asin: "B0CLHTF8YN", organic_position: 8, as_of: "2026-09-23", group_id: 3537 },
         { phrase, asin: "B0DQFKMJFY", organic_position: 12, as_of: "2026-09-23", group_id: 3553 },
+        { phrase: "retired phrase", asin: "B0CLHTF8YN", organic_position: 40, as_of: "2026-09-01", group_id: 3537 },
         { phrase: "lonely phrase", asin: "B0HBSZ71XQ", organic_position: 20, as_of: "2026-09-23", group_id: 3624 },
       ],
     });
@@ -2424,17 +2431,19 @@ describe("Dave nine zipper-audit fixes", () => {
     assert.equal(lonely?.paid_spend_l7_on_phrase, "");
     const census = organicTrackerCensus(
       [
-        { phrase, group_id: 3537 },
-        { phrase, group_id: 3553 },
-        { phrase: "lonely phrase", group_id: 3624 },
+        { phrase, group_id: 3537, as_of: "2026-09-23" },
+        { phrase, group_id: 3553, as_of: "2026-09-23" },
+        { phrase: "retired phrase", group_id: 3537, as_of: "2026-09-01" },
+        { phrase: "lonely phrase", group_id: 3624, as_of: "2026-09-23" },
       ],
       organic,
     );
     assert.equal(census.phrases, 2);
     assert.ok(census.snapshot_rows > census.phrases);
     const readme = pack.files.find((f) => f.name === "README.txt")!.body;
-    assert.match(readme, /organic_groups: 3 \/ phrases: 2 \/ snapshot_rows: \d+/);
+    assert.match(readme, /organic_groups: 3 \/ tracker_phrases: 2 \/ snapshot_rows: \d+/);
     assert.match(readme, /multi-ASIN/);
+    assert.doesNotMatch(readme, /tracker_phrases: 3/);
     assert.equal(census.groups, 3);
   });
 
@@ -2473,13 +2482,19 @@ describe("Dave nine zipper-audit fixes", () => {
     assert.match(readme, /adds_this_week_already: unknown/);
     assert.match(readme, /remaining_slots: 0/);
     assert.match(readme, /harvest_queue_rows: 0/);
-    const outcomes = parseCsv(pack.files.find((f) => f.name === "gno_outcomes.csv")!.body);
-    assert.equal(outcomes.length, 1);
-    assert.equal(outcomes[0].dave_action, "hold");
-    assert.equal(outcomes[0].query_normalized, "deodorant for woman");
-    assert.equal(outcomes[0].implemented, "unknown");
-    assert.equal(outcomes[0].campaign_id, "555666777888999000");
-    assert.match(pack.files.find((f) => f.name === "gno_outcomes.csv")!.body, /"555666777888999000"/);
+    const outcomesBody = pack.files.find((f) => f.name === "gno_outcomes.csv")!.body;
+    const outcomes = parseCsv(outcomesBody);
+    const deoOutcome = outcomes.find((r) => r.query_normalized === "deodorant for woman");
+    const rankOutcome = outcomes.find((r) => r.campaign_name.includes("Unscented Lip Balm"));
+    assert.ok(deoOutcome);
+    assert.equal(deoOutcome?.dave_action, "hold");
+    assert.equal(deoOutcome?.implemented, "unknown");
+    assert.match(deoOutcome?.campaign_id ?? "", /555666777888999000/);
+    assert.match(outcomesBody, /"=""555666777888999000"""/);
+    assert.ok(rankOutcome);
+    assert.equal(rankOutcome?.dave_action, "hold");
+    assert.match(rankOutcome?.notes ?? "", /Ranking campaign → hold/);
+    assert.match(rankOutcome?.notes ?? "", /1043/);
 
     const empty = buildGnoPack({
       asOf: "2026-09-23",
@@ -2489,10 +2504,15 @@ describe("Dave nine zipper-audit fixes", () => {
       placements: [],
       priorPack: { id: "gno-pack-2026-09-24_0824" },
     });
-    const emptyOut = empty.files.find((f) => f.name === "gno_outcomes.csv")!.body.trim().split("\n");
-    assert.equal(emptyOut.length, 1);
-    assert.match(empty.files.find((f) => f.name === "README.txt")!.body, /outcomes_empty_reason:/);
-    assert.match(empty.files.find((f) => f.name === "README.txt")!.body, /harvest_queue_rows: 0/);
+    const emptyOutcomes = parseCsv(empty.files.find((f) => f.name === "gno_outcomes.csv")!.body);
+    assert.equal(emptyOutcomes.length, 1);
+    assert.equal(emptyOutcomes[0].dave_action, "hold");
+    assert.match(emptyOutcomes[0].campaign_name, /Unscented Lip Balm/);
+    assert.match(emptyOutcomes[0].notes, /gno-pack-2026-09-24_1043/);
+    const emptyReadme = empty.files.find((f) => f.name === "README.txt")!.body;
+    assert.doesNotMatch(emptyReadme, /outcomes_empty_reason:/);
+    assert.match(emptyReadme, /Ranking campaign → hold/);
+    assert.match(emptyReadme, /harvest_queue_rows: 0/);
   });
 
   test("sibling audit is one row per phrase and README lists every Today meta_sync=false name", () => {
@@ -2530,5 +2550,246 @@ describe("Dave nine zipper-audit fixes", () => {
     const line = readme.split("\n").find((l) => l.startsWith("NEW_EXACT / flavor rows with meta_sync=false:"));
     assert.ok(line);
     for (const name of NEW_EXACT) assert.match(line!, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  });
+});
+
+describe("Dave six pack reviewability fixes", () => {
+  test("named competitor brands are brand_conquest; beef tallow stays allow", () => {
+    for (const brand of [
+      "lume",
+      "Lume Whole Body Deodorant",
+      "donna karan",
+      "Donna Karan Cashmere Mist deodorant",
+      "primally pure",
+      "primally pure body butter",
+      "osea",
+      "vanicream",
+      "saltair",
+      "native deodorant",
+      "medicube collagen cream",
+    ]) {
+      assert.equal(isBrandConquest(brand), true, brand);
+    }
+    assert.equal(isBrandConquest("beef tallow"), false);
+    assert.equal(isBrandConquest("beef tallow balm"), false);
+    const allow = contractSearchTermTag({
+      clicks: 8, orders: 3, search_term: "beef tallow",
+      has_enabled_exact_elsewhere: false,
+      destination_exists: true, destination_has_impressions: true,
+    });
+    assert.equal(allow.proposed_tag, "HARVEST_EXACT");
+    assert.equal(allow.relevance, "family");
+    const conquest = contractSearchTermTag({
+      clicks: 8, orders: 3, search_term: "saltair deodorant",
+      has_enabled_exact_elsewhere: false,
+    });
+    assert.equal(conquest.proposed_tag, "WATCH");
+    assert.equal(conquest.relevance, "brand_conquest");
+  });
+
+  test("harvest queue emits floor-passers when slots are 0, including exact-exists KEEP", () => {
+    const rows = assembleHarvestQueue([
+      {
+        term: "non toxic chapstick",
+        clicks: 7,
+        orders: 5,
+        label: "L7",
+        family: "lip_3pk",
+        source_campaign_id: "999888777666555444",
+        has_enabled_exact_elsewhere: true,
+        exact_elsewhere_campaign_ids: "123456789012345678",
+        exact_elsewhere_names: "SP | Chapstick Exact",
+      },
+      {
+        term: "tallow lip balm organic",
+        clicks: 8,
+        orders: 3,
+        label: "L7",
+        family: "lip_3pk",
+        source_campaign_id: "999888777666555444",
+        has_enabled_exact_elsewhere: false,
+      },
+      {
+        term: "one click",
+        clicks: 1,
+        orders: 0,
+        label: "L7",
+      },
+    ], 0, "unknown");
+    assert.equal(rows.length, 2);
+    const chap = rows.find((r) => r.term === "non toxic chapstick");
+    const organic = rows.find((r) => r.term === "tallow lip balm organic");
+    assert.equal(chap?.proposed_tag, "KEEP");
+    assert.match(String(chap?.proposed_tag_reason), /exact exists/);
+    assert.match(String(chap?.proposed_tag_reason), /not a new Exact harvest/);
+    assert.match(String(chap?.proposed_tag_reason), /SP \| Chapstick Exact/);
+    assert.equal(organic?.proposed_tag, "WATCH");
+    assert.equal(organic?.proposed_tag_reason, "slot_cap");
+
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      addsThisWeekAlready: 3,
+      campaigns: [camp(AUTO_LOOSE_NAME, {
+        date: "2026-09-23", spend: 40, campaign_id: "999888777666555444", campaign_status: "ENABLED",
+      })],
+      searchTerms: [
+        {
+          date: "2026-09-23", campaign_id: "999888777666555444", campaign_name: AUTO_LOOSE_NAME,
+          search_term: "non toxic chapstick", keyword: "non toxic chapstick", keyword_id: "111222333444555666",
+          match_type: "TARGETING_EXPRESSION", spend: 12, sales_14d: 40, orders_14d: 5, clicks: 7, impressions: 80,
+        },
+        {
+          date: "2026-09-23", campaign_id: "999888777666555444", campaign_name: AUTO_LOOSE_NAME,
+          search_term: "tallow lip balm organic", keyword: "tallow lip balm organic", keyword_id: "777888999000111222",
+          match_type: "TARGETING_EXPRESSION", spend: 10, sales_14d: 30, orders_14d: 3, clicks: 8, impressions: 90,
+        },
+      ],
+      placements: [],
+      keywordTargets: [{
+        campaign_id: "123456789012345678",
+        keyword_id: "333444555666777888",
+        campaign_name: "SP | Chapstick Exact",
+        keyword_text: "non toxic chapstick",
+        match_type: "EXACT",
+        state: "ENABLED",
+        bid: 1.1,
+      }],
+    });
+    const queue = parseCsv(pack.files.find((f) => f.name === "harvest_queue.csv")!.body);
+    const packedChap = queue.find((r) => r.term === "non toxic chapstick");
+    const packedOrganic = queue.find((r) => r.term === "tallow lip balm organic");
+    assert.ok(packedChap);
+    assert.equal(packedChap?.proposed_tag, "KEEP");
+    assert.match(packedChap?.proposed_tag_reason ?? "", /exact exists/);
+    assert.equal(packedOrganic?.proposed_tag, "WATCH");
+    assert.equal(packedOrganic?.proposed_tag_reason, "slot_cap");
+    assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /remaining_slots: 0/);
+    assert.match(pack.files.find((f) => f.name === "harvest_queue.csv")!.body, /"=""999888777666555444"""/);
+    assert.match(pack.files.find((f) => f.name === "harvest_queue.csv")!.body, /"=""123456789012345678"""/);
+  });
+
+  test("structure audit keeps actionable conflicts and drops flavor-only co-auctions", () => {
+    const flavor = (name: string, bid: number) => ({
+      campaign_id: name, campaign_name: name, bid, keyword_id: "",
+    });
+    const picked = selectActionableSiblings([
+      {
+        query_normalized: "beef tallow chapstick",
+        campaigns: [
+          flavor("Orange Lip Balm - SP - Beef Tallow Chapstick - KW - Exact", 1),
+          flavor("Assorted Lip Balm - SP - Beef Tallow Chapstick - KWs - Exact", 1.05),
+        ],
+      },
+      {
+        query_normalized: "unknown bid chapstick",
+        campaigns: [
+          { campaign_id: "o-null", campaign_name: "Orange Lip Balm - SP - Unknown Bid - KW - Exact", bid: null, keyword_id: "" },
+          { campaign_id: "a-null", campaign_name: "Assorted Lip Balm - SP - Unknown Bid - KWs - Exact", bid: 1.05, keyword_id: "" },
+        ],
+      },
+      {
+        query_normalized: "lip balm",
+        campaigns: [
+          flavor("Unscented Lip Balm - SP - Lip Balm - KWs - Exact", 1.8),
+          flavor("Assorted Lip Balm - SP - Lip Balm - KWs - Exact", 1.1),
+          { campaign_id: "pm", campaign_name: "SP KW - Exact(PM) - Lip Balm", bid: 1.4, keyword_id: "kw" },
+        ],
+      },
+      ...Array.from({ length: SIBLING_AUDIT_CAP + 5 }, (_, i) => ({
+        query_normalized: `conflict query ${String(i).padStart(2, "0")}`,
+        campaigns: [
+          { campaign_id: `a${i}`, campaign_name: `Keeper A ${i}`, bid: 1, keyword_id: "" },
+          { campaign_id: `b${i}`, campaign_name: `Keeper B ${i}`, bid: 2, keyword_id: "" },
+        ],
+      })),
+    ]);
+    assert.equal(picked.kept.some((r) => r.query_normalized === "beef tallow chapstick"), false);
+    assert.equal(picked.kept.some((r) => r.query_normalized === "unknown bid chapstick"), true);
+    assert.equal(picked.kept[0]?.query_normalized, "lip balm");
+    assert.equal(picked.kept.length, SIBLING_AUDIT_CAP);
+    assert.ok(picked.omitted > 0);
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: [],
+      searchTerms: [],
+      placements: [],
+      keywordTargets: [
+        { campaign_id: "o1", campaign_name: "Orange Lip Balm - SP - Beef Tallow Chapstick - KW - Exact", keyword_text: "beef tallow chapstick", match_type: "EXACT", state: "ENABLED", bid: 1 },
+        { campaign_id: "a1", campaign_name: "Assorted Lip Balm - SP - Beef Tallow Chapstick - KWs - Exact", keyword_text: "beef tallow chapstick", match_type: "EXACT", state: "ENABLED", bid: 1.05 },
+      ],
+    });
+    const audit = parseCsv(pack.files.find((f) => f.name === "structure_audit.csv")!.body);
+    assert.equal(audit.some((r) => r.evidence.includes("beef tallow chapstick")), false);
+    assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /flavor-shell-only/);
+  });
+
+  test("every pack CSV quotes long Amazon ids as text formulas", () => {
+    const longId = "123456789012345678";
+    for (const header of [
+      "campaign_id", "keyword_id", "ad_group_id", "target_id", "negative_id", "portfolio_id",
+      "sibling_exact_campaign_ids", "exact_elsewhere_campaign_ids", "entity_ids",
+      "source_campaign_id", "destination_campaign_id", "destination_exact_campaign_id",
+      "bidding_campaign_ids", "negative_ids",
+    ]) {
+      assert.equal(isAmazonIdHeader(header), true, header);
+      assert.equal(csvEscapeField(longId, header), `"=""${longId}"""`);
+    }
+    assert.equal(
+      csvEscapeField(`${longId}|998877665544332211`, "sibling_exact_campaign_ids"),
+      `"=""${longId}|998877665544332211"""`,
+    );
+    assert.equal(csvEscapeField("deo-1", "campaign_id"), '"deo-1"');
+    assert.equal(csvEscapeField(12.5, "spend"), "12.50");
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: "2026-09-24",
+      campaigns: [camp("SP | DEO | B0CLHYY3BB | EX | tallow deodorant | TOS", {
+        date: "2026-09-23", spend: 4, campaign_id: longId, campaign_status: "ENABLED",
+      })],
+      campaignMeta: [{
+        campaign_id: longId,
+        campaign_name: "SP | DEO | B0CLHYY3BB | EX | tallow deodorant | TOS",
+        state: "ENABLED",
+        portfolio_id: "998877665544332211",
+      }],
+      searchTerms: [],
+      placements: [],
+      keywordTargets: [{
+        campaign_id: longId,
+        ad_group_id: "222333444555666777",
+        keyword_id: "111222333444555666",
+        campaign_name: "SP | DEO | B0CLHYY3BB | EX | tallow deodorant | TOS",
+        keyword_text: "tallow deodorant",
+        match_type: "EXACT",
+        state: "ENABLED",
+        bid: 1,
+      }],
+      negatives: [{
+        campaign_id: longId,
+        ad_group_id: "222333444555666777",
+        negative_id: "444555666777888999",
+        campaign_name: "SP | DEO | B0CLHYY3BB | EX | tallow deodorant | TOS",
+        keyword: "junk term",
+        match_type: "NEGATIVE_EXACT",
+        state: "ENABLED",
+      }],
+    });
+    const csvs = pack.files.filter((f) => f.name.endsWith(".csv"));
+    assert.ok(csvs.length >= 10);
+    for (const file of csvs) {
+      const lines = file.body.trim().split("\n").filter(Boolean);
+      const headers = splitCsvLine(lines[0] ?? "");
+      for (const line of lines.slice(1)) {
+        const cols = splitCsvLine(line);
+        headers.forEach((header, i) => {
+          if (!isAmazonIdHeader(header)) return;
+          const value = cols[i] ?? "";
+          if (!/\d{12,}/.test(value)) return;
+          assert.match(value, /^="/, `${file.name} ${header} bare id ${value}`);
+        });
+      }
+    }
   });
 });

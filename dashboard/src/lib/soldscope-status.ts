@@ -133,9 +133,81 @@ export function summarizeFreshness(args: {
   };
 }
 
-export function rankTrackerCopy(groups: number, phrases: number): string {
-  if (groups <= 0 || phrases <= 0) return RT_EMPTY_COPY;
-  return `SoldScope Rank Tracker: ${groups} group${groups === 1 ? "" : "s"} / ${phrases} phrase${phrases === 1 ? "" : "s"} — observe-only.`;
+export interface TrackerPhraseCensus {
+  /** Distinct SoldScope group_id values. 0 when group_id is missing. */
+  groups: number;
+  /**
+   * Distinct tracker phrases on the newest as_of of each group.
+   * Null when the input has no phrase text. Never a raw row count.
+   */
+  tracker_phrases: number | null;
+  /** Rows fed to the counter. Not a phrase count. */
+  counted_rows: number;
+  /** True when newest-day-per-group membership was available. */
+  membership_known: boolean;
+}
+
+/**
+ * Real SoldScope tracker phrase count.
+ * Newest as_of per group_id, then distinct query_normalized.
+ * Older days in the same group do not add phrases.
+ * Without group_id + as_of, distinct phrases are still counted, but
+ * membership_known stays false so callers must not label that number
+ * as current group membership or as snapshot rows.
+ */
+export function countTrackerPhrases(rows: {
+  phrase?: string | null;
+  group_id?: number | null;
+  as_of?: string | null;
+}[]): TrackerPhraseCensus {
+  const counted_rows = rows.length;
+  const groupIds = new Set<string>();
+  for (const row of rows) {
+    if (row.group_id != null && Number.isFinite(Number(row.group_id))) {
+      groupIds.add(String(Number(row.group_id)));
+    }
+  }
+  const dated = rows.some((row) => /^\d{4}-\d{2}-\d{2}$/.test(String(row.as_of ?? "").slice(0, 10)));
+  const latestByGroup = new Map<string, string>();
+  if (dated && groupIds.size) {
+    for (const row of rows) {
+      if (row.group_id == null || !Number.isFinite(Number(row.group_id))) continue;
+      const day = String(row.as_of ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      const group = String(Number(row.group_id));
+      const prev = latestByGroup.get(group);
+      if (!prev || day > prev) latestByGroup.set(group, day);
+    }
+  }
+  const phrases = new Set<string>();
+  let sawPhrase = false;
+  for (const row of rows) {
+    const phrase = queryNormalized(row.phrase);
+    if (!phrase) continue;
+    sawPhrase = true;
+    if (latestByGroup.size) {
+      if (row.group_id == null || !Number.isFinite(Number(row.group_id))) continue;
+      const day = String(row.as_of ?? "").slice(0, 10);
+      if (latestByGroup.get(String(Number(row.group_id))) !== day) continue;
+    }
+    phrases.add(phrase);
+  }
+  return {
+    groups: groupIds.size,
+    tracker_phrases: sawPhrase ? phrases.size : null,
+    counted_rows,
+    membership_known: latestByGroup.size > 0,
+  };
+}
+
+export function rankTrackerCopy(groups: number, phrases: number | null): string {
+  if (groups <= 0 && (phrases == null || phrases <= 0)) return RT_EMPTY_COPY;
+  if (phrases == null) {
+    return `SoldScope Rank Tracker: ${groups} group${groups === 1 ? "" : "s"} / tracker phrases unknown (row count is not a phrase count) — observe-only.`;
+  }
+  const groupLabel = `${groups} group${groups === 1 ? "" : "s"}`;
+  const phraseLabel = `${phrases} tracker phrase${phrases === 1 ? "" : "s"}`;
+  return `SoldScope Rank Tracker: ${groupLabel} / ${phraseLabel} — distinct keywords on the newest day of each group, not snapshot rows. Observe-only.`;
 }
 
 export function formatSoldScopeVol(n: number | null | undefined): string {
@@ -282,14 +354,13 @@ export function mergeAsinIntel(
 
 export function rankTrackerCounts(rankRows: SoldScopeRankRow[]): {
   groups: number;
-  phrases: number;
+  phrases: number | null;
+  membership_known: boolean;
 } {
-  const groups = new Set<number>();
-  const phrases = new Set<string>();
-  for (const row of rankRows) {
-    if (row.group_id != null) groups.add(Number(row.group_id));
-    const phrase = normalizeKeyword(row.phrase);
-    if (phrase) phrases.add(phrase);
-  }
-  return { groups: groups.size, phrases: phrases.size };
+  const census = countTrackerPhrases(rankRows);
+  return {
+    groups: census.groups,
+    phrases: census.tracker_phrases,
+    membership_known: census.membership_known,
+  };
 }

@@ -6,6 +6,7 @@
  */
 
 import spec from "../../config/gno_ppc_watch.json";
+import { RANKING_LIP_BALM_CAMPAIGN, RANKING_LIP_BALM_QUERY } from "./gno-pack-contract";
 import { queryNormalized } from "./query-normalized";
 
 type ProposedTag = "KEEP" | "HARVEST_CANDIDATE" | "JUNK_CANDIDATE";
@@ -45,6 +46,51 @@ export interface GnoLedgerRow {
   dave_action: DaveAction;
   source?: string | null;
   notes?: string | null;
+}
+
+/** Durable desk decision from the 2026-09-24 pack 1043 review. Carried on every pack until revoked. */
+export const RANKING_HOLD_SEED_ID = "seed-ranking-hold-2026-09-24";
+
+export const SEEDED_DESK_DECISIONS: readonly GnoLedgerRow[] = [
+  {
+    id: RANKING_HOLD_SEED_ID,
+    created_at: "2026-09-24T18:00:00-07:00",
+    pack_date: "2026-09-24",
+    campaign_name: RANKING_LIP_BALM_CAMPAIGN,
+    search_term: RANKING_LIP_BALM_QUERY,
+    term_family: "",
+    proposed_tag: "",
+    dave_action: "hold",
+    source: "desk_review",
+    notes: "Ranking campaign → hold. Dave review 2026-09-24, pack context gno-pack-2026-09-24_1043. Score organic rank + SQP impression/purchase share. Do not cut for ACOS. implemented=unknown until a later ledger row says otherwise.",
+  },
+];
+
+function outcomeIdentity(row: GnoLedgerRow): string {
+  const name = String(row.campaign_name ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  return [
+    row.dave_action,
+    name,
+    queryNormalized(row.search_term),
+    String(row.pack_date ?? "").slice(0, 10),
+  ].join("|");
+}
+
+/**
+ * Seeded desk decisions plus stored ledger rows.
+ * Seeds are not dropped by the 30-day window — they carry forward until revoked.
+ * A stored row with the same action, campaign, query, and pack_date replaces the seed.
+ */
+export function carryForwardOutcomes(ledger: GnoLedgerRow[]): GnoLedgerRow[] {
+  const seeded = SEEDED_DESK_DECISIONS.map((row) => ({
+    ...row,
+    term_family: row.term_family || termFamily(row.search_term),
+  }));
+  const seen = new Set(ledger.map(outcomeIdentity));
+  const extras = seeded.filter((row) => !seen.has(outcomeIdentity(row)));
+  return [...extras, ...ledger].sort(
+    (a, b) => Date.parse(b.created_at ?? "") - Date.parse(a.created_at ?? ""),
+  );
 }
 
 export function isDaveAction(v: string): v is DaveAction {

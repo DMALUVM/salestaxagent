@@ -10,7 +10,9 @@ import spec from "../../config/gno_ppc_watch.json";
 import { AMAZON_TZ, shiftDays, windowStart } from "./as-of";
 import {
   applyHarvestLearning,
+  carryForwardOutcomes,
   lastCallForCampaign,
+  RANKING_HOLD_SEED_ID,
   type GnoLedgerRow,
 } from "./gno-learning";
 import {
@@ -48,6 +50,7 @@ import {
   bidReviewSuggestion,
   bleeder20Threshold,
   bleeders20Decision,
+  assembleHarvestQueue,
   campaignPurposeOf,
   childFlavorOf,
   contractSearchTermTag,
@@ -66,6 +69,7 @@ import {
   renderFreshnessBlock,
   renderPackManifest,
   seededAgreements,
+  selectActionableSiblings,
   siblingExactAuctions,
   spendsDisagree,
   structureAuditFindings,
@@ -406,6 +410,7 @@ export interface HarvestTerm {
   destination_exact_campaign_id?: string;
   destination_exact_has_impressions?: boolean;
   exact_elsewhere_campaign_ids?: string;
+  exact_elsewhere_names?: string;
 }
 
 export interface WatchCampaignExportRow {
@@ -970,6 +975,28 @@ export function enabledExactKeywords(
   return enabled;
 }
 
+function enabledExactCampaigns(
+  keywordTargets: KeywordTarget[],
+): Map<string, { campaign_id: string; campaign_name: string }[]> {
+  const map = new Map<string, { campaign_id: string; campaign_name: string }[]>();
+  for (const target of keywordTargets) {
+    const matchType = String(target.match_type ?? "").toLowerCase();
+    if (matchType && matchType !== "exact") continue;
+    if (target.state && !isEnabledStatus(target.state)) continue;
+    const query = normalizeTerm(target.keyword_text);
+    if (!query) continue;
+    const list = map.get(query) ?? [];
+    const campaignId = String(target.campaign_id ?? "");
+    const campaignName = target.campaign_name;
+    if (list.some((row) => row.campaign_id === campaignId && normalizeName(row.campaign_name) === normalizeName(campaignName))) {
+      continue;
+    }
+    list.push({ campaign_id: campaignId, campaign_name: campaignName });
+    map.set(query, list);
+  }
+  return map;
+}
+
 export function tagAutoLooseTerm(
   term: {
     orders: number;
@@ -1132,6 +1159,7 @@ function rollSearchTerms(input: {
   const ledger = input.ledger ?? [];
   const organicIndex = input.organicIndex;
   const enabled = enabledExactKeywords(campaignRows, termRows, end, keywordTargets);
+  const exactCampaigns = enabledExactCampaigns(keywordTargets);
   const scoped = inWindow(termRows, start, end).filter((r) => campaignPredicate(r.campaign_name));
   const dates = [...new Set(scoped.map((r) => r.date))].sort();
   const dailyDates = dates.filter((d) => stDateLooksDaily(
@@ -1163,7 +1191,9 @@ function rollSearchTerms(input: {
     const m = sumMetrics(group);
     const term = group[0].search_term;
     const campaignName = group[0].campaign_name || AUTO_LOOSE_NAME;
-    const hasExact = enabled.has(normalizeTerm(term));
+    const query = normalizeTerm(term);
+    const hasExact = enabled.has(query);
+    const exactHits = exactCampaigns.get(query) ?? [];
     const base = tagAutoLooseTerm(
       {
         orders: m.orders, spend: m.spend, sales: m.sales,
@@ -1198,6 +1228,8 @@ function rollSearchTerms(input: {
       ctr: m.impressions > 0 ? m.clicks / m.impressions : null,
       cpc: m.cpc,
       has_enabled_exact_elsewhere: hasExact,
+      exact_elsewhere_campaign_ids: exactHits.map((hit) => hit.campaign_id).filter(Boolean).join("|"),
+      exact_elsewhere_names: exactHits.map((hit) => hit.campaign_name).filter(Boolean).join(" | "),
       proposed_tag: learned.tag,
       learning_note: learned.note,
       metrics_complete: true,
@@ -2369,7 +2401,7 @@ export function gnoPackReadme(input: {
     "- aba_sfr is Brand Analytics SFR (`aba_search_frequency_rank`) only. Never from SoldScope searchVolume. Blank = not stored.",
     `- ${ORGANIC_RANK_EMPTY_CELL_NOTE}`,
     "- This desk never creates SoldScope Rank Tracker groups.",
-    "- organic_groups / phrases / snapshot_rows: snapshot_rows can exceed phrases when one phrase is stored on more than one ASIN.",
+    "- organic_groups / tracker_phrases / snapshot_rows: tracker_phrases is distinct query_normalized on the newest day of each SoldScope group. snapshot_rows is the CSV row count. They differ when one phrase is stored on more than one ASIN. tracker_phrases is never the raw row count.",
     "- Action (Blake): strong organic (low #) + high paid spend → harvest / negate / bid restraint.",
     "- Action (Blake): weak or missing organic + converting ST → Exact protect.",
     "",
@@ -2386,7 +2418,7 @@ export function gnoPackReadme(input: {
     competitorLine,
     "- negatives_snapshot.csv — optional",
     "- gno_decision_rules.txt — curated GNO review rules (family CM BE is SoT; 37% is a scenario)",
-    "- gno_outcomes.csv — harvest-desk ledger (hold / bid_down / bid_up / skip / approve_harvest_neg). Headers only when empty.",
+    "- gno_outcomes.csv — seeded desk decisions plus the last 30 days of the harvest-desk ledger (hold / bid_down / bid_up / skip / approve_harvest_neg). Ranking campaign → hold (2026-09-24, pack 1043) is seeded so it is not chat-only. implemented stays unknown unless the ledger records it.",
     "- README.txt — this file",
     "",
     `Pack files: ${input.files.join(", ")}`,
@@ -2522,7 +2554,7 @@ export function buildGnoPack(input: {
   const windows = contractPackWindows(today, asOf, input.campaigns);
   const metricsOpen = !l2L7MetricsComplete(today, asOf, input.campaigns);
   const targets = input.keywordTargets ?? [];
-  const ledger = ledgerWithinDays(input.ledger ?? [], today, 30);
+  const ledger = carryForwardOutcomes(ledgerWithinDays(input.ledger ?? [], today, 30));
   const negatives = input.negatives ?? [];
   const organicIndex = buildOrganicRankJoinIndex(input.organicSnapshots ?? []);
   const organicRows = organicRankSnapshotRows(input.organicSnapshots ?? []).map(blankZeroRank);
@@ -2708,28 +2740,30 @@ export function buildGnoPack(input: {
   const addsUnknown = input.addsThisWeekAlready == null || !Number.isFinite(Number(input.addsThisWeekAlready));
   const adds = addsUnknown ? null : Number(input.addsThisWeekAlready);
   const remaining = addsUnknown ? 0 : Math.max(0, MAX_NEW_STRUCTURES_PER_WEEK - (adds ?? 0));
-  const harvestPool = [...autoTerms, ...fatTerms, ...broadTerms]
-    .filter((r) => r.label === "L7" && (r.proposed_tag === "HARVEST_EXACT" || r.proposed_tag === "WATCH") && r.orders >= 2);
-  const harvestQueue = harvestPool.slice(0, remaining).map((r) => ({
-    term: r.customer_search_term,
-    query_normalized: queryNormalized(r.customer_search_term),
-    family: r.family,
-    source_campaign_id: r.campaign_id ?? "",
-    clicks_l7: r.clicks, orders_l7: r.orders, acos_l7: r.acos,
-    clicks_l30: null, orders_l30: null,
-    organic_rank: r.organic_rank, sqp_ps: r.sqp_purchase_share ?? null,
-    destination_exact_exists: false, destination_campaign_id: "",
-    destination_state: "", destination_budget: null, destination_impressions: 0,
-    source_negate_pending: false, slot_cost: 1,
-    proposed_tag: "WATCH",
-    proposed_tag_reason: "destination impressions unknown; HARVEST_EXACT not allowed",
-    harvest_ready: false,
-    adds_this_week_already: addsUnknown ? "unknown" : adds,
-    remaining_slots: remaining,
-  }));
+  const harvestQueue = assembleHarvestQueue(
+    [...autoTerms, ...fatTerms, ...broadTerms].map((r) => ({
+      term: r.customer_search_term,
+      query_normalized: r.query_normalized,
+      family: r.family,
+      source_campaign_id: r.campaign_id ?? "",
+      clicks: r.clicks,
+      orders: r.orders,
+      acos: r.acos,
+      label: r.label,
+      has_enabled_exact_elsewhere: r.has_enabled_exact_elsewhere,
+      exact_elsewhere_campaign_ids: r.exact_elsewhere_campaign_ids,
+      exact_elsewhere_names: r.exact_elsewhere_names,
+      organic_rank: r.organic_rank,
+      sqp_ps: r.sqp_purchase_share ?? null,
+      relevance: r.relevance,
+    })),
+    remaining,
+    addsUnknown ? "unknown" : (adds ?? 0),
+  );
 
+  const siblingAudit = selectActionableSiblings(siblings);
   const findings = structureAuditFindings({
-    siblings,
+    siblings: siblingAudit.kept,
     metaSyncMissing: [...new Map(watch
       .filter((r) => r.window_label === "Today" && r.meta_sync === false)
       .map((r) => [r.campaign_name, { campaign_name: r.campaign_name, watch_list: r.watch_list }])).values()],
@@ -2861,6 +2895,7 @@ export function buildGnoPack(input: {
   const organicCensus = organicTrackerCensus(input.organicSnapshots ?? [], organicRows);
   const groups = organicCensus.groups;
   const phrases = organicCensus.phrases;
+  const phraseLabel = phrases == null ? "unknown" : String(phrases);
   const sqpLag = sqpPlan.lastCompleteWeekEnd ? isoDayDelta(today, sqpPlan.lastCompleteWeekEnd) : null;
   const sqpSources = [...new Set(sqp.map((r) => String(r.source ?? "")).filter(Boolean))];
   const rankingLines = watch
@@ -2974,7 +3009,7 @@ export function buildGnoPack(input: {
     sqpLagDays: sqpLag == null || !Number.isFinite(sqpLag) ? "" : String(sqpLag),
     sqpComparison: comparisonText,
     organicAsOf,
-    organicGroups: `${groups} / phrases: ${phrases} / snapshot_rows: ${organicCensus.snapshot_rows}`,
+    organicGroups: `${groups} / tracker_phrases: ${phraseLabel} / snapshot_rows: ${organicCensus.snapshot_rows}`,
     placementAsOf: input.placements.map((p) => p.date).sort().at(-1) ?? "",
     negativesAsOf: negatives.length ? "stored snapshot; added_at not on every row" : "",
     skuCostsAsOf: skuAsOf || "missing",
@@ -2991,8 +3026,8 @@ export function buildGnoPack(input: {
     `BEFORE/AFTER vs prior pack: ${beforeAfter}`,
     `prior_pack_id: ${input.priorPack?.id ?? ""}`,
     ledger.length
-      ? "outcomes: last 30 days of gno_decision_ledger carried into gno_outcomes.csv. implemented stays unknown unless the ledger records it."
-      : "outcomes_empty_reason: no stored gno_outcomes / decision-ledger rows in the last 30 days",
+      ? "outcomes: seeded desk decisions carry forward on every pack (Ranking campaign → hold, 2026-09-24, pack context gno-pack-2026-09-24_1043) plus the last 30 days of gno_decision_ledger. implemented stays unknown unless the ledger records it."
+      : "outcomes_empty_reason: no seeded desk decisions and no stored gno_outcomes / decision-ledger rows in the last 30 days",
     `Auto Loose L2 omitted? ${autoL2 === 0 ? "yes — no 1-day ST stamps for that window" : "no"}`,
     fatEmpty ? "fat_parent empty reason: no search-term stamps for the configured fat-parent campaign in the closed windows." : "fat_parent empty reason: n/a",
     `NEW_EXACT / flavor rows with meta_sync=false: ${metaMissing.length ? metaMissing.join(" | ") : "none"}`,
@@ -3006,7 +3041,9 @@ export function buildGnoPack(input: {
     `adds_this_week_already: ${addsUnknown ? "unknown" : String(adds)}`,
     `remaining_slots: ${remaining}`,
     `harvest_queue_rows: ${harvestQueue.length}`,
-    addsUnknown ? "adds_this_week_already unknown; remaining_slots capped conservative at 0." : "",
+    "harvest_queue: floor-passers (clicks>=harvest_min_clicks and orders>=harvest_min_orders) are emitted even when remaining_slots=0. Exact already exists → KEEP with that explanation. Other slot-less floor-passers → WATCH reason slot_cap.",
+    `structure_audit sibling_exact_auction: actionable conflicts only, one row per query_normalized, cap ${siblingAudit.kept.length} shown / ${siblingAudit.omitted} omitted of ${siblingAudit.total} co-auctions. Dropped before the cap: flavor-shell-only splits (Orange/Assorted/Peppermint/Unscented) whose enabled exact bids are all known and differ by less than $0.25, and that do not include the ranking campaign or ranking query. A missing bid stays on the file. Kept rows sort ranking, then campaign count, then bid spread.`,
+    addsUnknown ? "adds_this_week_already unknown; remaining_slots capped conservative at 0. Floor-passers still emit as WATCH / slot_cap." : "",
     `ranking campaigns: ${rankingLines.length ? rankingLines.join(" || ") : "none in this pack"}`,
     ...emptyReasons,
     "Campaign spend SoT is ads_campaigns_daily on watch_campaigns. Keyword and search-term dollars are NOT_SOT.",
@@ -3055,7 +3092,12 @@ export function buildGnoPack(input: {
     { name: "structure_audit.csv", body: toCsv(STRUCTURE_AUDIT_HEADERS, findings as unknown as Record<string, unknown>[]) },
     { name: "agreements.csv", body: toCsv(AGREEMENTS_HEADERS, agreements) },
     { name: "gno_decision_rules.txt", body: gnoDecisionRulesTxt() },
-    { name: "gno_outcomes.csv", body: gnoOutcomesCsv(ledger) },
+    { name: "gno_outcomes.csv", body: gnoOutcomesCsv(ledger.map((row) => {
+      if (row.id !== RANKING_HOLD_SEED_ID || String(row.campaign_id ?? "").trim()) return row;
+      const rank = watch.find((r) => isRankingCampaign(r.campaign_name) && String(r.campaign_id ?? "").trim());
+      if (!rank?.campaign_id) return row;
+      return { ...row, campaign_id: String(rank.campaign_id) };
+    })) },
   ];
   if (sqpComparison.length) {
     files.push({ name: SQP_COMPARISON_FILENAME, body: sqpWeeklySliceCsv(sqpComparison) });

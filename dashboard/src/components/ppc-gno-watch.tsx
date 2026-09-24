@@ -121,7 +121,7 @@ interface GnoData {
     observeOnly?: boolean;
     rankTrackerCopy?: string;
     groups?: number;
-    phrases?: number;
+    phrases?: number | null;
     keywordOutliers?: Array<{
       keyword: string;
       asin: string;

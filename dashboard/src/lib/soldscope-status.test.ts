@@ -16,6 +16,7 @@ import {
   mergeAsinIntel,
   mergeKeywordIntel,
   normalizeKeyword,
+  countTrackerPhrases,
   rankTrackerCopy,
   summarizeFreshness,
 } from "./soldscope-status";
@@ -43,6 +44,24 @@ describe("SoldScope status (enrich existing desks, no second warehouse UI)", () 
     assert.match(EMPTY_STATE_COPY, /not a sales or ads number/i);
     assert.match(RT_EMPTY_COPY, /observe-only/);
     assert.equal(rankTrackerCopy(0, 0), RT_EMPTY_COPY);
+    assert.match(rankTrackerCopy(3, 2), /3 groups \/ 2 tracker phrases/);
+    assert.match(rankTrackerCopy(3, 2), /not snapshot rows/);
+    assert.match(rankTrackerCopy(3, null), /tracker phrases unknown/);
+  });
+
+  test("tracker phrases are the newest day of each group, not snapshot rows", () => {
+    const census = countTrackerPhrases([
+      { phrase: "lip balm", group_id: 3537, as_of: "2026-09-23" },
+      { phrase: "lip balm", group_id: 3553, as_of: "2026-09-23" },
+      { phrase: "retired phrase", group_id: 3537, as_of: "2026-09-01" },
+      { phrase: "chapstick", group_id: 3537, as_of: "2026-09-23" },
+      { phrase: "chapstick", group_id: 3537, as_of: "2026-09-22" },
+    ]);
+    assert.equal(census.groups, 2);
+    assert.equal(census.tracker_phrases, 2);
+    assert.equal(census.counted_rows, 5);
+    assert.equal(census.membership_known, true);
+    assert.notEqual(census.tracker_phrases, census.counted_rows);
   });
 
   test("normalizeKeyword matches the Python rank-gate join key", () => {
