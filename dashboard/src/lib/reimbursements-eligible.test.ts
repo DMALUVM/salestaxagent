@@ -526,6 +526,11 @@ describe("Reese package + page contract", () => {
     assert.match(alertsApi, /fba_case_events/);
     assert.match(alertsApi, /case_submitted/);
     assert.match(alertsApi, /found_offset/);
+    assert.match(alertsApi, /found_offset \(auto receipts_cover/);
+    assert.doesNotMatch(
+      alertsApi,
+      /already_reimbursed" \|\| status === "found_offset"/,
+    );
     assert.match(alertsApi, /event_keys/);
     assert.match(alertsApi, /resolveClearAction/);
     assert.match(alertsApi, /amazonWrite:\s*false/);
