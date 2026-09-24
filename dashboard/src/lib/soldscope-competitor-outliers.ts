@@ -10,6 +10,7 @@
 import bundled from "../../config/soldscope_competitors.json";
 import { familyHeroAsin, lookupOrganicRank, type OrganicRankJoin } from "@/lib/organic-rank-progress";
 import { normalizeKeyword } from "@/lib/soldscope-status";
+import { csvEscapeField } from "@/lib/gno-pack-contract";
 import { isBrandConquest, isSoftBodyButter } from "@/lib/query-normalized";
 
 function isEnabledExactState(status: string | null | undefined): boolean {
@@ -704,9 +705,10 @@ export function competitorKrOutliersCsv(rows: CompetitorOutlierRow[]): string {
   for (const row of rows) {
     lines.push(COMPETITOR_KR_CSV_HEADERS.map((h) => {
       const v = row[h];
-      if (v == null) return "";
-      const s = String(v);
-      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      if (typeof v === "number" || typeof v === "boolean" || typeof v === "string" || v == null) {
+        return csvEscapeField(v, h);
+      }
+      return csvEscapeField(v == null ? "" : String(v), h);
     }).join(","));
   }
   return `${lines.join("\n")}\n`;

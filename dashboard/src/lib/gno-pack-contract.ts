@@ -6,6 +6,7 @@
 
 import { createHash } from "node:crypto";
 import { isBrandConquest, queryNormalized } from "./query-normalized";
+import { countTrackerPhrases } from "./soldscope-status";
 
 export { isBrandConquest, isSoftBodyButter, queryNormalized } from "./query-normalized";
 
@@ -106,8 +107,36 @@ export const ST_REVIEW_FILES = [
 export const ROW_FILTERS_APPLIED =
   "SUMMARY stamps excluded from L2/L7 (not an ads window); review files are WINDOW_AGG one row per campaign_id+query_normalized+match_type+window_label; no min_clicks or min_spend row drop; ST $ is NOT_SOT";
 
-const AMAZON_ID_HEADER =
-  /(^|_)(campaign_id|ad_group_id|keyword_id|target_id|negative_id|portfolio_id)s?$|^entity_ids$/;
+/** campaign_id / keyword_id and sibling list columns (exact_elsewhere, entity_ids, …). */
+export function isAmazonIdHeader(header: string | null | undefined): boolean {
+  const h = String(header ?? "").trim().toLowerCase();
+  if (!h) return false;
+  if (h === "entity_ids" || h === "entity_id") return true;
+  return /(campaign_id|ad_group_id|keyword_id|target_id|negative_id|portfolio_id)s?$/.test(h);
+}
+
+function digitsFromNumber(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  const asString = String(value);
+  if (!/e/i.test(asString)) return asString;
+  return value.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 0 });
+}
+
+/**
+ * Excel and Sheets parse a quoted all-digit cell as a number and rewrite
+ * 12+ digit Amazon ids as scientific notation. A text formula keeps every digit.
+ * Pipe-separated sibling id lists are one formula so none of the ids convert.
+ */
+function quoteAmazonId(value: string): string {
+  const parts = value.split("|").map((part) => part.trim()).filter(Boolean);
+  const allDigits = parts.length > 0 && parts.every((part) => /^\d+$/.test(part));
+  const longDigit = allDigits && parts.some((part) => part.length >= 12);
+  if (longDigit) {
+    const formula = `="${value}"`;
+    return `"${formula.replace(/"/g, '""')}"`;
+  }
+  return `"${value.replace(/"/g, '""')}"`;
+}
 
 /**
  * A closed window is real only when loaded daily facts reach the window
@@ -138,49 +167,42 @@ export function csvEscapeField(
   header?: string,
 ): string {
   if (value === null || value === undefined) return "";
-  const forceQuote = Boolean(header && AMAZON_ID_HEADER.test(header));
+  const forceQuote = isAmazonIdHeader(header);
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return "";
-    const s = Number.isInteger(value) ? String(value) : value.toFixed(2);
-    return forceQuote ? `"${s}"` : s;
+    const s = Number.isInteger(value) ? digitsFromNumber(value) : value.toFixed(2);
+    if (!s) return "";
+    return forceQuote ? quoteAmazonId(s) : s;
   }
   if (typeof value === "boolean") return value ? "true" : "false";
   const s = String(value);
   if (!s) return "";
-  if (forceQuote || /[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  if (forceQuote) return quoteAmazonId(s);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
 export function organicTrackerCensus(
-  snapshots: { phrase?: string | null; group_id?: number | null }[],
+  snapshots: { phrase?: string | null; group_id?: number | null; as_of?: string | null }[],
   rows: { keyword?: string | null; family?: string | null }[],
-): { groups: number; phrases: number; snapshot_rows: number; note: string } {
-  const groupIds = new Set<string>();
-  const phrases = new Set<string>();
-  for (const s of snapshots) {
-    if (s.group_id != null && Number.isFinite(Number(s.group_id))) groupIds.add(String(s.group_id));
-    const q = queryNormalized(s.phrase);
-    if (q) phrases.add(q);
-  }
-  const families = new Set<string>();
-  const rowPhrases = new Set<string>();
-  for (const r of rows) {
-    const q = queryNormalized(r.keyword);
-    if (q) rowPhrases.add(q);
-    if (r.family) families.add(String(r.family));
-  }
-  const phraseCount = snapshots.length ? phrases.size : rowPhrases.size;
-  const groups = groupIds.size || families.size;
+): { groups: number; phrases: number | null; snapshot_rows: number; note: string } {
+  const census = countTrackerPhrases(snapshots);
   const snapshot_rows = rows.length;
+  const groups = census.groups;
+  const phrases = census.tracker_phrases;
   let note: string;
-  if (snapshot_rows > phraseCount) {
-    note = `snapshot_rows ${snapshot_rows} > phrases ${phraseCount} because multi-ASIN expansion stores one query_normalized on more than one ASIN.`;
-  } else if (phraseCount > snapshot_rows) {
-    note = `tracker phrases ${phraseCount} exceed snapshot_rows ${snapshot_rows}; phrases are distinct query_normalized in the tracker groups.`;
+  if (phrases == null) {
+    note = `tracker_phrases unknown; snapshot_rows ${snapshot_rows} is the organic_rank_snapshot.csv row count, not a SoldScope phrase count.`;
+  } else if (!census.membership_known) {
+    note = `tracker_phrases ${phrases} is distinct query_normalized in the snapshot input (group_id+as_of membership was not available). It is not the CSV row count. snapshot_rows ${snapshot_rows}.`;
+  } else if (snapshot_rows > phrases) {
+    note = `tracker_phrases ${phrases} is distinct query_normalized on the newest as_of of each SoldScope group. snapshot_rows ${snapshot_rows} is higher because multi-ASIN expansion stores one query_normalized on more than one ASIN.`;
+  } else if (phrases > snapshot_rows) {
+    note = `tracker_phrases ${phrases} (newest day of each group) exceed snapshot_rows ${snapshot_rows}. snapshot_rows is the CSV row count, not the tracker phrase count.`;
   } else {
-    note = `phrases ${phraseCount} equals snapshot_rows ${snapshot_rows}; each snapshot row is one distinct query_normalized.`;
+    note = `tracker_phrases ${phrases} equals snapshot_rows ${snapshot_rows} because each tracker phrase produced one snapshot row. The phrase count was not copied from the row count.`;
   }
-  return { groups, phrases: phraseCount, snapshot_rows, note };
+  return { groups, phrases, snapshot_rows, note };
 }
 
 export function namesKey(name: string | null | undefined): string {
@@ -540,6 +562,163 @@ export function siblingExactAuctions(targets: {
     if (distinct.size >= 2) out.push({ query_normalized: query, campaigns });
   }
   return out.sort((a, b) => a.query_normalized.localeCompare(b.query_normalized));
+}
+
+/**
+ * Desk cap for sibling_exact_auction rows.
+ * Flavor-shell-only co-auctions are not a conflict when every enabled Exact
+ * bid is known and the spread is under $0.25 (Orange/Assorted/Peppermint/
+ * Unscented bidding the same child keyword is the shell matrix). A missing
+ * bid is kept — an unknown spread is not proof the shells agree.
+ * Everything else is a conflict: a ranking campaign or ranking query, a
+ * non-shell campaign in the set, or a shell split whose known bids differ
+ * by at least $0.25.
+ * Conflicts sort ranking first, then campaign count, then bid spread, and
+ * the CSV keeps at most this many so the file stays scannable.
+ */
+export const SIBLING_AUDIT_CAP = 25;
+export const SIBLING_AUDIT_BID_SPREAD = 0.25;
+
+const FLAVOR_SHELL_NAME_RE = /^(orange|assorted|peppermint|unscented) lip balm - sp\b/;
+
+function isFlavorShellCampaignName(name: string): boolean {
+  return FLAVOR_SHELL_NAME_RE.test(namesKey(name));
+}
+
+function siblingBidSpread(campaigns: SiblingExact["campaigns"]): number | null {
+  const bids = campaigns
+    .map((c) => c.bid)
+    .filter((bid): bid is number => bid != null && Number.isFinite(bid));
+  if (bids.length < campaigns.length || bids.length < 2) return null;
+  return Math.max(...bids) - Math.min(...bids);
+}
+
+function siblingIsRanking(row: SiblingExact): boolean {
+  if (row.query_normalized === RANKING_LIP_BALM_QUERY) return true;
+  return row.campaigns.some((c) => isRankingCampaign(c.campaign_name));
+}
+
+/** True when a co-auction is worth a desk eye, not merely two campaigns sharing a query. */
+export function siblingConflictWorthEyes(row: SiblingExact): boolean {
+  if (siblingIsRanking(row)) return true;
+  const flavorOnly = row.campaigns.length > 0
+    && row.campaigns.every((c) => isFlavorShellCampaignName(c.campaign_name));
+  const spread = siblingBidSpread(row.campaigns);
+  if (flavorOnly && spread != null && spread < SIBLING_AUDIT_BID_SPREAD) return false;
+  return true;
+}
+
+export function selectActionableSiblings(siblings: SiblingExact[]): {
+  kept: SiblingExact[];
+  total: number;
+  omitted: number;
+} {
+  const actionable = siblings.filter(siblingConflictWorthEyes);
+  const ranked = [...actionable].sort((a, b) => {
+    const rankDelta = Number(siblingIsRanking(b)) - Number(siblingIsRanking(a));
+    if (rankDelta !== 0) return rankDelta;
+    if (b.campaigns.length !== a.campaigns.length) return b.campaigns.length - a.campaigns.length;
+    const spreadB = siblingBidSpread(b.campaigns);
+    const spreadA = siblingBidSpread(a.campaigns);
+    const spread = (spreadB ?? Number.POSITIVE_INFINITY) - (spreadA ?? Number.POSITIVE_INFINITY);
+    if (spread !== 0) return spread;
+    return a.query_normalized.localeCompare(b.query_normalized);
+  });
+  const kept = ranked.slice(0, SIBLING_AUDIT_CAP);
+  return { kept, total: siblings.length, omitted: siblings.length - kept.length };
+}
+
+export interface HarvestFloorTerm {
+  term: string;
+  query_normalized?: string;
+  family?: string;
+  source_campaign_id?: string;
+  clicks: number;
+  orders: number;
+  acos?: number | null;
+  label?: string;
+  has_enabled_exact_elsewhere?: boolean;
+  exact_elsewhere_campaign_ids?: string;
+  exact_elsewhere_names?: string;
+  organic_rank?: number | null;
+  sqp_ps?: number | null;
+  relevance?: string;
+}
+
+/**
+ * Floor-passers stay on harvest_queue even when remaining_slots is 0.
+ * Exact-already-exists → KEEP with that explanation (not a new Exact).
+ * Otherwise a slot-less floor-passer is WATCH / slot_cap.
+ * Slots, when any remain, are spent on floor-passers that are neither
+ * exact-exists nor brand conquest.
+ */
+export function assembleHarvestQueue(
+  terms: HarvestFloorTerm[],
+  remainingSlots: number,
+  addsThisWeekAlready: number | "unknown",
+): Record<string, unknown>[] {
+  const floor = terms
+    .filter((term) => (term.label ?? "L7") === "L7")
+    .filter((term) => term.clicks >= HARVEST_MIN_CLICKS && term.orders >= HARVEST_MIN_ORDERS)
+    .sort((a, b) => b.orders - a.orders || b.clicks - a.clicks || a.term.localeCompare(b.term));
+  let slots = Math.max(0, remainingSlots);
+  return floor.map((term) => {
+    const query = queryNormalized(term.query_normalized || term.term);
+    const exact = term.has_enabled_exact_elsewhere === true;
+    const brand = term.relevance === "brand_conquest" || isBrandConquest(term.term);
+    const where = [term.exact_elsewhere_names, term.exact_elsewhere_campaign_ids]
+      .map((part) => String(part ?? "").trim())
+      .filter(Boolean)
+      .join(" | ");
+    let proposed_tag = "WATCH";
+    let proposed_tag_reason = "destination impressions unknown; HARVEST_EXACT not allowed";
+    let slot_cost = 0;
+    let destination_exact_exists = false;
+    if (exact) {
+      proposed_tag = "KEEP";
+      proposed_tag_reason = where
+        ? `exact exists (${where}); KEEP — not a new Exact harvest`
+        : "exact exists; KEEP — not a new Exact harvest";
+      destination_exact_exists = true;
+    } else if (brand) {
+      proposed_tag = "WATCH";
+      proposed_tag_reason = "brand_conquest";
+    } else if (slots <= 0) {
+      proposed_tag = "WATCH";
+      proposed_tag_reason = "slot_cap";
+    } else {
+      slots -= 1;
+      slot_cost = 1;
+    }
+    const destinationId = exact
+      ? String(term.exact_elsewhere_campaign_ids ?? "").split("|").filter(Boolean)[0] ?? ""
+      : "";
+    return {
+      term: term.term,
+      query_normalized: query,
+      family: term.family ?? "",
+      source_campaign_id: term.source_campaign_id ?? "",
+      clicks_l7: term.clicks,
+      orders_l7: term.orders,
+      acos_l7: term.acos ?? null,
+      clicks_l30: null,
+      orders_l30: null,
+      organic_rank: term.organic_rank ?? null,
+      sqp_ps: term.sqp_ps ?? null,
+      destination_exact_exists,
+      destination_campaign_id: destinationId,
+      destination_state: "",
+      destination_budget: null,
+      destination_impressions: 0,
+      source_negate_pending: false,
+      slot_cost,
+      proposed_tag,
+      proposed_tag_reason,
+      harvest_ready: false,
+      adds_this_week_already: addsThisWeekAlready,
+      remaining_slots: Math.max(0, remainingSlots),
+    };
+  });
 }
 
 export interface StructureFinding {

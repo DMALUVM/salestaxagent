@@ -35,7 +35,7 @@ interface Status {
   } | null;
   soldscopeRankTracker?: string | null;
   soldscopeGroups?: number;
-  soldscopePhrases?: number;
+  soldscopePhrases?: number | null;
 }
 
 export function SqpStatus() {

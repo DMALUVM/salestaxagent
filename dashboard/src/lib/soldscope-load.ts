@@ -72,7 +72,7 @@ export async function loadSoldScopeAsinIntel(
 
 export async function loadSoldScopeRankStatus(
   sb: Sb = getServerSupabase(),
-): Promise<{ groups: number; phrases: number; copy: string }> {
+): Promise<{ groups: number; phrases: number | null; membership_known: boolean; copy: string }> {
   const ranks = (await selectAll(sb, "soldscope_rank_snapshots")) as SoldScopeRankRow[];
   const counts = rankTrackerCounts(ranks);
   return { ...counts, copy: rankTrackerCopy(counts.groups, counts.phrases) };
