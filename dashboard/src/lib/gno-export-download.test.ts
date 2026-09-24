@@ -88,6 +88,8 @@ describe("GNO export download", () => {
     assert.match(ui, /exportFailureMessage/);
     assert.match(ui, /triggerZipDownload/);
     assert.match(ui, /data-gno-notice/);
+    assert.match(ui, /data-gno-notice-tone=\{noticeTone\}/);
+    assert.match(ui, /showNotice\(exportFailureMessage\(res\.status, ct, text\), "err"\)/);
     assert.doesNotMatch(ui, /URL\.revokeObjectURL\(url\)/);
   });
 });

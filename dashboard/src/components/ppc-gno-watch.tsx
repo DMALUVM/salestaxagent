@@ -255,6 +255,7 @@ export function PpcGnoWatch() {
   const [adsLoading, setAdsLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<"ok" | "err">("ok");
   const [sqpNotice, setSqpNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [queued, setQueued] = useState<string[]>([]);
   const [sqpBusy, setSqpBusy] = useState(false);
@@ -321,29 +322,34 @@ export function PpcGnoWatch() {
     }).catch(() => { /* localStorage already holds the checkoff */ });
   }
 
+  function showNotice(text: string | null, tone: "ok" | "err" = "ok") {
+    setNotice(text);
+    setNoticeTone(tone);
+  }
+
   async function exportPack() {
     setExporting(true);
-    setNotice(null);
+    showNotice(null);
     try {
       const res = await fetch("/api/ppc/gno-export");
       const ct = res.headers.get("content-type") ?? "";
       const disposition = res.headers.get("content-disposition");
       if (!res.ok || !responseLooksLikeZip(ct, disposition)) {
         const text = await res.text();
-        setNotice(exportFailureMessage(res.status, ct, text));
+        showNotice(exportFailureMessage(res.status, ct, text), "err");
         return;
       }
       const blob = await res.blob();
       if (blob.size < 22) {
-        setNotice("Export failed. The server returned an empty file, so nothing was saved.");
+        showNotice("Export failed. The server returned an empty file, so nothing was saved.", "err");
         return;
       }
       const name = filenameFromDisposition(disposition) ?? "gno-pack.zip";
       triggerZipDownload(blob, name);
-      setNotice(`Downloaded ${name}. Check your Downloads folder. Observe only — nothing writes to Amazon.`);
+      showNotice(`Downloaded ${name}. Check your Downloads folder. Observe only — nothing writes to Amazon.`);
       await load();
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Export failed. No zip was saved.");
+      showNotice(e instanceof Error ? e.message : "Export failed. No zip was saved.", "err");
     } finally {
       setExporting(false);
     }
@@ -352,7 +358,7 @@ export function PpcGnoWatch() {
   async function uploadSqp(file: File) {
     setSqpBusy(true);
     setSqpNotice(null);
-    setNotice(null);
+    showNotice(null);
     try {
       const body = new FormData();
       body.append("file", file);
@@ -394,7 +400,7 @@ export function PpcGnoWatch() {
     }>;
   }) {
     setLogging(true);
-    setNotice(null);
+    showNotice(null);
     try {
       const res = await fetch("/api/ppc/gno-outcome", {
         method: "POST",
@@ -403,14 +409,14 @@ export function PpcGnoWatch() {
       });
       const d = await res.json() as { ok?: boolean; written?: number; error?: string; hint?: string };
       if (!res.ok || d.ok === false) {
-        setNotice(d.error ?? d.hint ?? "Could not log outcome.");
+        showNotice(d.error ?? d.hint ?? "Could not log outcome.", "err");
         return;
       }
-      setNotice(`Logged ${d.written ?? 0} outcome(s). Observe only — nothing wrote to Amazon.`);
+      showNotice(`Logged ${d.written ?? 0} outcome(s). Observe only — nothing wrote to Amazon.`);
       if (payload.paste) setPaste("");
       await load();
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Could not log outcome.");
+      showNotice(e instanceof Error ? e.message : "Could not log outcome.", "err");
     } finally {
       setLogging(false);
     }
@@ -470,10 +476,11 @@ export function PpcGnoWatch() {
 
       {notice && (
         <p
-          role={/fail|error|empty|too large|could not/i.test(notice) ? "alert" : "status"}
+          role={noticeTone === "err" ? "alert" : "status"}
           data-gno-notice
+          data-gno-notice-tone={noticeTone}
           className={`rounded-md border px-3 py-2 text-sm ${
-            /fail|error|empty|too large|could not/i.test(notice)
+            noticeTone === "err"
               ? "border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
               : "border-emerald-400/50 bg-emerald-50 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
           }`}
