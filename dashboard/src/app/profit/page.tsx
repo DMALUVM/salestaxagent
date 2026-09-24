@@ -401,9 +401,13 @@ export default function ProfitPage() {
             <span>
               <strong>Contribution (operating net) = gross sales − referral − FBA − ad spend − COGS</strong>,
               stored per Amazon day (America/Los_Angeles order date) when daily rows exist.
-              Month and year use Amazon <code>sales_by_sku</code> × <code>sku_costs</code>
-              (SP-API sales from Aug 2024 onward), replaced by daily Amazon totals
-              when those cover the month more completely. SKU Economics ad CSVs only cover Sept 2024 onward;
+              Month and year start from Amazon <code>sales_by_sku</code> × <code>sku_costs</code>
+              (SP-API sales from Aug 2024 onward). Headline sales dollars can move
+              to <code>sales_daily</code> when those beat <code>sales_by_sku</code>.
+              Units stay on <code>sales_by_sku</code> unless <code>pnl_daily</code> itself
+              covers the month and the unit sum is non-zero — <code>sales_daily</code> has
+              no units column, so a sales-only day is not a measured 0. COGS follows
+              those units, never inferred from dollars. SKU Economics ad CSVs only cover Sept 2024 onward;
               use Ads Console for earlier ad months. Gross sales come from the SP-API
               orders report (all non-cancelled statuses); ad spend from <code>ads_campaigns_daily</code>
               when that month has campaign rows, otherwise ads are labelled unknown;

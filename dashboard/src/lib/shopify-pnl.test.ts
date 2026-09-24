@@ -161,4 +161,16 @@ describe("Shopify outbound and Google/Meta ads", () => {
     assert.equal(once[0].est_contribution, twice[0].est_contribution);
     assert.equal(once[0].est_outbound_ship, twice[0].est_outbound_ship);
   });
+
+  test("profit page names the 3PL formula, Google + Meta, and unit overlay", () => {
+    const page = readFileSync(path.join(process.cwd(), "src/app/profit/page.tsx"), "utf8");
+    assert.match(page, /− Google \+ Meta ads/);
+    assert.match(page, /SHOPIFY_OUTBOUND_FIXED_PER_ORDER/);
+    assert.match(page, /SHOPIFY_OUTBOUND_FLAT_FALLBACK/);
+    assert.match(page, /Storage and account management are not in outbound/);
+    assert.match(page, /Units stay on <code>sales_by_sku<\/code>/);
+    assert.match(page, /sales_daily<\/code> has\s+no units column/);
+    assert.doesNotMatch(page, /replaced by daily Amazon totals/);
+    assert.doesNotMatch(page, /\$5\.50\/order/);
+  });
 });
