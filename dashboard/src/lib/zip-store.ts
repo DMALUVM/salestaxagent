@@ -288,3 +288,128 @@ export function streamingZipResponse(
     },
   });
 }
+
+/**
+ * Already-built zip, one buffered body. Under this size Vercel accepts a
+ * non-streamed response and the browser can trust Content-Length. Larger
+ * packs still stream as a clean zip (no heartbeat bytes) so we do not
+ * shrink the file to stay under the cap.
+ */
+export const BUFFERED_ZIP_MAX = 4 * 1024 * 1024;
+
+export function bufferedZipResponse(
+  bytes: Uint8Array,
+  filename: string,
+  extraHeaders?: Record<string, string>,
+): Response {
+  const body = new Uint8Array(bytes.byteLength);
+  body.set(bytes);
+  const safeName = filename.replace(/["\r\n]/g, "");
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "application/zip",
+      "content-disposition": `attachment; filename="${safeName}"`,
+      "content-length": String(body.byteLength),
+      "cache-control": "no-store, no-transform",
+      "x-content-type-options": "nosniff",
+      ...extraHeaders,
+    },
+  });
+}
+
+/** Clean zip for a short download. No leading heartbeat bytes. */
+export function readyZipResponse(
+  bytes: Uint8Array,
+  filename: string,
+  extraHeaders?: Record<string, string>,
+): Response {
+  if (bytes.byteLength > BUFFERED_ZIP_MAX) {
+    return zipAttachmentResponse(bytes, filename, extraHeaders);
+  }
+  return bufferedZipResponse(bytes, filename, extraHeaders);
+}
+
+/**
+ * Tiny text status stream while a pack builds. Lines are `.\n` heartbeats,
+ * then one `READY {"token","filename"}\n` or `GNOERR: …\n`. The zip itself
+ * is not in this body — a later short GET serves the file.
+ */
+export function streamingExportStatus(
+  filename: string,
+  produce: () => Promise<{ token: string; filename: string }>,
+  opts?: { heartbeatMs?: number; extraHeaders?: Record<string, string> },
+): Response {
+  const heartbeatMs = opts?.heartbeatMs ?? 2_000;
+  const safeName = filename.replace(/["\r\n]/g, "");
+  const encoder = new TextEncoder();
+  const heartbeat = encoder.encode(".\n");
+  let started = false;
+  let ready: { token: string; filename: string } | null = null;
+  let failure: string | null = null;
+  let producePromise: Promise<void> | null = null;
+  let beat: ReturnType<typeof pulse> | null = null;
+  let wroteTerminal = false;
+
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (!started) {
+        started = true;
+        console.info("gno-export stream open", safeName);
+        producePromise = Promise.resolve().then(produce).then(
+          (value) => {
+            ready = value;
+          },
+          (err: unknown) => {
+            failure = err instanceof Error ? err.message : String(err);
+            console.error("gno-export build failed", err);
+          },
+        );
+        controller.enqueue(heartbeat);
+        return;
+      }
+
+      if (ready == null && failure == null) {
+        beat = pulse(heartbeatMs);
+        await Promise.race([producePromise, beat.promise]);
+        beat.cancel();
+        beat = null;
+        if (ready == null && failure == null) {
+          controller.enqueue(heartbeat);
+          return;
+        }
+      }
+
+      if (wroteTerminal) {
+        controller.close();
+        return;
+      }
+      wroteTerminal = true;
+      if (failure != null) {
+        controller.enqueue(encoder.encode(`GNOERR:${failure}\n`));
+        controller.close();
+        return;
+      }
+      const line = `READY ${JSON.stringify({
+        token: ready?.token ?? "",
+        filename: ready?.filename ?? safeName,
+      })}\n`;
+      controller.enqueue(encoder.encode(line));
+      controller.close();
+    },
+    cancel() {
+      beat?.cancel();
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "no-store, no-transform",
+      "x-gno-export-framing": "status-line",
+      "x-accel-buffering": "no",
+      ...opts?.extraHeaders,
+    },
+  });
+}
