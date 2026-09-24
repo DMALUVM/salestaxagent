@@ -1,7 +1,12 @@
 /**
- * Minimal ZIP (store / no compression) so Vercel can ship a GNO pack
- * without a new dependency. CRC-32 + local/central/EOCD headers only.
+ * ZIP builder for the GNO pack. Entries are deflated (method 8) when that
+ * is smaller than stored bytes. CSV packs are highly repetitive; a STORE-only
+ * zip of the live negatives snapshot plus the #176 files crosses Vercel's
+ * 4.5MB buffered response cap, and the browser then never receives a file.
+ * zlib is built into Node — no extra dependency.
  */
+
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 
 function crc32(bytes: Uint8Array): number {
   let crc = 0xffffffff;
@@ -43,7 +48,7 @@ export interface ZipEntry {
   body: string;
 }
 
-/** Build a .zip of UTF-8 text files (STORED). */
+/** Build a .zip of UTF-8 text files. Deflate when it shrinks the entry. */
 export function zipStore(entries: ZipEntry[]): Uint8Array {
   const encoder = new TextEncoder();
   const locals: Uint8Array[] = [];
@@ -52,18 +57,22 @@ export function zipStore(entries: ZipEntry[]): Uint8Array {
 
   for (const entry of entries) {
     const name = encoder.encode(entry.name);
-    const data = encoder.encode(entry.body);
-    const crc = crc32(data);
+    const raw = encoder.encode(entry.body);
+    const compressed = raw.length > 0 ? deflateRawSync(raw) : raw;
+    const deflate = compressed.length > 0 && compressed.length < raw.length;
+    const data = deflate ? compressed : raw;
+    const method = deflate ? 8 : 0;
+    const crc = crc32(raw);
     const local = concat([
       Uint8Array.of(0x50, 0x4b, 0x03, 0x04),
       u16(20),
       u16(0),
-      u16(0),
+      u16(method),
       u16(0),
       u16(0),
       u32(crc),
       u32(data.length),
-      u32(data.length),
+      u32(raw.length),
       u16(name.length),
       u16(0),
       name,
@@ -75,12 +84,12 @@ export function zipStore(entries: ZipEntry[]): Uint8Array {
       u16(20),
       u16(20),
       u16(0),
-      u16(0),
+      u16(method),
       u16(0),
       u16(0),
       u32(crc),
       u32(data.length),
-      u32(data.length),
+      u32(raw.length),
       u16(name.length),
       u16(0),
       u16(0),
@@ -105,4 +114,70 @@ export function zipStore(entries: ZipEntry[]): Uint8Array {
     u16(0),
   ]);
   return concat([...locals, central, eocd]);
+}
+
+function readU16(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function readU32(bytes: Uint8Array, offset: number): number {
+  return (
+    bytes[offset]
+    | (bytes[offset + 1] << 8)
+    | (bytes[offset + 2] << 16)
+    | (bytes[offset + 3] << 24)
+  ) >>> 0;
+}
+
+/** Read back entries written by zipStore. Used to prove the bytes are a real zip. */
+export function unzipStore(zip: Uint8Array): ZipEntry[] {
+  const out: ZipEntry[] = [];
+  let offset = 0;
+  const decoder = new TextDecoder();
+  while (offset + 30 <= zip.length && readU32(zip, offset) === 0x04034b50) {
+    const method = readU16(zip, offset + 8);
+    const compSize = readU32(zip, offset + 18);
+    const nameLen = readU16(zip, offset + 26);
+    const extraLen = readU16(zip, offset + 28);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + nameLen + extraLen;
+    const name = decoder.decode(zip.subarray(nameStart, nameStart + nameLen));
+    const data = zip.subarray(dataStart, dataStart + compSize);
+    const raw = method === 0 ? data : inflateRawSync(data);
+    out.push({ name, body: decoder.decode(raw) });
+    offset = dataStart + compSize;
+  }
+  return out;
+}
+
+/**
+ * Chunked attachment response. Omits Content-Length so the platform sends
+ * a streamed body. A single buffered Buffer over 4.5MB is rejected after
+ * the function has already logged 200, and the browser saves nothing.
+ */
+export function zipAttachmentResponse(
+  bytes: Uint8Array,
+  filename: string,
+  extraHeaders?: Record<string, string>,
+): Response {
+  const payload = bytes.slice();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const size = 64 * 1024;
+      for (let i = 0; i < payload.length; i += size) {
+        controller.enqueue(payload.slice(i, Math.min(i + size, payload.length)));
+      }
+      controller.close();
+    },
+  });
+  const safeName = filename.replace(/["\r\n]/g, "");
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "content-type": "application/zip",
+      "content-disposition": `attachment; filename="${safeName}"`,
+      "cache-control": "no-store",
+      ...extraHeaders,
+    },
+  });
 }

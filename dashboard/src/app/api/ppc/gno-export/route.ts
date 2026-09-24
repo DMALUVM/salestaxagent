@@ -1,6 +1,6 @@
 import { getServerSupabase } from "@/lib/supabase-server";
 import { amazonAsOf, amazonToday, windowStart } from "@/lib/as-of";
-import { zipStore } from "@/lib/zip-store";
+import { zipAttachmentResponse, zipStore } from "@/lib/zip-store";
 import {
   NEW_EXACT,
   buildGnoPack,
@@ -38,7 +38,15 @@ import {
  * sqp_weekly_slice.csv is the newest stored complete Sun–Sat SQP week.
  * Older weeks, if shipped, are COMPARISON / PRE_RAISE only.
  * Observe / export only. Never writes to Amazon.
+ *
+ * The zip is deflated and streamed. A STORE zip of this pack exceeds
+ * Vercel's 4.5MB buffered response limit: the function can log 200 while
+ * the browser receives no file.
  */
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const CAMP_COLS =
   "date,campaign_id,campaign_name,campaign_type,campaign_status,budget,spend,sales_14d,orders_14d,clicks,impressions";
@@ -228,13 +236,8 @@ export async function GET() {
     const banner = exportBannerFromState(exportState, { now, p0, p1 });
     await saveGnoExportAck(ackPayload(banner, p0, p1, pack.filename, now));
     const zip = zipStore(pack.files);
-    return new Response(Buffer.from(zip), {
-      headers: {
-        "content-type": "application/zip",
-        "content-disposition": `attachment; filename="${pack.filename}"`,
-        "cache-control": "no-store",
-        "x-gno-observe-only": "1",
-      },
+    return zipAttachmentResponse(zip, pack.filename, {
+      "x-gno-observe-only": "1",
     });
   } catch (e) {
     return Response.json({

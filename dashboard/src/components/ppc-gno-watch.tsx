@@ -10,6 +10,12 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { exportBannerFromState, mergeGnoAdsOntoState } from "@/lib/gno-export-state";
+import {
+  exportFailureMessage,
+  filenameFromDisposition,
+  responseLooksLikeZip,
+  triggerZipDownload,
+} from "@/lib/gno-export-download";
 import { CM_NOTE } from "@/lib/gno-ppc-watch";
 import { GnoDeskReference } from "@/components/gno-desk-reference";
 import { OrganicRankHeatmap } from "@/components/organic-rank-heatmap";
@@ -249,6 +255,7 @@ export function PpcGnoWatch() {
   const [adsLoading, setAdsLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<"ok" | "err">("ok");
   const [sqpNotice, setSqpNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [queued, setQueued] = useState<string[]>([]);
   const [sqpBusy, setSqpBusy] = useState(false);
@@ -315,31 +322,34 @@ export function PpcGnoWatch() {
     }).catch(() => { /* localStorage already holds the checkoff */ });
   }
 
+  function showNotice(text: string | null, tone: "ok" | "err" = "ok") {
+    setNotice(text);
+    setNoticeTone(tone);
+  }
+
   async function exportPack() {
     setExporting(true);
-    setNotice(null);
+    showNotice(null);
     try {
       const res = await fetch("/api/ppc/gno-export");
       const ct = res.headers.get("content-type") ?? "";
-      if (!res.ok || !ct.includes("zip")) {
-        const d = ct.includes("json") ? await res.json() : null;
-        setNotice(d?.hint ?? d?.error ?? `Export failed (${res.status}).`);
+      const disposition = res.headers.get("content-disposition");
+      if (!res.ok || !responseLooksLikeZip(ct, disposition)) {
+        const text = await res.text();
+        showNotice(exportFailureMessage(res.status, ct, text), "err");
         return;
       }
-      const match = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "");
-      const name = match?.[1] ?? "gno-pack.zip";
-      const url = URL.createObjectURL(await res.blob());
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      setNotice(`Downloaded ${name} — observe only. Drop it in Grok. Nothing writes to Amazon.`);
+      const blob = await res.blob();
+      if (blob.size < 22) {
+        showNotice("Export failed. The server returned an empty file, so nothing was saved.", "err");
+        return;
+      }
+      const name = filenameFromDisposition(disposition) ?? "gno-pack.zip";
+      triggerZipDownload(blob, name);
+      showNotice(`Downloaded ${name}. Check your Downloads folder. Observe only — nothing writes to Amazon.`);
       await load();
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Export failed.");
+      showNotice(e instanceof Error ? e.message : "Export failed. No zip was saved.", "err");
     } finally {
       setExporting(false);
     }
@@ -348,7 +358,7 @@ export function PpcGnoWatch() {
   async function uploadSqp(file: File) {
     setSqpBusy(true);
     setSqpNotice(null);
-    setNotice(null);
+    showNotice(null);
     try {
       const body = new FormData();
       body.append("file", file);
@@ -390,7 +400,7 @@ export function PpcGnoWatch() {
     }>;
   }) {
     setLogging(true);
-    setNotice(null);
+    showNotice(null);
     try {
       const res = await fetch("/api/ppc/gno-outcome", {
         method: "POST",
@@ -399,14 +409,14 @@ export function PpcGnoWatch() {
       });
       const d = await res.json() as { ok?: boolean; written?: number; error?: string; hint?: string };
       if (!res.ok || d.ok === false) {
-        setNotice(d.error ?? d.hint ?? "Could not log outcome.");
+        showNotice(d.error ?? d.hint ?? "Could not log outcome.", "err");
         return;
       }
-      setNotice(`Logged ${d.written ?? 0} outcome(s). Observe only — nothing wrote to Amazon.`);
+      showNotice(`Logged ${d.written ?? 0} outcome(s). Observe only — nothing wrote to Amazon.`);
       if (payload.paste) setPaste("");
       await load();
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Could not log outcome.");
+      showNotice(e instanceof Error ? e.message : "Could not log outcome.", "err");
     } finally {
       setLogging(false);
     }
@@ -454,15 +464,30 @@ export function PpcGnoWatch() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => { setLoading(true); load(); }}>
+          <Button type="button" variant="outline" size="sm" onClick={() => { setLoading(true); load(); }}>
             <RefreshCw className="mr-1 h-3 w-3" /> Refresh
           </Button>
-          <Button size="sm" onClick={exportPack} disabled={exporting}>
+          <Button type="button" size="sm" onClick={exportPack} disabled={exporting}>
             <Download className="mr-1 h-3 w-3" />
             {exporting ? "Building…" : "Export GNO pack"}
           </Button>
         </div>
       </div>
+
+      {notice && (
+        <p
+          role={noticeTone === "err" ? "alert" : "status"}
+          data-gno-notice
+          data-gno-notice-tone={noticeTone}
+          className={`rounded-md border px-3 py-2 text-sm ${
+            noticeTone === "err"
+              ? "border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
+              : "border-emerald-400/50 bg-emerald-50 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100"
+          }`}
+        >
+          {notice}
+        </p>
+      )}
 
       <div
         role="status"
@@ -536,10 +561,6 @@ export function PpcGnoWatch() {
 
       {adsLoading && (
         <p className="text-xs text-muted-foreground">Loading campaign tiles…</p>
-      )}
-
-      {notice && (
-        <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs">{notice}</p>
       )}
 
       {(p0.length > 0 || (showDone && p0Done.length > 0)) && (
