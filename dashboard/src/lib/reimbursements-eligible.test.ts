@@ -421,7 +421,10 @@ describe("Reese package + page contract", () => {
     assert.match(sync, /reimbursements_case_sync/);
     assert.match(ui, /Enqueue 90D queue rebuild/);
     assert.match(ui, /will not reopen those/);
-    assert.match(ui, /receipts_cover/);
+    assert.match(ui, /event_key or FBA shipment \+ SKU/);
+    assert.match(ui, /receipts_cover \/ found_offset 0-receive stays cleared/);
+    assert.match(ui, /Amazon live short/);
+    assert.doesNotMatch(ui, /can reopen if the shipment is still short/);
     assert.match(ui, /Enqueueing\.\.\./);
     assert.doesNotMatch(ui, />\s*Sync queue\s*</);
     assert.match(ui, /\.\/\.venv\/bin\/python -m src\.main reimbursements-case-sync/);
