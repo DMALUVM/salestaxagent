@@ -7,6 +7,7 @@
  */
 
 import type { GnoLedgerRow } from "./gno-learning";
+import { csvEscapeField, queryNormalized } from "./gno-pack-contract";
 
 export const TALLOWBOURN_PPC_DESK = {
   url: "https://tallowbourn-ppc.vercel.app",
@@ -294,13 +295,6 @@ export function gnoDecisionRulesTxt(): string {
   return lines.join("\n");
 }
 
-function csvEscape(v: string | number | boolean | null | undefined): string {
-  if (v == null || v === "") return "";
-  const s = String(v);
-  if (/[",\n\r]/.test(s)) return `"${s.replaceAll("\"", "\"\"")}"`;
-  return s;
-}
-
 export function gnoOutcomesCsv(rows: GnoLedgerRow[]): string {
   const lines = [GNO_OUTCOME_CSV_HEADERS.join(",")];
   for (const r of rows) {
@@ -308,10 +302,10 @@ export function gnoOutcomesCsv(rows: GnoLedgerRow[]): string {
       created_at: r.created_at ?? "",
       pack_date: r.pack_date ?? "",
       dave_action: r.dave_action,
-      campaign_id: "",
+      campaign_id: r.campaign_id ?? "",
       campaign_name: r.campaign_name ?? "",
       search_term: r.search_term ?? "",
-      query_normalized: String(r.search_term ?? "").replace(/\s+/g, " ").trim().toLowerCase(),
+      query_normalized: queryNormalized(r.search_term),
       term_family: r.term_family ?? "",
       proposed_tag: r.proposed_tag ?? "",
       source: r.source ?? "",
@@ -325,7 +319,7 @@ export function gnoOutcomesCsv(rows: GnoLedgerRow[]): string {
       plus_72h_acos: "",
       rollback: "",
     };
-    lines.push(GNO_OUTCOME_CSV_HEADERS.map((h) => csvEscape(rec[h])).join(","));
+    lines.push(GNO_OUTCOME_CSV_HEADERS.map((h) => csvEscapeField(rec[h], h)).join(","));
   }
   return `${lines.join("\n")}\n`;
 }

@@ -6,6 +6,7 @@
  */
 
 import spec from "../../config/gno_ppc_watch.json";
+import { queryNormalized } from "./query-normalized";
 
 type ProposedTag = "KEEP" | "HARVEST_CANDIDATE" | "JUNK_CANDIDATE";
 
@@ -14,7 +15,7 @@ function normalizeName(name: string | null | undefined): string {
 }
 
 function normalizeTerm(term: string | null | undefined): string {
-  return normalizeName(term);
+  return queryNormalized(term);
 }
 
 export const DAVE_ACTIONS = [
@@ -36,6 +37,7 @@ export interface GnoLedgerRow {
   id?: string;
   created_at?: string;
   pack_date?: string | null;
+  campaign_id?: string | null;
   campaign_name?: string | null;
   search_term?: string | null;
   term_family?: string | null;

@@ -11,7 +11,7 @@ import {
   isDaveAction,
   ledgerInsertRow,
 } from "./gno-learning";
-import type { GnoExportStateRow } from "./gno-export-state";
+import type { GnoExportStateRow, GnoPriorRowCounts } from "./gno-export-state";
 
 export const GNO_EXPORT_TABLE = "gno_export_state";
 export const GNO_LEDGER_TABLE = "gno_decision_ledger";
@@ -28,14 +28,39 @@ function asStringArray(v: unknown): string[] {
   return [];
 }
 
+function asRowCounts(v: unknown): GnoPriorRowCounts | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const num = (k: string) => {
+    const n = Number(o[k]);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const counts: GnoPriorRowCounts = {
+    auto_loose: num("auto_loose"),
+    broad_m: num("broad_m"),
+    watch: num("watch"),
+    sqp: num("sqp"),
+  };
+  if (counts.auto_loose == null && counts.broad_m == null && counts.watch == null && counts.sqp == null) {
+    return null;
+  }
+  return counts;
+}
+
 export async function loadGnoExportState(
   sb: ReturnType<typeof getServerSupabase> = getServerSupabase(),
 ): Promise<GnoExportStateRow | null> {
   try {
-    const r = await sb.from(GNO_EXPORT_TABLE)
-      .select("id,last_export_at,last_export_reason,last_export_filename,acked_p0_keys,acked_p1_keys,updated_at")
+    let r = await sb.from(GNO_EXPORT_TABLE)
+      .select("id,last_export_at,last_export_reason,last_export_filename,acked_p0_keys,acked_p1_keys,updated_at,last_row_counts")
       .eq("id", GNO_EXPORT_ROW_ID)
       .maybeSingle();
+    if (r.error && /last_row_counts/i.test(r.error.message || "")) {
+      r = await sb.from(GNO_EXPORT_TABLE)
+        .select("id,last_export_at,last_export_reason,last_export_filename,acked_p0_keys,acked_p1_keys,updated_at")
+        .eq("id", GNO_EXPORT_ROW_ID)
+        .maybeSingle();
+    }
     if (r.error) {
       if (tableMissing(r.error.message, GNO_EXPORT_TABLE)) return null;
       return null;
@@ -50,6 +75,7 @@ export async function loadGnoExportState(
       acked_p0_keys: asStringArray(row.acked_p0_keys),
       acked_p1_keys: asStringArray(row.acked_p1_keys),
       updated_at: row.updated_at ? String(row.updated_at) : null,
+      last_row_counts: asRowCounts(row.last_row_counts),
     };
   } catch {
     return null;
@@ -64,14 +90,23 @@ export async function saveGnoExportAck(
     acked_p0_keys: string[];
     acked_p1_keys: string[];
     updated_at: string;
+    last_row_counts?: GnoPriorRowCounts | null;
   },
   sb: ReturnType<typeof getServerSupabase> = getServerSupabase(),
 ): Promise<{ ok: boolean; hint?: string }> {
   try {
-    const r = await sb.from(GNO_EXPORT_TABLE).upsert({
+    let r = await sb.from(GNO_EXPORT_TABLE).upsert({
       id: GNO_EXPORT_ROW_ID,
       ...payload,
     }, { onConflict: "id" });
+    if (r.error && payload.last_row_counts != null && /last_row_counts/i.test(r.error.message || "")) {
+      const rest = { ...payload };
+      delete rest.last_row_counts;
+      r = await sb.from(GNO_EXPORT_TABLE).upsert({
+        id: GNO_EXPORT_ROW_ID,
+        ...rest,
+      }, { onConflict: "id" });
+    }
     if (r.error) {
       return {
         ok: false,
