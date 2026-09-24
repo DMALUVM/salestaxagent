@@ -23,12 +23,15 @@ import {
   LIP_BE_ACOS,
   NEW_EXACT,
   PLACEMENT_LAG_NOTE,
-  SQP_SLICE_COVER_END,
-  SQP_SLICE_COVER_START,
+  SQP_COMPARISON_FILENAME,
   SQP_SLICE_CSV_HEADERS,
+  SQP_STALE_AFTER_DAYS,
   WATCH_CAMPAIGN_CSV_HEADERS,
   isNewExactName,
+  isCompleteSqpWeek,
+  l2L7MetricsComplete,
   selectSqpSliceWeek,
+  sqpComparisonSliceRows,
   stDateLooksDaily,
   sumHarvestSpend,
   acosVsBe,
@@ -1309,10 +1312,21 @@ describe("GNO pack v3 — Wed review upgrades", () => {
     assert.doesNotMatch(sqp!.body, /2026-08-22/);
     assert.match(sqp!.body, /chapstick/);
     assert.doesNotMatch(sqp!.body, /beef tallow moisturizer/);
-    assert.match(withSqp.files.find((f) => f.name === "README.txt")!.body, /STALE PRE-RAISE/);
+    const readme = withSqp.files.find((f) => f.name === "README.txt")!.body;
+    assert.match(readme, /CURRENT newest stored complete/);
+    assert.match(readme, /stale_pre_raise=false/);
+    assert.doesNotMatch(readme, /STALE PRE-RAISE/);
     assert.match(sqp!.body, /stale_pre_raise/);
+    assert.match(sqp!.body, /false/);
+    assert.match(sqp!.body, /sqp_csv/);
+    assert.doesNotMatch(sqp!.body, /sqp_brand_csv/);
+    const comparison = withSqp.files.find((f) => f.name === SQP_COMPARISON_FILENAME);
+    assert.ok(comparison);
+    assert.match(comparison!.body, /2026-08-22/);
+    assert.match(comparison!.body, /sqp_spapi/);
+    assert.match(readme, /COMPARISON \/ PRE_RAISE/);
 
-    const empty = sqpWeeklySliceRows([]);
+    const empty = sqpWeeklySliceRows([], "2026-09-07");
     assert.deepEqual(empty, []);
   });
 });
@@ -1357,9 +1371,7 @@ describe("GNO pack — NEW_EXACT TBM shells + SQP week + ST L2 SoT + organic ran
     assert.equal(today.filter((r) => /b0clf5b27y/i.test(r.campaign_name)).length, 2);
   });
 
-  test("SQP slice prefers the week covering Sep 7-10 over a pre-raise week", () => {
-    assert.equal(SQP_SLICE_COVER_START, "2026-09-07");
-    assert.equal(SQP_SLICE_COVER_END, "2026-09-10");
+  test("current SQP slice is the max complete week_end even when that week is the bid-raise week", () => {
     const rows = [
       {
         week_start: "2026-08-30", week_end: "2026-09-05",
@@ -1369,56 +1381,17 @@ describe("GNO pack — NEW_EXACT TBM shells + SQP week + ST L2 SoT + organic ran
       {
         week_start: "2026-09-06", week_end: "2026-09-12",
         search_query: "lip balm", query_normalized: "lip balm",
-        search_query_volume: 92000, click_share: 0.12, source: "sqp_brand_csv",
-      },
-      {
-        week_start: "2026-09-06", week_end: "2026-09-12",
-        search_query: "chapstick", query_normalized: "chapstick",
-        search_query_volume: 78000, click_share: 0.3, source: "sqp_brand_csv",
+        search_query_volume: 92000, click_share: 0.12, source: "sqp_spapi",
       },
     ];
-    const picked = selectSqpSliceWeek(rows);
-    assert.equal(picked?.weekEnd, "2026-09-12");
-    assert.equal(picked?.coversTarget, true);
-    assert.match(picked?.note ?? "", /stale_pre_raise=false/);
-    const slice = sqpWeeklySliceRows(rows);
+    const picked = selectSqpSliceWeek(rows, "2026-09-13");
+    assert.equal(picked.current?.weekEnd, "2026-09-12");
+    assert.equal(picked.stale, false);
+    assert.match(picked.note, /stale_pre_raise=false/);
+    const slice = sqpWeeklySliceRows(rows, "2026-09-13");
     assert.ok(slice.every((r) => r.week_end === "2026-09-12"));
     assert.ok(slice.every((r) => r.stale_pre_raise === false));
-    assert.doesNotMatch(slice.map((r) => r.week_end).join(","), /2026-09-05/);
-    const pack = buildGnoPack({
-      asOf: "2026-09-10", today: "2026-09-11",
-      campaigns: [], searchTerms: [], placements: [],
-      sqpWeekly: rows,
-    });
-    assert.doesNotMatch(pack.files.find((f) => f.name === "README.txt")!.body, /STALE PRE-RAISE/);
-    assert.match(pack.files.find((f) => f.name === "sqp_weekly_slice.csv")!.body, /false/);
-  });
-
-  test("SQP slice ships latest week with an honest pre-raise note when Sep 7-10 is missing", () => {
-    const rows = [
-      {
-        week_start: "2026-08-30", week_end: "2026-09-05",
-        search_query: "lip balm", query_normalized: "lip balm",
-        search_query_volume: 90000, source: "sqp_brand_csv",
-      },
-    ];
-    const picked = selectSqpSliceWeek(rows);
-    assert.equal(picked?.weekEnd, "2026-09-05");
-    assert.equal(picked?.coversTarget, false);
-    assert.match(picked?.note ?? "", /SQP week covering Sep 7–10 not in warehouse yet/);
-    assert.match(picked?.note ?? "", /stale_pre_raise=true/);
-    const pack = buildGnoPack({
-      asOf: "2026-09-10", today: "2026-09-11",
-      campaigns: [], searchTerms: [], placements: [],
-      sqpWeekly: rows,
-    });
-    const readme = pack.files.find((f) => f.name === "README.txt")!.body;
-    const sqp = pack.files.find((f) => f.name === "sqp_weekly_slice.csv")!.body;
-    assert.match(readme, /SQP week covering Sep 7–10 not in warehouse yet/);
-    assert.match(readme, /STALE PRE-RAISE/);
-    assert.match(sqp, /2026-09-05/);
-    assert.match(sqp, /true/);
-    assert.ok(sqpWeeklySliceRows(rows).every((r) => r.stale_pre_raise === true));
+    assert.ok(slice.every((r) => r.source === "sqp_spapi"));
   });
 
   test("Auto Loose L2 ST sum does not inflate vs campaign L2 (SUMMARY grain)", () => {
@@ -1451,8 +1424,8 @@ describe("GNO pack — NEW_EXACT TBM shells + SQP week + ST L2 SoT + organic ran
     assert.equal(l2, 0);
     assert.equal(st.filter((r) => r.label === "L2").length, 0);
     const l7 = sumHarvestSpend(st, "L7");
-    assert.ok(l7 > 0);
-    assert.match(st.find((r) => r.label === "L7")?.cm_note ?? "", /watch_campaigns is SoT/);
+    assert.equal(l7, 0);
+    assert.equal(st.filter((r) => r.label === "L7").length, 0);
   });
 
   test("Auto Loose L2 ST sums 1-day stamps and stays near campaign L2", () => {
@@ -1561,5 +1534,218 @@ describe("GNO pack — NEW_EXACT TBM shells + SQP week + ST L2 SoT + organic ran
     const emptyKw = emptyPack.files.find((f) => f.name === "watch_campaigns.csv")!.body;
     assert.match(emptyKw.split("\n")[0], /organic_rank/);
     assert.doesNotMatch(emptyKw, /888888/);
+  });
+});
+
+describe("GNO pack freshness — SQP current slice and unslid L2/L7", () => {
+  const PACK = "2026-09-24";
+  const currentWeek = {
+    week_start: "2026-09-13",
+    week_end: "2026-09-19",
+    search_query: "lip balm",
+    query_normalized: "lip balm",
+    search_query_volume: 88000,
+    click_share: 0.14,
+    source: "sqp_spapi",
+  };
+  const bidRaise = {
+    week_start: "2026-09-06",
+    week_end: "2026-09-12",
+    search_query: "chapstick",
+    query_normalized: "chapstick",
+    search_query_volume: 77000,
+    source: "sqp_brand_csv",
+  };
+  const inProgress = {
+    week_start: "2026-09-20",
+    week_end: "2026-09-26",
+    search_query: "lip balm",
+    query_normalized: "lip balm",
+    search_query_volume: 1,
+    impression_share: 0.5,
+    click_share: 0.5,
+    purchase_share: 0.5,
+    source: "sqp_spapi",
+  };
+
+  test("current SQP slice is the max complete week_end", () => {
+    assert.equal(SQP_STALE_AFTER_DAYS, 10);
+    assert.equal(isCompleteSqpWeek("2026-09-13", "2026-09-19", PACK), true);
+    assert.equal(isCompleteSqpWeek("2026-09-20", "2026-09-26", PACK), false);
+    const rows = [bidRaise, currentWeek, inProgress];
+    const plan = selectSqpSliceWeek(rows, PACK);
+    assert.equal(plan.stale, false);
+    assert.equal(plan.current?.weekStart, "2026-09-13");
+    assert.equal(plan.current?.weekEnd, "2026-09-19");
+    assert.equal(plan.lastCompleteWeekEnd, "2026-09-19");
+    const slice = sqpWeeklySliceRows(rows, PACK);
+    assert.ok(slice.length > 0);
+    assert.ok(slice.every((r) => r.week_end === "2026-09-19" && r.stale_pre_raise === false));
+    assert.ok(slice.every((r) => r.source === "sqp_spapi"));
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: PACK,
+      campaigns: [],
+      searchTerms: [],
+      placements: [],
+      sqpWeekly: rows,
+    });
+    const file = pack.files.find((f) => f.name === "sqp_weekly_slice.csv")!;
+    assert.match(file.body, /2026-09-19/);
+    assert.doesNotMatch(file.body, /2026-09-12/);
+    assert.doesNotMatch(file.body, /2026-09-26/);
+    assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /CURRENT newest stored complete/);
+    assert.match(pack.files.find((f) => f.name === "README.txt")!.body, /stale_pre_raise=false/);
+    const header = file.body.split("\n")[0].split(",");
+    const data = file.body.trim().split("\n")[1].split(",");
+    const shareAt = header.indexOf("impression_share");
+    const purchaseAt = header.indexOf("purchase_share");
+    assert.equal(data[shareAt], "");
+    assert.equal(data[purchaseAt], "");
+  });
+
+  test("older SQP weeks ship only as COMPARISON PRE_RAISE with stale_pre_raise true", () => {
+    const rows = [bidRaise, currentWeek];
+    const comparison = sqpComparisonSliceRows(rows, PACK);
+    assert.ok(comparison.length > 0);
+    assert.ok(comparison.every((r) => r.week_end === "2026-09-12" && r.stale_pre_raise === true));
+    assert.ok(comparison.every((r) => r.source === "sqp_csv"));
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: PACK,
+      campaigns: [],
+      searchTerms: [],
+      placements: [],
+      sqpWeekly: rows,
+    });
+    const current = pack.files.find((f) => f.name === "sqp_weekly_slice.csv")!.body;
+    const older = pack.files.find((f) => f.name === SQP_COMPARISON_FILENAME)!.body;
+    assert.match(current, /2026-09-19/);
+    assert.doesNotMatch(current, /2026-09-12/);
+    assert.match(older, /2026-09-12/);
+    assert.match(older, /true/);
+    assert.doesNotMatch(older, /2026-09-19/);
+    const readme = pack.files.find((f) => f.name === "README.txt")!.body;
+    assert.match(readme, /COMPARISON \/ PRE_RAISE/);
+    assert.match(readme, /stale_pre_raise=true/);
+    assert.match(readme, /Not the current slice/);
+  });
+
+  test("SQP_STALE when newest complete week_end is more than 10 days before pack_date", () => {
+    assert.equal(isCompleteSqpWeek("2026-09-06", "2026-09-12", "2026-09-22"), true);
+    const freshEnough = selectSqpSliceWeek([bidRaise], "2026-09-22");
+    assert.equal(freshEnough.stale, false);
+    assert.equal(freshEnough.current?.weekEnd, "2026-09-12");
+    const stale = selectSqpSliceWeek([bidRaise, inProgress], "2026-09-23");
+    assert.equal(stale.stale, true);
+    assert.equal(stale.current, null);
+    assert.equal(stale.staleReason, "newest_complete_week_older_than_10_days");
+    assert.equal(stale.lastCompleteWeekEnd, "2026-09-12");
+    assert.match(stale.note, /SQP_STALE reason=newest_complete_week_older_than_10_days last_week_end=2026-09-12/);
+    const pack = buildGnoPack({
+      asOf: "2026-09-22",
+      today: "2026-09-23",
+      campaigns: [],
+      searchTerms: [],
+      placements: [],
+      sqpWeekly: [bidRaise, inProgress],
+    });
+    assert.equal(pack.files.some((f) => f.name.includes("sqp_weekly")), false);
+    const readme = pack.files.find((f) => f.name === "README.txt")!.body;
+    assert.match(readme, /SQP_STALE reason=newest_complete_week_older_than_10_days last_week_end=2026-09-12/);
+    assert.doesNotMatch(readme, /stale_pre_raise=false/);
+    assert.doesNotMatch(readme, /CURRENT newest stored complete/);
+  });
+
+  test("in-progress incomplete SQP week is never selected", () => {
+    assert.equal(isCompleteSqpWeek("2026-09-20", "2026-09-24", PACK), false);
+    assert.equal(isCompleteSqpWeek("2026-09-20", "2026-09-26", "2026-09-26"), false);
+    const onlyOpen = selectSqpSliceWeek([inProgress], PACK);
+    assert.equal(onlyOpen.current, null);
+    assert.equal(onlyOpen.staleReason, "no_complete_sun_sat_week");
+    assert.deepEqual(sqpWeeklySliceRows([inProgress], PACK), []);
+    const pack = buildGnoPack({
+      asOf: "2026-09-23",
+      today: PACK,
+      campaigns: [],
+      searchTerms: [],
+      placements: [],
+      sqpWeekly: [inProgress],
+    });
+    assert.equal(pack.files.some((f) => f.name.includes("sqp_weekly")), false);
+    assert.match(
+      pack.files.find((f) => f.name === "README.txt")!.body,
+      /SQP_STALE reason=no_complete_sun_sat_week last_week_end=2026-09-26/,
+    );
+    const withCurrent = sqpWeeklySliceRows([currentWeek, inProgress], PACK);
+    assert.ok(withCurrent.every((r) => r.week_end === "2026-09-19"));
+    assert.equal(withCurrent.some((r) => r.week_end === "2026-09-26"), false);
+  });
+
+  test("L2 and L7 end yesterday and do not slide when yesterday ads are open", () => {
+    assert.equal(packClosedEnd("2026-09-24", "2026-09-20"), "2026-09-23");
+    assert.equal(l2L7MetricsComplete("2026-09-24", "2026-09-20"), false);
+    const campaigns = [camp(AUTO_LOOSE_NAME, { date: "2026-09-20", spend: 50, campaign_status: "enabled" })];
+    const windows = packWindows("2026-09-24", "2026-09-20", campaigns);
+    assert.deepEqual(windows, [
+      { start: "2026-09-24", end: "2026-09-24", label: "Today", metrics_complete: false },
+      { start: "2026-09-22", end: "2026-09-23", label: "Last2", metrics_complete: false },
+      { start: "2026-09-17", end: "2026-09-23", label: "Last7", metrics_complete: false },
+    ]);
+    const rows = watchCampaignExportRows({
+      asOf: "2026-09-20",
+      today: "2026-09-24",
+      campaigns,
+      placements: [],
+    });
+    const today = rows.find((r) => r.campaign_name === AUTO_LOOSE_NAME && r.date_start === "2026-09-24");
+    const l2 = rows.find((r) => r.campaign_name === AUTO_LOOSE_NAME && r.date_end === "2026-09-23" && r.date_start === "2026-09-22");
+    const l7 = rows.find((r) => r.campaign_name === AUTO_LOOSE_NAME && r.date_end === "2026-09-23" && r.date_start === "2026-09-17");
+    assert.equal(today?.metrics_complete, false);
+    assert.equal(today?.spend, 0);
+    assert.equal(today?.state, "enabled");
+    assert.equal(l2?.metrics_complete, false);
+    assert.equal(l2?.spend, 0);
+    assert.equal(l7?.metrics_complete, false);
+    assert.equal(l7?.spend, 0);
+    assert.equal(rows.some((r) => r.campaign_name === AUTO_LOOSE_NAME && r.date_end === "2026-09-20"), false);
+  });
+
+  test("SUMMARY search-term stamp is not used as L2 or L7", () => {
+    const campaigns = [
+      camp(AUTO_LOOSE_NAME, { date: "2026-09-22", spend: 40 }),
+      camp(AUTO_LOOSE_NAME, { date: "2026-09-23", spend: 44 }),
+    ];
+    const terms: SearchTermRow[] = [
+      {
+        date: "2026-09-23",
+        campaign_name: AUTO_LOOSE_NAME,
+        search_term: "tallow lip balm organic",
+        match_type: "TARGETING_EXPRESSION",
+        spend: 400, sales_14d: 0, orders_14d: 0, clicks: 90, impressions: 2000,
+      },
+    ];
+    const st = searchTermExportRows(terms, campaigns, "2026-09-23", isAutoLoose);
+    assert.equal(sumHarvestSpend(st, "L2"), 0);
+    assert.equal(sumHarvestSpend(st, "L7"), 0);
+    assert.equal(st.length, 0);
+    const kw = keywordTargetExportRows({
+      today: "2026-09-24",
+      asOf: "2026-09-23",
+      campaigns,
+      keywordTargets: [{
+        campaign_name: AUTO_LOOSE_NAME,
+        keyword_text: "tallow lip balm organic",
+        match_type: "TARGETING_EXPRESSION",
+        state: "ENABLED",
+        bid: 0.8,
+      }],
+      searchTerms: terms.map((t) => ({ ...t, keyword: t.search_term })),
+    });
+    const l2 = kw.find((r) => r.date_start === "2026-09-22");
+    const l7 = kw.find((r) => r.date_start === "2026-09-17");
+    assert.equal(l2?.metrics_complete, true);
+    assert.equal(l2?.spend, 0);
+    assert.equal(l7?.spend, 0);
   });
 });
