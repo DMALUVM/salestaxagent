@@ -432,6 +432,7 @@ describe("Competitor reverse-ASIN outliers", () => {
     ];
     const byKw = Object.fromEntries(buildCompetitorOutliers({ krRows }).map((r) => [r.keyword, r]));
     assert.equal(byKw["lume deodorant for women"]?.suggested_lever, "watch");
+    assert.equal(byKw["lume deodorant for women"]?.harvest_blocked_reason, "brand_conquest");
     assert.equal(byKw["tree hut tallow body butter"]?.suggested_lever, "watch");
     assert.equal(byKw["blistex lip balm"]?.suggested_lever, "harvest_exact");
     const surface = buildBlakeCompetitorSurface({ krRows });
@@ -439,5 +440,36 @@ describe("Competitor reverse-ASIN outliers", () => {
     const lume = classifyFamilyFit("lume unscented deodorant for women", "deo");
     assert.equal(lume.fit, true);
     assert.equal(lume.softWatch, true);
+  });
+
+  test("named competitor brands are watch or skip with brand_conquest; beef tallow can harvest", () => {
+    const brands = [
+      "lume deodorant",
+      "donna karan deodorant",
+      "primally pure tallow balm",
+      "osea body balm",
+      "vanicream",
+      "saltair deodorant",
+    ];
+    const krRows = [
+      ...brands.map((keyword) => ({
+        competitor_asin: LIP_COMP, family: "lip" as const, keyword,
+        search_volume: 400, opportunity_score: 500,
+        organic_asin: LIP_COMP, organic_rank: 3, as_of: "2026-09-23",
+      })),
+      {
+        competitor_asin: BALM_COMP, family: "balm" as const,
+        keyword: "beef tallow balm", search_volume: 800, opportunity_score: 600,
+        organic_asin: BALM_COMP, organic_rank: 4, as_of: "2026-09-23",
+      },
+    ];
+    const byKw = Object.fromEntries(buildCompetitorOutliers({ krRows }).map((r) => [r.keyword, r]));
+    for (const keyword of brands) {
+      assert.notEqual(byKw[keyword]?.suggested_lever, "harvest_exact", keyword);
+      assert.ok(byKw[keyword]?.suggested_lever === "watch" || byKw[keyword]?.suggested_lever === "skip", keyword);
+      assert.equal(byKw[keyword]?.harvest_blocked_reason, "brand_conquest", keyword);
+    }
+    assert.equal(byKw["beef tallow balm"]?.suggested_lever, "harvest_exact");
+    assert.equal(byKw["beef tallow balm"]?.family_fit, "allow");
   });
 });

@@ -5,8 +5,14 @@
  * Fold women → woman so the two spellings join. man/men are not folded.
  */
 
+/**
+ * Competitor brand SERP names. `allow` / harvest-ok is for category terms
+ * (beef tallow, tallow balm), not these brands.
+ * Named 2026-09-24: lume, donna karan, primally pure, osea, vanicream, saltair,
+ * plus the brands already on this list (native, medicube, and the rest).
+ */
 const BRAND_CONQUEST_RE =
-  /\b(native|medicube|dr\.?\s*squatch|harry'?s|dove|degree|old spice|secret|schmidt'?s)\b/i;
+  /\b(?:native|medicube|lume|osea|vanicream|saltair|donna\s+karan|primally\s+pure|dr\.?\s*squatch|harry'?s|dove|degree|old\s+spice|secret|schmidt'?s)\b/i;
 
 export function queryNormalized(term: string | null | undefined): string {
   return String(term ?? "")
