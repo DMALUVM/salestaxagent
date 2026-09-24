@@ -32,7 +32,10 @@ import {
   BLEEDERS10_HEADERS,
   BLEEDERS20_HEADERS,
   BLEEDERS10_MIN_CLICKS,
+  HARVEST_MIN_CLICKS,
+  HARVEST_MIN_ORDERS,
   HARVEST_QUEUE_HEADERS,
+  MAX_NEW_STRUCTURES_PER_WEEK,
   LIFETIME_ZERO_HEADERS,
   RANKING_LIP_BALM_QUERY,
   RANKING_SUCCESS_METRIC,
@@ -50,6 +53,9 @@ import {
   contractSearchTermTag,
   countDelta,
   csvDataRowCount,
+  csvEscapeField,
+  organicTrackerCensus,
+  seriesCoversWindow,
   dedupeWatchCampaignRows,
   evaluatePackQuality,
   isRankingCampaign,
@@ -71,6 +77,7 @@ import {
 import {
   competitorKrOutliersCsv,
   COMPETITOR_KR_CSV_HEADERS,
+  finalizeCompetitorKrRows,
   type CompetitorOutlierRow,
 } from "./soldscope-competitor-outliers";
 
@@ -123,7 +130,7 @@ export const KEYWORD_TARGET_CSV_HEADERS = [
   "already_negative_exact_in_source", "destination_exact_campaign_id",
   "destination_exact_has_impressions", "bleeders10_flag", "bleeders20_flag",
   "lifetime_zero_flag", "protected_recent_test", "campaign_purpose",
-  "window_mismatch", "id_missing",
+  "window_mismatch", "id_missing", "created_at", "days_live",
 ] as const;
 
 export const NEGATIVES_CSV_HEADERS = [
@@ -313,6 +320,7 @@ export interface KeywordTarget {
   match_type?: string | null;
   state?: string | null;
   bid?: number | null;
+  created_at?: string | number | null;
 }
 
 export interface NewExactTile {
@@ -414,12 +422,12 @@ export interface WatchCampaignExportRow {
   tos_spend_share: number | null;
   ros_spend_share: number | null;
   pp_spend_share: number | null;
-  impressions: number;
-  clicks: number;
-  spend: number;
-  cpc: number;
-  orders: number;
-  sales: number;
+  impressions: number | null;
+  clicks: number | null;
+  spend: number | null;
+  cpc: number | null;
+  orders: number | null;
+  sales: number | null;
   acos: number | null;
   watch_list: WatchList;
   /** false on Today — Ads lag; $0 is not a pause. Read spend/ACOS from L2/L7. */
@@ -448,7 +456,10 @@ export interface WatchCampaignExportRow {
   spend_yesterday?: number | null;
   spend_dby?: number | null;
   budget_util_yesterday?: number | null;
-  budget_capped_yesterday?: boolean;
+  budget_capped_yesterday?: boolean | null;
+  created_at?: string;
+  last_updated_at?: string;
+  days_live?: number | null;
   protected_recent_test?: boolean;
   advertised_asin?: string;
   portfolio_id?: string;
@@ -465,11 +476,11 @@ export interface KeywordTargetExportRow {
   match_type: string;
   keyword_state: string;
   bid: number | null;
-  impressions: number;
-  clicks: number;
-  spend: number;
-  orders: number;
-  sales: number;
+  impressions: number | null;
+  clicks: number | null;
+  spend: number | null;
+  orders: number | null;
+  sales: number | null;
   acos: number | null;
   /** false on Today — config-only until Amazon attributes. */
   metrics_complete: boolean;
@@ -490,9 +501,12 @@ export interface KeywordTargetExportRow {
   campaign_purpose?: string;
   window_mismatch?: boolean;
   id_missing?: boolean;
-  bleeders10_flag?: boolean;
-  bleeders20_flag?: boolean;
+  bleeders10_flag?: boolean | null;
+  bleeders20_flag?: boolean | null;
+  lifetime_zero_flag?: boolean | null;
   protected_recent_test?: boolean;
+  created_at?: string;
+  days_live?: number | null;
   sibling_exact_campaign_count?: number;
   sibling_exact_campaign_ids?: string;
   highest_sibling_bid?: number | null;
@@ -594,7 +608,7 @@ export function normalizeName(name: string | null | undefined): string {
 }
 
 export function normalizeTerm(term: string | null | undefined): string {
-  return normalizeName(term);
+  return queryNormalized(term);
 }
 
 function namesEqual(a: string, b: string): boolean {
@@ -1636,6 +1650,10 @@ export function watchCampaignExportRows(input: {
   const names = uniqueWatchNames(campaigns, meta.map((m) => m.campaign_name));
   const rows: WatchCampaignExportRow[] = [];
   const yesterday = packClosedEnd(today);
+  const l60Window = windows.find((w) => windowLabelFromPack(w.label) === "L60");
+  const l60Trusted = l60Window
+    ? seriesCoversWindow(campaigns.map((c) => c.date), l60Window.start, l60Window.end).covers
+    : false;
   for (const w of windows) {
     for (const { name, list } of names) {
       const matched = campaigns.filter((r) =>
@@ -1643,11 +1661,16 @@ export function watchCampaignExportRows(input: {
       const idBuckets = distinctCampaignBuckets(matched);
       for (const campRows of idBuckets) {
         const storedName = campRows[0]?.campaign_name ?? name;
-        // Today is config-only. Spend / orders / ACOS live on closed windows.
-        const m = w.metrics_complete
+        const label = windowLabelFromPack(w.label);
+        const l60Blank = label === "L60" && !l60Trusted;
+        // Today is config-only. Untrusted L60 is blank, not a copy of the shorter window.
+        const useMetrics = w.metrics_complete && !l60Blank;
+        const m = useMetrics
           ? sumMetrics(inWindow(campRows, w.start, w.end))
-          : { impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0, cpc: 0, acos: null, cvr: null };
-        const place = w.metrics_complete
+          : l60Blank
+            ? { impressions: null, clicks: null, spend: null, orders: null, sales: null, cpc: null, acos: null, cvr: null }
+            : { impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0, cpc: 0, acos: null, cvr: null };
+        const place = useMetrics
           ? placementShares(inWindow(
             placements.filter((p) =>
               namesEqual(p.campaign_name, storedName) || namesEqual(p.campaign_name, name)
@@ -1663,13 +1686,20 @@ export function watchCampaignExportRows(input: {
         const budget = snap?.budget != null ? Number(snap.budget)
           : (metaRow?.daily_budget != null ? Number(metaRow.daily_budget) : null);
         const portfolio = String(metaRow?.portfolio_name || "").trim() || "none";
-        const placementLag = w.metrics_complete
-          && m.spend > 0
+        const placementLag = useMetrics
+          && (m.spend ?? 0) > 0
           && place.tos_spend_share == null
           && place.ros_spend_share == null
           && place.pp_spend_share == null;
         const frame = contributionFrame(storedName, m.acos, placementLag ? [PLACEMENT_LAG_NOTE] : []);
         const purpose = campaignPurposeOf(storedName, list);
+        const clock = clockFields(
+          metaRow?.created_at ?? metaRow?.creationDate,
+          metaRow?.snapshot_at,
+          today,
+          frame.cm_note,
+        );
+        const isToday = label === "Today";
         const yRow = campRows.find((r) => r.date === yesterday);
         const dby = campRows.find((r) => r.date === shiftDays(yesterday, -1));
         const asins = extractAsin(storedName).split("/").map((a) => a.trim()).filter(Boolean);
@@ -1677,7 +1707,7 @@ export function watchCampaignExportRows(input: {
         rows.push(attachOrganicFields({
           date_start: w.start,
           date_end: w.end,
-          window_label: windowLabelFromPack(w.label),
+          window_label: label,
           grain: "campaign",
           campaign_id: campaignId,
           campaign_name: storedName,
@@ -1693,10 +1723,10 @@ export function watchCampaignExportRows(input: {
           portfolio_id: metaRow?.portfolio_id ?? "",
           portfolio_name: portfolio === "none" ? "" : portfolio,
           daily_budget: budget,
-          spend_yesterday: yRow ? n(yRow.spend) : null,
-          spend_dby: dby ? n(dby.spend) : null,
-          budget_util_yesterday: yRow && budget ? n(yRow.spend) / budget : null,
-          budget_capped_yesterday: Boolean(yRow && budget && n(yRow.spend) >= budget),
+          spend_yesterday: isToday && yRow ? n(yRow.spend) : null,
+          spend_dby: isToday && dby ? n(dby.spend) : null,
+          budget_util_yesterday: isToday && yRow && budget ? n(yRow.spend) / budget : null,
+          budget_capped_yesterday: isToday ? Boolean(yRow && budget && n(yRow.spend) >= budget) : null,
           tos_modifier_pct: metaRow?.tos_modifier_pct ?? null,
           ros_modifier_pct: metaRow?.ros_modifier_pct ?? null,
           pp_modifier_pct: metaRow?.pp_modifier_pct ?? null,
@@ -1711,19 +1741,23 @@ export function watchCampaignExportRows(input: {
           orders: m.orders,
           sales: m.sales,
           acos: m.acos,
-          ctr: m.impressions > 0 ? m.clicks / m.impressions : null,
+          ctr: (m.impressions ?? 0) > 0 ? (m.clicks ?? 0) / (m.impressions ?? 1) : null,
           cvr: m.cvr,
-          aov: m.orders > 0 ? m.sales / m.orders : null,
-          roas: m.spend > 0 ? m.sales / m.spend : null,
+          aov: (m.orders ?? 0) > 0 ? (m.sales ?? 0) / (m.orders ?? 1) : null,
+          roas: (m.spend ?? 0) > 0 ? (m.sales ?? 0) / (m.spend ?? 1) : null,
           watch_list: list,
           campaign_purpose: purpose,
           ranking_query: ranking ? RANKING_LIP_BALM_QUERY : "",
           ranking_success_metric: ranking ? RANKING_SUCCESS_METRIC : "",
-          metrics_complete: w.metrics_complete,
+          metrics_complete: useMetrics,
           protected_recent_test: false,
           window_mismatch: false,
           duplicate_reason: "",
           ...frame,
+          created_at: clock.created_at,
+          last_updated_at: clock.last_updated_at,
+          days_live: clock.days_live,
+          cm_note: clock.cm_note,
         }, extractExactKeyword(storedName) ?? (ranking ? RANKING_LIP_BALM_QUERY : ""), frame.family, organicIndex));
       }
     }
@@ -1738,23 +1772,54 @@ function distinctCampaignBuckets(rows: CampaignDailyRow[]): CampaignDailyRow[][]
   return ids.map((id) => rows.filter((r) => String(r.campaign_id ?? "").trim() === id));
 }
 
-export function csvEscape(value: string | number | boolean | null | undefined): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return "";
-    return Number.isInteger(value) ? String(value) : value.toFixed(2);
-  }
-  const s = String(value);
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
+export function csvEscape(
+  value: string | number | boolean | null | undefined,
+  header?: string,
+): string {
+  return csvEscapeField(value, header);
 }
 
 export function toCsv(headers: readonly string[], rows: Array<Record<string, unknown>>): string {
   const lines = [headers.join(",")];
   for (const row of rows) {
-    lines.push(headers.map((h) => csvEscape(row[h] as string | number | boolean | null)).join(","));
+    lines.push(headers.map((h) => csvEscape(row[h] as string | number | boolean | null, h)).join(","));
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** Calendar days from created_at to pack Today. Blank when created_at is missing. */
+export function daysLiveAsOf(createdAt: unknown, todayYmd: string): number | null {
+  const ms = parseLaunchInstant(createdAt);
+  if (ms == null) return null;
+  const ymd = new Intl.DateTimeFormat("en-CA", {
+    timeZone: AMAZON_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ms));
+  const days = isoDayDelta(todayYmd, ymd);
+  if (!Number.isFinite(days) || days < 0) return null;
+  return days;
+}
+
+function clockFields(
+  createdAt: unknown,
+  updatedAt: unknown,
+  today: string,
+  cmNote: string,
+): { created_at: string; last_updated_at: string; days_live: number | null; cm_note: string } {
+  const createdMs = parseLaunchInstant(createdAt);
+  const updatedMs = parseLaunchInstant(updatedAt);
+  const days = daysLiveAsOf(createdAt, today);
+  const cm_note = createdMs == null
+    ? [cmNote, "days_live blank: created_at missing"].filter(Boolean).join("; ")
+    : cmNote;
+  return {
+    created_at: createdMs == null ? "" : new Date(createdMs).toISOString(),
+    last_updated_at: updatedMs == null ? "" : new Date(updatedMs).toISOString(),
+    days_live: days,
+    cm_note,
+  };
 }
 
 export function watchCampaignsCsv(rows: WatchCampaignExportRow[]): string {
@@ -1838,8 +1903,20 @@ export function keywordWindowMetrics(
   return sumMetrics(rows);
 }
 
-function metricFingerprint(m: Pick<Metrics, "impressions" | "clicks" | "spend" | "orders" | "sales">): string {
-  return [m.impressions, m.clicks, m.spend.toFixed(2), m.orders, m.sales.toFixed(2)].join("|");
+function metricFingerprint(m: {
+  impressions: number | null;
+  clicks: number | null;
+  spend: number | null;
+  orders: number | null;
+  sales: number | null;
+}): string {
+  return [
+    m.impressions ?? 0,
+    m.clicks ?? 0,
+    (m.spend ?? 0).toFixed(2),
+    m.orders ?? 0,
+    (m.sales ?? 0).toFixed(2),
+  ].join("|");
 }
 
 function emptyMetrics(): Metrics {
@@ -1852,6 +1929,7 @@ export function keywordTargetExportRows(input: {
   keywordTargets: KeywordTarget[];
   searchTerms: SearchTermRow[];
   campaigns?: CampaignDailyRow[];
+  campaignMeta?: CampaignMeta[];
   organicIndex?: Map<string, OrganicRankJoin[]>;
   windows?: PackWindow[];
 }): KeywordTargetExportRow[] {
@@ -1861,8 +1939,14 @@ export function keywordTargetExportRows(input: {
     return list === "NEW_EXACT" || list === "KEEPER" || list === "FLAVOR_SHELL";
   });
   const campaigns = input.campaigns ?? [];
+  const meta = input.campaignMeta ?? [];
   const rows: KeywordTargetExportRow[] = [];
-  for (const w of input.windows ?? packWindows(input.today, input.asOf, campaigns)) {
+  const windows = input.windows ?? packWindows(input.today, input.asOf, campaigns);
+  const l60Window = windows.find((w) => windowLabelFromPack(w.label) === "L60");
+  const l60Trusted = l60Window
+    ? seriesCoversWindow(input.searchTerms.map((t) => t.date), l60Window.start, l60Window.end).covers
+    : false;
+  for (const w of windows) {
     const windowRows: KeywordTargetExportRow[] = [];
     const summaryByCampaign = new Map<string, Set<string>>();
     for (const t of wanted) {
@@ -1874,15 +1958,22 @@ export function keywordTargetExportRows(input: {
           : new Set<string>();
         summaryByCampaign.set(campKey, skip);
       }
-      const m = w.metrics_complete
+      const label = windowLabelFromPack(w.label);
+      const l60Blank = label === "L60" && !l60Trusted;
+      const useMetrics = w.metrics_complete && !l60Blank;
+      const m = useMetrics
         ? keywordWindowMetrics(input.searchTerms, t, w.start, w.end, { skipDates: skip })
         : emptyMetrics();
-      const frame = contributionFrame(t.campaign_name, m.acos);
+      const frame = contributionFrame(t.campaign_name, useMetrics ? m.acos : null);
       const purpose = campaignPurposeOf(t.campaign_name, watchListOf(t.campaign_name));
+      const metaRow = meta.find((row) => String(row.campaign_id ?? "") === String(t.campaign_id ?? "") && String(t.campaign_id ?? ""))
+        ?? metaForName(meta, t.campaign_name);
+      const clock = clockFields(t.created_at ?? metaRow?.created_at ?? metaRow?.creationDate, metaRow?.snapshot_at, input.today, frame.cm_note);
+      const isToday = label === "Today";
       windowRows.push(attachOrganicFields({
         date_start: w.start,
         date_end: w.end,
-        window_label: windowLabelFromPack(w.label),
+        window_label: label,
         grain: "target",
         campaign_id: String(t.campaign_id ?? ""),
         ad_group_id: String(t.ad_group_id ?? ""),
@@ -1898,19 +1989,23 @@ export function keywordTargetExportRows(input: {
         window_mismatch: false,
         id_missing: !String(t.keyword_id ?? t.campaign_id ?? "").trim(),
         protected_recent_test: false,
-        bleeders10_flag: false,
-        bleeders20_flag: false,
-        impressions: m.impressions,
-        clicks: m.clicks,
-        spend: m.spend,
-        orders: m.orders,
-        sales: m.sales,
-        acos: m.acos,
-        metrics_complete: w.metrics_complete,
+        bleeders10_flag: isToday ? false : null,
+        bleeders20_flag: isToday ? false : null,
+        lifetime_zero_flag: isToday ? false : null,
+        impressions: l60Blank ? null : m.impressions,
+        clicks: l60Blank ? null : m.clicks,
+        spend: l60Blank ? null : m.spend,
+        orders: l60Blank ? null : m.orders,
+        sales: l60Blank ? null : m.sales,
+        acos: l60Blank ? null : m.acos,
+        metrics_complete: useMetrics,
         ...frame,
+        created_at: clock.created_at,
+        days_live: clock.days_live,
+        cm_note: clock.cm_note,
       }, t.keyword_text, frame.family, input.organicIndex));
     }
-    if (w.metrics_complete) {
+    if (w.metrics_complete && !(windowLabelFromPack(w.label) === "L60" && !l60Trusted)) {
       const byCamp = new Map<string, KeywordTargetExportRow[]>();
       for (const r of windowRows) {
         const key = normalizeName(r.campaign_name);
@@ -1921,12 +2016,12 @@ export function keywordTargetExportRows(input: {
       for (const group of byCamp.values()) {
         const counts = new Map<string, number>();
         for (const r of group) {
-          if (r.spend <= 0 && r.impressions <= 0) continue;
+          if ((r.spend ?? 0) <= 0 && (r.impressions ?? 0) <= 0) continue;
           const fp = metricFingerprint(r);
           counts.set(fp, (counts.get(fp) ?? 0) + 1);
         }
         for (const r of group) {
-          if (r.spend <= 0 && r.impressions <= 0) continue;
+          if ((r.spend ?? 0) <= 0 && (r.impressions ?? 0) <= 0) continue;
           const fp = metricFingerprint(r);
           if ((counts.get(fp) ?? 0) < 2) continue;
           const keep = isEnabledStatus(r.keyword_state);
@@ -2450,7 +2545,7 @@ export function buildGnoPack(input: {
   )), negatives);
   const keywords = keywordTargetExportRows({
     today, asOf, keywordTargets: targets, searchTerms: input.searchTerms,
-    campaigns: input.campaigns, organicIndex, windows,
+    campaigns: input.campaigns, campaignMeta: input.campaignMeta, organicIndex, windows,
   });
   const advertised = advertisedProductL7Rows({
     today, asOf, campaigns: input.campaigns,
@@ -2466,6 +2561,8 @@ export function buildGnoPack(input: {
   const l60 = windowStart(closed, 60);
   const l7 = windowStart(closed, 7);
   const complete = !metricsOpen;
+  const stCoverage = seriesCoversWindow(input.searchTerms.map((t) => t.date), l60, closed);
+  const bleederTrusted = complete && stCoverage.covers;
 
   const bleeders10: Record<string, unknown>[] = [];
   const bleeders20: Record<string, unknown>[] = [];
@@ -2484,12 +2581,13 @@ export function buildGnoPack(input: {
     const purpose = campaignPurposeOf(t.campaign_name, list === "OTHER" ? "FLAVOR_SHELL" : list);
     const relevance = termRelevance(t.keyword_text);
     const key = `${t.campaign_id ?? t.campaign_name}\t${queryNormalized(t.keyword_text)}`;
-    if (m60.clicks >= BLEEDERS10_MIN_CLICKS && m60.orders === 0 && !seenBleeder.has(`10:${key}`)) {
+    if (bleederTrusted && m60.clicks >= BLEEDERS10_MIN_CLICKS && m60.orders === 0 && !seenBleeder.has(`10:${key}`)) {
       seenBleeder.add(`10:${key}`);
       const watchTag = (relevance === "hero" || relevance === "family") && m60.clicks <= 12;
       bleeders10.push({
         source_type: "target",
-        date_start: l60, date_end: closed, window_label: "L60", metrics_complete: complete,
+        date_start: l60, date_end: closed, window_label: "L60",
+        metrics_complete: true, window_untrusted: false,
         campaign_id: t.campaign_id ?? "", campaign_name: t.campaign_name,
         keyword_id: t.keyword_id ?? "", target_id: t.keyword_id ?? "",
         search_term: "", query_normalized: queryNormalized(t.keyword_text),
@@ -2531,14 +2629,16 @@ export function buildGnoPack(input: {
         proposed_tag_reason: decision.proposed_tag_reason,
       });
       for (const kw of keywords) {
+        if (kw.window_label !== "Today") continue;
         if (normalizeName(kw.campaign_name) === normalizeName(t.campaign_name)
           && queryNormalized(kw.keyword_text) === queryNormalized(t.keyword_text)) {
           kw.bleeders20_flag = true;
         }
       }
     }
-    if (m60.clicks >= BLEEDERS10_MIN_CLICKS && m60.orders === 0) {
+    if (bleederTrusted && m60.clicks >= BLEEDERS10_MIN_CLICKS && m60.orders === 0) {
       for (const kw of keywords) {
+        if (kw.window_label !== "Today") continue;
         if (normalizeName(kw.campaign_name) === normalizeName(t.campaign_name)
           && queryNormalized(kw.keyword_text) === queryNormalized(t.keyword_text)) {
           kw.bleeders10_flag = true;
@@ -2573,8 +2673,11 @@ export function buildGnoPack(input: {
         if (Math.abs(acosL7 - acosL30) <= 1) trend = "flat";
         else trend = acosL7 < acosL30 ? "improving" : "worsening";
       }
-      const budgetConstrained = l7row.budget_capped_yesterday === true
-        || (l7row.budget_util_yesterday != null && l7row.budget_util_yesterday >= 0.9);
+      const todayRow = watch.find((r) =>
+        r.window_label === "Today" && normalizeName(r.campaign_name) === normalizeName(l7row.campaign_name)
+        && String(r.campaign_id ?? "") === String(l7row.campaign_id ?? ""));
+      const budgetConstrained = todayRow?.budget_capped_yesterday === true
+        || (todayRow?.budget_util_yesterday != null && todayRow.budget_util_yesterday >= 0.9);
       const query = queryNormalized(l7row.ranking_query || extractExactKeyword(l7row.campaign_name) || "");
       const sibling = query ? siblingQueries.has(query) : false;
       const suggestion = bidReviewSuggestion({
@@ -2604,7 +2707,7 @@ export function buildGnoPack(input: {
 
   const addsUnknown = input.addsThisWeekAlready == null || !Number.isFinite(Number(input.addsThisWeekAlready));
   const adds = addsUnknown ? null : Number(input.addsThisWeekAlready);
-  const remaining = addsUnknown ? 0 : Math.max(0, 3 - (adds ?? 0));
+  const remaining = addsUnknown ? 0 : Math.max(0, MAX_NEW_STRUCTURES_PER_WEEK - (adds ?? 0));
   const harvestPool = [...autoTerms, ...fatTerms, ...broadTerms]
     .filter((r) => r.label === "L7" && (r.proposed_tag === "HARVEST_EXACT" || r.proposed_tag === "WATCH") && r.orders >= 2);
   const harvestQueue = harvestPool.slice(0, remaining).map((r) => ({
@@ -2627,10 +2730,9 @@ export function buildGnoPack(input: {
 
   const findings = structureAuditFindings({
     siblings,
-    metaSyncMissing: watch
-      .filter((r) => r.window_label === "Today" && r.meta_sync === false
-        && (r.watch_list === "NEW_EXACT" || r.watch_list === "FLAVOR_SHELL"))
-      .map((r) => ({ campaign_name: r.campaign_name, watch_list: r.watch_list })),
+    metaSyncMissing: [...new Map(watch
+      .filter((r) => r.window_label === "Today" && r.meta_sync === false)
+      .map((r) => [r.campaign_name, { campaign_name: r.campaign_name, watch_list: r.watch_list }])).values()],
     rankingUnlabeled: watch
       .filter((r) => isRankingCampaign(r.campaign_name) && r.campaign_purpose !== "ranking" && r.window_label === "Today")
       .map((r) => ({ campaign_id: r.campaign_id, campaign_name: r.campaign_name })),
@@ -2705,32 +2807,45 @@ export function buildGnoPack(input: {
     "query_normalized", "hero_asin", "tracker_group_name", "sfr_source",
     "soldscope_search_volume", "organic_as_of_prev", "paid_spend_l7_on_phrase", "converting_st_no_exact",
   ] as const;
-  const organicBody = toCsv(organicPackHeaders, organicRows.map((r) => ({
-    ...r,
-    query_normalized: queryNormalized(r.keyword),
-    hero_asin: familyHeroAsin(r.family) ?? "",
-    tracker_group_name: "",
-    sfr_source: r.aba_sfr == null ? "" : "aba",
-    soldscope_search_volume: null,
-    organic_as_of_prev: "",
-    paid_spend_l7_on_phrase: null,
-    converting_st_no_exact: "",
-  })));
+  const exactL7Spend = new Map<string, number>();
+  for (const kw of keywords) {
+    if (kw.window_label !== "L7" || !kw.metrics_complete) continue;
+    if (normalizeName(kw.match_type) !== "exact") continue;
+    const q = queryNormalized(kw.query_normalized || kw.keyword_text);
+    if (!q) continue;
+    exactL7Spend.set(q, (exactL7Spend.get(q) ?? 0) + n(kw.spend));
+  }
+  const organicBody = toCsv(organicPackHeaders, organicRows.map((r) => {
+    const q = queryNormalized(r.keyword);
+    return {
+      ...r,
+      query_normalized: q,
+      hero_asin: familyHeroAsin(r.family) ?? "",
+      tracker_group_name: "",
+      sfr_source: r.aba_sfr == null ? "" : "aba",
+      soldscope_search_volume: null,
+      organic_as_of_prev: "",
+      paid_spend_l7_on_phrase: exactL7Spend.has(q) ? exactL7Spend.get(q) : null,
+      converting_st_no_exact: "",
+    };
+  }));
 
+  const competitorRows = finalizeCompetitorKrRows(input.competitorOutliers ?? []);
   const competitorBody = toCsv(
     [...COMPETITOR_KR_CSV_HEADERS, "query_normalized", "bidding_campaign_ids", "our_exact_bid",
       "competitor_on_serp_evidence", "family_fit", "cap_slot", "suggested_lever_reason", "harvest_blocked_reason"],
-    (input.competitorOutliers ?? []).map((r) => ({
+    competitorRows.map((r) => ({
       ...r,
       already_bidding: r.already_bidding === "Y" ? true : r.already_bidding === "N" ? false : r.already_bidding,
       query_normalized: queryNormalized(r.keyword),
       bidding_campaign_ids: "",
       our_exact_bid: null,
-      competitor_on_serp_evidence: "",
-      family_fit: "",
-      cap_slot: null,
-      suggested_lever_reason: "",
-      harvest_blocked_reason: "",
+      competitor_on_serp_evidence: r.competitor_on_serp_evidence ?? "",
+      family_fit: r.family_fit ?? "",
+      cap_slot: r.cap_slot ?? null,
+      suggested_lever: r.suggested_lever,
+      suggested_lever_reason: r.suggested_lever_reason ?? "",
+      harvest_blocked_reason: r.suggested_lever === "harvest_exact" ? "" : (r.harvest_blocked_reason ?? ""),
     })),
   );
 
@@ -2743,17 +2858,17 @@ export function buildGnoPack(input: {
   const skuAsOf = skuDates.length ? skuDates[skuDates.length - 1] : "";
   const skuMissing = !(input.asinCatalog ?? []).some((r) => r.cogs_per_unit != null && Number(r.cogs_per_unit) > 0);
   const organicAsOf = organicRows.map((r) => r.organic_as_of).filter((d): d is string => !!d).sort().at(-1) ?? "";
-  const groups = new Set(organicRows.map((r) => r.family)).size;
-  const phrases = new Set(organicRows.map((r) => queryNormalized(r.keyword))).size;
+  const organicCensus = organicTrackerCensus(input.organicSnapshots ?? [], organicRows);
+  const groups = organicCensus.groups;
+  const phrases = organicCensus.phrases;
   const sqpLag = sqpPlan.lastCompleteWeekEnd ? isoDayDelta(today, sqpPlan.lastCompleteWeekEnd) : null;
   const sqpSources = [...new Set(sqp.map((r) => String(r.source ?? "")).filter(Boolean))];
   const rankingLines = watch
     .filter((r) => r.campaign_purpose === "ranking" && r.window_label === "Today")
     .map((r) => `${r.campaign_id || "id_missing"} | ${r.campaign_name} | ${r.ranking_query}`);
-  const metaMissing = watch
-    .filter((r) => r.window_label === "Today" && r.meta_sync === false
-      && (r.watch_list === "NEW_EXACT" || r.watch_list === "FLAVOR_SHELL"))
-    .map((r) => r.campaign_name);
+  const metaMissing = [...new Set(watch
+    .filter((r) => r.window_label === "Today" && r.meta_sync === false)
+    .map((r) => r.campaign_name))];
   const emptyReasons = [
     autoTerms.length === 0 ? "EMPTY_REASON auto_loose_search_terms.csv: no 1-day search-term stamps in the closed L2/L7 windows" : "",
     fatEmpty ? "EMPTY_REASON fat_parent_search_terms.csv: no fat-parent search-term stamps (or none configured in window)" : "",
@@ -2859,11 +2974,11 @@ export function buildGnoPack(input: {
     sqpLagDays: sqpLag == null || !Number.isFinite(sqpLag) ? "" : String(sqpLag),
     sqpComparison: comparisonText,
     organicAsOf,
-    organicGroups: `${groups} / phrases: ${phrases} / snapshot_rows: ${organicRows.length}`,
+    organicGroups: `${groups} / phrases: ${phrases} / snapshot_rows: ${organicCensus.snapshot_rows}`,
     placementAsOf: input.placements.map((p) => p.date).sort().at(-1) ?? "",
     negativesAsOf: negatives.length ? "stored snapshot; added_at not on every row" : "",
     skuCostsAsOf: skuAsOf || "missing",
-    bleeders10: `${l60} → ${closed}`,
+    bleeders10: `${l60} → ${closed}${stCoverage.covers ? ` coverage_days=${stCoverage.daysInWindow}` : ` untrusted coverage_days=${stCoverage.daysInWindow}`}`,
     bleeders20: `${l30} → ${closed}`,
     unexpectedEmpty: unexpected,
     rowFilters: ROW_FILTERS_APPLIED,
@@ -2874,15 +2989,30 @@ export function buildGnoPack(input: {
     "ST grain: WINDOW_AGG (review files). Raw optional files, when present, are grain=DAILY and are not labeled L7.",
     "ST filters: none. SUMMARY stamps are excluded from L2/L7 rather than relabeled.",
     `BEFORE/AFTER vs prior pack: ${beforeAfter}`,
+    `prior_pack_id: ${input.priorPack?.id ?? ""}`,
+    ledger.length
+      ? "outcomes: last 30 days of gno_decision_ledger carried into gno_outcomes.csv. implemented stays unknown unless the ledger records it."
+      : "outcomes_empty_reason: no stored gno_outcomes / decision-ledger rows in the last 30 days",
     `Auto Loose L2 omitted? ${autoL2 === 0 ? "yes — no 1-day ST stamps for that window" : "no"}`,
     fatEmpty ? "fat_parent empty reason: no search-term stamps for the configured fat-parent campaign in the closed windows." : "fat_parent empty reason: n/a",
     `NEW_EXACT / flavor rows with meta_sync=false: ${metaMissing.length ? metaMissing.join(" | ") : "none"}`,
+    organicCensus.note,
+    "query_normalized: lowercase, trim, collapse whitespace, ASCII-fold, fold women→woman so woman/women join across ST, Exact, SQP, SoldScope, KR, and negatives. man/men are not folded.",
+    "SOP flags bleeders10_flag, bleeders20_flag, and lifetime_zero_flag are set on Today rows only. L1/L2/L7/L30/L60 leave them blank.",
+    "spend_yesterday, spend_dby, budget_util_yesterday, and budget_capped_yesterday are Today rows only.",
+    `harvest_min_clicks: ${HARVEST_MIN_CLICKS}`,
+    `harvest_min_orders: ${HARVEST_MIN_ORDERS}`,
+    `max_new_structures_per_week: ${MAX_NEW_STRUCTURES_PER_WEEK}`,
+    `adds_this_week_already: ${addsUnknown ? "unknown" : String(adds)}`,
+    `remaining_slots: ${remaining}`,
+    `harvest_queue_rows: ${harvestQueue.length}`,
+    addsUnknown ? "adds_this_week_already unknown; remaining_slots capped conservative at 0." : "",
     `ranking campaigns: ${rankingLines.length ? rankingLines.join(" || ") : "none in this pack"}`,
     ...emptyReasons,
     "Campaign spend SoT is ads_campaigns_daily on watch_campaigns. Keyword and search-term dollars are NOT_SOT.",
     "Family BE lip_3pk=42, deo=36, balm=36. Bleeders 2.0 is family BE+20pp (SP) or BE+10pp (SB/SBV/SD).",
     "Never writes to Amazon.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   const methodology = gnoPackReadme({
     files: [...REQUIRED_PACK_FILES],

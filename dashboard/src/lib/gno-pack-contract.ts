@@ -5,6 +5,9 @@
  */
 
 import { createHash } from "node:crypto";
+import { isBrandConquest, queryNormalized } from "./query-normalized";
+
+export { isBrandConquest, isSoftBodyButter, queryNormalized } from "./query-normalized";
 
 export const CONTRACT_PACK_DATE = "2026-09-24";
 export const WINDOW_MISMATCH_RATIO = 0.25;
@@ -103,15 +106,81 @@ export const ST_REVIEW_FILES = [
 export const ROW_FILTERS_APPLIED =
   "SUMMARY stamps excluded from L2/L7 (not an ads window); review files are WINDOW_AGG one row per campaign_id+query_normalized+match_type+window_label; no min_clicks or min_spend row drop; ST $ is NOT_SOT";
 
-const BRAND_CONQUEST_RE = /\b(native|medicube|dr\.?\s*squatch|harry'?s|dove|degree|old spice|secret|schmidt'?s)\b/i;
+const AMAZON_ID_HEADER =
+  /(^|_)(campaign_id|ad_group_id|keyword_id|target_id|negative_id|portfolio_id)s?$|^entity_ids$/;
 
-export function queryNormalized(term: string | null | undefined): string {
-  return String(term ?? "")
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+/**
+ * A closed window is real only when loaded daily facts reach the window
+ * start and the window end. A shorter store must not be labeled L60.
+ */
+export function seriesCoversWindow(
+  dates: Iterable<string>,
+  start: string,
+  end: string,
+): { covers: boolean; earliest: string | null; latest: string | null; daysInWindow: number } {
+  let earliest: string | null = null;
+  let latest: string | null = null;
+  const inWindow = new Set<string>();
+  for (const raw of dates) {
+    const d = String(raw ?? "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+    if (!earliest || d < earliest) earliest = d;
+    if (!latest || d > latest) latest = d;
+    if (d >= start && d <= end) inWindow.add(d);
+  }
+  const covers = earliest != null && latest != null && earliest <= start && latest >= end;
+  return { covers, earliest, latest, daysInWindow: inWindow.size };
+}
+
+/** Quote Amazon IDs so Excel/Sheets cannot rewrite them as scientific notation. */
+export function csvEscapeField(
+  value: string | number | boolean | null | undefined,
+  header?: string,
+): string {
+  if (value === null || value === undefined) return "";
+  const forceQuote = Boolean(header && AMAZON_ID_HEADER.test(header));
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "";
+    const s = Number.isInteger(value) ? String(value) : value.toFixed(2);
+    return forceQuote ? `"${s}"` : s;
+  }
+  if (typeof value === "boolean") return value ? "true" : "false";
+  const s = String(value);
+  if (!s) return "";
+  if (forceQuote || /[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+export function organicTrackerCensus(
+  snapshots: { phrase?: string | null; group_id?: number | null }[],
+  rows: { keyword?: string | null; family?: string | null }[],
+): { groups: number; phrases: number; snapshot_rows: number; note: string } {
+  const groupIds = new Set<string>();
+  const phrases = new Set<string>();
+  for (const s of snapshots) {
+    if (s.group_id != null && Number.isFinite(Number(s.group_id))) groupIds.add(String(s.group_id));
+    const q = queryNormalized(s.phrase);
+    if (q) phrases.add(q);
+  }
+  const families = new Set<string>();
+  const rowPhrases = new Set<string>();
+  for (const r of rows) {
+    const q = queryNormalized(r.keyword);
+    if (q) rowPhrases.add(q);
+    if (r.family) families.add(String(r.family));
+  }
+  const phraseCount = snapshots.length ? phrases.size : rowPhrases.size;
+  const groups = groupIds.size || families.size;
+  const snapshot_rows = rows.length;
+  let note: string;
+  if (snapshot_rows > phraseCount) {
+    note = `snapshot_rows ${snapshot_rows} > phrases ${phraseCount} because multi-ASIN expansion stores one query_normalized on more than one ASIN.`;
+  } else if (phraseCount > snapshot_rows) {
+    note = `tracker phrases ${phraseCount} exceed snapshot_rows ${snapshot_rows}; phrases are distinct query_normalized in the tracker groups.`;
+  } else {
+    note = `phrases ${phraseCount} equals snapshot_rows ${snapshot_rows}; each snapshot row is one distinct query_normalized.`;
+  }
+  return { groups, phrases: phraseCount, snapshot_rows, note };
 }
 
 export function namesKey(name: string | null | undefined): string {
@@ -251,7 +320,7 @@ const HERO_QUERIES = new Set([
 export function termRelevance(term: string): TermRelevance {
   const q = queryNormalized(term);
   if (!q) return "unknown";
-  if (BRAND_CONQUEST_RE.test(q)) return "brand_conquest";
+  if (isBrandConquest(q)) return "brand_conquest";
   if (HERO_QUERIES.has(q)) return "hero";
   if (/\b(tallow|chapstick|lip balm|deodorant)\b/.test(q)) return "family";
   if (/\b(free|cheap|diy|recipe|scam|wholesale)\b/.test(q)) return "junk";
@@ -488,7 +557,22 @@ export function structureAuditFindings(input: {
   metaSyncMissing?: { campaign_name: string; watch_list: string }[];
 }): StructureFinding[] {
   const out: StructureFinding[] = [];
+  const siblings = new Map<string, SiblingExact>();
   for (const s of input.siblings) {
+    const q = queryNormalized(s.query_normalized);
+    if (!q) continue;
+    const prev = siblings.get(q);
+    if (!prev) {
+      siblings.set(q, { query_normalized: q, campaigns: [...s.campaigns] });
+      continue;
+    }
+    for (const c of s.campaigns) {
+      const id = String(c.campaign_id ?? "").trim() || namesKey(c.campaign_name);
+      if (prev.campaigns.some((x) => (String(x.campaign_id ?? "").trim() || namesKey(x.campaign_name)) === id)) continue;
+      prev.campaigns.push(c);
+    }
+  }
+  for (const s of siblings.values()) {
     out.push({
       finding_type: "sibling_exact_auction",
       severity: "warn",
@@ -790,7 +874,7 @@ export const WATCH_PLACEMENT_HEADERS = [
 ] as const;
 
 export const BLEEDERS10_HEADERS = [
-  "source_type", "date_start", "date_end", "window_label", "metrics_complete",
+  "source_type", "date_start", "date_end", "window_label", "metrics_complete", "window_untrusted",
   "campaign_id", "campaign_name", "keyword_id", "target_id", "search_term", "query_normalized",
   "clicks_60", "spend_60", "orders_60", "relevance", "state", "protected_recent_test",
   "conquesting", "last_click_date", "proposed_tag", "proposed_tag_reason", "family",
