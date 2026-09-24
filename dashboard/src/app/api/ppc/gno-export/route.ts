@@ -33,7 +33,10 @@ import {
  * + README.txt
  * (+ optional sqp_weekly_slice.csv, negatives_snapshot.csv).
  * Today = config only (metrics_complete=false). L2/L7 = closed days
- * ending yesterday. Campaigns API snapshot fills 0-impr shells.
+ * ending yesterday; a lagging ads day flags metrics_complete=false and
+ * does not slide the window. SUMMARY search-term stamps are not L2/L7.
+ * sqp_weekly_slice.csv is the newest stored complete Sun–Sat SQP week.
+ * Older weeks, if shipped, are COMPARISON / PRE_RAISE only.
  * Observe / export only. Never writes to Amazon.
  */
 
