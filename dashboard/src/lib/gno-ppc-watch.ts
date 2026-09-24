@@ -79,9 +79,13 @@ export const SQP_SLICE_QUERIES = [
   "lip balm", "tallow lip balm", "chapstick",
   "tallow balm", "beef tallow balm", "tallow deodorant", "tallow deodorant for men",
 ] as const;
-/** Bid-raise window Dave needs in the SQP slice (Amazon week covering these dates). */
-export const SQP_SLICE_COVER_START = "2026-09-07";
-export const SQP_SLICE_COVER_END = "2026-09-10";
+/**
+ * Newest stored complete Sun–Sat week older than this many days before
+ * pack_date fails the slice (SQP_STALE). Age == 10 still ships as current.
+ */
+export const SQP_STALE_AFTER_DAYS = 10;
+/** Older week, when emitted, is never the current slice file. */
+export const SQP_COMPARISON_FILENAME = "sqp_weekly_slice_COMPARISON_PRE_RAISE.csv";
 
 export type WatchList = "NEW_EXACT" | "KEEPER" | "DAY5_PAUSE" | "FLAVOR_SHELL" | "OTHER";
 export type ProposedTag = "KEEP" | "HARVEST_CANDIDATE" | "JUNK_CANDIDATE";
@@ -392,7 +396,10 @@ export interface SqpSliceRow {
   asin_clicks?: number | null;
   asin_purchases?: number | null;
   source?: string | null;
-  /** true when the packed week does not cover Sep 7–10. Never imply currency. */
+  /**
+   * false only when week_end is the newest stored complete Sun–Sat week.
+   * Older weeks emitted as COMPARISON / PRE_RAISE are true.
+   */
   stale_pre_raise?: boolean;
 }
 
@@ -911,8 +918,8 @@ function attachOrganicFields<T extends Record<string, unknown>>(
 /**
  * ads_search_terms_daily is requested as timeUnit=DAILY (Amazon date =
  * that calendar day). Leftover 7-day SUMMARY stamps (chunk END) remain
- * until Mini ads-search-terms-rebuild. A 7-day SUMMARY dated yesterday
- * is not L2. Compare that date's ST total to campaign daily (SoT) —
+ * until Mini ads-search-terms-rebuild. A 7-day SUMMARY is not L2 or L7.
+ * Compare that date's ST total to campaign daily (SoT) —
  * ST ≫ campaign daily means multi-day.
  */
 export function stDateLooksDaily(stSpend: number, campaignSpend: number): boolean {
@@ -967,21 +974,13 @@ function rollSearchTerms(input: {
 
   let source: SearchTermRow[] = [];
   const extraNotes: string[] = [ST_CAMPAIGN_SOT_NOTE];
-  if (hasSummaryDate && label === "L2") {
-    if (!dailyDates.length) {
-      // 7d SUMMARY is not L2. Campaign L2 on watch_campaigns is SoT.
-      return [];
-    }
-    for (const d of dailyDates) {
-      source.push(...latestSearchTerms(scoped, d, d));
-    }
-  } else if (hasSummaryDate) {
-    // L7: one SUMMARY row per term (chunk END), do not sum overlapping weeks.
-    source = latestSearchTerms(scoped, start, end);
-  } else {
-    for (const d of dailyDates.length ? dailyDates : dates) {
-      source.push(...latestSearchTerms(scoped, d, d));
-    }
+  // SUMMARY stamped on chunk END is not an L2 or L7 day. Use 1-day stamps only.
+  if (!dailyDates.length) {
+    return [];
+  }
+  if (hasSummaryDate) extraNotes.push("SUMMARY search-term stamp omitted; not L2 or L7");
+  for (const d of dailyDates) {
+    source.push(...latestSearchTerms(scoped, d, d));
   }
 
   const rolled = new Map<string, SearchTermRow[]>();
@@ -1390,23 +1389,51 @@ export interface PackWindow {
 
 /**
  * Last closed Amazon day that L2/L7 may include. Never `today`.
- * Ads Today is incomplete — L2 = yesterday + day before.
+ * Always yesterday in the account calendar. A lagging `asOf` must not
+ * slide the window backward.
  */
-export function packClosedEnd(today: string, asOf: string): string {
-  return asOf < today ? asOf : shiftDays(today, -1);
+export function packClosedEnd(today: string, _asOf?: string): string {
+  return shiftDays(today, -1);
+}
+
+/**
+ * Yesterday's ads_campaigns_daily is closed when `asOf` reaches yesterday
+ * and, if campaign rows were loaded, at least one row is dated yesterday
+ * or later. A hole does not move L2/L7; callers flag metrics_complete=false.
+ */
+export function l2L7MetricsComplete(
+  today: string,
+  asOf: string,
+  campaigns?: { date: string }[],
+): boolean {
+  const yesterday = packClosedEnd(today);
+  if (asOf < yesterday) return false;
+  if (!campaigns || campaigns.length === 0) return true;
+  let maxDate = "";
+  for (const row of campaigns) {
+    if (row.date > maxDate) maxDate = row.date;
+  }
+  return maxDate >= yesterday;
 }
 
 /**
  * Pack windows as of Amazon Today.
  * Example 2026-09-07: Today=2026-09-07; L2=2026-09-05..2026-09-06;
  * L7=last 7 closed days ending yesterday (2026-08-31..2026-09-06).
+ * If yesterday is not closed, L2/L7 stay on those dates with
+ * metrics_complete=false.
  */
-export function packWindows(today: string, asOf: string): PackWindow[] {
+export function packWindows(
+  today: string,
+  asOf: string,
+  campaigns?: { date: string }[],
+): PackWindow[] {
   const closed = packClosedEnd(today, asOf);
+  const complete = l2L7MetricsComplete(today, asOf, campaigns);
   return [
     { start: today, end: today, label: "Today", metrics_complete: false },
-    { start: windowStart(closed, 2), end: closed, label: "Last2", metrics_complete: true },
-    { start: windowStart(closed, 7), end: closed, label: "Last7", metrics_complete: true },
+    { start: windowStart(closed, 2), end: closed, label: "Last2", metrics_complete: complete },
+    { start: windowStart(closed, 7), end: closed, label: "Last7", metrics_complete: complete },
   ];
 }
 
@@ -1420,7 +1447,7 @@ export function watchCampaignExportRows(input: {
 }): WatchCampaignExportRow[] {
   const { campaigns, placements } = input;
   const today = input.today || input.asOf;
-  const windows = packWindows(today, input.asOf);
+  const windows = packWindows(today, input.asOf, campaigns);
   const latest = latestByCampaign(campaigns);
   const meta = input.campaignMeta ?? [];
   const organicIndex = input.organicIndex;
@@ -1532,16 +1559,39 @@ export function negativesSnapshotCsv(rows: NegativeRow[]): string {
  * every match-type sibling (paused Exact `tallow lip balm` vs enabled
  * Exact `tallow lip balms`).
  */
+/** Dates whose search-term stamp is a multi-day SUMMARY, not a calendar day. */
+export function summarySearchTermDates(
+  terms: SearchTermRow[],
+  campaigns: CampaignDailyRow[],
+  campaignName: string,
+  start: string,
+  end: string,
+): Set<string> {
+  const pred = (name: string) => namesEqual(name, campaignName);
+  const scoped = inWindow(terms, start, end).filter((r) => pred(r.campaign_name));
+  const out = new Set<string>();
+  for (const d of new Set(scoped.map((r) => r.date))) {
+    if (!stDateLooksDaily(
+      searchTermSpendOnDate(scoped, pred, d),
+      campaignSpendOnDate(campaigns, pred, d),
+    )) out.add(d);
+  }
+  return out;
+}
+
 export function keywordWindowMetrics(
   terms: SearchTermRow[],
   target: Pick<KeywordTarget, "campaign_name" | "keyword_text" | "match_type" | "keyword_id">,
   start: string,
   end: string,
+  opts?: { skipDates?: Set<string> },
 ): Metrics {
   const kw = normalizeTerm(target.keyword_text);
   const mt = normalizeName(target.match_type);
   const kid = String(target.keyword_id ?? "").trim();
+  const skip = opts?.skipDates;
   const rows = inWindow(terms, start, end).filter((t) => {
+    if (skip?.has(t.date)) return false;
     if (!namesEqual(t.campaign_name, target.campaign_name)) return false;
     const termKid = String(t.keyword_id ?? "").trim();
     if (kid && termKid) return termKid === kid;
@@ -1566,6 +1616,7 @@ export function keywordTargetExportRows(input: {
   asOf: string;
   keywordTargets: KeywordTarget[];
   searchTerms: SearchTermRow[];
+  campaigns?: CampaignDailyRow[];
   organicIndex?: Map<string, OrganicRankJoin[]>;
 }): KeywordTargetExportRow[] {
   // Include PAUSED + ENABLED. Today rows are config-only (bid / state).
@@ -1573,12 +1624,22 @@ export function keywordTargetExportRows(input: {
     const list = watchListOf(t.campaign_name);
     return list === "NEW_EXACT" || list === "KEEPER" || list === "FLAVOR_SHELL";
   });
+  const campaigns = input.campaigns ?? [];
   const rows: KeywordTargetExportRow[] = [];
-  for (const w of packWindows(input.today, input.asOf)) {
+  for (const w of packWindows(input.today, input.asOf, campaigns)) {
     const windowRows: KeywordTargetExportRow[] = [];
+    const summaryByCampaign = new Map<string, Set<string>>();
     for (const t of wanted) {
+      const campKey = normalizeName(t.campaign_name);
+      let skip = summaryByCampaign.get(campKey);
+      if (!skip) {
+        skip = w.metrics_complete
+          ? summarySearchTermDates(input.searchTerms, campaigns, t.campaign_name, w.start, w.end)
+          : new Set<string>();
+        summaryByCampaign.set(campKey, skip);
+      }
       const m = w.metrics_complete
-        ? keywordWindowMetrics(input.searchTerms, t, w.start, w.end)
+        ? keywordWindowMetrics(input.searchTerms, t, w.start, w.end, { skipDates: skip })
         : emptyMetrics();
       const frame = contributionFrame(t.campaign_name, m.acos);
       windowRows.push(attachOrganicFields({
@@ -1647,6 +1708,7 @@ export function advertisedProductL7Rows(input: {
   asinCatalog?: AsinCatalogRow[];
 }): AdvertisedProductL7Row[] {
   const closed = packClosedEnd(input.today, input.asOf);
+  const complete = l2L7MetricsComplete(input.today, input.asOf, input.campaigns);
   const start = windowStart(closed, 7);
   const catalog = new Map<string, AsinCatalogRow>();
   for (const row of input.asinCatalog ?? []) {
@@ -1664,9 +1726,14 @@ export function advertisedProductL7Rows(input: {
     const storedName = campRows[0]?.campaign_name ?? name;
     const asins = extractAsin(storedName).split("/").map((a) => a.trim()).filter(Boolean);
     if (!asins.length) continue;
-    const m = sumMetrics(inWindow(campRows, start, closed));
+    const m = complete
+      ? sumMetrics(inWindow(campRows, start, closed))
+      : { impressions: 0, clicks: 0, spend: 0, orders: 0, sales: 0, cpc: 0, acos: null, cvr: null };
     const mixed = asins.length > 1;
-    const frame = contributionFrame(storedName, m.acos, [ADVERTISED_PRODUCT_NOTE]);
+    const frame = contributionFrame(storedName, m.acos, [
+      ADVERTISED_PRODUCT_NOTE,
+      ...(complete ? [] : ["yesterday ads_campaigns_daily not closed; L7 window not slid"]),
+    ]);
     for (const asin of asins) {
       const cat = catalog.get(asin.toUpperCase());
       out.push({
@@ -1693,84 +1760,168 @@ export function advertisedProductL7Csv(rows: AdvertisedProductL7Row[]): string {
   return toCsv(ADVERTISED_PRODUCT_L7_CSV_HEADERS, rows.map((r) => ({ ...r })));
 }
 
-export function weekCoversSqpTarget(
-  weekStart: string,
-  weekEnd: string,
-  coverStart = SQP_SLICE_COVER_START,
-  coverEnd = SQP_SLICE_COVER_END,
-): boolean {
-  const start = String(weekStart ?? "");
-  const end = String(weekEnd ?? "");
-  if (!start || !end) return false;
-  return start <= coverEnd && end >= coverStart;
-}
-
-export function sqpSliceStaleNote(weekStart: string, weekEnd: string): string {
-  if (weekCoversSqpTarget(weekStart, weekEnd)) {
-    return (
-      `SQP slice week ${weekStart}–${weekEnd} covers Sep 7–10 (bid-raise window). `
-      + `stale_pre_raise=false.`
-    );
-  }
-  return (
-    `SQP week covering Sep 7–10 not in warehouse yet; slice is ${weekStart}–${weekEnd} `
-    + `(pre-raise). stale_pre_raise=true. Amazon SQP is weekly (Sun–Sat); the week that `
-    + `includes Sep 7–10 is 2026-09-06→2026-09-12 and is not published until that Saturday `
-    + `closes (plus ~24–48h). Do not poll daily. After 2026-09-12 upload Brand Analytics `
-    + `SQP CSV on /ppc/gno or run \`python -m src.main sqp-sync --apply --ref 2026-09-13\`.`
-  );
-}
-
-export function selectSqpSliceWeek(rows: SqpSliceRow[]): {
+export interface SqpWeekRef {
   weekStart: string;
   weekEnd: string;
-  coversTarget: boolean;
+}
+
+export interface SqpSlicePlan {
+  packDate: string;
+  /** Newest stored week_end, including an in-progress week that must not ship. */
+  lastStoredWeekEnd: string | null;
+  /** Newest complete Sun–Sat week_end, if any. */
+  lastCompleteWeekEnd: string | null;
+  current: SqpWeekRef | null;
+  /** Next-older complete week. Never written into sqp_weekly_slice.csv. */
+  comparison: SqpWeekRef | null;
+  /** True when the slice must not ship as current. */
+  stale: boolean;
+  staleReason: string | null;
   note: string;
-} | null {
-  const wanted = new Set<string>(SQP_SLICE_QUERIES);
-  const filtered = rows.filter((r) => {
-    const q = normalizeTerm(r.query_normalized || r.search_query);
-    return wanted.has(q);
-  });
-  if (!filtered.length) return null;
-  const weeks = new Map<string, { start: string; end: string }>();
-  for (const r of filtered) {
-    const end = String(r.week_end ?? "");
-    const start = String(r.week_start ?? "");
-    if (!end) continue;
-    const prev = weeks.get(end);
-    if (!prev || start > prev.start) weeks.set(end, { start, end });
+}
+
+function utcWeekday(iso: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const t = Date.parse(`${iso}T12:00:00Z`);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).getUTCDay();
+}
+
+function isoDayDelta(later: string, earlier: string): number {
+  const a = Date.parse(`${earlier}T12:00:00Z`);
+  const b = Date.parse(`${later}T12:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return Number.NaN;
+  return Math.round((b - a) / 86_400_000);
+}
+
+/**
+ * Complete Brand Analytics SQP week: Sunday–Saturday, and the Saturday
+ * has already closed before pack_date. The in-progress week is not complete.
+ */
+export function isCompleteSqpWeek(weekStart: string, weekEnd: string, packDate: string): boolean {
+  const start = String(weekStart ?? "");
+  const end = String(weekEnd ?? "");
+  if (!start || !end || !packDate) return false;
+  if (utcWeekday(start) !== 0 || utcWeekday(end) !== 6) return false;
+  if (shiftDays(start, 6) !== end) return false;
+  return end < packDate;
+}
+
+/** Pack CSV source. Blank stays blank — shares and source are never invented. */
+export function sqpPackSource(source: string | null | undefined): string {
+  const s = String(source ?? "").trim().toLowerCase();
+  if (s === "sqp_spapi") return "sqp_spapi";
+  if (s === "sqp_csv" || s === "sqp_brand_csv") return "sqp_csv";
+  return "";
+}
+
+function completeSqpWeeks(rows: SqpSliceRow[], packDate: string): SqpWeekRef[] {
+  const byEnd = new Map<string, SqpWeekRef>();
+  for (const row of rows) {
+    const weekStart = String(row.week_start ?? "");
+    const weekEnd = String(row.week_end ?? "");
+    if (!isCompleteSqpWeek(weekStart, weekEnd, packDate)) continue;
+    if (!byEnd.has(weekEnd)) byEnd.set(weekEnd, { weekStart, weekEnd });
   }
-  const covering = [...weeks.values()]
-    .filter((w) => weekCoversSqpTarget(w.start, w.end))
-    .sort((a, b) => b.end.localeCompare(a.end));
-  const picked = covering[0] ?? [...weeks.values()].sort((a, b) => b.end.localeCompare(a.end))[0];
-  if (!picked) return null;
+  return [...byEnd.values()].sort((a, b) => b.weekEnd.localeCompare(a.weekEnd));
+}
+
+/**
+ * Current slice = newest stored complete Sun–Sat week as of packDate.
+ * A bid-raise or other older week is comparison only. An in-progress
+ * week is never current. Age > 10 days fails the slice (SQP_STALE).
+ */
+export function selectSqpSliceWeek(rows: SqpSliceRow[], packDate: string): SqpSlicePlan {
+  const storedEnds = rows
+    .map((r) => String(r.week_end ?? ""))
+    .filter((end) => /^\d{4}-\d{2}-\d{2}$/.test(end))
+    .sort();
+  const lastStoredWeekEnd = storedEnds.length ? storedEnds[storedEnds.length - 1] : null;
+  const complete = completeSqpWeeks(rows, packDate);
+  const newest = complete[0] ?? null;
+  const prior = complete[1] ?? null;
+  const empty: SqpSlicePlan = {
+    packDate,
+    lastStoredWeekEnd,
+    lastCompleteWeekEnd: newest?.weekEnd ?? null,
+    current: null,
+    comparison: null,
+    stale: false,
+    staleReason: null,
+    note: "",
+  };
+  if (!rows.length) {
+    return { ...empty, note: "No stored SQP rows. Do not invent a slice." };
+  }
+  if (!newest) {
+    return {
+      ...empty,
+      stale: true,
+      staleReason: "no_complete_sun_sat_week",
+      note: `SQP_STALE reason=no_complete_sun_sat_week last_week_end=${lastStoredWeekEnd ?? ""}`,
+    };
+  }
+  const age = isoDayDelta(packDate, newest.weekEnd);
+  if (age > SQP_STALE_AFTER_DAYS) {
+    return {
+      ...empty,
+      lastCompleteWeekEnd: newest.weekEnd,
+      stale: true,
+      staleReason: "newest_complete_week_older_than_10_days",
+      note: `SQP_STALE reason=newest_complete_week_older_than_10_days last_week_end=${newest.weekEnd}`,
+    };
+  }
   return {
-    weekStart: picked.start,
-    weekEnd: picked.end,
-    coversTarget: weekCoversSqpTarget(picked.start, picked.end),
-    note: sqpSliceStaleNote(picked.start, picked.end),
+    packDate,
+    lastStoredWeekEnd,
+    lastCompleteWeekEnd: newest.weekEnd,
+    current: newest,
+    comparison: prior,
+    stale: false,
+    staleReason: null,
+    note: (
+      `CURRENT SQP week ${newest.weekStart}–${newest.weekEnd} `
+      + `(newest stored complete week_end). stale_pre_raise=false.`
+    ),
   };
 }
 
-export function sqpWeeklySliceRows(rows: SqpSliceRow[]): SqpSliceRow[] {
-  const picked = selectSqpSliceWeek(rows);
-  if (!picked) return [];
+function sqpRowsForWeek(rows: SqpSliceRow[], weekEnd: string, stale: boolean): SqpSliceRow[] {
   const wanted = new Set<string>(SQP_SLICE_QUERIES);
-  const stale = !picked.coversTarget;
   return rows
     .filter((r) => {
       const q = normalizeTerm(r.query_normalized || r.search_query);
-      return wanted.has(q) && String(r.week_end ?? "") === picked.weekEnd;
+      return wanted.has(q) && String(r.week_end ?? "") === weekEnd;
     })
-    .map((r) => ({ ...r, stale_pre_raise: stale }))
+    .map((r) => ({
+      ...r,
+      source: sqpPackSource(r.source),
+      impression_share: r.impression_share ?? null,
+      click_share: r.click_share ?? null,
+      purchase_share: r.purchase_share ?? null,
+      stale_pre_raise: stale,
+    }))
     .sort((a, b) => {
       const qa = normalizeTerm(a.query_normalized || a.search_query);
       const qb = normalizeTerm(b.query_normalized || b.search_query);
       if (qa !== qb) return qa.localeCompare(qb);
       return String(a.asin ?? "").localeCompare(String(b.asin ?? ""));
     });
+}
+
+/** Current file only: newest complete week, stale_pre_raise=false. */
+export function sqpWeeklySliceRows(rows: SqpSliceRow[], packDate: string): SqpSliceRow[] {
+  const plan = selectSqpSliceWeek(rows, packDate);
+  if (!plan.current || plan.stale) return [];
+  return sqpRowsForWeek(rows, plan.current.weekEnd, false);
+}
+
+/** Separately labeled COMPARISON / PRE_RAISE week. Not current. */
+export function sqpComparisonSliceRows(rows: SqpSliceRow[], packDate: string): SqpSliceRow[] {
+  const plan = selectSqpSliceWeek(rows, packDate);
+  if (!plan.comparison || plan.stale || !plan.current) return [];
+  if (plan.comparison.weekEnd === plan.current.weekEnd) return [];
+  return sqpRowsForWeek(rows, plan.comparison.weekEnd, true);
 }
 
 export function sqpWeeklySliceCsv(rows: SqpSliceRow[]): string {
@@ -1801,14 +1952,23 @@ export function gnoPackReadme(input: {
   sqpIncluded: boolean;
   sqpNote?: string;
   sqpStale?: boolean;
+  sqpStaleReason?: string | null;
+  sqpLastWeekEnd?: string | null;
+  sqpWeek?: SqpWeekRef | null;
+  sqpComparison?: SqpWeekRef | null;
   organicIncluded: boolean;
   competitorIncluded?: boolean;
 }): string {
-  const sqpLine = input.sqpIncluded
-    ? (input.sqpStale
-      ? `- sqp_weekly_slice.csv — STALE PRE-RAISE (stale_pre_raise=true). SQP week covering Sep 7–10 not in warehouse yet; slice is Aug 30–Sep 5 (pre-raise). Do not treat as the post-raise week. Shares are reported, never invented.`
-      : `- sqp_weekly_slice.csv — week covering Sep 7–10 for ${SQP_SLICE_QUERIES.join(" / ")} (from sqp_weekly). stale_pre_raise=false. Shares are reported, never invented.`)
-    : "- sqp_weekly_slice.csv — OMITTED. SQP week covering Sep 7–10 not in warehouse yet (and no other slice rows). Do not invent SQP rows. After 2026-09-12 upload Brand Analytics SQP CSV on /ppc/gno or run `python -m src.main sqp-sync --apply --ref 2026-09-13`.";
+  const sqpLine = input.sqpStale
+    ? `- sqp_weekly_slice.csv — OMITTED. SQP_STALE reason=${input.sqpStaleReason ?? "stale"} last_week_end=${input.sqpLastWeekEnd ?? ""}. Do not fall back to a bid-raise week and call it current. Shares are never invented.`
+    : input.sqpIncluded && input.sqpWeek
+      ? `- sqp_weekly_slice.csv — CURRENT newest stored complete Sun–Sat week ${input.sqpWeek.weekStart}–${input.sqpWeek.weekEnd} for ${SQP_SLICE_QUERIES.join(" / ")}. stale_pre_raise=false. source is sqp_spapi or sqp_csv. Shares are reported, never invented.`
+      : input.sqpWeek
+        ? `- sqp_weekly_slice.csv — OMITTED. Newest complete week ${input.sqpWeek.weekStart}–${input.sqpWeek.weekEnd} has no stored rows for the slice queries. Do not substitute an older week. Shares are never invented.`
+        : "- sqp_weekly_slice.csv — OMITTED. No stored complete Sun–Sat SQP week. Do not invent SQP rows.";
+  const sqpComparisonLine = input.sqpComparison
+    ? `- ${SQP_COMPARISON_FILENAME} — COMPARISON / PRE_RAISE week ${input.sqpComparison.weekStart}–${input.sqpComparison.weekEnd}. stale_pre_raise=true. Not the current slice.`
+    : "";
   const sqpStatus = input.sqpNote ? `SQP week: ${input.sqpNote}` : "";
   const organicLine = input.organicIncluded
     ? "- organic_rank_snapshot.csv — hero ASINs B0CLHTF8YN (lip) / B0DQFKMJFY (balm) / B0HBSZ71XQ (deo). Rank from soldscope_rank_snapshots. aba_sfr is Brand Analytics SFR only."
@@ -1820,13 +1980,13 @@ export function gnoPackReadme(input: {
     "GNO Export pack — observe only. Never writes to Amazon.",
     "",
     "Windows:",
-    "- Today = config only (metrics_complete=false). $0 is not a pause.",
-    "- L2 / L7 = closed Amazon days ending yesterday.",
+    "- Today = config only (metrics_complete=false). $0 is not a pause and is not missing data.",
+    "- L2 / L7 = closed Amazon days ending yesterday. If yesterday's ads_campaigns_daily is not closed, metrics_complete=false. The window does not slide back.",
     "",
     "Spend source of truth:",
     "- watch_campaigns.csv campaign-level L2/L7 is SoT for spend (ads_campaigns_daily).",
     "- auto_loose / fat_parent / broad_m search-term files are term-level negate/harvest only.",
-    "- ads_search_terms_daily is requested as timeUnit=DAILY (Amazon date = that calendar day). Until Mini ads-search-terms-rebuild --days 90, some dates may still be old 7-day SUMMARY stamps on chunk END. A 7-day SUMMARY is not L2.",
+    "- ads_search_terms_daily is requested as timeUnit=DAILY (Amazon date = that calendar day). Until Mini ads-search-terms-rebuild --days 90, some dates may still be old 7-day SUMMARY stamps on chunk END. A 7-day SUMMARY is not L2 or L7.",
     "- Auto Loose L2 ST rows are omitted unless 1-day ST stamps exist for that window. Do not sum ST $ vs the campaign tile.",
     "",
     "Family BE (config family_break_even_acos, not TACOS):",
@@ -1850,6 +2010,7 @@ export function gnoPackReadme(input: {
     "- keyword_targets.csv — bid/state per keyword_id; Today config-only; L2/L7 attributed to the serving keyword (not copied across match types)",
     "- advertised_product_l7.csv — L7 by ASIN from campaign names. No advertised-product report is synced; mixed-ASIN spend is campaign-level (not split).",
     sqpLine,
+    ...(sqpComparisonLine ? [sqpComparisonLine] : []),
     organicLine,
     competitorLine,
     "- negatives_snapshot.csv — optional",
@@ -1919,7 +2080,8 @@ export function buildGnoPack(input: {
   const broadTerms = searchTermExportRows(
     input.searchTerms, input.campaigns, closed, isBroadM, targets, ledger, organicIndex);
   const keywords = keywordTargetExportRows({
-    today, asOf, keywordTargets: targets, searchTerms: input.searchTerms, organicIndex,
+    today, asOf, keywordTargets: targets, searchTerms: input.searchTerms,
+    campaigns: input.campaigns, organicIndex,
   });
   const advertised = advertisedProductL7Rows({
     today, asOf, campaigns: input.campaigns,
@@ -1933,10 +2095,15 @@ export function buildGnoPack(input: {
     { name: "keyword_targets.csv", body: keywordTargetsCsv(keywords) },
     { name: "advertised_product_l7.csv", body: advertisedProductL7Csv(advertised) },
   ];
-  const sqp = sqpWeeklySliceRows(input.sqpWeekly ?? []);
-  const sqpWeek = selectSqpSliceWeek(input.sqpWeekly ?? []);
+  const sqpRows = input.sqpWeekly ?? [];
+  const sqpPlan = selectSqpSliceWeek(sqpRows, today);
+  const sqp = sqpWeeklySliceRows(sqpRows, today);
+  const sqpComparison = sqpComparisonSliceRows(sqpRows, today);
   if (sqp.length) {
     files.push({ name: "sqp_weekly_slice.csv", body: sqpWeeklySliceCsv(sqp) });
+  }
+  if (sqpComparison.length) {
+    files.push({ name: SQP_COMPARISON_FILENAME, body: sqpWeeklySliceCsv(sqpComparison) });
   }
   files.push({
     name: "organic_rank_snapshot.csv",
@@ -1968,8 +2135,14 @@ export function buildGnoPack(input: {
     body: gnoPackReadme({
       files: files.map((f) => f.name).concat("README.txt"),
       sqpIncluded: sqp.length > 0,
-      sqpNote: sqpWeek?.note,
-      sqpStale: sqpWeek ? !sqpWeek.coversTarget : undefined,
+      sqpNote: sqpPlan.note,
+      sqpStale: sqpPlan.stale,
+      sqpStaleReason: sqpPlan.staleReason,
+      sqpLastWeekEnd: sqpPlan.stale
+        ? (sqpPlan.lastCompleteWeekEnd ?? sqpPlan.lastStoredWeekEnd)
+        : sqpPlan.lastCompleteWeekEnd,
+      sqpWeek: sqpPlan.current,
+      sqpComparison: sqpComparison.length ? sqpPlan.comparison : null,
       organicIncluded: organicRows.length > 0,
       competitorIncluded: competitorRows.length > 0,
     }),
