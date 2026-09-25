@@ -544,6 +544,12 @@ export async function evaluateViaGateway(
         { role: "user", content: JSON.stringify({ state, questions }) },
       ],
       response_format: { type: "json_object" },
+      // Every call requires ZDR. Gateway returns 400 no_providers_available
+      // when no ZDR provider can serve the model; that is a normal gateway
+      // error below — never retry without this flag.
+      providerOptions: {
+        gateway: { zeroDataRetention: true },
+      },
     }),
   });
   const raw = await res.text();
