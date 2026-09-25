@@ -539,6 +539,25 @@ def test_header_template_replaces_key():
     assert (name, value) == ("X-Grok-Key", "sekret")
 
 
+def test_hung_running_row_from_yesterday_is_not_healthy():
+    """Misfire grace reaches yesterday, but a running row from then is stuck."""
+    ga4 = _spec("ga4_sync", 7, 20, grace=3600, gate="ga4")
+    now = datetime(2026, 9, 25, 11, 20, 30, tzinfo=timezone.utc)  # 07:20:30 ET
+    yesterday = now - timedelta(days=1)
+    hung = hw.evaluate_job(ga4, [_row("ga4_sync", "running", yesterday)], now)
+    assert hung is not None
+    assert hung.check == "job:ga4_sync"
+    assert "still running" in hung.detail
+    assert hw.evaluate_job(
+        ga4, [_row("ga4_sync", "success", yesterday, "ok")], now,
+    ) is None
+    assert hw.evaluate_job(ga4, [_row("ga4_sync", "running", now)], now) is None
+    later = datetime(2026, 9, 25, 11, 30, tzinfo=timezone.utc)  # 07:30 ET
+    assert hw.kickstart_blockers(
+        [ga4], {"ga4": True}, [_row("ga4_sync", "running", yesterday)], later,
+    ) == []
+
+
 def test_fresh_running_ga4_blocks_kickstart():
     """07:20 is ga4_sync. A running row must keep kickstart -k from firing."""
     ga4 = _spec("ga4_sync", 7, 20, grace=3600, gate="ga4")

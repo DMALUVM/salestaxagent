@@ -75,6 +75,10 @@ _EXTRA_IGNORE_MARKERS = (
 )
 # A run may start a couple of minutes before its cron minute.
 START_SKEW = timedelta(minutes=2)
+# Longer than this, a `running` row is hung. Matches the ads lease TTL:
+# job_runs.status=running is not itself a lock, and a live pull is not
+# still in flight a day later just because misfire grace reached back
+# to yesterday's slot.
 JOB_LOOKBACK = timedelta(days=10)
 DETAIL_LIMIT = 800
 # `launchctl kickstart -k` SIGKILLs the sync agent. 07:20 is also ga4_sync,
@@ -218,6 +222,35 @@ def _is_ignorable(row: dict) -> bool:
     return any(marker in lowered for marker in markers)
 
 
+def _max_running() -> timedelta:
+    from src.rules import ADS_LOCK_TTL_HOURS
+
+    return timedelta(hours=int(ADS_LOCK_TTL_HOURS))
+
+
+def _running_is_in_flight(spec: JobSpec, started: datetime | None, now: datetime) -> bool:
+    """True when this `running` row is the current slot, not a hung prior day.
+
+    Success may use the grace-relaxed window (yesterday's ga4 success is
+    fine at 07:20, before today's slot has to have finished). A running
+    row may not: it has to have started at or after the latest cron fire,
+    and it cannot be older than the ads lock TTL.
+    """
+    if started is None:
+        return False
+    moment = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    started_at = started if started.tzinfo else started.replace(tzinfo=timezone.utc)
+    if moment - started_at > _max_running():
+        return False
+    if spec.interval_seconds:
+        required = required_started_at(spec, moment)
+        return started_at >= required - START_SKEW
+    last = previous_fire(spec, moment)
+    if last is None:
+        return False
+    return started_at >= last - START_SKEW
+
+
 def evaluate_job(spec: JobSpec, rows: list[dict], now: datetime) -> Failure | None:
     """Latest meaningful row must be success/partial and inside the window."""
     required = required_started_at(spec, now)
@@ -246,7 +279,7 @@ def evaluate_job(spec: JobSpec, rows: list[dict], now: datetime) -> Failure | No
     message = str(latest.get("message") or "").strip()
     fresh = started is not None and started >= required - START_SKEW
 
-    if status == "running" and fresh:
+    if status == "running" and _running_is_in_flight(spec, started, now):
         return None
     if status in OK_STATUSES and fresh:
         return None
@@ -256,11 +289,11 @@ def evaluate_job(spec: JobSpec, rows: list[dict], now: datetime) -> Failure | No
             f"job:{spec.name}",
             _clip(f"stale {status} at {when}; need a run since {required.isoformat()}"),
         )
-    if status == "running" and not fresh:
+    if status == "running":
         when = started.isoformat() if started else "unknown"
         return Failure(
             f"job:{spec.name}",
-            _clip(f"still running since {when} (window opened {required.isoformat()})"),
+            _clip(f"still running since {when}"),
         )
     detail = message or status or "failed"
     return Failure(f"job:{spec.name}", _clip(f"{status or 'fail'}: {detail}"))
@@ -339,9 +372,7 @@ def kickstart_blockers(
         if latest is not None:
             status = str(latest.get("status") or "").strip().lower()
             started = parse_ts(latest.get("started_at"))
-            required = required_started_at(spec, moment)
-            fresh = started is not None and started >= required - START_SKEW
-            if status == "running" and fresh:
+            if status == "running" and _running_is_in_flight(spec, started, moment):
                 blocked.append(name)
                 continue
         if spec.interval_seconds:
