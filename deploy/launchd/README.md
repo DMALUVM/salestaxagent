@@ -210,8 +210,12 @@ Checks:
 2. If this checkout is behind `origin/main`, fast-forward with the same
    ff-only rules as `git_auto_update` (`restart=False`, so this process does
    not exit), then `launchctl kickstart -k` the sync agent
-   (`com.tallowbourn.salestax` by default). Already up to date, or a pull
-   plus kickstart that both succeed, is silent. A dirty tree, a diverged
+   (`com.tallowbourn.salestax` by default). Kickstart waits while a
+   scheduled job is `running` or a cron is inside a 3-minute guard
+   (07:20 is also `ga4_sync`). If the agent is still busy after 45
+   minutes, the new checkout is left on disk, the agent is not killed,
+   and that wait is reported. Already up to date, or a pull plus
+   kickstart that both succeed, is silent. A dirty tree, a diverged
    history, a failed pull, or a failed kickstart is reported.
 3. Every scheduled job that writes `job_runs` must have its latest
    meaningful row as `success` or `partial`, and that row must fall inside

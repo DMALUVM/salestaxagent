@@ -10,7 +10,10 @@ Checks:
      No ``VERCEL_TOKEN`` (or ``VERCEL_ACCESS_TOKEN``) → log once and skip.
   2. If the checkout is behind ``origin/main``, ff-only pull (same rules as
      ``git_auto_update``) then ``launchctl kickstart`` the sync agent.
-     Report only when that pull or kickstart fails.
+     Kickstart waits while a job is in flight or a cron is inside 3
+     minutes (07:20 is also ``ga4_sync``). If the agent is still busy
+     after 45 minutes, it is left running and that is reported.
+     Report only when the pull, the wait, or the kickstart fails.
   3. Each scheduled job that writes ``job_runs`` has a latest meaningful
      row of success (or partial) inside the freshness window from
      ``job_schedule``. ``skipped`` / "another ads pull is running" rows
@@ -27,6 +30,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -38,6 +42,8 @@ from zoneinfo import ZoneInfo
 from src.alerts.job_health import INTERRUPTION_MARKERS
 from src.maintenance.job_schedule import (
     JobSpec,
+    next_fire,
+    previous_fire,
     required_started_at,
     scheduled_names,
 )
@@ -71,6 +77,13 @@ _EXTRA_IGNORE_MARKERS = (
 START_SKEW = timedelta(minutes=2)
 JOB_LOOKBACK = timedelta(days=10)
 DETAIL_LIMIT = 800
+# `launchctl kickstart -k` SIGKILLs the sync agent. 07:20 is also ga4_sync,
+# then gsc / google ads / meta through 07:35. Do not kill a fresh running
+# job or a cron that is about to start. Wait, and if the agent is still
+# busy, report that and leave it running.
+KICKSTART_FIRE_GUARD = timedelta(minutes=3)
+KICKSTART_POLL_SECONDS = 15
+KICKSTART_MAX_WAIT_SECONDS = 45 * 60
 
 MISSING_WEBHOOK_LOG = (
     "GROKBOT_HEALTH_WEBHOOK_URL and GROKBOT_HEALTH_WEBHOOK_KEY are required; "
@@ -285,17 +298,126 @@ def evaluate_completeness(row: dict | None, day: date) -> Failure | None:
     return Failure("ads_day_completeness", _clip(detail))
 
 
+def _latest_meaningful(rows: list[dict], name: str) -> dict | None:
+    mine = [r for r in rows if (r.get("job_name") or "") == name and not _is_ignorable(r)]
+    if not mine:
+        return None
+    mine.sort(key=lambda r: r.get("started_at") or "", reverse=True)
+    return mine[0]
+
+
+def _slot_settled(rows: list[dict], name: str, fire: datetime) -> bool:
+    """True when this fire already has a terminal row (not still running)."""
+    latest = _latest_meaningful(rows, name)
+    if latest is None:
+        return False
+    started = parse_ts(latest.get("started_at"))
+    if started is None or started < fire - START_SKEW:
+        return False
+    status = str(latest.get("status") or "").strip().lower()
+    return status != "running"
+
+
+def kickstart_blockers(
+    specs: list[JobSpec],
+    gates: Mapping[str, bool],
+    rows: list[dict],
+    now: datetime,
+) -> list[str]:
+    """Jobs that make `kickstart -k` unsafe right now.
+
+    A fresh `running` row is an in-flight sync. A cron inside the guard
+    window is either about to start or just started and may not have
+    written `job_runs` yet. Interval jobs block only while a fresh row
+    is `running` — their next tick is not a clock time we can see.
+    """
+    blocked: list[str] = []
+    moment = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    for name in scheduled_names(list(specs), dict(gates)):
+        spec = next(s for s in specs if s.name == name)
+        latest = _latest_meaningful(rows, name)
+        if latest is not None:
+            status = str(latest.get("status") or "").strip().lower()
+            started = parse_ts(latest.get("started_at"))
+            required = required_started_at(spec, moment)
+            fresh = started is not None and started >= required - START_SKEW
+            if status == "running" and fresh:
+                blocked.append(name)
+                continue
+        if spec.interval_seconds:
+            continue
+        upcoming = next_fire(spec, moment)
+        if upcoming is not None and upcoming - moment.astimezone(upcoming.tzinfo) <= KICKSTART_FIRE_GUARD:
+            blocked.append(name)
+            continue
+        last = previous_fire(spec, moment)
+        if last is None:
+            continue
+        age = moment.astimezone(last.tzinfo) - last
+        if timedelta(0) <= age <= KICKSTART_FIRE_GUARD and not _slot_settled(rows, name, last):
+            blocked.append(name)
+    return sorted(set(blocked))
+
+
+def wait_until_kickstart_quiet(
+    specs: list[JobSpec],
+    gates: Mapping[str, bool],
+    fetch_job_runs: Callable[[datetime], list[dict]],
+    *,
+    clock: Callable[[], datetime],
+    sleep: Callable[[float], None],
+    max_wait_seconds: float = KICKSTART_MAX_WAIT_SECONDS,
+    poll_seconds: float = KICKSTART_POLL_SECONDS,
+) -> tuple[bool, str]:
+    """Poll until kickstart will not SIGKILL an active or imminent job."""
+    deadline = clock() + timedelta(seconds=max_wait_seconds)
+    while True:
+        moment = clock()
+        try:
+            rows = fetch_job_runs(moment)
+        except Exception as e:
+            blockers = ["job_runs"]
+            why = f"could not read job_runs before kickstart: {e}"
+        else:
+            blockers = kickstart_blockers(specs, gates, rows, moment)
+            why = "still busy: " + ", ".join(blockers)
+        if not blockers:
+            return True, ""
+        if moment >= deadline:
+            return False, _clip(why)
+        sleep(poll_seconds)
+
+
 def apply_checkout(
     git_update: Callable[[], dict],
     kickstart: Callable[[], tuple[bool, str]],
+    ready: Callable[[], tuple[bool, str]] | None = None,
 ) -> Failure | None:
-    """Ff-only pull when behind, then kickstart. Silent when that works."""
+    """Ff-only pull when behind, then kickstart. Silent when that works.
+
+    `ready` waits until an in-flight morning job has finished. If it
+    never clears, the checkout stays updated and the agent is left
+    running — `kickstart -k` is not sent.
+    """
     try:
         result = git_update()
     except Exception as e:
         return Failure("mini_checkout", _clip(f"auto-update raised: {e}"))
     status = str(result.get("status") or "")
     if status == "updated":
+        if ready is not None:
+            try:
+                clear, why = ready()
+            except Exception as e:
+                return Failure(
+                    "mini_checkout",
+                    _clip(f"fast-forwarded but did not kickstart: {e}"),
+                )
+            if not clear:
+                return Failure(
+                    "mini_checkout",
+                    _clip(f"fast-forwarded but did not kickstart: {why}"),
+                )
         try:
             ok, err = kickstart()
         except Exception as e:
@@ -336,6 +458,9 @@ def execute(
     kickstart: Callable[[], tuple[bool, str]],
     post_webhook: Callable[[str, dict, str, str], None],
     as_of: Callable[[datetime], date],
+    clock: Callable[[], datetime] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    max_kickstart_wait: float = KICKSTART_MAX_WAIT_SECONDS,
 ) -> int:
     """Run every check. Exit 0 when healthy. Exit 2 when the webhook is unset."""
     if not webhook_configured(env):
@@ -384,7 +509,17 @@ def execute(
                 if found:
                     failures.append(found)
 
-    checkout = apply_checkout(git_update, kickstart)
+    def _ready() -> tuple[bool, str]:
+        return wait_until_kickstart_quiet(
+            specs,
+            gates,
+            fetch_job_runs,
+            clock=clock or (lambda: datetime.now(timezone.utc)),
+            sleep=sleep or time.sleep,
+            max_wait_seconds=max_kickstart_wait,
+        )
+
+    checkout = apply_checkout(git_update, kickstart, ready=_ready)
     if checkout:
         failures.append(checkout)
 

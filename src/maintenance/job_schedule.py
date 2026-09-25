@@ -288,6 +288,28 @@ def _previous_cron(spec: JobSpec, moment: datetime) -> datetime:
     raise RuntimeError(f"no cron fire for {spec.name} within 8 days of {moment.isoformat()}")
 
 
+def next_fire(spec: JobSpec, now: datetime) -> datetime | None:
+    """Next cron fire strictly after `now`. Interval jobs have no cron slot."""
+    if spec.interval_seconds:
+        return None
+    tz = ZoneInfo(spec.timezone)
+    moment = now.astimezone(tz)
+    cursor = moment.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    for _ in range(8 * 24 * 60 + 5):
+        if _matches(spec, cursor):
+            return cursor
+        cursor += timedelta(minutes=1)
+    return None
+
+
+def previous_fire(spec: JobSpec, now: datetime) -> datetime | None:
+    """Latest cron fire at or before `now`. Interval jobs have no cron slot."""
+    if spec.interval_seconds:
+        return None
+    tz = ZoneInfo(spec.timezone)
+    return _previous_cron(spec, now.astimezone(tz))
+
+
 def required_started_at(spec: JobSpec, now: datetime) -> datetime:
     """Earliest `started_at` that still satisfies this job's freshness window.
 

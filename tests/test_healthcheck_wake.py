@@ -152,7 +152,8 @@ class _Client:
 
 def _execute(env, *, specs, gates, rows, vercel_payload=None, vercel_error=None,
              git_result=None, kick_ok=True, completeness=None, as_of_day=None,
-             post=None, fetch_completeness=None, fetch_runs=None, now=NOW):
+             post=None, fetch_completeness=None, fetch_runs=None, now=NOW,
+             clock=None, sleep=None, max_kickstart_wait=hw.KICKSTART_MAX_WAIT_SECONDS):
     posts = []
     kickstarts = []
     git_calls = []
@@ -203,6 +204,9 @@ def _execute(env, *, specs, gates, rows, vercel_payload=None, vercel_error=None,
         kickstart=kickstart,
         post_webhook=post_webhook,
         as_of=lambda _now: as_of_day or __import__("datetime").date(2026, 9, 24),
+        clock=clock,
+        sleep=sleep,
+        max_kickstart_wait=max_kickstart_wait,
     )
     return SimpleNamespace(
         code=code,
@@ -533,6 +537,84 @@ def test_header_template_replaces_key():
     assert (name, value) == ("Authorization", "Bearer sekret")
     name, value = hw.parse_webhook_header("X-Grok-Key", "sekret")
     assert (name, value) == ("X-Grok-Key", "sekret")
+
+
+def test_fresh_running_ga4_blocks_kickstart():
+    """07:20 is ga4_sync. A running row must keep kickstart -k from firing."""
+    ga4 = _spec("ga4_sync", 7, 20, grace=3600, gate="ga4")
+    moment = datetime(2026, 9, 25, 11, 20, tzinfo=timezone.utc)  # 07:20 ET
+    running = [_row("ga4_sync", "running", moment, "")]
+    assert hw.kickstart_blockers([ga4], {"ga4": True}, running, moment) == ["ga4_sync"]
+
+    settled_at = datetime(2026, 9, 25, 11, 24, tzinfo=timezone.utc)  # 07:24 ET
+    done = [_row("ga4_sync", "success", moment + timedelta(minutes=1), "ok")]
+    assert hw.kickstart_blockers([ga4], {"ga4": True}, done, settled_at) == []
+
+    gsc = _spec("gsc_sync", 7, 25, grace=3600, gate="gsc")
+    almost = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)  # 07:23 ET
+    assert hw.kickstart_blockers([gsc], {"gsc": True}, [], almost) == ["gsc_sync"]
+
+
+def test_kickstart_waits_until_ga4_finishes():
+    ga4 = _spec("ga4_sync", 7, 20, grace=3600, gate="ga4")
+    start = datetime(2026, 9, 25, 11, 20, tzinfo=timezone.utc)
+    state = {"now": start, "reads": 0, "slept": 0}
+
+    def clock():
+        return state["now"]
+
+    def sleep(seconds):
+        state["slept"] += seconds
+        state["now"] += timedelta(seconds=seconds)
+
+    def fetch(_now):
+        state["reads"] += 1
+        if state["reads"] < 3:
+            return [_row("ga4_sync", "running", start, "")]
+        return [_row("ga4_sync", "success", start, "ok")]
+
+    out = _execute(
+        WEBHOOK_ENV,
+        specs=[ga4],
+        gates={"ga4": True},
+        rows=[],
+        now=start,
+        git_result={"status": "updated"},
+        fetch_runs=fetch,
+        clock=clock,
+        sleep=sleep,
+        max_kickstart_wait=60,
+        completeness={"date": "2026-09-24", "status": "CLEAR", "reason": "ok"},
+    )
+    assert out.code == 0
+    assert out.kickstarts == [True]
+    assert state["slept"] >= hw.KICKSTART_POLL_SECONDS
+    assert out.posts == []
+
+
+def test_busy_agent_is_not_killed_and_is_reported():
+    ga4 = _spec("ga4_sync", 7, 20, grace=3600, gate="ga4")
+    start = datetime(2026, 9, 25, 11, 20, tzinfo=timezone.utc)
+    slept = []
+
+    out = _execute(
+        WEBHOOK_ENV,
+        specs=[ga4],
+        gates={"ga4": True},
+        rows=[_row("ga4_sync", "running", start, "")],
+        now=start,
+        git_result={"status": "updated"},
+        clock=lambda: start,
+        sleep=lambda seconds: slept.append(seconds),
+        max_kickstart_wait=0,
+        completeness={"date": "2026-09-24", "status": "CLEAR", "reason": "ok"},
+    )
+    assert out.kickstarts == []
+    assert slept == []
+    detail = out.posts[0][1]["failures"][0]
+    assert detail["check"] == "mini_checkout"
+    assert "did not kickstart" in detail["detail"]
+    assert "ga4_sync" in detail["detail"]
 
 
 def test_checkout_pull_and_kickstart_success_is_silent():
