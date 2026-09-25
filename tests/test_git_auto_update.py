@@ -249,6 +249,29 @@ class TestRunAutoUpdate:
         assert r["status"] == "disabled"
         assert r["restart"] is False
 
+    def test_force_pulls_when_auto_update_disabled(self, monkeypatch):
+        monkeypatch.setenv("GIT_AUTO_UPDATE", "0")
+        fake = FakeGit(_base_answers())
+        monkeypatch.setattr(gau, "_git", fake)
+        monkeypatch.setattr(gau, "_in_progress_operation", lambda: None)
+        r = gau.run_auto_update(force=True, restart=False)
+        assert r["status"] == "up_to_date"
+        assert r["restart"] is False
+        assert any(c[0] == "fetch" for c in fake.calls)
+        assert not any(c[0] == "pull" for c in fake.calls)
+
+    def test_force_still_refuses_dirty_tree(self, monkeypatch):
+        monkeypatch.setenv("GIT_AUTO_UPDATE", "0")
+        fake = FakeGit(_base_answers({
+            ("diff", "--quiet"): _proc(returncode=1),
+        }))
+        monkeypatch.setattr(gau, "_git", fake)
+        monkeypatch.setattr(gau, "_in_progress_operation", lambda: None)
+        r = gau.run_auto_update(force=True, restart=False)
+        assert r["status"] == "dirty"
+        assert not any(c[0] == "pull" for c in fake.calls)
+        assert not any(c[0] == "fetch" for c in fake.calls)
+
     def test_restart_default_skips_on_tty(self, monkeypatch):
         monkeypatch.delenv("GIT_AUTO_UPDATE_RESTART", raising=False)
         monkeypatch.setattr(gau.sys.stdin, "isatty", lambda: True)

@@ -189,17 +189,22 @@ def run_auto_update(
     restart: bool | None = None,
     remote: str | None = None,
     branch: str | None = None,
+    force: bool = False,
 ) -> dict:
     """Fetch origin/main and fast-forward if it is a clean ancestor.
 
     Returns a result dict. `restart` is True only when HEAD moved and a
     process exit was requested. The caller writes `job_runs` and, when
     `restart` is True, calls `request_process_exit()`.
+
+    `force=True` runs the same ff-only pull when GIT_AUTO_UPDATE=0.
+    The 07:20 health check uses that so a disabled 04:30 job does not
+    leave the Mini behind. Dirty, diverged, and non-ff pulls still abort.
     """
     remote = remote or DEFAULT_REMOTE
     branch = branch or DEFAULT_BRANCH
 
-    if not is_enabled() and not dry_run:
+    if not is_enabled() and not dry_run and not force:
         return _result("disabled", message="GIT_AUTO_UPDATE=0")
 
     if not _LOCK.acquire(blocking=False):

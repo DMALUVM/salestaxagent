@@ -5,9 +5,10 @@ tracks `origin/main` and runs every scheduled sync itself. Merges to `main` do
 not need a human `git pull` or `launchctl kickstart`.
 
 The agent is a launchd **user agent**: it starts at login and restarts if it
-exits (`KeepAlive`). A second launchd plist is deliberately not used — auto-
-update is one APScheduler job inside this same process, so it cannot compete
-with the running agent.
+exits (`KeepAlive`). Auto-update is one APScheduler job inside this same
+process, not a second copy of `src.main run`, so it cannot compete with the
+running agent. The 07:20 failure-only health check below is a separate
+calendar LaunchAgent. It does not start the scheduler.
 
 ## Install launchd agent
 
@@ -193,6 +194,86 @@ work without reaching this machine, publish a copy:
 
 ```bash
 python -m src.main ppc-export --publish
+```
+
+## Failure-only health check (07:20 ET)
+
+Wakes the ops assistant only when something is broken. A healthy run exits 0
+with no webhook and no Telegram. This does not change the Telegram allow/deny
+list, and it only reads `job_runs` and `ads_day_completeness`.
+
+Checks:
+
+1. Latest Vercel production deployment of project `dashboard` is `READY`.
+   If `VERCEL_TOKEN` and `VERCEL_ACCESS_TOKEN` are both unset, the check is
+   skipped and one line is written to the error log. That is not a failure.
+2. If this checkout is behind `origin/main`, fast-forward with the same
+   ff-only rules as `git_auto_update` (`restart=False`, so this process does
+   not exit), then `launchctl kickstart -k` the sync agent
+   (`com.tallowbourn.salestax` by default). Already up to date, or a pull
+   plus kickstart that both succeed, is silent. A dirty tree, a diverged
+   history, a failed pull, or a failed kickstart is reported.
+3. Every scheduled job that writes `job_runs` must have its latest
+   meaningful row as `success` or `partial`, and that row must fall inside
+   the freshness window derived from the scheduler cron (misfire grace
+   included). `skipped` rows and messages such as "another ads pull is
+   running" are not failures. A real `fail` includes the `message` text
+   (for example an expired Meta access token on `meta_ads_sync`).
+4. `ads_day_completeness` for Amazon D-1 (`amazon_as_of`, yesterday in
+   America/Los_Angeles) must be `CLEAR` once the deadline has passed.
+   Default deadline is 07:15 America/New_York.
+
+`launchd` `StartCalendarInterval` uses the Mac's system timezone. The Mini
+must stay on **America/New_York** so this fires at 07:20 ET.
+
+### Env vars (repo `.env`, not the plist)
+
+| Name | Required | Purpose |
+|------|----------|---------|
+| `GROKBOT_HEALTH_WEBHOOK_URL` | yes | POST target. Missing URL or key: one log line, exit 2, no POST |
+| `GROKBOT_HEALTH_WEBHOOK_KEY` | yes | Secret sent on the webhook |
+| `GROKBOT_HEALTH_WEBHOOK_HEADER` | no | Default `Authorization: Bearer <key>`. `<key>` is replaced with the key. A bare name sends the key as the value |
+| `GROKBOT_ADS_CLEAR_DEADLINE` | no | `HH:MM` in America/New_York. Default `07:15` |
+| `GROKBOT_SYNC_LAUNCHD_LABEL` | no | Sync agent label to kickstart. Default `com.tallowbourn.salestax` |
+| `VERCEL_TOKEN` | no | Vercel API token. Also accepts `VERCEL_ACCESS_TOKEN`. Unset → skip |
+| `VERCEL_ORG_ID` | no | Team id query param. `VERCEL_TEAM_ID` is the same |
+| `VERCEL_PROJECT_ID` | no | Defaults to project name `dashboard` |
+
+Webhook body:
+
+```json
+{"checked_at":"2026-09-25T11:20:00+00:00","failures":[{"check":"job:meta_ads_sync","detail":"fail: Meta access token expired"}]}
+```
+
+### Install on the Mini
+
+One time, after this commit is on the checkout (the 04:30 auto-update will
+fast-forward `main`; this plist is not loaded until you install it):
+
+```bash
+cd /Users/maloney_assistant/sales-tax-agent
+
+# Add the webhook to .env (values stay on the Mini; do not commit them)
+# GROKBOT_HEALTH_WEBHOOK_URL=https://example.invalid/hook
+# GROKBOT_HEALTH_WEBHOOK_KEY=...
+
+bash deploy/launchd/install-healthcheck.sh
+
+# Confirm it is loaded — exit status 0, no PID until 07:20
+launchctl list | grep tallowbourn.healthcheck
+
+# Manual run. Healthy: prints nothing, exits 0. Broken: POSTs JSON, exits 1.
+.venv/bin/python scripts/healthcheck_wake.py
+echo "exit=$?"
+```
+
+Logs: `logs/healthcheck.out.log` (empty on success) and
+`logs/healthcheck.err.log` (the Vercel-skip note, and failures).
+
+Unload:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.tallowbourn.healthcheck.plist
 ```
 
 ## Prerequisites
