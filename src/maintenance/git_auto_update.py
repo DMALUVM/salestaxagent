@@ -184,22 +184,69 @@ def _result(status: str, **extra) -> dict:
     return out
 
 
+def _pending_restart_ready(restart: bool | None) -> bool:
+    """True when a deferred kickstart can exit this scheduler process.
+
+    ``restart=False`` is the health check. It must not SIGTERM itself;
+    it kickstarts the sync agent instead. A running job, or a job_runs
+    read that fails, leaves the marker for the next quiet attempt.
+    """
+    if restart is not None:
+        return False
+    from src.maintenance.restart_pending import jobs_are_quiet, restart_is_pending
+
+    if not restart_is_pending():
+        return False
+    quiet = jobs_are_quiet()
+    if quiet is None:
+        log.warning("restart pending but job_runs could not be read; not exiting")
+        return False
+    if not quiet:
+        log.info("restart pending; a job is running, leaving the marker")
+        return False
+    return True
+
+
+def _up_to_date(message: str, *, commit: str, branch: str,
+                restart: bool | None) -> dict:
+    if _pending_restart_ready(restart):
+        return _result(
+            "up_to_date",
+            message=message + "; restart pending and no job is running",
+            commit=commit,
+            branch=branch,
+            restart=True,
+            restart_reason="pending",
+        )
+    return _result(
+        "up_to_date",
+        message=message,
+        commit=commit,
+        branch=branch,
+    )
+
+
 def run_auto_update(
     dry_run: bool = False,
     restart: bool | None = None,
     remote: str | None = None,
     branch: str | None = None,
+    force: bool = False,
 ) -> dict:
     """Fetch origin/main and fast-forward if it is a clean ancestor.
 
     Returns a result dict. `restart` is True only when HEAD moved and a
     process exit was requested. The caller writes `job_runs` and, when
     `restart` is True, calls `request_process_exit()`.
+
+    `force=True` runs the same ff-only pull when GIT_AUTO_UPDATE=0.
+    The 07:23 health check uses that so a disabled 04:30 job does not
+    leave the Mini behind. Dirty, diverged, and non-ff pulls still abort.
     """
     remote = remote or DEFAULT_REMOTE
     branch = branch or DEFAULT_BRANCH
 
-    if not is_enabled() and not dry_run:
+    if not is_enabled() and not dry_run and not force:
         return _result("disabled", message="GIT_AUTO_UPDATE=0")
 
     if not _LOCK.acquire(blocking=False):
@@ -256,11 +303,11 @@ def _run_locked(*, dry_run: bool, restart: bool | None,
     remote_sha = _stdout(upstream)
 
     if local == remote_sha:
-        return _result(
-            "up_to_date",
-            message=f"already at {remote_ref} ({local[:10]})",
+        return _up_to_date(
+            f"already at {remote_ref} ({local[:10]})",
             commit=local,
             branch=current,
+            restart=restart,
         )
 
     base = _git("merge-base", "HEAD", remote_ref, check=False)
@@ -314,11 +361,11 @@ def _run_locked(*, dry_run: bool, restart: bool | None,
         )
 
     if new_head == local:
-        return _result(
-            "up_to_date",
-            message=f"pull was a no-op; still {local[:10]}",
+        return _up_to_date(
+            f"pull was a no-op; still {local[:10]}",
             commit=local,
             branch=current,
+            restart=restart,
         )
 
     do_restart = should_restart_process() if restart is None else bool(restart)
