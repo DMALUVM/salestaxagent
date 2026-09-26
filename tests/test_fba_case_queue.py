@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.amazon_sp.adjustments import adjustment_event_key, parse_ledger_adjustments
+from src.reimbursements.qa import CaseQueueSyncError
 from src.reimbursements.case_package import (
     REESE_AGENT_ID,
     build_case_package,
@@ -2094,3 +2095,66 @@ def test_sync_summary_lists_amazon_fetch_misses(monkeypatch):
     assert row["status"] == STATUS_NEEDS_CASE
     assert row["quantity_received"] == 13
     assert row["quantity"] == 527
+
+
+def test_qa_failure_records_job_run_as_fail(monkeypatch):
+    """QA ok=False must not leave reimbursements_case_sync green on /api/job-runs."""
+    sid = "FBA19QAFAIL1"
+    tables = {
+        "fba_inventory_adjustments": [],
+        "inventory_inbound_shipments": [],
+        "inventory_inbound_shipment_items": [],
+        "sellerboard_inbound_discrepancies": [{
+            "shipment_id": sid,
+            "sku": "DDPE0001SHOP",
+            "quantity_shipped": 10,
+            "quantity_received": 0,
+            "quantity_short": 10,
+            "shipment_status": "CLOSED",
+            "closed_at": "2026-09-01",
+        }],
+        "fba_case_events": [],
+        "fba_reimbursements": [],
+        "inventory_events": [],
+        "amazon_inbound_qty_cache": [],
+    }
+    finishes: list[dict] = []
+
+    def fetch_all(table, *args, **kwargs):
+        return list(tables.get(table, []))
+
+    def fake_finish(run_id, status="success", message=None, stats=None):
+        finishes.append({
+            "run_id": run_id,
+            "status": status,
+            "message": message,
+            "stats": stats,
+        })
+
+    monkeypatch.setattr("src.db.fetch_all", fetch_all)
+    monkeypatch.setattr("src.db.upsert_rows", lambda *args, **kwargs: 1)
+    monkeypatch.setattr("src.db.job_start", lambda name: "run-qa")
+    monkeypatch.setattr("src.db.job_finish", fake_finish)
+    monkeypatch.setattr(
+        "src.reimbursements.case_queue.purge_ineligible_needs_case_orphans",
+        lambda: 0,
+    )
+    monkeypatch.setattr(
+        "src.reimbursements.case_queue.fetch_amazon_inbound_qty",
+        lambda *args, **kwargs: ([], {}, []),
+    )
+
+    try:
+        sync_case_queue(days=120, dry_run=False, fetch_ledger=False)
+        raised = False
+    except CaseQueueSyncError as exc:
+        raised = True
+        assert "fulfillment_center" in str(exc)
+
+    assert raised
+    assert len(finishes) == 1
+    assert finishes[0]["run_id"] == "run-qa"
+    assert finishes[0]["status"] == "fail"
+    assert "fulfillment_center" in (finishes[0]["message"] or "")
+    assert finishes[0]["stats"]["qa_ok"] is False
+    assert finishes[0]["stats"]["amazon_fetch_missed_ids"] == []

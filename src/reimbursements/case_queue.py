@@ -2037,24 +2037,38 @@ def _persist_amazon_qty_cache(rows: Iterable[dict]) -> None:
     )
 
 
-def _record_case_sync_job(summary: dict) -> None:
-    """Best-effort job_runs row so missed Amazon shipment ids are visible."""
+def _record_case_sync_job(
+    summary: dict,
+    *,
+    status: str = "success",
+    message: str | None = None,
+) -> None:
+    """Best-effort job_runs row so missed Amazon shipment ids are visible.
+
+    Call only after the QA gate. A failed QA must be status ``fail`` —
+    ``/api/job-runs`` shows the latest row per job, and ``success`` is green.
+    """
     try:
         from src.db import job_finish, job_start
 
         missed = list(summary.get("amazon_fetch_missed_ids") or [])
+        if message is None:
+            message = (
+                f"needs_case={summary.get('needs_case', 0)} "
+                f"missed_amazon={len(missed)}"
+            )
         run_id = job_start("reimbursements_case_sync")
         job_finish(
             run_id,
-            "success",
-            f"needs_case={summary.get('needs_case', 0)} "
-            f"missed_amazon={len(missed)}",
+            status,
+            message[:1000],
             stats={
                 "amazon_fetch_missed_ids": missed,
                 "needs_case": summary.get("needs_case"),
                 "found_offset": summary.get("found_offset"),
                 "amazon_reconcile_ids": summary.get("amazon_reconcile_ids"),
                 "amazon_reconcile_rows": summary.get("amazon_reconcile_rows"),
+                "qa_ok": bool((summary.get("qa") or {}).get("ok")),
             },
         )
     except Exception as e:
@@ -2266,12 +2280,20 @@ def sync_case_queue(
         log.warning("Could not purge ineligible needs_case orphans: %s", e)
         purged = 0
     summary["orphans_purged"] = purged
-    _record_case_sync_job(summary)
-
+    qa_errors = [str(err) for err in (qa.get("errors") or []) if err]
     if not qa["ok"]:
+        _record_case_sync_job(
+            summary,
+            status="fail",
+            message=(
+                "Needs-case QA failed — do not prep Reese packets. "
+                + "; ".join(qa_errors)
+            ),
+        )
         raise CaseQueueSyncError(
             "Needs-case QA failed — do not prep Reese packets. "
-            + "; ".join(qa["errors"]),
+            + "; ".join(qa_errors),
             qa=qa,
         )
+    _record_case_sync_job(summary)
     return summary
