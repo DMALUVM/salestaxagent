@@ -423,6 +423,8 @@ describe("Reese package + page contract", () => {
     assert.match(ui, /will not reopen those/);
     assert.match(ui, /event_key or FBA shipment \+ SKU/);
     assert.match(ui, /receipts_cover \/ found_offset 0-receive stays cleared/);
+    assert.match(ui, /failed Amazon inbound fetch does not invent 0 received/);
+    assert.match(ui, /does not pool-clear the row/);
     assert.match(ui, /Amazon live short/);
     assert.doesNotMatch(ui, /can reopen if the shipment is still short/);
     assert.match(ui, /Enqueueing\.\.\./);

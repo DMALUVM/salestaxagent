@@ -525,7 +525,7 @@ export function ReimbursementsEligiblePanel() {
                     Open cases ({fmt(visible.length)})
                   </CardTitle>
                   <p className="mt-1 text-[11px] font-normal text-muted-foreground">
-                    Filed / Reconciled / Not pursuing stay off this list. Enqueue 90D queue rebuild will not reopen those (event_key or FBA shipment + SKU). A receipts_cover / found_offset 0-receive stays cleared. It reopens only on Amazon live short, Sellerboard received &gt; 0, or a shipment receipt remainder.
+                    Filed / Reconciled / Not pursuing stay off this list. Enqueue 90D queue rebuild will not reopen those (event_key or FBA shipment + SKU). A receipts_cover / found_offset 0-receive stays cleared. A failed Amazon inbound fetch does not invent 0 received and does not pool-clear the row. It reopens only on Amazon live short, Sellerboard received &gt; 0, or a shipment receipt remainder.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
