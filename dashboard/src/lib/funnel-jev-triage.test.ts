@@ -250,6 +250,52 @@ describe("fail closed on Vercel", () => {
     if (prev === undefined) delete process.env.AI_GATEWAY_API_KEY;
     else process.env.AI_GATEWAY_API_KEY = prev;
   });
+
+  test("evaluateViaGateway requests zero data retention and fails closed on no_providers_available", async () => {
+    const prev = process.env.AI_GATEWAY_API_KEY;
+    process.env.AI_GATEWAY_API_KEY = "super-secret-key";
+    const okPayload = JSON.stringify({
+      choices: [{
+        message: { content: JSON.stringify({ answers: { severity: { choice: "p1" } } }) },
+      }],
+    });
+    try {
+      let zdrBody: { providerOptions?: { gateway?: { zeroDataRetention?: boolean } }; model?: string } | undefined;
+      const ok = await evaluateViaGateway("state", {} as never, (async (_url, init) => {
+        zdrBody = JSON.parse(String(init?.body));
+        return new Response(okPayload, { status: 200 });
+      }) as typeof fetch);
+      assert.equal(zdrBody?.model, "typesafe-ai/jev");
+      assert.equal(zdrBody?.providerOptions?.gateway?.zeroDataRetention, true);
+      assert.equal(ok.answers?.severity?.choice, "p1");
+
+      let calls = 0;
+      await assert.rejects(
+        () => evaluateViaGateway("state", {} as never, (async (_url, init) => {
+          calls += 1;
+          const sent = JSON.parse(String(init?.body)) as {
+            providerOptions?: { gateway?: { zeroDataRetention?: boolean } };
+          };
+          assert.equal(sent.providerOptions?.gateway?.zeroDataRetention, true);
+          return new Response(JSON.stringify({
+            error: "No ZDR providers available for model: typesafe-ai/jev",
+            type: "no_providers_available",
+            statusCode: 400,
+          }), { status: 400 });
+        }) as typeof fetch),
+        (err: Error) => {
+          assert.match(err.message, /jev gateway 400/);
+          assert.match(err.message, /no_providers_available/);
+          assert.doesNotMatch(err.message, /super-secret-key/);
+          return true;
+        },
+      );
+      assert.equal(calls, 1);
+    } finally {
+      if (prev === undefined) delete process.env.AI_GATEWAY_API_KEY;
+      else process.env.AI_GATEWAY_API_KEY = prev;
+    }
+  });
 });
 
 describe("wiring", () => {
