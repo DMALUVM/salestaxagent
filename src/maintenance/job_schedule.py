@@ -1,6 +1,6 @@
 """Cron specs for jobs registered in `src.main.run`.
 
-The 07:20 health check derives each freshness window from these specs:
+The 07:23 health check derives each freshness window from these specs:
 the latest meaningful `job_runs` row must cover the most recent fire
 that is already past that job's misfire grace.
 
@@ -315,7 +315,7 @@ def required_started_at(spec: JobSpec, now: datetime) -> datetime:
 
     While `now` is inside the misfire grace of the latest fire, the
     previous fire is the one that must already have succeeded. That keeps
-    a 07:20 check from paging on a job scheduled at 07:20 or 07:35.
+    a 07:23 check from paging on a job scheduled at 07:20 or 07:35.
     """
     tz = ZoneInfo(spec.timezone)
     moment = now.astimezone(tz)

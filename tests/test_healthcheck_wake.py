@@ -152,8 +152,7 @@ class _Client:
 
 def _execute(env, *, specs, gates, rows, vercel_payload=None, vercel_error=None,
              git_result=None, kick_ok=True, completeness=None, as_of_day=None,
-             post=None, fetch_completeness=None, fetch_runs=None, now=NOW,
-             clock=None, sleep=None, max_kickstart_wait=hw.KICKSTART_MAX_WAIT_SECONDS):
+             post=None, fetch_completeness=None, fetch_runs=None, now=NOW):
     posts = []
     kickstarts = []
     git_calls = []
@@ -204,9 +203,6 @@ def _execute(env, *, specs, gates, rows, vercel_payload=None, vercel_error=None,
         kickstart=kickstart,
         post_webhook=post_webhook,
         as_of=lambda _now: as_of_day or __import__("datetime").date(2026, 9, 24),
-        clock=clock,
-        sleep=sleep,
-        max_kickstart_wait=max_kickstart_wait,
     )
     return SimpleNamespace(
         code=code,
@@ -218,12 +214,13 @@ def _execute(env, *, specs, gates, rows, vercel_payload=None, vercel_error=None,
     )
 
 
-def test_launchd_plist_is_0720_and_does_not_keepalive():
+def test_launchd_plist_is_0723_and_does_not_keepalive():
     import plistlib
     path = ROOT / "deploy" / "launchd" / "com.tallowbourn.healthcheck.plist"
     plist = plistlib.loads(path.read_bytes())
     assert plist["Label"] == "com.tallowbourn.healthcheck"
-    assert plist["StartCalendarInterval"] == {"Hour": 7, "Minute": 20}
+    # 07:23 is off every scheduled job minute (ga4_sync is 07:20, gsc is 07:25).
+    assert plist["StartCalendarInterval"] == {"Hour": 7, "Minute": 23}
     assert "KeepAlive" not in plist
     assert "RunAtLoad" not in plist
     assert plist["ProgramArguments"][-1].endswith("scripts/healthcheck_wake.py")
@@ -231,6 +228,10 @@ def test_launchd_plist_is_0720_and_does_not_keepalive():
     assert "GROKBOT_HEALTH_WEBHOOK_URL" in script
     assert "GROKBOT_HEALTH_WEBHOOK_KEY" in script
     assert "com.tallowbourn.salestax" in script
+    for spec in build_job_specs():
+        if spec.interval_seconds:
+            continue
+        assert not (7 in spec.hours and 23 in spec.minutes), spec.name
 
 
 def test_scheduler_ids_match_healthcheck_catalog():
@@ -539,101 +540,130 @@ def test_header_template_replaces_key():
     assert (name, value) == ("X-Grok-Key", "sekret")
 
 
-def test_hung_running_row_from_yesterday_is_not_healthy():
-    """Misfire grace reaches yesterday, but a running row from then is stuck."""
+def test_running_row_fails_after_per_job_max_runtime():
+    """Ads jobs get 3h. Everything else gets 1h. A fresh heartbeat extends it."""
     ga4 = _spec("ga4_sync", 7, 20, grace=3600, gate="ga4")
-    now = datetime(2026, 9, 25, 11, 20, 30, tzinfo=timezone.utc)  # 07:20:30 ET
+    ads = _spec("ads_search_terms_sync", 5, 30, grace=3600)
+    now = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)  # 07:23 ET
+
+    assert hw.evaluate_job(
+        ga4, [_row("ga4_sync", "running", now - timedelta(minutes=59))], now,
+    ) is None
+    hung_ga4 = hw.evaluate_job(
+        ga4, [_row("ga4_sync", "running", now - timedelta(hours=1, minutes=1))], now,
+    )
+    assert hung_ga4 is not None
+    assert hung_ga4.check == "job:ga4_sync"
+    assert "older than 1h" in hung_ga4.detail
+
+    assert hw.evaluate_job(
+        ads, [_row("ads_search_terms_sync", "running", now - timedelta(hours=2, minutes=59))], now,
+    ) is None
+    hung_ads = hw.evaluate_job(
+        ads, [_row("ads_search_terms_sync", "running", now - timedelta(hours=3, minutes=1))], now,
+    )
+    assert hung_ads is not None
+    assert "older than 3h" in hung_ads.detail
+
+    # Yesterday's success still covers a slot inside misfire grace.
     yesterday = now - timedelta(days=1)
-    hung = hw.evaluate_job(ga4, [_row("ga4_sync", "running", yesterday)], now)
-    assert hung is not None
-    assert hung.check == "job:ga4_sync"
-    assert "still running" in hung.detail
     assert hw.evaluate_job(
         ga4, [_row("ga4_sync", "success", yesterday, "ok")], now,
     ) is None
-    assert hw.evaluate_job(ga4, [_row("ga4_sync", "running", now)], now) is None
-    later = datetime(2026, 9, 25, 11, 30, tzinfo=timezone.utc)  # 07:30 ET
-    assert hw.kickstart_blockers(
-        [ga4], {"ga4": True}, [_row("ga4_sync", "running", yesterday)], later,
-    ) == []
 
 
-def test_fresh_running_ga4_blocks_kickstart():
-    """07:20 is ga4_sync. A running row must keep kickstart -k from firing."""
-    ga4 = _spec("ga4_sync", 7, 20, grace=3600, gate="ga4")
-    moment = datetime(2026, 9, 25, 11, 20, tzinfo=timezone.utc)  # 07:20 ET
-    running = [_row("ga4_sync", "running", moment, "")]
-    assert hw.kickstart_blockers([ga4], {"ga4": True}, running, moment) == ["ga4_sync"]
+def test_fresh_job_runs_heartbeat_keeps_a_long_run_healthy():
+    ads = _spec("ads_campaigns_sync", 5, 0, grace=3600)
+    now = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)
+    started = now - timedelta(hours=5)
+    row = _row("ads_campaigns_sync", "running", started, "")
+    row["heartbeat_at"] = (now - timedelta(minutes=1)).isoformat()
+    assert hw.evaluate_job(ads, [row], now) is None
 
-    settled_at = datetime(2026, 9, 25, 11, 24, tzinfo=timezone.utc)  # 07:24 ET
-    done = [_row("ga4_sync", "success", moment + timedelta(minutes=1), "ok")]
-    assert hw.kickstart_blockers([ga4], {"ga4": True}, done, settled_at) == []
+    stale = _row("ads_campaigns_sync", "running", started, "")
+    stale["heartbeat_at"] = (now - timedelta(minutes=20)).isoformat()
+    found = hw.evaluate_job(ads, [stale], now)
+    assert found is not None
+    assert "older than 3h" in found.detail
 
-    gsc = _spec("gsc_sync", 7, 25, grace=3600, gate="gsc")
-    almost = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)  # 07:23 ET
-    assert hw.kickstart_blockers([gsc], {"gsc": True}, [], almost) == ["gsc_sync"]
+    via_stats = _row("ads_campaigns_sync", "running", started, "")
+    via_stats["stats"] = json.dumps({
+        "heartbeat_at": (now - timedelta(minutes=2)).isoformat(),
+    })
+    assert hw.evaluate_job(ads, [via_stats], now) is None
 
 
-def test_kickstart_waits_until_ga4_finishes():
-    ga4 = _spec("ga4_sync", 7, 20, grace=3600, gate="ga4")
-    start = datetime(2026, 9, 25, 11, 20, tzinfo=timezone.utc)
-    state = {"now": start, "reads": 0, "slept": 0}
-
-    def clock():
-        return state["now"]
-
-    def sleep(seconds):
-        state["slept"] += seconds
-        state["now"] += timedelta(seconds=seconds)
-
-    def fetch(_now):
-        state["reads"] += 1
-        if state["reads"] < 3:
-            return [_row("ga4_sync", "running", start, "")]
-        return [_row("ga4_sync", "success", start, "ok")]
-
+def test_any_running_row_skips_kickstart_without_a_report():
+    """A live job, including one this check does not score, blocks kickstart."""
+    spec = _spec("daily_analysis", 8, 0, grace=1)
+    now = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)  # 07:23 ET
+    rows = [
+        _row(spec.name, "success", required_started_at(spec, now)),
+        _row("ga4_sync", "running", now - timedelta(minutes=2), ""),
+    ]
     out = _execute(
         WEBHOOK_ENV,
-        specs=[ga4],
-        gates={"ga4": True},
-        rows=[],
-        now=start,
-        git_result={"status": "updated"},
-        fetch_runs=fetch,
-        clock=clock,
-        sleep=sleep,
-        max_kickstart_wait=60,
+        specs=[spec],
+        gates={},
+        rows=rows,
+        now=now,
+        git_result={"status": "updated", "message": "fast-forwarded"},
         completeness={"date": "2026-09-24", "status": "CLEAR", "reason": "ok"},
     )
     assert out.code == 0
-    assert out.kickstarts == [True]
-    assert state["slept"] >= hw.KICKSTART_POLL_SECONDS
+    assert out.git_calls == []
+    assert out.kickstarts == []
+    assert out.posts == []
+    assert hw.any_job_running(rows) is True
+    assert hw.any_job_running(rows[:1]) is False
+
+
+def test_job_that_starts_during_the_pull_is_not_killed():
+    spec = _spec("daily_analysis", 8, 0, grace=1)
+    now = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)
+    quiet = [_row(spec.name, "success", required_started_at(spec, now))]
+    state = {"n": 0}
+
+    def fetch(_now):
+        state["n"] += 1
+        # 1 = score the jobs, 2 = decide whether to pull, 3 = after the pull.
+        if state["n"] < 3:
+            return quiet
+        return quiet + [_row("gsc_sync", "running", now, "")]
+
+    out = _execute(
+        WEBHOOK_ENV,
+        specs=[spec],
+        gates={},
+        rows=[],
+        now=now,
+        git_result={"status": "updated"},
+        fetch_runs=fetch,
+        completeness={"date": "2026-09-24", "status": "CLEAR", "reason": "ok"},
+    )
+    assert state["n"] == 3
+    assert out.git_calls == [True]
+    assert out.kickstarts == []
+    assert out.code == 0
     assert out.posts == []
 
 
-def test_busy_agent_is_not_killed_and_is_reported():
+def test_stuck_running_is_reported_and_kickstart_stays_silent():
     ga4 = _spec("ga4_sync", 7, 20, grace=3600, gate="ga4")
-    start = datetime(2026, 9, 25, 11, 20, tzinfo=timezone.utc)
-    slept = []
-
+    now = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)
     out = _execute(
         WEBHOOK_ENV,
         specs=[ga4],
         gates={"ga4": True},
-        rows=[_row("ga4_sync", "running", start, "")],
-        now=start,
+        rows=[_row("ga4_sync", "running", now - timedelta(hours=2), "")],
+        now=now,
         git_result={"status": "updated"},
-        clock=lambda: start,
-        sleep=lambda seconds: slept.append(seconds),
-        max_kickstart_wait=0,
         completeness={"date": "2026-09-24", "status": "CLEAR", "reason": "ok"},
     )
     assert out.kickstarts == []
-    assert slept == []
-    detail = out.posts[0][1]["failures"][0]
-    assert detail["check"] == "mini_checkout"
-    assert "did not kickstart" in detail["detail"]
-    assert "ga4_sync" in detail["detail"]
+    failures = out.posts[0][1]["failures"]
+    assert [f["check"] for f in failures] == ["job:ga4_sync"]
+    assert "older than 1h" in failures[0]["detail"]
 
 
 def test_checkout_pull_and_kickstart_success_is_silent():

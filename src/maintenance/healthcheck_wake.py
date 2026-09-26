@@ -1,7 +1,8 @@
 """Failure-only wake-up for the Mac Mini sync agent.
 
-Runs from launchd at 07:20 America/New_York. Success is silent: no
-webhook, no Telegram, exit 0. Any broken check POSTs compact JSON
+Runs from launchd at 07:23 America/New_York, off every scheduled job
+minute (``ga4_sync`` is 07:20, ``gsc_sync`` is 07:25). Success is silent:
+no webhook, no Telegram, exit 0. Any broken check POSTs compact JSON
 ``{checked_at, failures:[{check, detail}]}`` to
 ``GROKBOT_HEALTH_WEBHOOK_URL``.
 
@@ -10,14 +11,16 @@ Checks:
      No ``VERCEL_TOKEN`` (or ``VERCEL_ACCESS_TOKEN``) → log once and skip.
   2. If the checkout is behind ``origin/main``, ff-only pull (same rules as
      ``git_auto_update``) then ``launchctl kickstart`` the sync agent.
-     Kickstart waits while a job is in flight or a cron is inside 3
-     minutes (07:20 is also ``ga4_sync``). If the agent is still busy
-     after 45 minutes, it is left running and that is reported.
-     Report only when the pull, the wait, or the kickstart fails.
+     If any ``job_runs`` row is ``running``, skip the pull and the
+     kickstart and report nothing — the 04:30 auto-update loads the new
+     checkout. Report only when the pull fails or a kickstart that was
+     sent fails.
   3. Each scheduled job that writes ``job_runs`` has a latest meaningful
      row of success (or partial) inside the freshness window from
-     ``job_schedule``. ``skipped`` / "another ads pull is running" rows
-     are not failures.
+     ``job_schedule``. A ``running`` row is healthy until it is older than
+     that job's max runtime (3h for ads jobs, 1h otherwise), unless the
+     row's own heartbeat is still fresh. ``skipped`` / "another ads pull
+     is running" rows are not failures.
   4. ``ads_day_completeness`` for Amazon D-1 (``amazon_as_of``) is CLEAR
      once ``GROKBOT_ADS_CLEAR_DEADLINE`` (default 07:15 America/New_York)
      has passed.
@@ -30,7 +33,6 @@ import json
 import logging
 import os
 import subprocess
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -42,8 +44,6 @@ from zoneinfo import ZoneInfo
 from src.alerts.job_health import INTERRUPTION_MARKERS
 from src.maintenance.job_schedule import (
     JobSpec,
-    next_fire,
-    previous_fire,
     required_started_at,
     scheduled_names,
 )
@@ -75,19 +75,13 @@ _EXTRA_IGNORE_MARKERS = (
 )
 # A run may start a couple of minutes before its cron minute.
 START_SKEW = timedelta(minutes=2)
-# Longer than this, a `running` row is hung. Matches the ads lease TTL:
-# job_runs.status=running is not itself a lock, and a live pull is not
-# still in flight a day later just because misfire grace reached back
-# to yesterday's slot.
+# A `running` row older than this is stuck. Ads pulls wait on Amazon
+# reports; other crons do not. A fresh heartbeat on the row overrides this.
+ADS_MAX_RUNNING = timedelta(hours=3)
+DEFAULT_MAX_RUNNING = timedelta(hours=1)
+_HEARTBEAT_KEYS = ("heartbeat_at", "last_heartbeat_at", "last_heartbeat")
 JOB_LOOKBACK = timedelta(days=10)
 DETAIL_LIMIT = 800
-# `launchctl kickstart -k` SIGKILLs the sync agent. 07:20 is also ga4_sync,
-# then gsc / google ads / meta through 07:35. Do not kill a fresh running
-# job or a cron that is about to start. Wait, and if the agent is still
-# busy, report that and leave it running.
-KICKSTART_FIRE_GUARD = timedelta(minutes=3)
-KICKSTART_POLL_SECONDS = 15
-KICKSTART_MAX_WAIT_SECONDS = 45 * 60
 
 MISSING_WEBHOOK_LOG = (
     "GROKBOT_HEALTH_WEBHOOK_URL and GROKBOT_HEALTH_WEBHOOK_KEY are required; "
@@ -222,33 +216,73 @@ def _is_ignorable(row: dict) -> bool:
     return any(marker in lowered for marker in markers)
 
 
-def _max_running() -> timedelta:
-    from src.rules import ADS_LOCK_TTL_HOURS
-
-    return timedelta(hours=int(ADS_LOCK_TTL_HOURS))
+def _is_ads_job(name: str) -> bool:
+    return (name or "").startswith("ads_")
 
 
-def _running_is_in_flight(spec: JobSpec, started: datetime | None, now: datetime) -> bool:
-    """True when this `running` row is the current slot, not a hung prior day.
+def max_running(job_name: str) -> timedelta:
+    """How long a `running` row may stay open before this check calls it stuck."""
+    if _is_ads_job(job_name):
+        return ADS_MAX_RUNNING
+    return DEFAULT_MAX_RUNNING
 
-    Success may use the grace-relaxed window (yesterday's ga4 success is
-    fine at 07:20, before today's slot has to have finished). A running
-    row may not: it has to have started at or after the latest cron fire,
-    and it cannot be older than the ads lock TTL.
+
+def _heartbeat_stale_after() -> timedelta:
+    """Same window the ads lease uses for a live heartbeat."""
+    from src.rules import ADS_LOCK_HEARTBEAT_STALE_MINUTES
+
+    return timedelta(minutes=int(ADS_LOCK_HEARTBEAT_STALE_MINUTES))
+
+
+def _row_heartbeat(row: dict) -> datetime | None:
+    """Heartbeat on the row, when job_runs carries one.
+
+    Top-level columns and `stats` (object or JSON string) are both read.
+    `started_at` is not a heartbeat.
     """
+    for key in _HEARTBEAT_KEYS:
+        found = parse_ts(row.get(key))
+        if found is not None:
+            return found
+    stats = row.get("stats")
+    if isinstance(stats, str) and stats.strip():
+        try:
+            stats = json.loads(stats)
+        except (TypeError, ValueError):
+            stats = None
+    if isinstance(stats, dict):
+        for key in _HEARTBEAT_KEYS:
+            found = parse_ts(stats.get(key))
+            if found is not None:
+                return found
+    return None
+
+
+def _heartbeat_is_fresh(row: dict, now: datetime) -> bool:
+    beat = _row_heartbeat(row)
+    if beat is None:
+        return False
+    moment = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    beat_at = beat if beat.tzinfo else beat.replace(tzinfo=timezone.utc)
+    return moment - beat_at <= _heartbeat_stale_after()
+
+
+def _running_is_healthy(spec: JobSpec, row: dict, now: datetime) -> bool:
+    """True while the run is inside its max runtime, or its heartbeat is live.
+
+    Yesterday's success can still satisfy the grace window. A `running`
+    row cannot: once `now - started_at` is past 3h (ads) or 1h (everything
+    else), it is stuck. A heartbeat on that row newer than the ads lease
+    stale window keeps a long pull healthy.
+    """
+    if _heartbeat_is_fresh(row, now):
+        return True
+    started = parse_ts(row.get("started_at"))
     if started is None:
         return False
     moment = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
     started_at = started if started.tzinfo else started.replace(tzinfo=timezone.utc)
-    if moment - started_at > _max_running():
-        return False
-    if spec.interval_seconds:
-        required = required_started_at(spec, moment)
-        return started_at >= required - START_SKEW
-    last = previous_fire(spec, moment)
-    if last is None:
-        return False
-    return started_at >= last - START_SKEW
+    return moment - started_at <= max_running(spec.name)
 
 
 def evaluate_job(spec: JobSpec, rows: list[dict], now: datetime) -> Failure | None:
@@ -279,7 +313,7 @@ def evaluate_job(spec: JobSpec, rows: list[dict], now: datetime) -> Failure | No
     message = str(latest.get("message") or "").strip()
     fresh = started is not None and started >= required - START_SKEW
 
-    if status == "running" and _running_is_in_flight(spec, started, now):
+    if status == "running" and _running_is_healthy(spec, latest, now):
         return None
     if status in OK_STATUSES and fresh:
         return None
@@ -291,9 +325,10 @@ def evaluate_job(spec: JobSpec, rows: list[dict], now: datetime) -> Failure | No
         )
     if status == "running":
         when = started.isoformat() if started else "unknown"
+        hours = int(max_running(spec.name).total_seconds() // 3600)
         return Failure(
             f"job:{spec.name}",
-            _clip(f"still running since {when}"),
+            _clip(f"still running since {when} (older than {hours}h)"),
         )
     detail = message or status or "failed"
     return Failure(f"job:{spec.name}", _clip(f"{status or 'fail'}: {detail}"))
@@ -331,124 +366,60 @@ def evaluate_completeness(row: dict | None, day: date) -> Failure | None:
     return Failure("ads_day_completeness", _clip(detail))
 
 
-def _latest_meaningful(rows: list[dict], name: str) -> dict | None:
-    mine = [r for r in rows if (r.get("job_name") or "") == name and not _is_ignorable(r)]
-    if not mine:
-        return None
-    mine.sort(key=lambda r: r.get("started_at") or "", reverse=True)
-    return mine[0]
+def any_job_running(rows: list[dict]) -> bool:
+    """True when any job_runs row is `running`, scheduled or not.
 
-
-def _slot_settled(rows: list[dict], name: str, fire: datetime) -> bool:
-    """True when this fire already has a terminal row (not still running)."""
-    latest = _latest_meaningful(rows, name)
-    if latest is None:
-        return False
-    started = parse_ts(latest.get("started_at"))
-    if started is None or started < fire - START_SKEW:
-        return False
-    status = str(latest.get("status") or "").strip().lower()
-    return status != "running"
-
-
-def kickstart_blockers(
-    specs: list[JobSpec],
-    gates: Mapping[str, bool],
-    rows: list[dict],
-    now: datetime,
-) -> list[str]:
-    """Jobs that make `kickstart -k` unsafe right now.
-
-    A fresh `running` row is an in-flight sync. A cron inside the guard
-    window is either about to start or just started and may not have
-    written `job_runs` yet. Interval jobs block only while a fresh row
-    is `running` — their next tick is not a clock time we can see.
+    `launchctl kickstart -k` SIGKILLs the sync agent. A stuck row counts
+    too: the 04:30 auto-update loads new code without this check killing
+    the process.
     """
-    blocked: list[str] = []
-    moment = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
-    for name in scheduled_names(list(specs), dict(gates)):
-        spec = next(s for s in specs if s.name == name)
-        latest = _latest_meaningful(rows, name)
-        if latest is not None:
-            status = str(latest.get("status") or "").strip().lower()
-            started = parse_ts(latest.get("started_at"))
-            if status == "running" and _running_is_in_flight(spec, started, moment):
-                blocked.append(name)
-                continue
-        if spec.interval_seconds:
-            continue
-        upcoming = next_fire(spec, moment)
-        if upcoming is not None and upcoming - moment.astimezone(upcoming.tzinfo) <= KICKSTART_FIRE_GUARD:
-            blocked.append(name)
-            continue
-        last = previous_fire(spec, moment)
-        if last is None:
-            continue
-        age = moment.astimezone(last.tzinfo) - last
-        if timedelta(0) <= age <= KICKSTART_FIRE_GUARD and not _slot_settled(rows, name, last):
-            blocked.append(name)
-    return sorted(set(blocked))
-
-
-def wait_until_kickstart_quiet(
-    specs: list[JobSpec],
-    gates: Mapping[str, bool],
-    fetch_job_runs: Callable[[datetime], list[dict]],
-    *,
-    clock: Callable[[], datetime],
-    sleep: Callable[[float], None],
-    max_wait_seconds: float = KICKSTART_MAX_WAIT_SECONDS,
-    poll_seconds: float = KICKSTART_POLL_SECONDS,
-) -> tuple[bool, str]:
-    """Poll until kickstart will not SIGKILL an active or imminent job."""
-    deadline = clock() + timedelta(seconds=max_wait_seconds)
-    while True:
-        moment = clock()
-        try:
-            rows = fetch_job_runs(moment)
-        except Exception as e:
-            blockers = ["job_runs"]
-            why = f"could not read job_runs before kickstart: {e}"
-        else:
-            blockers = kickstart_blockers(specs, gates, rows, moment)
-            why = "still busy: " + ", ".join(blockers)
-        if not blockers:
-            return True, ""
-        if moment >= deadline:
-            return False, _clip(why)
-        sleep(poll_seconds)
+    for row in rows:
+        if str(row.get("status") or "").strip().lower() == "running":
+            return True
+    return False
 
 
 def apply_checkout(
     git_update: Callable[[], dict],
     kickstart: Callable[[], tuple[bool, str]],
-    ready: Callable[[], tuple[bool, str]] | None = None,
+    job_running: Callable[[], bool] | None = None,
 ) -> Failure | None:
     """Ff-only pull when behind, then kickstart. Silent when that works.
 
-    `ready` waits until an in-flight morning job has finished. If it
-    never clears, the checkout stays updated and the agent is left
-    running — `kickstart -k` is not sent.
+    If `job_running` is true, do not pull and do not kickstart. Leaving
+    the checkout behind lets the 04:30 auto-update fast-forward and
+    respawn. That skip is not a failure. A job that starts during the
+    pull still blocks kickstart.
     """
+    if job_running is not None:
+        try:
+            busy = job_running()
+        except Exception as e:
+            log.warning("checkout skipped; could not read job_runs: %s", e)
+            return None
+        if busy:
+            log.info(
+                "checkout skipped because a job is running; "
+                "04:30 auto-update will catch up"
+            )
+            return None
     try:
         result = git_update()
     except Exception as e:
         return Failure("mini_checkout", _clip(f"auto-update raised: {e}"))
     status = str(result.get("status") or "")
     if status == "updated":
-        if ready is not None:
+        if job_running is not None:
             try:
-                clear, why = ready()
+                busy = job_running()
             except Exception as e:
-                return Failure(
-                    "mini_checkout",
-                    _clip(f"fast-forwarded but did not kickstart: {e}"),
+                log.warning("kickstart skipped; could not read job_runs: %s", e)
+                return None
+            if busy:
+                log.info(
+                    "kickstart skipped because a job started during the pull"
                 )
-            if not clear:
-                return Failure(
-                    "mini_checkout",
-                    _clip(f"fast-forwarded but did not kickstart: {why}"),
-                )
+                return None
         try:
             ok, err = kickstart()
         except Exception as e:
@@ -489,9 +460,6 @@ def execute(
     kickstart: Callable[[], tuple[bool, str]],
     post_webhook: Callable[[str, dict, str, str], None],
     as_of: Callable[[datetime], date],
-    clock: Callable[[], datetime] | None = None,
-    sleep: Callable[[float], None] | None = None,
-    max_kickstart_wait: float = KICKSTART_MAX_WAIT_SECONDS,
 ) -> int:
     """Run every check. Exit 0 when healthy. Exit 2 when the webhook is unset."""
     if not webhook_configured(env):
@@ -540,17 +508,12 @@ def execute(
                 if found:
                     failures.append(found)
 
-    def _ready() -> tuple[bool, str]:
-        return wait_until_kickstart_quiet(
-            specs,
-            gates,
-            fetch_job_runs,
-            clock=clock or (lambda: datetime.now(timezone.utc)),
-            sleep=sleep or time.sleep,
-            max_wait_seconds=max_kickstart_wait,
-        )
+    def _job_running() -> bool:
+        # Re-read after the pull. A job that started while git ran still
+        # blocks kickstart. Any `running` row counts, not only scheduled ones.
+        return any_job_running(fetch_job_runs(datetime.now(timezone.utc)))
 
-    checkout = apply_checkout(git_update, kickstart, ready=_ready)
+    checkout = apply_checkout(git_update, kickstart, job_running=_job_running)
     if checkout:
         failures.append(checkout)
 
@@ -618,7 +581,7 @@ def select_job_runs(client, since: datetime) -> list[dict]:
     while offset < 20000:
         resp = (
             client.table("job_runs")
-            .select("job_name,status,message,started_at,finished_at")
+            .select("job_name,status,message,started_at,finished_at,stats")
             .gte("started_at", since_iso)
             .order("started_at", desc=True)
             .range(offset, offset + page - 1)

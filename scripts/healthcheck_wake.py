@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mac Mini failure-only health check. Silent on success.
 
-Launchd runs this daily at 07:20 America/New_York. See
+Launchd runs this daily at 07:23 America/New_York. See
 deploy/launchd/README.md for install steps and env vars.
 """
 from __future__ import annotations

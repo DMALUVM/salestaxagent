@@ -5,8 +5,9 @@
 
   This is NOT a second `src.main run`. It does not start APScheduler.
   StartCalendarInterval uses the Mac system timezone — the Mini must
-  stay on America/New_York so this fires at 07:20 ET, after the morning
-  syncs and after the 07:15 ads CLEAR deadline.
+  stay on America/New_York so this fires at 07:23 ET, after the 07:15
+  ads CLEAR deadline and off every scheduled job minute (ga4_sync is
+  07:20, gsc_sync is 07:25).
 
   Success exits 0 and prints nothing. Failures POST to
   GROKBOT_HEALTH_WEBHOOK_URL (from the repo .env). No Telegram.
@@ -41,7 +42,7 @@
         <key>Hour</key>
         <integer>7</integer>
         <key>Minute</key>
-        <integer>20</integer>
+        <integer>23</integer>
     </dict>
 
     <key>StandardOutPath</key>

@@ -7,7 +7,7 @@ not need a human `git pull` or `launchctl kickstart`.
 The agent is a launchd **user agent**: it starts at login and restarts if it
 exits (`KeepAlive`). Auto-update is one APScheduler job inside this same
 process, not a second copy of `src.main run`, so it cannot compete with the
-running agent. The 07:20 failure-only health check below is a separate
+running agent. The 07:23 failure-only health check below is a separate
 calendar LaunchAgent. It does not start the scheduler.
 
 ## Install launchd agent
@@ -196,7 +196,7 @@ work without reaching this machine, publish a copy:
 python -m src.main ppc-export --publish
 ```
 
-## Failure-only health check (07:20 ET)
+## Failure-only health check (07:23 ET)
 
 Wakes the ops assistant only when something is broken. A healthy run exits 0
 with no webhook and no Telegram. This does not change the Telegram allow/deny
@@ -210,25 +210,30 @@ Checks:
 2. If this checkout is behind `origin/main`, fast-forward with the same
    ff-only rules as `git_auto_update` (`restart=False`, so this process does
    not exit), then `launchctl kickstart -k` the sync agent
-   (`com.tallowbourn.salestax` by default). Kickstart waits while a
-   scheduled job is `running` or a cron is inside a 3-minute guard
-   (07:20 is also `ga4_sync`). If the agent is still busy after 45
-   minutes, the new checkout is left on disk, the agent is not killed,
-   and that wait is reported. Already up to date, or a pull plus
+   (`com.tallowbourn.salestax` by default). If any `job_runs` row is
+   `running`, the pull and the kickstart are both skipped and that skip
+   is not reported. The checkout stays behind so the 04:30 auto-update
+   can fast-forward and respawn. Already up to date, or a pull plus
    kickstart that both succeed, is silent. A dirty tree, a diverged
-   history, a failed pull, or a failed kickstart is reported.
+   history, a failed pull, or a kickstart that was sent and failed is
+   reported.
 3. Every scheduled job that writes `job_runs` must have its latest
    meaningful row as `success` or `partial`, and that row must fall inside
    the freshness window derived from the scheduler cron (misfire grace
-   included). `skipped` rows and messages such as "another ads pull is
-   running" are not failures. A real `fail` includes the `message` text
-   (for example an expired Meta access token on `meta_ads_sync`).
+   included). A `running` row is healthy until it is older than 3 hours
+   for an ads job or 1 hour otherwise. A heartbeat on that row
+   (`heartbeat_at`, or the same field inside `stats`) that is still inside
+   the ads lease stale window keeps the run healthy past that limit.
+   `skipped` rows and messages such as "another ads pull is running" are
+   not failures. A real `fail` includes the `message` text (for example
+   an expired Meta access token on `meta_ads_sync`).
 4. `ads_day_completeness` for Amazon D-1 (`amazon_as_of`, yesterday in
    America/Los_Angeles) must be `CLEAR` once the deadline has passed.
    Default deadline is 07:15 America/New_York.
 
 `launchd` `StartCalendarInterval` uses the Mac's system timezone. The Mini
-must stay on **America/New_York** so this fires at 07:20 ET.
+must stay on **America/New_York** so this fires at 07:23 ET. 07:23 is
+not a scheduled job minute (`ga4_sync` is 07:20, `gsc_sync` is 07:25).
 
 ### Env vars (repo `.env`, not the plist)
 
@@ -263,7 +268,7 @@ cd /Users/maloney_assistant/sales-tax-agent
 
 bash deploy/launchd/install-healthcheck.sh
 
-# Confirm it is loaded — exit status 0, no PID until 07:20
+# Confirm it is loaded — exit status 0, no PID until 07:23
 launchctl list | grep tallowbourn.healthcheck
 
 # Manual run. Healthy: prints nothing, exits 0. Broken: POSTs JSON, exits 1.

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install the 07:20 failure-only health check LaunchAgent.
+# Install the 07:23 failure-only health check LaunchAgent.
 # Does not touch com.tallowbourn.salestax (the sync agent).
 set -euo pipefail
 
@@ -21,7 +21,7 @@ launchctl unload "${DEST}" 2>/dev/null || true
 launchctl load "${DEST}"
 
 echo "Loaded ${LABEL}."
-echo "Fires daily at 07:20 in the Mac system timezone."
+echo "Fires daily at 07:23 in the Mac system timezone."
 echo "The Mac timezone must be America/New_York."
 echo "Required in ${ROOT}/.env:"
 echo "  GROKBOT_HEALTH_WEBHOOK_URL"

@@ -198,7 +198,7 @@ def run_auto_update(
     `restart` is True, calls `request_process_exit()`.
 
     `force=True` runs the same ff-only pull when GIT_AUTO_UPDATE=0.
-    The 07:20 health check uses that so a disabled 04:30 job does not
+    The 07:23 health check uses that so a disabled 04:30 job does not
     leave the Mini behind. Dirty, diverged, and non-ff pulls still abort.
     """
     remote = remote or DEFAULT_REMOTE
