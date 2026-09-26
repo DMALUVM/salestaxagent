@@ -18,6 +18,9 @@ log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 MARKER_PATH = ROOT / "logs" / "healthcheck_restart_pending.json"
+# The caller inserts its own job_runs row before this check. Counting
+# that row as busy means a pending restart can never fire at 04:30.
+SELF_JOB_NAMES = frozenset({"git_auto_update", "healthcheck"})
 
 
 def mark_restart_pending(commit: str | None = None) -> None:
@@ -42,11 +45,27 @@ def clear_restart_pending() -> None:
         return
 
 
+def other_job_running(rows: list[dict], *, ignore: frozenset[str] = SELF_JOB_NAMES) -> bool:
+    """True when some other job_runs row is `running`.
+
+    ``git_auto_update`` and ``healthcheck`` are the callers. Their own
+    ``running`` row is not a reason to skip the restart.
+    """
+    for row in rows:
+        if str(row.get("status") or "").strip().lower() != "running":
+            continue
+        if str(row.get("job_name") or "") in ignore:
+            continue
+        return True
+    return False
+
+
 def jobs_are_quiet() -> bool | None:
-    """True when no job_runs row is `running`. None when the read fails.
+    """True when no other job_runs row is `running`. None when the read fails.
 
     None means "do not kill the agent" — a missed read is not proof the
-    scheduler is idle.
+    scheduler is idle. The caller's own ``running`` row is ignored.
+    More than one row is read so a self-row cannot hide a real job.
     """
     try:
         from src.db import get_client
@@ -56,10 +75,10 @@ def jobs_are_quiet() -> bool | None:
             .table("job_runs")
             .select("job_name,status")
             .eq("status", "running")
-            .limit(1)
+            .limit(50)
             .execute()
         )
     except Exception as e:
         log.warning("restart pending: job_runs read failed: %s", e)
         return None
-    return not list(resp.data or [])
+    return not other_job_running(list(resp.data or []))

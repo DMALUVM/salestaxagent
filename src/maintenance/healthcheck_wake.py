@@ -410,16 +410,15 @@ def evaluate_completeness(row: dict | None, day: date) -> Failure | None:
 
 
 def any_job_running(rows: list[dict]) -> bool:
-    """True when any job_runs row is `running`, scheduled or not.
+    """True when some other job_runs row is `running`.
 
-    `launchctl kickstart -k` SIGKILLs the sync agent. A stuck row counts
-    too: the 04:30 auto-update loads new code without this check killing
-    the process.
+    ``launchctl kickstart -k`` SIGKILLs the sync agent. The caller's own
+    ``git_auto_update`` / ``healthcheck`` row does not count. A stuck row
+    for any other job does.
     """
-    for row in rows:
-        if str(row.get("status") or "").strip().lower() == "running":
-            return True
-    return False
+    from src.maintenance.restart_pending import other_job_running
+
+    return other_job_running(rows)
 
 
 _QUIET_CHECKOUT = frozenset({"up_to_date", "disabled", "skipped", "dry_run"})

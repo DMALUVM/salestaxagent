@@ -140,6 +140,64 @@ class TestRunAutoUpdate:
         assert rp.restart_is_pending()
         assert not any(c[0] == "pull" for c in fake.calls)
 
+    def test_pending_restart_ignores_its_own_running_row(self, monkeypatch, tmp_path):
+        """04:30 inserts git_auto_update=running before this check."""
+        monkeypatch.setattr(rp, "MARKER_PATH", tmp_path / "pending.json")
+        rp.mark_restart_pending("abc")
+
+        class _Query:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def select(self, *_a, **_k):
+                return self
+
+            def eq(self, *_a, **_k):
+                return self
+
+            def limit(self, *_a, **_k):
+                return self
+
+            def execute(self):
+                return SimpleNamespace(data=self.rows)
+
+        class _Client:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def table(self, _name):
+                return _Query(self.rows)
+
+        seen = {}
+
+        def get_client():
+            seen["called"] = True
+            return _Client([
+                {"job_name": "git_auto_update", "status": "running"},
+                {"job_name": "healthcheck", "status": "running"},
+            ])
+
+        monkeypatch.setattr("src.db.get_client", get_client)
+        fake = FakeGit(_base_answers())
+        monkeypatch.setattr(gau, "_git", fake)
+        monkeypatch.setattr(gau, "_in_progress_operation", lambda: None)
+        r = gau.run_auto_update()
+        assert seen["called"] is True
+        assert r["status"] == "up_to_date"
+        assert r["restart"] is True
+        assert r["restart_reason"] == "pending"
+
+        def get_client_busy():
+            return _Client([
+                {"job_name": "git_auto_update", "status": "running"},
+                {"job_name": "ga4_sync", "status": "running"},
+            ])
+
+        monkeypatch.setattr("src.db.get_client", get_client_busy)
+        r = gau.run_auto_update()
+        assert r["restart"] is False
+        assert rp.restart_is_pending()
+
     def test_pending_restart_waits_while_a_job_is_running(self, monkeypatch, tmp_path):
         monkeypatch.setattr(rp, "MARKER_PATH", tmp_path / "pending.json")
         monkeypatch.setattr(rp, "jobs_are_quiet", lambda: False)

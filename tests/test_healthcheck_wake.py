@@ -676,6 +676,10 @@ def test_any_running_row_skips_kickstart_without_a_report():
     assert out.posts == []
     assert hw.any_job_running(rows) is True
     assert hw.any_job_running(rows[:1]) is False
+    assert hw.any_job_running([
+        _row("git_auto_update", "running", now, ""),
+        _row("healthcheck", "running", now, ""),
+    ]) is False
 
 
 def test_job_that_starts_during_the_pull_is_not_killed():
