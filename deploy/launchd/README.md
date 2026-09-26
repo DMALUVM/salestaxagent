@@ -211,19 +211,26 @@ Checks:
    ff-only rules as `git_auto_update` (`restart=False`, so this process does
    not exit), then `launchctl kickstart -k` the sync agent
    (`com.tallowbourn.salestax` by default). If any `job_runs` row is
-   `running`, the pull and the kickstart are both skipped and that skip
-   is not reported. The checkout stays behind so the 04:30 auto-update
-   can fast-forward and respawn. Already up to date, or a pull plus
+   `running` before the pull, the pull and the kickstart are both skipped
+   and that skip is not reported. The checkout stays behind so the 04:30
+   auto-update can fast-forward and respawn. If the pull already landed
+   and a job is then running, `logs/healthcheck_restart_pending.json`
+   records the debt. The next quiet health check kickstarts, and the
+   04:30 job exits so KeepAlive respawns, once no `job_runs` row is
+   `running`. A `job_runs` re-read that raises after the pull is a
+   failure, and the marker stays. Already up to date, or a pull plus
    kickstart that both succeed, is silent. A dirty tree, a diverged
    history, a failed pull, or a kickstart that was sent and failed is
    reported.
 3. Every scheduled job that writes `job_runs` must have its latest
    meaningful row as `success` or `partial`, and that row must fall inside
    the freshness window derived from the scheduler cron (misfire grace
-   included). A `running` row is healthy until it is older than 3 hours
-   for an ads job or 1 hour otherwise. A heartbeat on that row
-   (`heartbeat_at`, or the same field inside `stats`) that is still inside
-   the ads lease stale window keeps the run healthy past that limit.
+   included). A `running` row is healthy until it is older than the ads
+   lock TTL (4h) for an ads pull or a long SP-API / Sunday backfill
+   (`spapi_refresh`, `amazon_sku_month`, `inventory_ledger_backfill`,
+   `sqp_sync`), and 1 hour otherwise. A live ads lock-file heartbeat
+   (`logs/ads_sync.lock.json`) keeps that pull healthy past 4h. `job_runs`
+   does not carry a mid-run heartbeat.
    `skipped` rows and messages such as "another ads pull is running" are
    not failures. A real `fail` includes the `message` text (for example
    an expired Meta access token on `meta_ads_sync`).

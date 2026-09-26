@@ -16,6 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.maintenance import git_auto_update as gau
+from src.maintenance import restart_pending as rp
 
 
 def _proc(stdout="", stderr="", returncode=0):
@@ -124,6 +125,41 @@ class TestRunAutoUpdate:
         assert r["status"] == "up_to_date"
         assert r["restart"] is False
         assert not any(c[0] == "pull" for c in fake.calls)
+
+    def test_pending_restart_respawns_when_idle(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(rp, "MARKER_PATH", tmp_path / "pending.json")
+        monkeypatch.setattr(rp, "jobs_are_quiet", lambda: True)
+        rp.mark_restart_pending("abc")
+        fake = FakeGit(_base_answers())
+        monkeypatch.setattr(gau, "_git", fake)
+        monkeypatch.setattr(gau, "_in_progress_operation", lambda: None)
+        r = gau.run_auto_update()
+        assert r["status"] == "up_to_date"
+        assert r["restart"] is True
+        assert r["restart_reason"] == "pending"
+        assert rp.restart_is_pending()
+        assert not any(c[0] == "pull" for c in fake.calls)
+
+    def test_pending_restart_waits_while_a_job_is_running(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(rp, "MARKER_PATH", tmp_path / "pending.json")
+        monkeypatch.setattr(rp, "jobs_are_quiet", lambda: False)
+        rp.mark_restart_pending("abc")
+        fake = FakeGit(_base_answers())
+        monkeypatch.setattr(gau, "_git", fake)
+        monkeypatch.setattr(gau, "_in_progress_operation", lambda: None)
+        r = gau.run_auto_update()
+        assert r["restart"] is False
+        assert rp.restart_is_pending()
+
+    def test_healthcheck_restart_false_does_not_honor_pending(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(rp, "MARKER_PATH", tmp_path / "pending.json")
+        monkeypatch.setattr(rp, "jobs_are_quiet", lambda: True)
+        rp.mark_restart_pending("abc")
+        fake = FakeGit(_base_answers())
+        monkeypatch.setattr(gau, "_git", fake)
+        monkeypatch.setattr(gau, "_in_progress_operation", lambda: None)
+        r = gau.run_auto_update(restart=False)
+        assert r["restart"] is False
 
     def test_dirty_tracked_tree_aborts_without_pull(self, monkeypatch):
         fake = FakeGit(_base_answers({

@@ -12,15 +12,19 @@ Checks:
   2. If the checkout is behind ``origin/main``, ff-only pull (same rules as
      ``git_auto_update``) then ``launchctl kickstart`` the sync agent.
      If any ``job_runs`` row is ``running``, skip the pull and the
-     kickstart and report nothing — the 04:30 auto-update loads the new
-     checkout. Report only when the pull fails or a kickstart that was
-     sent fails.
+     kickstart and report nothing — the checkout stays behind so the
+     04:30 auto-update can still fast-forward and respawn. If the pull
+     already landed and kickstart must wait, a marker file records the
+     pending restart; the next quiet health check or 04:30 run honors
+     it. A ``job_runs`` re-read that raises after the pull is a failure.
+     Report when the pull fails or a kickstart that was sent fails.
   3. Each scheduled job that writes ``job_runs`` has a latest meaningful
      row of success (or partial) inside the freshness window from
      ``job_schedule``. A ``running`` row is healthy until it is older than
-     that job's max runtime (3h for ads jobs, 1h otherwise), unless the
-     row's own heartbeat is still fresh. ``skipped`` / "another ads pull
-     is running" rows are not failures.
+     its max runtime: the ads lock TTL (4h) for ads pulls and the long
+     SP-API / Sunday backfill jobs, 1h otherwise. A live ads lock-file
+     heartbeat keeps a pull healthy past that TTL. ``skipped`` /
+     "another ads pull is running" rows are not failures.
   4. ``ads_day_completeness`` for Amazon D-1 (``amazon_as_of``) is CLEAR
      once ``GROKBOT_ADS_CLEAR_DEADLINE`` (default 07:15 America/New_York)
      has passed.
@@ -75,10 +79,18 @@ _EXTRA_IGNORE_MARKERS = (
 )
 # A run may start a couple of minutes before its cron minute.
 START_SKEW = timedelta(minutes=2)
-# A `running` row older than this is stuck. Ads pulls wait on Amazon
-# reports; other crons do not. A fresh heartbeat on the row overrides this.
-ADS_MAX_RUNNING = timedelta(hours=3)
+# Short crons. Ads pulls and the long SP-API / Sunday jobs use the ads
+# lock TTL instead (see max_running). A live ads lock-file heartbeat
+# extends an ads pull past that TTL.
 DEFAULT_MAX_RUNNING = timedelta(hours=1)
+# No mid-run heartbeat. These are still inside a normal window at 07:23
+# when they started at 04:00–06:20, so a 1h cap false-wakes.
+_LONG_RUNNING_JOBS = frozenset({
+    "spapi_refresh",
+    "amazon_sku_month",
+    "inventory_ledger_backfill",
+    "sqp_sync",
+})
 _HEARTBEAT_KEYS = ("heartbeat_at", "last_heartbeat_at", "last_heartbeat")
 JOB_LOOKBACK = timedelta(days=10)
 DETAIL_LIMIT = 800
@@ -216,15 +228,47 @@ def _is_ignorable(row: dict) -> bool:
     return any(marker in lowered for marker in markers)
 
 
-def _is_ads_job(name: str) -> bool:
-    return (name or "").startswith("ads_")
-
-
 def max_running(job_name: str) -> timedelta:
-    """How long a `running` row may stay open before this check calls it stuck."""
-    if _is_ads_job(job_name):
-        return ADS_MAX_RUNNING
+    """How long a `running` row may stay open with no live heartbeat.
+
+    Ads pulls use ``ads.lock_ttl_hours`` (4h), the same ceiling
+    ``fail_stale_ads_job_runs`` uses when the lease is dead. SP-API
+    refresh and the Sunday backfills have no lock file and no mid-run
+    ``job_runs`` heartbeat; they share that 4h ceiling so a pull that is
+    still going at 07:23 is not a wake. A live ads lock-file heartbeat
+    extends an ads pull past the ceiling. Other crons are 1h.
+    """
+    from src.amazon_ads.sync_lock import is_ads_pull_job
+    from src.rules import ADS_LOCK_TTL_HOURS
+
+    if is_ads_pull_job(job_name) or job_name in _LONG_RUNNING_JOBS:
+        return timedelta(hours=int(ADS_LOCK_TTL_HOURS))
     return DEFAULT_MAX_RUNNING
+
+
+def _ads_lock_covers(row: dict, now: datetime) -> bool:
+    """True when the ads lock file's heartbeat belongs to this running row.
+
+    Nothing writes ``heartbeat_at`` onto ``job_runs`` (stats land at
+    ``job_finish``). The live beat is ``logs/ads_sync.lock.json``.
+    """
+    from src.amazon_ads.sync_lock import (
+        _row_belongs_to_live_lease,
+        is_ads_pull_job,
+        lease_is_live,
+        read_lease,
+    )
+
+    name = str(row.get("job_name") or "")
+    if not is_ads_pull_job(name):
+        return False
+    lease = read_lease()
+    if not lease_is_live(lease, now):
+        return False
+    job = str((lease or {}).get("job") or "")
+    if job != name:
+        return False
+    return _row_belongs_to_live_lease(row, lease)
 
 
 def _heartbeat_stale_after() -> timedelta:
@@ -268,14 +312,13 @@ def _heartbeat_is_fresh(row: dict, now: datetime) -> bool:
 
 
 def _running_is_healthy(spec: JobSpec, row: dict, now: datetime) -> bool:
-    """True while the run is inside its max runtime, or its heartbeat is live.
+    """True while the run is inside its max runtime, or a real heartbeat is live.
 
     Yesterday's success can still satisfy the grace window. A `running`
-    row cannot: once `now - started_at` is past 3h (ads) or 1h (everything
-    else), it is stuck. A heartbeat on that row newer than the ads lease
-    stale window keeps a long pull healthy.
+    row older than ``max_running`` is stuck unless the ads lock file (or
+    a heartbeat actually stored on the row) is still fresh.
     """
-    if _heartbeat_is_fresh(row, now):
+    if _heartbeat_is_fresh(row, now) or _ads_lock_covers(row, now):
         return True
     started = parse_ts(row.get("started_at"))
     if started is None:
@@ -379,6 +422,15 @@ def any_job_running(rows: list[dict]) -> bool:
     return False
 
 
+_QUIET_CHECKOUT = frozenset({"up_to_date", "disabled", "skipped", "dry_run"})
+
+
+def _defer_kickstart(commit: str | None) -> None:
+    from src.maintenance.restart_pending import mark_restart_pending
+
+    mark_restart_pending(commit)
+
+
 def apply_checkout(
     git_update: Callable[[], dict],
     kickstart: Callable[[], tuple[bool, str]],
@@ -386,12 +438,22 @@ def apply_checkout(
 ) -> Failure | None:
     """Ff-only pull when behind, then kickstart. Silent when that works.
 
-    If `job_running` is true, do not pull and do not kickstart. Leaving
-    the checkout behind lets the 04:30 auto-update fast-forward and
-    respawn. That skip is not a failure. A job that starts during the
-    pull still blocks kickstart.
+    If a job is already running, do not pull and do not kickstart. The
+    checkout stays behind so the 04:30 auto-update can fast-forward and
+    respawn. That skip is not a failure.
+
+    If the pull already happened and a job is running (or the job_runs
+    re-read raises), record a pending restart instead of dropping it.
+    The re-read error is reported. The next quiet health check, or the
+    04:30 job, performs the restart.
     """
-    if job_running is not None:
+    from src.maintenance.restart_pending import (
+        clear_restart_pending,
+        restart_is_pending,
+    )
+
+    pending = restart_is_pending()
+    if job_running is not None and not pending:
         try:
             busy = job_running()
         except Exception as e:
@@ -408,32 +470,44 @@ def apply_checkout(
     except Exception as e:
         return Failure("mini_checkout", _clip(f"auto-update raised: {e}"))
     status = str(result.get("status") or "")
-    if status == "updated":
+    commit = str(result.get("commit") or "") or None
+    want_kick = status == "updated" or (pending and status in _QUIET_CHECKOUT)
+    if want_kick:
         if job_running is not None:
             try:
                 busy = job_running()
             except Exception as e:
-                log.warning("kickstart skipped; could not read job_runs: %s", e)
-                return None
+                _defer_kickstart(commit)
+                return Failure(
+                    "mini_checkout",
+                    _clip(
+                        "fast-forwarded but could not re-read job_runs "
+                        f"before kickstart: {e}"
+                    ),
+                )
             if busy:
+                _defer_kickstart(commit)
                 log.info(
-                    "kickstart skipped because a job started during the pull"
+                    "kickstart deferred; restart pending until no job is running"
                 )
                 return None
         try:
             ok, err = kickstart()
         except Exception as e:
+            _defer_kickstart(commit)
             return Failure(
                 "mini_checkout",
                 _clip(f"fast-forwarded but kickstart raised: {e}"),
             )
         if not ok:
+            _defer_kickstart(commit)
             return Failure(
                 "mini_checkout",
                 _clip(f"fast-forwarded but launchctl kickstart failed: {err}"),
             )
+        clear_restart_pending()
         return None
-    if status in {"up_to_date", "disabled", "skipped", "dry_run"}:
+    if status in _QUIET_CHECKOUT:
         return None
     detail = result.get("error") or result.get("message") or status or "failed"
     return Failure("mini_checkout", _clip(f"{status}: {detail}"))

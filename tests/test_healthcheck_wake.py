@@ -14,6 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.maintenance import healthcheck_wake as hw
+from src.maintenance import restart_pending as rp
 from src.maintenance.job_schedule import (
     EXCLUDED_SCHEDULER_IDS,
     JobSpec,
@@ -24,6 +25,11 @@ from src.maintenance.job_schedule import (
 
 ROOT = Path(__file__).resolve().parent.parent
 ET = ZoneInfo("America/New_York")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_restart_marker(tmp_path, monkeypatch):
+    monkeypatch.setattr(rp, "MARKER_PATH", tmp_path / "restart_pending.json")
 # Friday 2026-09-25 07:20 ET (EDT, UTC-4).
 NOW = datetime(2026, 9, 25, 11, 20, tzinfo=timezone.utc)
 WEBHOOK_ENV = {
@@ -540,10 +546,15 @@ def test_header_template_replaces_key():
     assert (name, value) == ("X-Grok-Key", "sekret")
 
 
-def test_running_row_fails_after_per_job_max_runtime():
-    """Ads jobs get 3h. Everything else gets 1h. A fresh heartbeat extends it."""
+def test_running_row_fails_after_per_job_max_runtime(monkeypatch):
+    """Short jobs are 1h. Ads pulls and long SP-API jobs use the 4h lock TTL."""
+    monkeypatch.setattr(
+        "src.amazon_ads.sync_lock.read_lease", lambda path=None: None,
+    )
     ga4 = _spec("ga4_sync", 7, 20, grace=3600, gate="ga4")
     ads = _spec("ads_search_terms_sync", 5, 30, grace=3600)
+    spapi = _spec("spapi_refresh", 6, 0, grace=1, gate="amazon_sp")
+    ledger = _spec("inventory_ledger_backfill", 4, 0, grace=7200, gate="amazon_sp", dow=6)
     now = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)  # 07:23 ET
 
     assert hw.evaluate_job(
@@ -557,13 +568,30 @@ def test_running_row_fails_after_per_job_max_runtime():
     assert "older than 1h" in hung_ga4.detail
 
     assert hw.evaluate_job(
-        ads, [_row("ads_search_terms_sync", "running", now - timedelta(hours=2, minutes=59))], now,
+        ads, [_row("ads_search_terms_sync", "running", now - timedelta(hours=3, minutes=59))], now,
     ) is None
     hung_ads = hw.evaluate_job(
-        ads, [_row("ads_search_terms_sync", "running", now - timedelta(hours=3, minutes=1))], now,
+        ads, [_row("ads_search_terms_sync", "running", now - timedelta(hours=4, minutes=1))], now,
     )
     assert hung_ads is not None
-    assert "older than 3h" in hung_ads.detail
+    assert "older than 4h" in hung_ads.detail
+
+    # 06:00 spapi_refresh still running at 07:23 is inside the 4h TTL.
+    assert hw.evaluate_job(
+        spapi, [_row("spapi_refresh", "running", now - timedelta(hours=2))], now,
+    ) is None
+    hung_spapi = hw.evaluate_job(
+        spapi, [_row("spapi_refresh", "running", now - timedelta(hours=4, minutes=1))], now,
+    )
+    assert hung_spapi is not None
+    assert "older than 4h" in hung_spapi.detail
+
+    # Sunday 04:00 ledger backfill is still in flight at 07:23 (3h23m).
+    assert hw.evaluate_job(
+        ledger,
+        [_row("inventory_ledger_backfill", "running", now - timedelta(hours=3, minutes=23))],
+        now,
+    ) is None
 
     # Yesterday's success still covers a slot inside misfire grace.
     yesterday = now - timedelta(days=1)
@@ -572,7 +600,10 @@ def test_running_row_fails_after_per_job_max_runtime():
     ) is None
 
 
-def test_fresh_job_runs_heartbeat_keeps_a_long_run_healthy():
+def test_fresh_job_runs_heartbeat_keeps_a_long_run_healthy(monkeypatch):
+    monkeypatch.setattr(
+        "src.amazon_ads.sync_lock.read_lease", lambda path=None: None,
+    )
     ads = _spec("ads_campaigns_sync", 5, 0, grace=3600)
     now = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)
     started = now - timedelta(hours=5)
@@ -584,13 +615,42 @@ def test_fresh_job_runs_heartbeat_keeps_a_long_run_healthy():
     stale["heartbeat_at"] = (now - timedelta(minutes=20)).isoformat()
     found = hw.evaluate_job(ads, [stale], now)
     assert found is not None
-    assert "older than 3h" in found.detail
+    assert "older than 4h" in found.detail
 
     via_stats = _row("ads_campaigns_sync", "running", started, "")
     via_stats["stats"] = json.dumps({
         "heartbeat_at": (now - timedelta(minutes=2)).isoformat(),
     })
     assert hw.evaluate_job(ads, [via_stats], now) is None
+
+
+def test_live_ads_lock_heartbeat_keeps_a_sunday_backfill_healthy(monkeypatch):
+    """job_runs has no mid-run beat. The lock file does."""
+    spec = _spec("ads_campaigns_backfill", 3, 0, grace=7200, gate="amazon_ads", dow=6)
+    now = datetime(2026, 9, 27, 11, 23, tzinfo=timezone.utc)  # Sunday 07:23 ET
+    started = now - timedelta(hours=5)
+    row = _row("ads_campaigns_backfill", "running", started, "")
+    lease = {
+        "pid": 4242,
+        "job": "ads_campaigns_backfill",
+        "started_at": (started + timedelta(seconds=2)).isoformat(),
+        "heartbeat_at": (now - timedelta(minutes=1)).isoformat(),
+    }
+    monkeypatch.setattr("src.amazon_ads.sync_lock.read_lease", lambda path=None: lease)
+    monkeypatch.setattr("src.amazon_ads.sync_lock.pid_is_alive", lambda pid: pid == 4242)
+    assert hw.evaluate_job(spec, [row], now) is None
+
+    stale = dict(lease)
+    stale["heartbeat_at"] = (now - timedelta(minutes=20)).isoformat()
+    monkeypatch.setattr("src.amazon_ads.sync_lock.read_lease", lambda path=None: stale)
+    hung = hw.evaluate_job(spec, [row], now)
+    assert hung is not None
+    assert "older than 4h" in hung.detail
+
+    other = dict(lease)
+    other["job"] = "ads_search_terms_sync"
+    monkeypatch.setattr("src.amazon_ads.sync_lock.read_lease", lambda path=None: other)
+    assert hw.evaluate_job(spec, [row], now) is not None
 
 
 def test_any_running_row_skips_kickstart_without_a_report():
@@ -646,6 +706,57 @@ def test_job_that_starts_during_the_pull_is_not_killed():
     assert out.kickstarts == []
     assert out.code == 0
     assert out.posts == []
+    assert rp.restart_is_pending()
+
+
+def test_deferred_restart_kickstarts_once_quiet():
+    spec = _spec("daily_analysis", 8, 0, grace=1)
+    now = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)
+    quiet = [_row(spec.name, "success", required_started_at(spec, now))]
+    rp.mark_restart_pending("bbb")
+    out = _execute(
+        WEBHOOK_ENV,
+        specs=[spec],
+        gates={},
+        rows=quiet,
+        now=now,
+        git_result={"status": "up_to_date"},
+        completeness={"date": "2026-09-24", "status": "CLEAR", "reason": "ok"},
+    )
+    assert out.code == 0
+    assert out.kickstarts == [True]
+    assert out.posts == []
+    assert not rp.restart_is_pending()
+
+
+def test_job_runs_reread_after_pull_is_a_failure():
+    spec = _spec("daily_analysis", 8, 0, grace=1)
+    now = datetime(2026, 9, 25, 11, 23, tzinfo=timezone.utc)
+    quiet = [_row(spec.name, "success", required_started_at(spec, now))]
+    state = {"n": 0}
+
+    def fetch(_now):
+        state["n"] += 1
+        if state["n"] < 3:
+            return quiet
+        raise RuntimeError("supabase down")
+
+    out = _execute(
+        WEBHOOK_ENV,
+        specs=[spec],
+        gates={},
+        rows=[],
+        now=now,
+        git_result={"status": "updated", "commit": "abc123"},
+        fetch_runs=fetch,
+        completeness={"date": "2026-09-24", "status": "CLEAR", "reason": "ok"},
+    )
+    assert out.kickstarts == []
+    assert out.code == 1
+    failures = out.posts[0][1]["failures"]
+    assert [f["check"] for f in failures] == ["mini_checkout"]
+    assert "re-read job_runs" in failures[0]["detail"]
+    assert rp.restart_is_pending()
 
 
 def test_stuck_running_is_reported_and_kickstart_stays_silent():
@@ -774,6 +885,13 @@ def test_supabase_reads_are_select_only():
     assert "select" in kinds
     assert "insert" not in kinds
     assert "update" not in kinds
+
+
+def test_scheduler_startup_clears_a_pending_restart():
+    text = (ROOT / "src" / "main.py").read_text()
+    start = text.index("def run():")
+    window = text[start:start + 800]
+    assert "clear_restart_pending" in window
 
 
 def test_module_does_not_touch_telegram_or_writes():
