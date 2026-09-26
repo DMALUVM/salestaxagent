@@ -23,7 +23,11 @@ from SP-API and Sellerboard collapses to one row.
 Receipts SoT: before keeping a Sellerboard/SP-API Lost_Inbound short,
 ``apply_receipt_cover`` checks inventory_events Receipts (Reference ID =
 FBA* when present). If receipts cover shipped qty for that shipment+SKU,
-mark found_offset (durable for zero-recv CLOSED ghosts).
+mark found_offset (durable for zero-recv CLOSED ghosts). An unreferenced
+SKU pool receipt dated before the shipment ship/create date does not
+count, and a pool match never overrides an Amazon-reported short. A
+failed getShipments / getShipmentItems call keeps the last cached Amazon
+qty and must not clear the row.
 
 This module never opens Seller Central cases.
 """
@@ -168,9 +172,14 @@ USER_CLEAR_NOTES = frozenset({
 
 # Sellerboard CLOSED + UnitsReceived=0 ghosts: ledger Receipts often land at a
 # different FC than the plan destination. Prefer Reference ID (= FBA*) match;
-# fall back to exact-qty SKU receipt pool near plan/event date (consumed once).
+# fall back to exact-qty SKU receipt pool on/after the ship/create date
+# (consumed once). Receipts before that date belong to another shipment.
+# When ship/create is unknown, the window is still anchor−14d to +60d.
 RECEIPT_COVER_BEFORE_DAYS = 14
 RECEIPT_COVER_AFTER_DAYS = 60
+
+# Last successful Amazon getShipmentItems qty. Not a case status.
+AMAZON_INBOUND_QTY_TABLE = "amazon_inbound_qty_cache"
 
 SOURCE_LEDGER = "ledger_adjustment"
 SOURCE_INBOUND = "inbound_discrepancy"
@@ -261,6 +270,56 @@ def _plan_anchor_day(row: dict) -> date | None:
         or _parse_day(row.get("last_updated_at"))
         or _parse_day(row.get("event_date"))
     )
+
+
+def _day_from_plan_value(value: object) -> date | None:
+    """ISO date or unix seconds/ms. Closed dates are not passed here."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)) or (
+        isinstance(value, str) and value.strip().isdigit()
+    ):
+        try:
+            ts = int(value)
+        except (TypeError, ValueError):
+            return None
+        if ts > 10_000_000_000:
+            ts //= 1000
+        if ts > 1_000_000_000:
+            try:
+                return datetime.fromtimestamp(ts, tz=timezone.utc).date()
+            except (OSError, OverflowError, ValueError):
+                return None
+        return None
+    return _parse_day(value)
+
+
+def _shipment_ship_or_create_day(row: dict) -> date | None:
+    """Ship or create day. Pool receipts before this belong to another shipment.
+
+    Closed and event dates are not a ship date — receiving happens before
+    close. ``None`` when the row has no plan, ship, or create timestamp.
+    A ``plan_date`` copied from the closed/event fallback is ignored when
+    ``raw`` is present but has no plan or ship field, so unknown-ship
+    ghosts keep the anchor−14d pool window.
+    """
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else None
+    if raw:
+        for key in (
+            "plan_date", "shipment_date", "shipped_at", "created_at",
+            "CreatedDate", "ShippedDate", "ship_date",
+        ):
+            day = _day_from_plan_value(raw.get(key))
+            if day:
+                return day
+    for key in ("shipped_at", "created_at", "ship_date", "created_date"):
+        day = _day_from_plan_value(row.get(key))
+        if day:
+            return day
+    if raw:
+        return None
+    return _day_from_plan_value(row.get("plan_date"))
+
 
 def _fba_id(value: str | None) -> str | None:
     raw = (value or "").strip().upper()
@@ -630,27 +689,41 @@ def amazon_qty_from_spapi_payloads(
     return rows, totals
 
 
+def _normalize_missed_ids(shipment_ids: Iterable[str]) -> list[str]:
+    """Unique FBA* ids, request order preserved."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in shipment_ids:
+        sid = fba_shipment_id(str(raw) if raw is not None else None)
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        out.append(sid)
+    return out
+
+
 def fetch_amazon_inbound_qty(
     shipment_ids: Iterable[str],
     *,
     get_shipments=None,
     get_items=None,
     batch_size: int = AMAZON_RECONCILE_BATCH,
-) -> tuple[list[dict], dict[str, dict]]:
+) -> tuple[list[dict], dict[str, dict], list[str]]:
     """Live FBA inbound v0 getShipments(SHIPMENT) + getShipmentItems.
 
     Batches of 1–5. Large 50-id lists silently return only a few CLOSED
     headers. No I/O when callables are injected (unit tests).
+
+    Returns ``(item_rows, shipment_totals, missed_shipment_ids)``.
+    A getShipments batch exception or a getShipmentItems exception adds
+    those ids to ``missed_shipment_ids`` and does not invent empty qty.
+    Callers keep the last cached Amazon qty for missed ids. A successful
+    response that simply omits an id is not a failure — CLOSED history
+    often is not in the live payload, and the receipt pool may still run.
     """
-    ids = []
-    seen: set[str] = set()
-    for raw in shipment_ids:
-        sid = fba_shipment_id(raw)
-        if sid and sid not in seen:
-            seen.add(sid)
-            ids.append(sid)
+    ids = _normalize_missed_ids(shipment_ids)
     if not ids:
-        return [], {}
+        return [], {}, []
     size = max(1, min(int(batch_size or AMAZON_RECONCILE_BATCH), AMAZON_RECONCILE_BATCH))
     if get_shipments is None or get_items is None:
         from src.inventory.inbound_shipments import (
@@ -658,29 +731,119 @@ def fetch_amazon_inbound_qty(
             _get_shipments_by_ids,
         )
         if get_shipments is None:
-            get_shipments = _get_shipments_by_ids
+            def get_shipments(batch, _fn=_get_shipments_by_ids):
+                return _fn(batch, raise_on_error=True)
         if get_items is None:
-            get_items = _get_shipment_items
+            def get_items(sid, _fn=_get_shipment_items):
+                return _fn(sid, raise_on_error=True)
     shipments: list[dict] = []
+    missed: list[str] = []
+    missed_seen: set[str] = set()
+
+    def _miss(sid: str) -> None:
+        if sid and sid not in missed_seen:
+            missed_seen.add(sid)
+            missed.append(sid)
+
     for i in range(0, len(ids), size):
         batch = ids[i : i + size]
         try:
             shipments.extend(get_shipments(batch) or [])
         except Exception as e:
             log.warning("Amazon getShipments batch failed (%s): %s", batch, e)
+            for sid in batch:
+                _miss(sid)
     items_by_sid: dict[str, list[dict]] = {}
+    item_failed: set[str] = set()
     for sh in shipments:
         sid = fba_shipment_id(
             sh.get("ShipmentId") or sh.get("shipmentId") or sh.get("shipment_id"),
         )
-        if not sid or sid in items_by_sid:
+        if not sid or sid in items_by_sid or sid in item_failed:
             continue
         try:
             items_by_sid[sid] = list(get_items(sid) or [])
         except Exception as e:
             log.warning("Amazon getShipmentItems failed for %s: %s", sid, e)
-            items_by_sid[sid] = []
-    return amazon_qty_from_spapi_payloads(shipments, items_by_sid)
+            item_failed.add(sid)
+            _miss(sid)
+    ok_shipments = []
+    for sh in shipments:
+        sid = fba_shipment_id(
+            sh.get("ShipmentId") or sh.get("shipmentId") or sh.get("shipment_id"),
+        )
+        if sid and sid in item_failed:
+            continue
+        ok_shipments.append(sh)
+    rows, totals = amazon_qty_from_spapi_payloads(ok_shipments, items_by_sid)
+    for sid in item_failed:
+        totals.pop(sid, None)
+    return rows, totals, missed
+
+
+def merge_cached_amazon_qty(
+    live_rows: Iterable[dict],
+    live_totals: dict[str, dict] | None,
+    missed_ids: Iterable[str],
+    cache_rows: Iterable[dict],
+) -> tuple[list[dict], dict[str, dict]]:
+    """Fill Amazon qty for fetch-failed shipment ids from the last good cache.
+
+    Live rows win for shipments Amazon answered. Missed ids are replaced
+    with cached per-SKU shipped/received so a failed call cannot wipe a
+    known short. Shipments with no cache row stay absent.
+    """
+    missed = set(_normalize_missed_ids(missed_ids))
+    totals = {
+        sid: dict(info)
+        for sid, info in (live_totals or {}).items()
+        if sid not in missed
+    }
+    rows: list[dict] = []
+    for raw in live_rows:
+        sid = fba_shipment_id(raw.get("shipment_id"))
+        if sid and sid in missed:
+            continue
+        rows.append(dict(raw))
+    if not missed:
+        return rows, totals
+    by_sid: dict[str, list[dict]] = {}
+    for raw in cache_rows:
+        sid = fba_shipment_id(raw.get("shipment_id"))
+        if not sid or sid not in missed:
+            continue
+        sku = normalize_sku(raw.get("sku"))
+        shipped = _int_or_none(raw.get("quantity_shipped"))
+        received = _int_or_none(raw.get("quantity_received"))
+        if sku == "UNKNOWN" or (shipped is None and received is None):
+            continue
+        by_sid.setdefault(sid, []).append({
+            "shipment_id": sid,
+            "sku": sku,
+            "quantity_shipped": shipped,
+            "quantity_received": received,
+            "quantity_short": inbound_live_short(shipped, received),
+        })
+    for sid, items in by_sid.items():
+        rows.extend(items)
+        if len(items) == 1:
+            totals[sid] = {
+                "quantity_shipped": items[0]["quantity_shipped"],
+                "quantity_received": items[0]["quantity_received"],
+                "quantity_short": items[0]["quantity_short"],
+                "sku_count": 1,
+            }
+    return rows, totals
+
+
+def _unpack_amazon_fetch(fetched) -> tuple[list[dict], dict[str, dict], list[str]]:
+    """Accept the 3-tuple or a legacy ``(rows, totals)`` test double."""
+    if isinstance(fetched, tuple) and len(fetched) >= 3:
+        rows, totals, missed = fetched[0], fetched[1], fetched[2]
+    else:
+        rows, totals = fetched
+        missed = []
+    return list(rows or []), dict(totals or {}), _normalize_missed_ids(missed or [])
 
 
 def _mark_inbound_found_offset(row: dict, info: dict | None = None) -> dict:
@@ -1336,10 +1499,40 @@ def collect_receipt_qty_pool(
     return pool
 
 
+def _amazon_reported_short(
+    row: dict,
+    amazon_live: dict[tuple[str, str], dict] | None,
+    amazon_totals: dict[str, dict] | None = None,
+) -> int | None:
+    """Amazon ship−recv for this shipment+SKU, including single-SKU headers."""
+    match = inbound_match_key(row.get("shipment_id"), row.get("sku"))
+    if not match:
+        return None
+    info = (amazon_live or {}).get(match)
+    if not info and amazon_totals:
+        tot = amazon_totals.get(match[0]) or {}
+        try:
+            sku_count = int(tot.get("sku_count") or 0)
+        except (TypeError, ValueError):
+            sku_count = 0
+        if sku_count <= 1 and tot:
+            info = tot
+    if not info:
+        return None
+    return inbound_live_short(
+        _int_or_none(info.get("quantity_shipped")),
+        _int_or_none(info.get("quantity_received")),
+        _int_or_none(info.get("quantity_short")),
+    )
+
+
 def _receipt_cover_for_row(
     row: dict,
     by_shipment: dict[tuple[str, str], int],
     pool: list[dict],
+    *,
+    amazon_short: int | None = None,
+    skip_pool: bool = False,
 ) -> tuple[int, str | None]:
     """Return (covered_qty, basis) for one Lost_Inbound row."""
     key = inbound_match_key(row.get("shipment_id"), row.get("sku"))
@@ -1363,11 +1556,23 @@ def _receipt_cover_for_row(
     received = _int_or_none(row.get("quantity_received"))
     if received is not None and received > 0:
         return 0, None
+    # Amazon already reported a short (including 0 received). An unreferenced
+    # same-SKU receipt must not mark this found_offset.
+    if amazon_short is not None and amazon_short > 0:
+        return 0, None
+    # Failed getShipments / getShipmentItems: do not invent a clear.
+    if skip_pool:
+        return 0, None
 
-    anchor = _plan_anchor_day(row) or _parse_day(row.get("event_date"))
+    origin = _shipment_ship_or_create_day(row)
+    anchor = origin or _plan_anchor_day(row) or _parse_day(row.get("event_date"))
     if anchor is None:
         return 0, None
-    earliest = anchor - timedelta(days=RECEIPT_COVER_BEFORE_DAYS)
+    # Pool receipts before ship/create belong to another shipment.
+    if origin is not None:
+        earliest = origin
+    else:
+        earliest = anchor - timedelta(days=RECEIPT_COVER_BEFORE_DAYS)
     latest = anchor + timedelta(days=RECEIPT_COVER_AFTER_DAYS)
 
     # Prefer exact-qty unused receipt (no shipment_id, or matching sid).
@@ -1406,21 +1611,26 @@ def apply_receipt_cover(
     receipt_events: Iterable[dict] | None = None,
     *,
     durable_zero_recv: bool = True,
+    amazon_live: dict[tuple[str, str], dict] | None = None,
+    amazon_totals: dict[str, dict] | None = None,
+    skip_pool_shipment_ids: Iterable[str] | None = None,
 ) -> list[dict]:
     """Clear Lost_Inbound when warehouse Receipts cover shipped qty.
 
     Prefer Reference-ID (= FBA*) matches. For CLOSED zero-recv Sellerboard
     ghosts without reference_id yet, consume an exact-qty SKU receipt pool
-    near the plan/ship date. Durable dismiss (dismissed_at) for full cover
-    on zero-recv so Sellerboard 0-recv dumps cannot reopen the ghost.
+    on/after the ship/create date. Durable dismiss (dismissed_at) for full
+    cover on zero-recv so Sellerboard 0-recv dumps cannot reopen the ghost.
     Real recv shorts (received > 0 and short > 0) are left alone unless a
-    shipment-keyed receipt reduces the remaining short.
+    shipment-keyed receipt reduces the remaining short. An Amazon-reported
+    short and a failed Amazon fetch both skip the pool.
     """
     receipts = list(receipt_events or [])
     if not receipts:
         return events
     by_shipment = collect_receipt_qty_by_shipment(receipts)
     pool = collect_receipt_qty_pool(receipts)
+    skip_pool = set(_normalize_missed_ids(skip_pool_shipment_ids or []))
     now = datetime.now(timezone.utc).isoformat()
     out: list[dict] = []
     for ev in events:
@@ -1438,7 +1648,14 @@ def apply_receipt_cover(
         ):
             out.append(row)
             continue
-        covered, basis = _receipt_cover_for_row(row, by_shipment, pool)
+        match = inbound_match_key(row.get("shipment_id"), row.get("sku"))
+        covered, basis = _receipt_cover_for_row(
+            row,
+            by_shipment,
+            pool,
+            amazon_short=_amazon_reported_short(row, amazon_live, amazon_totals),
+            skip_pool=bool(match and match[0] in skip_pool),
+        )
         if covered <= 0:
             out.append(row)
             continue
@@ -1651,6 +1868,7 @@ def build_case_events(
     amazon_inbound_rows: Iterable[dict] | None = None,
     amazon_shipment_totals: dict[str, dict] | None = None,
     receipt_events: Iterable[dict] | None = None,
+    amazon_fetch_missed_ids: Iterable[str] | None = None,
 ) -> list[dict]:
     """Pure builder — no I/O. Returns rows ready for fba_case_events."""
     as_of = as_of or end
@@ -1685,8 +1903,15 @@ def build_case_events(
         merged, existing_list, amazon_only, amazon_shipment_totals,
     )
     # Receipts SoT after Amazon/Sellerboard balance — clears zero-recv CLOSED
-    # ghosts even when SP-API is silent or also shows UnitsReceived=0.
-    merged = apply_receipt_cover(merged, receipts)
+    # ghosts when Amazon did not report a short. A failed Amazon fetch and an
+    # Amazon-reported short both skip the unreferenced SKU pool.
+    merged = apply_receipt_cover(
+        merged,
+        receipts,
+        amazon_live=amazon_only,
+        amazon_totals=amazon_shipment_totals,
+        skip_pool_shipment_ids=amazon_fetch_missed_ids,
+    )
     merged = _enrich_asin(merged, adj_list, paid_list)
     out = apply_paid_dedupe(merged, paid_list)
     out = preserve_submitted_status(out, existing_list)
@@ -1778,6 +2003,76 @@ def purge_ineligible_needs_case_orphans() -> int:
     if deleted:
         log.warning("Purged %s ineligible needs_case orphans (D/O and excluded codes)", deleted)
     return deleted
+
+
+def _persist_amazon_qty_cache(rows: Iterable[dict]) -> None:
+    """Upsert shipment+SKU qty from a successful Amazon item parse."""
+    from src.db import upsert_rows
+
+    now = datetime.now(timezone.utc).isoformat()
+    payload: list[dict] = []
+    for raw in rows:
+        sid = fba_shipment_id(raw.get("shipment_id"))
+        sku = normalize_sku(raw.get("sku"))
+        if not sid or sku == "UNKNOWN":
+            continue
+        shipped = _int_or_none(raw.get("quantity_shipped"))
+        received = _int_or_none(raw.get("quantity_received"))
+        if shipped is None and received is None:
+            continue
+        payload.append({
+            "shipment_id": sid,
+            "sku": sku,
+            "quantity_shipped": shipped,
+            "quantity_received": received,
+            "fetched_at": now,
+        })
+    if not payload:
+        return
+    _with_one_retry(
+        upsert_rows,
+        AMAZON_INBOUND_QTY_TABLE,
+        payload,
+        on_conflict="shipment_id,sku",
+    )
+
+
+def _record_case_sync_job(
+    summary: dict,
+    *,
+    status: str = "success",
+    message: str | None = None,
+) -> None:
+    """Best-effort job_runs row so missed Amazon shipment ids are visible.
+
+    Call only after the QA gate. A failed QA must be status ``fail`` —
+    ``/api/job-runs`` shows the latest row per job, and ``success`` is green.
+    """
+    try:
+        from src.db import job_finish, job_start
+
+        missed = list(summary.get("amazon_fetch_missed_ids") or [])
+        if message is None:
+            message = (
+                f"needs_case={summary.get('needs_case', 0)} "
+                f"missed_amazon={len(missed)}"
+            )
+        run_id = job_start("reimbursements_case_sync")
+        job_finish(
+            run_id,
+            status,
+            message[:1000],
+            stats={
+                "amazon_fetch_missed_ids": missed,
+                "needs_case": summary.get("needs_case"),
+                "found_offset": summary.get("found_offset"),
+                "amazon_reconcile_ids": summary.get("amazon_reconcile_ids"),
+                "amazon_reconcile_rows": summary.get("amazon_reconcile_rows"),
+                "qa_ok": bool((summary.get("qa") or {}).get("ok")),
+            },
+        )
+    except Exception as e:
+        log.warning("case sync job_runs note failed: %s", e)
 
 
 def fail_if_empty_adjustments_pull(
@@ -1885,12 +2180,29 @@ def sync_case_queue(
 
     amazon_rows: list[dict] = []
     amazon_totals: dict[str, dict] = {}
+    amazon_missed: list[str] = []
+    cache_rows: list[dict] = []
+    try:
+        cache_rows = list(
+            _with_one_retry(fetch_all, AMAZON_INBOUND_QTY_TABLE) or []
+        )
+    except Exception as e:
+        log.warning("amazon_inbound_qty_cache unavailable: %s", e)
+        cache_rows = []
     amazon_ids = collect_reconcile_shipment_ids(existing_events, sellerboard)
+    live_amazon_rows: list[dict] = []
     if amazon_ids:
         try:
-            amazon_rows, amazon_totals = fetch_amazon_inbound_qty(amazon_ids)
+            live_amazon_rows, amazon_totals, amazon_missed = _unpack_amazon_fetch(
+                fetch_amazon_inbound_qty(amazon_ids),
+            )
         except Exception as e:
             log.warning("Amazon inbound reconcile fetch failed: %s", e)
+            amazon_missed = _normalize_missed_ids(amazon_ids)
+            live_amazon_rows, amazon_totals = [], {}
+    amazon_rows, amazon_totals = merge_cached_amazon_qty(
+        live_amazon_rows, amazon_totals, amazon_missed, cache_rows,
+    )
 
     events = build_case_events(
         adjustments=adjustments,
@@ -1905,6 +2217,7 @@ def sync_case_queue(
         amazon_inbound_rows=amazon_rows,
         amazon_shipment_totals=amazon_totals,
         receipt_events=receipt_events,
+        amazon_fetch_missed_ids=amazon_missed,
     )
     negatives = negative_adjustments_in_window(adjustments, start, end)
     qa = evaluate_queue_qa(
@@ -1935,12 +2248,19 @@ def sync_case_queue(
         "orphans_purged": 0,
         "amazon_reconcile_ids": len(amazon_ids),
         "amazon_reconcile_rows": len(amazon_rows),
+        "amazon_fetch_missed_ids": amazon_missed,
     }
     if dry_run:
         summary["events"] = stamped
         if not qa["ok"]:
             summary["qa_failed"] = True
         return summary
+
+    if live_amazon_rows:
+        try:
+            _persist_amazon_qty_cache(live_amazon_rows)
+        except Exception as e:
+            log.warning("amazon_inbound_qty_cache upsert failed: %s", e)
 
     if stamped:
         try:
@@ -1960,11 +2280,20 @@ def sync_case_queue(
         log.warning("Could not purge ineligible needs_case orphans: %s", e)
         purged = 0
     summary["orphans_purged"] = purged
-
+    qa_errors = [str(err) for err in (qa.get("errors") or []) if err]
     if not qa["ok"]:
+        _record_case_sync_job(
+            summary,
+            status="fail",
+            message=(
+                "Needs-case QA failed — do not prep Reese packets. "
+                + "; ".join(qa_errors)
+            ),
+        )
         raise CaseQueueSyncError(
             "Needs-case QA failed — do not prep Reese packets. "
-            + "; ".join(qa["errors"]),
+            + "; ".join(qa_errors),
             qa=qa,
         )
+    _record_case_sync_job(summary)
     return summary
