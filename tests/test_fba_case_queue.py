@@ -40,6 +40,7 @@ from src.reimbursements.case_queue import (
     collect_live_inbound_qty,
     collect_reconcile_shipment_ids,
     fetch_amazon_inbound_qty,
+    merge_cached_amazon_qty,
     inbound_discrepancies,
     inbound_live_short,
     inbound_match_key,
@@ -1577,6 +1578,7 @@ def test_sync_keeps_filed_zero_recv_and_does_not_revive_receipts_cover_ghosts(mo
     )
 
     summary = sync_case_queue(days=120, dry_run=True, fetch_ledger=False)
+    assert summary.get("amazon_fetch_missed_ids") == []
     by_sid = {e["shipment_id"]: e for e in summary["events"]}
     needs = [e for e in summary["events"] if e.get("status") == STATUS_NEEDS_CASE]
 
@@ -1780,3 +1782,315 @@ def test_receipt_cover_sku_pool_exact_qty_without_reference_id():
     assert covered[0]["status"] == STATUS_FOUND_OFFSET
     assert covered[0]["quantity"] == 0
     assert covered[0].get("dismissed_at")
+
+
+def _zero_recv_sellerboard(sid: str, sku: str, *, plan_date: str = "2026-06-15") -> dict:
+    return {
+        "shipment_id": sid,
+        "sku": sku,
+        "quantity_shipped": 540,
+        "quantity_received": 0,
+        "quantity_short": 540,
+        "shipment_status": "CLOSED",
+        "closed_at": "2026-07-02",
+        "fulfillment_center": "ONT8",
+        "raw": {"plan_date": plan_date, "UnitsReceived": 0, "Units": 540},
+    }
+
+
+def _unreferenced_receipt(sku: str, day: str, qty: int = 540) -> dict:
+    return {
+        "event_type": "Receipts",
+        "event_date": day,
+        "sku": sku,
+        "quantity": qty,
+        "fc_code": "XSB3",
+    }
+
+
+def test_fetch_failure_keeps_prior_amazon_qty_and_records_misses():
+    """A swallowed getShipments/getShipmentItems call must not drop Amazon qty.
+
+    FBA19FHXPN77 / DDPE0001SHOP: Amazon last said 540 shipped, 13 received.
+    Sellerboard says 0 received. An unreferenced exact-qty receipt must not
+    flip the row to found_offset, and the missed id is returned for the summary.
+    """
+    sid = "FBA19FHXPN77"
+    sku = "DDPE0001SHOP"
+    locked = "FBA19LOCKED01"
+
+    def get_ships(batch):
+        if sid in batch or locked in batch:
+            raise RuntimeError("getShipments 503")
+        return [{
+            "ShipmentId": batch[0],
+            "QuantityShipped": 10,
+            "QuantityReceived": 4,
+        }]
+
+    def get_items(shipment_id):
+        if shipment_id in (sid, locked):
+            raise RuntimeError("getShipmentItems 500")
+        return [{"SellerSKU": "SKU-A", "QuantityShipped": 10, "QuantityReceived": 4}]
+
+    ok_ids = [f"FBA19OK{i:02d}XXXX" for i in range(5)]
+    rows, _totals, missed = fetch_amazon_inbound_qty(
+        ok_ids + [sid, locked],
+        get_shipments=get_ships,
+        get_items=get_items,
+    )
+    assert sid in missed
+    assert locked in missed
+    assert rows
+    assert all(r["shipment_id"] != sid for r in rows)
+
+    def _items_fail(_shipment_id):
+        raise RuntimeError("items 500")
+
+    item_rows, _item_totals, item_missed = fetch_amazon_inbound_qty(
+        [sid],
+        get_shipments=lambda batch: [{"ShipmentId": batch[0]}],
+        get_items=_items_fail,
+    )
+    assert item_missed == [sid]
+    assert item_rows == []
+
+    merged, merged_totals = merge_cached_amazon_qty(
+        [],
+        {},
+        missed,
+        [
+            {
+                "shipment_id": sid,
+                "sku": sku,
+                "quantity_shipped": 540,
+                "quantity_received": 13,
+            },
+            {
+                "shipment_id": locked,
+                "sku": sku,
+                "quantity_shipped": 540,
+                "quantity_received": 13,
+            },
+        ],
+    )
+    restored = next(r for r in merged if r["shipment_id"] == sid)
+    assert restored["quantity_shipped"] == 540
+    assert restored["quantity_received"] == 13
+
+    common = dict(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 5, 1),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[
+            _zero_recv_sellerboard(sid, "DDPE0001Shop"),
+            _zero_recv_sellerboard(locked, "DDPE0001Shop"),
+        ],
+        existing_events=[{
+            "event_key": f"inbound|{locked}|{sku}",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-07-02",
+            "sku": sku,
+            "quantity": 0,
+            "quantity_shipped": 540,
+            "quantity_received": 540,
+            "reason": "Lost_Inbound",
+            "shipment_id": locked,
+            "status": STATUS_CASE_SUBMITTED,
+            "dismissed_at": "2026-09-23T12:00:00Z",
+            "dismissed_note": "filed",
+            "fulfillment_center": "ONT8",
+        }],
+        receipt_events=[_unreferenced_receipt(sku, "2026-06-20")],
+    )
+    events = build_case_events(
+        **common,
+        amazon_inbound_rows=merged,
+        amazon_shipment_totals=merged_totals,
+        amazon_fetch_missed_ids=missed,
+    )
+    kept = next(e for e in events if e["shipment_id"] == sid)
+    assert kept["status"] == STATUS_NEEDS_CASE
+    assert kept["quantity_received"] == 13
+    assert kept["quantity"] == 527
+    assert kept.get("dismissed_note") != CLEAR_NOTE_RECEIPTS_COVER
+    user_locked = next(e for e in events if e["shipment_id"] == locked)
+    assert user_locked["status"] == STATUS_CASE_SUBMITTED
+    assert user_locked["dismissed_note"] == "filed"
+    assert user_locked["dismissed_at"] == "2026-09-23T12:00:00Z"
+
+    # Same Sellerboard 0 + pool receipt clears only when the fetch did not fail
+    # and Amazon did not report a short.
+    cleared = build_case_events(**common)
+    ghost = next(e for e in cleared if e["shipment_id"] == sid)
+    assert ghost["status"] == STATUS_FOUND_OFFSET
+    assert ghost["dismissed_note"] == CLEAR_NOTE_RECEIPTS_COVER
+    still_locked = next(e for e in cleared if e["shipment_id"] == locked)
+    assert still_locked["status"] == STATUS_CASE_SUBMITTED
+
+
+def test_fetch_failure_without_cache_does_not_pool_clear():
+    """No last-known Amazon qty: a failed fetch still must not clear the row."""
+    sid = "FBA19FHXPN77"
+    sku = "DDPE0001SHOP"
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 5, 1),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[_zero_recv_sellerboard(sid, sku)],
+        receipt_events=[_unreferenced_receipt(sku, "2026-06-20")],
+        amazon_fetch_missed_ids=[sid],
+    )
+    row = next(e for e in events if e["shipment_id"] == sid)
+    assert row["status"] == STATUS_NEEDS_CASE
+    assert row["quantity"] == 540
+    assert row.get("dismissed_note") != CLEAR_NOTE_RECEIPTS_COVER
+
+
+def test_pool_receipt_before_ship_date_is_ignored():
+    """Exact-qty pool receipt in the old plan−14d window belongs to another shipment."""
+    sid = "FBA19FHXPN77"
+    covered = apply_receipt_cover([{
+        "event_key": f"inbound|{sid}|DDPE0001SHOP",
+        "source": SOURCE_SELLERBOARD,
+        "event_date": date(2026, 7, 2),
+        "sku": "DDPE0001SHOP",
+        "quantity": 540,
+        "quantity_shipped": 540,
+        "quantity_received": 0,
+        "reason": "Lost_Inbound",
+        "reason_group": "lost_inbound",
+        "shipment_id": sid,
+        "status": STATUS_NEEDS_CASE,
+        "plan_date": "2026-06-15",
+        "fulfillment_center": "ONT8",
+    }], [_unreferenced_receipt("DDPE0001SHOP", "2026-06-01")])
+    assert covered[0]["status"] == STATUS_NEEDS_CASE
+    assert covered[0]["quantity"] == 540
+    assert covered[0].get("dismissed_note") != CLEAR_NOTE_RECEIPTS_COVER
+
+
+def test_pool_without_ship_date_keeps_lookback_window():
+    """No plan/ship timestamp: the anchor−14d pool window still clears a ghost."""
+    covered = apply_receipt_cover([{
+        "event_key": "inbound|FBA19NOSHIP|SKU-Z",
+        "source": SOURCE_SELLERBOARD,
+        "event_date": date(2026, 7, 2),
+        "sku": "SKU-Z",
+        "quantity": 90,
+        "quantity_shipped": 90,
+        "quantity_received": 0,
+        "reason": "Lost_Inbound",
+        "reason_group": "lost_inbound",
+        "shipment_id": "FBA19NOSHIP",
+        "status": STATUS_NEEDS_CASE,
+        "fulfillment_center": "RDU2",
+        "raw": {"closed_at": "2026-07-02"},
+    }], [{
+        "event_type": "Receipts",
+        "event_date": "2026-06-20",
+        "sku": "SKU-Z",
+        "quantity": 90,
+    }])
+    assert covered[0]["status"] == STATUS_FOUND_OFFSET
+    assert covered[0]["quantity"] == 0
+
+
+def test_amazon_short_beats_unreferenced_pool_receipt():
+    """Amazon ship−recv > 0 wins over a same-SKU exact pool receipt."""
+    sku = "DDPE0001SHOP"
+    partial = "FBA19FHXPN77"
+    full_short = "FBA19AMZZERO1"
+    events = build_case_events(
+        adjustments=[],
+        shipments=[],
+        shipment_items=[],
+        reimbursements=[],
+        start=date(2026, 5, 1),
+        end=date(2026, 9, 14),
+        sellerboard_rows=[
+            _zero_recv_sellerboard(partial, "DDPE0001Shop"),
+            _zero_recv_sellerboard(full_short, "DDPE0001Shop"),
+        ],
+        amazon_inbound_rows=[
+            {
+                "shipment_id": partial,
+                "sku": sku,
+                "quantity_shipped": 540,
+                "quantity_received": 13,
+            },
+            {
+                "shipment_id": full_short,
+                "sku": sku,
+                "quantity_shipped": 540,
+                "quantity_received": 0,
+            },
+        ],
+        receipt_events=[_unreferenced_receipt(sku, "2026-06-20")],
+    )
+    got_partial = next(e for e in events if e["shipment_id"] == partial)
+    assert got_partial["status"] == STATUS_NEEDS_CASE
+    assert got_partial["quantity_received"] == 13
+    assert got_partial["quantity"] == 527
+    assert got_partial.get("dismissed_note") != CLEAR_NOTE_RECEIPTS_COVER
+    got_zero = next(e for e in events if e["shipment_id"] == full_short)
+    assert got_zero["status"] == STATUS_NEEDS_CASE
+    assert got_zero["quantity"] == 540
+    assert got_zero["quantity_received"] == 0
+    assert got_zero.get("dismissed_note") != CLEAR_NOTE_RECEIPTS_COVER
+
+
+def test_sync_summary_lists_amazon_fetch_misses(monkeypatch):
+    sid = "FBA19FHXPN77"
+    sku = "DDPE0001SHOP"
+    tables = {
+        "fba_inventory_adjustments": [],
+        "inventory_inbound_shipments": [],
+        "inventory_inbound_shipment_items": [],
+        "sellerboard_inbound_discrepancies": [
+            _zero_recv_sellerboard(sid, "DDPE0001Shop"),
+        ],
+        "fba_case_events": [{
+            "event_key": f"inbound|{sid}|{sku}",
+            "source": SOURCE_SELLERBOARD,
+            "event_date": "2026-07-02",
+            "sku": sku,
+            "quantity": 527,
+            "quantity_shipped": 540,
+            "quantity_received": 13,
+            "reason": "Lost_Inbound",
+            "shipment_id": sid,
+            "status": STATUS_NEEDS_CASE,
+            "fulfillment_center": "ONT8",
+        }],
+        "fba_reimbursements": [],
+        "inventory_events": [_unreferenced_receipt(sku, "2026-06-20")],
+        "amazon_inbound_qty_cache": [{
+            "shipment_id": sid,
+            "sku": sku,
+            "quantity_shipped": 540,
+            "quantity_received": 13,
+        }],
+    }
+
+    def fetch_all(table, *args, **kwargs):
+        return list(tables.get(table, []))
+
+    monkeypatch.setattr("src.db.fetch_all", fetch_all)
+    monkeypatch.setattr(
+        "src.reimbursements.case_queue.fetch_amazon_inbound_qty",
+        lambda *args, **kwargs: ([], {}, [sid]),
+    )
+
+    summary = sync_case_queue(days=120, dry_run=True, fetch_ledger=False)
+    assert summary["amazon_fetch_missed_ids"] == [sid]
+    row = next(e for e in summary["events"] if e["shipment_id"] == sid)
+    assert row["status"] == STATUS_NEEDS_CASE
+    assert row["quantity_received"] == 13
+    assert row["quantity"] == 527
