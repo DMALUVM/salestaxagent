@@ -5321,7 +5321,11 @@ def integrity_check():
 @cli.command()
 def run():
     """Start the background agent (folder watcher + scheduled tasks)."""
+    from src.maintenance.restart_pending import clear_restart_pending
     from src.watcher.folder_watcher import start_watcher
+
+    # A new process is the restart a deferred kickstart was waiting for.
+    clear_restart_pending()
 
     click.echo("Starting Sales Tax Compliance Agent...")
     click.echo("Press Ctrl+C to stop.\n")
@@ -7934,8 +7938,12 @@ def _run_git_auto_update():
         alert_if_needed(result)
 
     if result.get("restart"):
-        print("[git_auto_update] HEAD changed — exiting so launchd "
-              "KeepAlive respawns with the new checkout")
+        if result.get("restart_reason") == "pending":
+            print("[git_auto_update] restart pending and no job is running "
+                  "— exiting so launchd KeepAlive respawns")
+        else:
+            print("[git_auto_update] HEAD changed — exiting so launchd "
+                  "KeepAlive respawns with the new checkout")
         request_process_exit()
 
 
