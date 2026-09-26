@@ -4096,6 +4096,9 @@ def reimbursements_case_sync_cmd(days, dry_run, no_fetch):
         f"(already reimbursed {result.get('already_reimbursed', 0)}, "
         f"found-offset {result.get('found_offset', 0)})"
     )
+    missed = result.get("amazon_fetch_missed_ids") or []
+    if missed:
+        click.echo(f"Amazon inbound fetch missed: {', '.join(missed)}")
     if result.get("adjustments_error"):
         click.echo(f"Ledger adjustments pull: {result['adjustments_error']}")
 
@@ -6540,6 +6543,10 @@ def _run_spapi_refresh():
         print(f"[SP-API] {ts} Case queue: {cases.get('needs_case', 0)} needs-case / "
               f"{cases.get('needs_units', 0)} u "
               f"(adj {cases.get('adjustments_inserted', 0)})")
+        missed = cases.get("amazon_fetch_missed_ids") or []
+        if missed:
+            print(f"[SP-API] {ts} Case queue Amazon fetch missed {len(missed)}: "
+                  f"{', '.join(missed)}")
     except Exception as e:
         print(f"[SP-API] {ts} Case queue error: {e}")
 

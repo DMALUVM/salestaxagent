@@ -157,7 +157,11 @@ def _get_shipments_page(
     return payload
 
 
-def _get_shipments_by_ids(shipment_ids: list[str]) -> list[dict]:
+def _get_shipments_by_ids(
+    shipment_ids: list[str],
+    *,
+    raise_on_error: bool = False,
+) -> list[dict]:
     """Fetch FBA inbound shipments by ShipmentIdList (AWD replenishment outbound IDs)."""
     if not shipment_ids:
         return []
@@ -177,6 +181,11 @@ def _get_shipments_by_ids(shipment_ids: list[str]) -> list[dict]:
             timeout=60,
         )
         if resp.status_code != 200:
+            if raise_on_error:
+                raise SPAPIError(
+                    f"Inbound getShipments by ID failed ({resp.status_code}): "
+                    f"{resp.text[:200]}"
+                )
             log.warning(
                 "Inbound getShipments by ID failed (%s): %s",
                 resp.status_code,
@@ -217,13 +226,17 @@ def _fba_ids_from_awd_replenishments(extra_orders: list[dict] | None = None) -> 
     return sorted(ids)
 
 
-def _get_shipment_items(shipment_id: str) -> list[dict]:
+def _get_shipment_items(shipment_id: str, *, raise_on_error: bool = False) -> list[dict]:
     resp = httpx.get(
         f"{BASE_URL}{INBOUND_PATH}/shipments/{shipment_id}/items",
         headers=_headers(),
         timeout=60,
     )
     if resp.status_code != 200:
+        if raise_on_error:
+            raise SPAPIError(
+                f"Inbound items {shipment_id} failed ({resp.status_code})"
+            )
         log.warning("Inbound items %s: %s", shipment_id, resp.status_code)
         return []
     payload = resp.json().get("payload") or resp.json()
